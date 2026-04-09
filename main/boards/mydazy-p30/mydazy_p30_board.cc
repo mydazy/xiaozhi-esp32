@@ -37,8 +37,9 @@
 #include <esp_spiffs.h>
 #include <esp_sleep.h>
 #include <esp_wifi.h>
+#include <nvs_flash.h>
 #include <esp_vfs.h>
-#include <wifi_station.h>
+#include <wifi_manager.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <driver/rtc_io.h>
@@ -283,12 +284,12 @@ private:
         }
 
         // 设置触摸回调（唤醒设备）
-        touch_driver_->SetTouchCallback([]() {
+        touch_driver_->SetTouchCallback([this]() {
             WakeUp();
         });
 
         // 设置手势回调：单击唤醒/打断/退出对话，滑动调节音量
-        touch_driver_->SetGestureCallback([](TouchGesture gesture, int16_t x, int16_t y) {
+        touch_driver_->SetGestureCallback([this](TouchGesture gesture, int16_t x, int16_t y) {
             WakeUp();
 
             switch (gesture) {
@@ -442,8 +443,7 @@ private:
 
         // 5. 处理WiFi连接（WiFi版本固定断开WiFi）
         if (GetNetworkType() == NetworkType::WIFI) {
-            auto& wifi_station = WifiStation::GetInstance();
-            wifi_station.Stop();
+            WifiManager::GetInstance().StopStation();
         }
 
         // 6. 停止电源管理定时器
@@ -591,7 +591,10 @@ private:
                 }
                 app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
                 vTaskDelay(pdMS_TO_TICKS(3000));
-                SystemReset::FactoryReset();
+                // NVS 清除 + 重启实现恢复出厂
+                nvs_flash_erase();
+                nvs_flash_init();
+                app.Reboot();
                 return;
             }
 
@@ -625,10 +628,10 @@ private:
                     vTaskDelay(pdMS_TO_TICKS(1500));
                     SwitchNetworkType();
                 } else {
-                    // WiFi模式下，重置WiFi配置 并重启进入配网模式
+                    // WiFi模式下，进入配网模式
                     app.Schedule([this]() {
                         auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
-                        wifi_board.ResetWifiConfiguration();
+                        wifi_board.EnterWifiConfigMode();
                     });
                 }
             } else {
@@ -779,7 +782,7 @@ private:
                     char volume_text[64];
                     snprintf(volume_text, sizeof(volume_text), "%s %d", Lang::Strings::VOLUME, v);
                     Board::GetInstance().GetDisplay()->SetStatus(volume_text);
-                    WakeUp();
+                    static_cast<MyDazyP30Board&>(Board::GetInstance()).WakeUp();
                 }
                 vTaskDelay(pdMS_TO_TICKS(200)); // 200ms间隔，每秒调节5次
             }

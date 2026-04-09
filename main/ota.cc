@@ -620,7 +620,7 @@ bool Ota::ProcessCustomContent(cJSON* custom_array, const std::string& context) 
 
         std::string original_path = path->valuestring;
         std::string filename = original_path.substr(original_path.find_last_of('/') + 1);
-        std::string save_path = std::string(CONFIG_SPIFFS_BASE_PATH) + "/" + filename;
+        std::string save_path = std::string("/spiffs") + "/" + filename;
         std::string expected_md5 = cJSON_IsString(md5) ? md5->valuestring : "";
 
         downloader.add_download(url->valuestring, save_path.c_str(), expected_md5.c_str());
