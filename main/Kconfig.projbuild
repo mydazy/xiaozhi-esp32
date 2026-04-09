@@ -119,9 +119,12 @@ endchoice
 
 choice BOARD_TYPE
     prompt "Board Type"
-    default BOARD_TYPE_BREAD_COMPACT_WIFI
+    default BOARD_TYPE_MYDAZY_P30
     help
         Board type. 开发板类型
+    config BOARD_TYPE_MYDAZY_P30
+        bool "MyDazy P30 (4G+WiFi)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_WIFI
         bool "Bread Compact WiFi (面包板)"
         depends on IDF_TARGET_ESP32S3

@@ -1,0 +1,7 @@
+dependencies:
+  cmake_utilities: 0.*
+  idf: '>=4.4'
+description: ESP LCD GC9D01
+repository: git@github.com:Kevincoooool/esp_lcd_gc9d01.git
+url: https://github.com/Kevincoooool/esp_lcd_gc9d01
+version: 0.0.1

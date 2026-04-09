@@ -14,6 +14,7 @@
 #include "display.h"
 #include "oled_display.h"
 #include "board.h"
+#include "system_info.h"
 #include "settings.h"
 #include "lvgl_theme.h"
 #include "lvgl_display.h"
@@ -42,6 +43,14 @@ void McpServer::AddCommonTools() {
     // Do not add custom tools here.
     // Custom tools must be added in the board's InitializeTools function.
 
+    // P30: MAC 地址查询工具
+    AddTool("self.get_mac_address",
+        "Get the device MAC address.",
+        PropertyList(),
+        [&board](const PropertyList& properties) -> ReturnValue {
+            return SystemInfo::GetMacAddress();
+        });
+
     AddTool("self.get_device_status",
         "Provides the real-time information of the device, including the current status of the audio speaker, screen, battery, network, etc.\n"
         "Use this tool for: \n"
@@ -52,7 +61,19 @@ void McpServer::AddCommonTools() {
             return board.GetDeviceStatusJson();
         });
 
-    AddTool("self.audio_speaker.set_volume", 
+    // P30: AEC 控制工具
+    AddTool("self.audio.set_aec",
+        "Set AEC mode: 'off' (disable interrupt), 'device' (enable interrupt)",
+        PropertyList({Property("mode", kPropertyTypeString)}),
+        [&board](const PropertyList& properties) -> ReturnValue {
+            auto& app = Application::GetInstance();
+            std::string mode = properties["mode"].value<std::string>();
+            AecMode aec_mode = (mode == "device") ? kAecOnDeviceSide : kAecOff;
+            app.SetAecMode(aec_mode);
+            return "AEC set to " + mode;
+        });
+
+    AddTool("self.audio_speaker.set_volume",
         "Set the volume of the audio speaker. If the current volume is unknown, you must call `self.get_device_status` tool first and then call this tool.",
         PropertyList({
             Property("volume", kPropertyTypeInteger, 0, 100)

@@ -5,6 +5,7 @@
 #include "audio_codec.h"
 #include "mqtt_protocol.h"
 #include "websocket_protocol.h"
+#include "websocket_joyai_protocol.h"
 #include "assets/lang_config.h"
 #include "mcp_server.h"
 #include "assets.h"
@@ -480,7 +481,15 @@ void Application::InitializeProtocol() {
     if (ota_->HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
     } else if (ota_->HasWebsocketConfig()) {
-        protocol_ = std::make_unique<WebsocketProtocol>();
+        // JoyAI 协议分发：检查 websocket URL 是否指向 joyinside.jd.com
+        Settings ws_settings("websocket", false);
+        std::string ws_url = ws_settings.GetString("url", "");
+        if (ws_url.find("joyinside.jd.com") != std::string::npos) {
+            ESP_LOGI(TAG, "Using JoyAI WebSocket protocol");
+            protocol_ = std::make_unique<WebsocketJoeaiProtocol>();
+        } else {
+            protocol_ = std::make_unique<WebsocketProtocol>();
+        }
     } else {
         ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
         protocol_ = std::make_unique<MqttProtocol>();

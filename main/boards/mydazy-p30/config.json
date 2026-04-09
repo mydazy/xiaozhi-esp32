@@ -1,0 +1,29 @@
+{
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "mydazy-p30",
+            "sdkconfig_append": [
+                "CONFIG_USE_DEVICE_AEC=y",
+                "CONFIG_BOARD_TYPE_MYDAZY_P30=y",
+                "CONFIG_LV_DEF_REFR_PERIOD=33",
+                "CONFIG_FLASH_DEFAULT_ASSETS=y",
+                "CONFIG_USE_EMOTE_MESSAGE_STYLE=y",
+                "CONFIG_LV_USE_LODEPNG=y",
+                "CONFIG_LV_USE_GIF=y",
+                "CONFIG_LV_GIF_CACHE_DECODE_DATA=y",
+                "CONFIG_LV_USE_PNG=y",
+                "CONFIG_BT_ENABLED=y",
+                "CONFIG_BT_NIMBLE_ENABLED=y",
+                "CONFIG_BT_NIMBLE_BLUFI_ENABLE=y",
+                "CONFIG_MBEDTLS_DHM_C=y",
+                "CONFIG_SPIRAM=y",
+                "CONFIG_SPIRAM_MODE_OCT=y",
+                "CONFIG_ULP_COPROC_ENABLED=y",
+                "CONFIG_ESP32S3_ULP_COPROC_ENABLED=y",
+                "CONFIG_ESP32S3_ULP_COPROC_RISCV=y",
+                "CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y"
+            ]
+        }
+    ]
+}

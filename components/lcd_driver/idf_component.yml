@@ -1,0 +1,12 @@
+dependencies:
+  espressif/esp_lcd_st77916:
+    version: ^1
+    require: no
+  espressif/esp_lcd_gc9a01:
+    version: ^2
+    require: no
+  ckv/esp_lcd_jd9853:
+    version: ^1
+    require: no
+  idf:
+    version: '>=5.3.0'

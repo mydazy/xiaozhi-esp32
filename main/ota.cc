@@ -1,4 +1,5 @@
 #include "ota.h"
+#include "ota_http_download.h"
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
@@ -489,4 +490,147 @@ esp_err_t Ota::Activate() {
 
     ESP_LOGI(TAG, "Activation successful");
     return ESP_OK;
+}
+
+// P30: 状态上报到 MyDazy 服务器
+bool Ota::ReportStatus() {
+    std::string url = GetCheckVersionUrl();
+    if (url.length() < 10) {
+        ESP_LOGE(TAG, "Status URL base not set");
+        return false;
+    }
+
+    if (url.find("mydazy") == std::string::npos) {
+        url = "https://www.mydazy.cn/v1/ota/status";
+    } else {
+        url += (url.back() == '/') ? "status" : "/status";
+    }
+
+    auto http = SetupHttp();
+    auto& board = Board::GetInstance();
+    std::string status_json = board.GetDeviceStatusJson();
+    std::string board_json = board.GetBoardJson();
+    if (status_json.empty()) status_json = "{}";
+    if (board_json.empty()) board_json = "{}";
+    std::string payload = std::string("{\"status\":") + status_json + ",\"board\":" + board_json + "}";
+    ESP_LOGI(TAG, "status url: %s", url.c_str());
+    http->SetContent(std::move(payload));
+    if (!http->Open("POST", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP for status");
+        return false;
+    }
+    int code = http->GetStatusCode();
+    std::string resp;
+    if (code == 200) {
+        resp = http->ReadAll();
+    }
+    http->Close();
+
+    if (code != 200 && code != 202 && code != 204) {
+        ESP_LOGW(TAG, "Status post code: %d", code);
+        return false;
+    }
+
+    if (!resp.empty()) {
+        auto *resp_ptr = new std::string(std::move(resp));
+        BaseType_t task_created = xTaskCreate([](void* p) {
+            std::unique_ptr<std::string> holder(static_cast<std::string*>(p));
+            cJSON* root = cJSON_Parse(holder->c_str());
+            if (!root) { vTaskDelete(NULL); return; }
+
+            // 同步服务器时间
+            cJSON* server_time = cJSON_GetObjectItem(root, "server_time");
+            if (cJSON_IsObject(server_time)) {
+                cJSON* timestamp = cJSON_GetObjectItem(server_time, "timestamp");
+                cJSON* timezone_offset = cJSON_GetObjectItem(server_time, "timezone_offset");
+                if (cJSON_IsNumber(timestamp)) {
+                    struct timeval tv;
+                    double ts = timestamp->valuedouble;
+                    if (cJSON_IsNumber(timezone_offset)) ts += (timezone_offset->valueint * 60 * 1000);
+                    tv.tv_sec = static_cast<time_t>(ts / 1000);
+                    tv.tv_usec = static_cast<suseconds_t>(static_cast<long long>(ts) % 1000) * 1000;
+                    settimeofday(&tv, NULL);
+                }
+            }
+
+            // 处理远程设置控制
+            cJSON* settings_obj = cJSON_GetObjectItem(root, "settings");
+            if (cJSON_IsObject(settings_obj)) {
+                cJSON* status_obj = cJSON_GetObjectItem(settings_obj, "status");
+                if (cJSON_IsObject(status_obj)) {
+                    Settings status_settings("status", true);
+                    const char* keys[] = {"deepSleep", "report", "autoStart", "pickupWake"};
+                    for (const char* key : keys) {
+                        cJSON* val = cJSON_GetObjectItem(status_obj, key);
+                        if (cJSON_IsNumber(val)) {
+                            status_settings.SetInt(key, val->valueint);
+                            ESP_LOGI(TAG, "Remote setting status.%s = %d", key, val->valueint);
+                        }
+                    }
+                }
+            }
+
+            // 处理自定义内容下载
+            Settings settings("ota", false);
+            int enabled = settings.GetInt("custom", 1);
+            cJSON* custom = cJSON_GetObjectItem(root, "custom");
+            if (enabled && cJSON_IsArray(custom)) {
+                Ota ota_instance;
+                ota_instance.ProcessCustomContent(custom, "ReportStatus");
+            }
+
+            cJSON_Delete(root);
+            vTaskDelete(NULL);
+        }, "status_assets", 4096, resp_ptr, 4, NULL);
+
+        if (task_created != pdPASS) {
+            delete resp_ptr;
+        }
+    }
+
+    return true;
+}
+
+// P30: 处理自定义内容下载
+bool Ota::ProcessCustomContent(cJSON* custom_array, const std::string& context) {
+    if (!cJSON_IsArray(custom_array)) return false;
+    int total_items = cJSON_GetArraySize(custom_array);
+    ESP_LOGI(TAG, "Processing %d custom items%s", total_items,
+             context.empty() ? "" : (" from " + context).c_str());
+
+    OtaHttpDownload& downloader = OtaHttpDownload::GetInstance();
+    if (downloader.is_downloading()) {
+        ESP_LOGW(TAG, "Downloader busy, skipping");
+        return false;
+    }
+
+    downloader.set_progress_callback([](int progress, size_t downloaded, size_t total) {
+        ESP_LOGI(TAG, "Download: %d%% (%zu/%zu)", progress, downloaded, total);
+    });
+
+    cJSON* item = nullptr;
+    int count = 0;
+    cJSON_ArrayForEach(item, custom_array) {
+        if (!cJSON_IsObject(item)) continue;
+        cJSON* url = cJSON_GetObjectItem(item, "url");
+        cJSON* path = cJSON_GetObjectItem(item, "path");
+        cJSON* md5 = cJSON_GetObjectItem(item, "md5");
+
+        if (!cJSON_IsString(url) || !cJSON_IsString(path)) continue;
+
+        std::string original_path = path->valuestring;
+        std::string filename = original_path.substr(original_path.find_last_of('/') + 1);
+        std::string save_path = std::string(CONFIG_SPIFFS_BASE_PATH) + "/" + filename;
+        std::string expected_md5 = cJSON_IsString(md5) ? md5->valuestring : "";
+
+        downloader.add_download(url->valuestring, save_path.c_str(), expected_md5.c_str());
+        count++;
+    }
+
+    if (count > 0) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        downloader.start_downloads();
+    }
+
+    return true;
 }

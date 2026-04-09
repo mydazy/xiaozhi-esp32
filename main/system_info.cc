@@ -9,6 +9,8 @@
 #include <esp_app_desc.h>
 #include <esp_ota_ops.h>
 #include <esp_pm.h>
+#include <esp_clk_tree.h>
+#include <driver/temperature_sensor.h>
 #if CONFIG_IDF_TARGET_ESP32P4
 #include "esp_wifi_remote.h"
 #endif
@@ -41,6 +43,22 @@ std::string SystemInfo::GetMacAddress() {
 #endif
     char mac_str[18];
     snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return std::string(mac_str);
+}
+
+std::string SystemInfo::GetMacAddressRaw() {
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char mac_str[13];
+    snprintf(mac_str, sizeof(mac_str), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return std::string(mac_str);
+}
+
+std::string SystemInfo::GetMacAddressLast4() {
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char mac_str[5];
+    snprintf(mac_str, sizeof(mac_str), "%02X%02X", mac[4], mac[5]);
     return std::string(mac_str);
 }
 
@@ -153,4 +171,32 @@ void SystemInfo::PrintHeapStats() {
 
 void SystemInfo::PrintPmLocks() {
     esp_pm_dump_locks(stdout);
+}
+
+esp_err_t SystemInfo::GetChipTemperature(float& temperature) {
+#if SOC_TEMP_SENSOR_SUPPORTED
+    static temperature_sensor_handle_t temp_sensor = nullptr;
+    if (temp_sensor == nullptr) {
+        temperature_sensor_config_t cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+        esp_err_t ret = temperature_sensor_install(&cfg, &temp_sensor);
+        if (ret != ESP_OK) return ret;
+        ret = temperature_sensor_enable(temp_sensor);
+        if (ret != ESP_OK) {
+            temperature_sensor_uninstall(temp_sensor);
+            temp_sensor = nullptr;
+            return ret;
+        }
+    }
+    return temperature_sensor_get_celsius(temp_sensor, &temperature);
+#else
+    temperature = 0.0f;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+uint32_t SystemInfo::GetCpuFrequencyMHz(int core) {
+    uint32_t freq_hz = 0;
+    esp_err_t ret = esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_CPU, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &freq_hz);
+    if (ret != ESP_OK) return 0;
+    return freq_hz / 1000000;
 }

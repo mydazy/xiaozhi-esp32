@@ -12,12 +12,16 @@ public:
     static size_t GetMinimumFreeHeapSize();
     static size_t GetFreeHeapSize();
     static std::string GetMacAddress();
+    static std::string GetMacAddressRaw();
+    static std::string GetMacAddressLast4();
     static std::string GetChipModelName();
     static std::string GetUserAgent();
     static esp_err_t PrintTaskCpuUsage(TickType_t xTicksToWait);
     static void PrintTaskList();
     static void PrintHeapStats();
     static void PrintPmLocks();
+    static esp_err_t GetChipTemperature(float& temperature);
+    static uint32_t GetCpuFrequencyMHz(int core = 0);
 };
 
 #endif // _SYSTEM_INFO_H_

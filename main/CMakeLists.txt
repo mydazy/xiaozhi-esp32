@@ -29,6 +29,11 @@ set(SOURCES "audio/audio_codec.cc"
             "protocols/protocol.cc"
             "protocols/mqtt_protocol.cc"
             "protocols/websocket_protocol.cc"
+            "protocols/websocket_joyai_protocol.cc"
+            "blufi/blufi.cc"
+            "blufi/blufi_init.c"
+            "blufi/blufi_security.c"
+            "ota_http_download.cc"
             "mcp_server.cc"
             "system_info.cc"
             "application.cc"
@@ -39,7 +44,7 @@ set(SOURCES "audio/audio_codec.cc"
             "main.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/demuxer" "protocols")
+set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/demuxer" "protocols" "blufi" "nfc")
 
 # Add board common files
 list(APPEND SOURCES
@@ -60,7 +65,16 @@ list(APPEND SOURCES
     "boards/common/sleep_timer.cc"
     "boards/common/sy6970.cc"
     "boards/common/system_reset.cc"
+    "boards/common/ml307_gnss_at_test.c"
+    "boards/common/axs5106l_touch.cc"
+    "boards/common/axs5106l_upgrade.cc"
+    "boards/common/sc7a20h.cc"
+    "boards/common/rtc_wake_stub.cc"
 )
+
+# P30: NFC 源文件
+file(GLOB NFC_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/nfc/*.c)
+list(APPEND SOURCES ${NFC_SOURCES})
 list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/common)
 
 
@@ -85,7 +99,12 @@ set(EMOTE_RESOLUTION "320_240")
 
 # Add board files according to BOARD_TYPE
 # Set default assets if the board uses partition table V2
-if(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI)
+if(CONFIG_BOARD_TYPE_MYDAZY_P30)
+    set(BOARD_TYPE "mydazy-p30")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
+    set(BUILTIN_ICON_FONT font_awesome_20_4)
+    set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+elseif(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI)
     set(BOARD_TYPE "bread-compact-wifi")
     set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
     set(BUILTIN_ICON_FONT font_awesome_14_1)

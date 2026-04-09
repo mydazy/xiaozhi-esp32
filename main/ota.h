@@ -5,6 +5,7 @@
 #include <string>
 
 #include <esp_err.h>
+#include <cJSON.h>
 #include "board.h"
 
 class Ota {
@@ -14,6 +15,8 @@ public:
 
     esp_err_t CheckVersion();
     esp_err_t Activate();
+    bool ReportStatus();
+    bool ProcessCustomContent(cJSON* custom_array, const std::string& context = "");
     bool HasActivationChallenge() { return has_activation_challenge_; }
     bool HasNewVersion() { return has_new_version_; }
     bool HasMqttConfig() { return has_mqtt_config_; }
