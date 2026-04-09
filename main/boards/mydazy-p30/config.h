@@ -112,9 +112,32 @@
 // SC7A20H 三轴加速度传感器（运动检测与唤醒）
 #define SC7A20H_GPIO_INT1 GPIO_NUM_3       // SC7A20H中断引脚（运动检测时触发）
 
+// ============================================================
+// Type-C 耳机检测 GPIO 配置
+// ============================================================
+#define USB_DET_GPIO            GPIO_NUM_7     // USB 检测引脚（高=充电器，低=可能耳机）
+#define USB_MIC_ADC_GPIO        GPIO_NUM_9     // USB MIC ADC 检测
+#define USB_SW_GPIO             GPIO_NUM_46    // USB 模拟开关
+#define CC_VDD_GPIO             GPIO_NUM_40    // CC 电源控制
+#define MIC_SELECT_GPIO         GPIO_NUM_21    // MIC 通道选择
 
+#define USB_MIC_ADC_UNIT        ADC_UNIT_1
+#define USB_MIC_ADC_CHANNEL     ADC_CHANNEL_8
+#define CC_ADC_UNIT             ADC_UNIT_1
+#define CC_ADC_CHANNEL          ADC_CHANNEL_5
 
-// 触摸屏 I2C 单独测试：屏蔽其它 I2C 设备（音频编解码器/SC7A20H/NFC）
+#define USB_MIC_ADC_HIGH_MV     1300
+#define USB_MIC_ADC_LOW_MV      500
+#define CC_ADC_HEADSET_MV       100
+
+// NFC 写入测试开关
+#define NFC_WRITE_TEST_ENABLE   0
+#define NFC_WRITE_TEST_BLOCK    4
+
+// GPS 测试开关
+#define GNSS_AT_TEST_ENABLED    false
+
+// 触摸屏 I2C 单独测试
 #define MYDAZY_TOUCH_I2C_ONLY_TEST 1
 
 

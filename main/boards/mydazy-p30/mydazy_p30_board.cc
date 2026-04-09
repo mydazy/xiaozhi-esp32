@@ -22,6 +22,9 @@
 #include "rtc_wake_stub.h"
 #include "ota.h"
 #include "assets.h"         // 预加载 logo 资源
+#include "nfc.h"
+#include "ws1850_iic.h"
+#include "ml307_gnss_at_test.h"
 #include <sys/stat.h>       // 文件属性头文件
 #include <sys/unistd.h>
 #include <dirent.h>         // 目录操作头文件
@@ -43,8 +46,41 @@
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <driver/rtc_io.h>
+#include <esp_adc/adc_oneshot.h>
+#include <esp_adc/adc_cali.h>
+#include <esp_adc/adc_cali_scheme.h>
 
 #define TAG "MyDazyP30Board"
+
+// 耳机检测全局状态（audio_service.cc 访问）
+bool headset_present = false;
+
+// ADC 校准辅助
+static bool AdcCalibrationInit(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t* out_handle) {
+    adc_cali_handle_t handle = NULL;
+    bool calibrated = false;
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    adc_cali_curve_fitting_config_t cali_config = {
+        .unit_id = unit, .chan = channel, .atten = atten, .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    if (adc_cali_create_scheme_curve_fitting(&cali_config, &handle) == ESP_OK) calibrated = true;
+#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    adc_cali_line_fitting_config_t cali_config = {
+        .unit_id = unit, .atten = atten, .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    if (adc_cali_create_scheme_line_fitting(&cali_config, &handle) == ESP_OK) calibrated = true;
+#endif
+    *out_handle = handle;
+    return calibrated;
+}
+
+static bool ReadAdcMv(adc_oneshot_unit_handle_t handle, adc_cali_handle_t cali_handle, bool calibrated, adc_channel_t channel, int& out_mv) {
+    int raw = 0;
+    if (adc_oneshot_read(handle, channel, &raw) != ESP_OK) return false;
+    if (calibrated && cali_handle && adc_cali_raw_to_voltage(cali_handle, raw, &out_mv) == ESP_OK) return true;
+    out_mv = raw * 3300 / 4095;
+    return true;
+}
 
 // #if MYDAZY_TOUCH_I2C_ONLY_TEST
 // namespace {
