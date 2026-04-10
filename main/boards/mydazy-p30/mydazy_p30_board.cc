@@ -23,7 +23,9 @@
 #include "ota.h"
 #include "assets.h"         // 预加载 logo 资源
 #include "esp_nfc_ws1850s.h"
-#include "ml307_gnss_at_test.h"
+#include "ibeacon.h"
+#include "ml307_gnss.h"
+#include <font_awesome.h>
 #include <sys/stat.h>       // 文件属性头文件
 #include <sys/unistd.h>
 #include <dirent.h>         // 目录操作头文件
@@ -81,32 +83,6 @@ static bool ReadAdcMv(adc_oneshot_unit_handle_t handle, adc_cali_handle_t cali_h
     return true;
 }
 
-// #if MYDAZY_TOUCH_I2C_ONLY_TEST
-// namespace {
-// class NullAudioCodec final : public AudioCodec {
-// public:
-//     NullAudioCodec(int input_sample_rate, int output_sample_rate, bool input_reference) {
-//         duplex_ = true;
-//         input_reference_ = input_reference;
-//         input_sample_rate_ = input_sample_rate;
-//         output_sample_rate_ = output_sample_rate;
-//         input_channels_ = 2;
-//         output_channels_ = 1;
-//     }
-
-// protected:
-//     int Read(int16_t* dest, int samples) override {
-//         (void)dest;
-//         return 0;
-//     }
-
-//     int Write(const int16_t* data, int samples) override {
-//         (void)data;
-//         return samples;
-//     }
-// };
-// } // namespace
-// #endif
 
 class MyDazyP30Board : public DualNetworkBoard {
 private:
@@ -786,6 +762,11 @@ private:
     // NFC 读写器
     NfcWs1850s* nfc_ = nullptr;
 
+    // GNSS 定位
+    Ml307Gnss* gnss_ = nullptr;
+    std::atomic<int> gnss_satellites_{0};
+    std::atomic<bool> gnss_fixed_{false};
+
     void InitializeNfc() {
         if (i2c_bus_ == nullptr) {
             ESP_LOGE(TAG, "NFC: I2C bus not ready");
@@ -822,6 +803,65 @@ private:
 
         // 启动后台检测（200ms 间隔）
         nfc_->StartDetection(200);
+    }
+
+    // GPS 初始化（4G 网络连接后调用）
+    void StartGnss() {
+        if (GetNetworkType() != NetworkType::ML307) return;
+
+        auto& ml307_board = dynamic_cast<Ml307Board&>(GetCurrentBoard());
+        auto* modem = ml307_board.GetModem();
+        if (!modem) {
+            ESP_LOGW(TAG, "GNSS: modem not ready");
+            return;
+        }
+
+        gnss_ = new Ml307Gnss(modem->GetAtUart());
+
+        // 搜星回调 → 更新状态栏
+        gnss_->SetSatCallback([this](int sats) {
+            gnss_satellites_ = sats;
+            auto display = GetDisplay();
+            if (display) {
+                char text[32];
+                snprintf(text, sizeof(text), FONT_AWESOME_LOCATION_DOT " %d", sats);
+                display->SetStatus(text);
+            }
+        });
+
+        // 定位成功回调
+        gnss_->SetFixCallback([this](const GnssFix& fix) {
+            gnss_fixed_ = fix.valid;
+            gnss_satellites_ = fix.satellites;
+            auto display = GetDisplay();
+            if (display) {
+                char text[48];
+                snprintf(text, sizeof(text), FONT_AWESOME_LOCATION_DOT " %d  %.4f,%.4f",
+                         fix.satellites, fix.latitude, fix.longitude);
+                display->SetStatus(text);
+            }
+        });
+
+        gnss_->Start(kGnssGps | kGnssBds);
+        ESP_LOGI(TAG, "GNSS started (GPS+BDS)");
+    }
+
+    // iBeacon 扫描器
+    void InitializeIBeacon() {
+        auto& ibeacon = IBeacon::GetInstance();
+        ibeacon.OnDetected([this](const IBeaconInfo& beacon) {
+            auto display = GetDisplay();
+            if (display) {
+                char text[128];
+                snprintf(text, sizeof(text), "iBeacon: M=%u m=%u RSSI=%d %.1fm",
+                         beacon.major, beacon.minor, beacon.rssi,
+                         beacon.CalculateDistance());
+                display->ShowNotification(text, 10000);
+            }
+        });
+
+        // 延迟启动：等 BLE 协议栈就绪后再开始扫描
+        ibeacon.StartDeferred(30000);
     }
 
     // 音量调节函数（单次调节）
@@ -889,6 +929,7 @@ public:
         InitializePowerSaveTimer(); // 9. 初始化省电定时器
         InitializeButtons();        // 10. 初始化按钮 (最后初始化)
         InitializeNfc();            // 11. 初始化 NFC（WS1850S I2C）
+        InitializeIBeacon();        // 12. 初始化 iBeacon 扫描（等 BLE 就绪后启动）
 
         // 灯光控制
         GetBacklight()->RestoreBrightness();
@@ -949,6 +990,9 @@ public:
     }
 
     ~MyDazyP30Board() {
+        // 清理 iBeacon
+        IBeacon::GetInstance().Stop();
+
         // 清理 NFC
         if (nfc_) {
             nfc_->StopDetection();
