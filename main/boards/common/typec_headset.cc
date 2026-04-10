@@ -86,13 +86,15 @@ void TypecHeadset::DetectLoop() {
     bool last_state = false;
 
     while (running_) {
-        if (gpio_get_level(cfg_.usb_det_pin)) {
+        int usb_det = gpio_get_level(cfg_.usb_det_pin);
+
+        if (usb_det) {
             // USB_DET 高 = 充电器，非耳机
             if (inserted_) {
                 inserted_ = false;
                 gpio_set_level(cfg_.usb_sw_pin, 0);
                 gpio_set_level(cfg_.pa_pin, 1);
-                ESP_LOGI(TAG, "Charger detected, speaker mode");
+                ESP_LOGW(TAG, "🔌 USB_DET=HIGH → charger/debug, USB_SW=0 (speaker mode)");
                 if (callback_) callback_(false);
             }
             gpio_set_level(cfg_.cc_vdd_pin, 1);
@@ -111,6 +113,12 @@ void TypecHeadset::DetectLoop() {
         }
 
         static int insert_cnt = 0, remove_cnt = 0;
+        // 每 50 轮（~1秒）打印一次检测状态
+        static int dbg_cnt = 0;
+        if (++dbg_cnt % 50 == 0) {
+            ESP_LOGW(TAG, "🎧 USB_DET=LOW cc_mv=%d (thr=%d) inserted=%d insert_cnt=%d remove_cnt=%d",
+                     cc_mv, cfg_.cc_headset_mv, inserted_, insert_cnt, remove_cnt);
+        }
 
         if (cc_mv < cfg_.cc_headset_mv) {
             insert_cnt++;
@@ -123,6 +131,7 @@ void TypecHeadset::DetectLoop() {
         // 插入确认（防抖 2 次）
         if (!inserted_ && insert_cnt >= 2) {
             insert_cnt = 0;
+            ESP_LOGW(TAG, "🎧🎧🎧 HEADSET INSERTING: cc_mv=%d, PA=OFF, USB_SW=1", cc_mv);
             gpio_set_level(cfg_.pa_pin, 0);   // 关 PA
             vTaskDelay(pdMS_TO_TICKS(20));
             gpio_set_level(cfg_.usb_sw_pin, 1); // 切耳机
@@ -142,13 +151,15 @@ void TypecHeadset::DetectLoop() {
             gpio_set_level(cfg_.mic_select_pin, mic_select_level_);
 
             inserted_ = true;
-            ESP_LOGI(TAG, "Headset inserted (MIC_SEL=%d, mv0=%d, mv1=%d)", mic_select_level_, mv0, mv1);
+            ESP_LOGW(TAG, "🎧🎧🎧 HEADSET INSERTED: MIC_SEL=%d mv0=%d mv1=%d USB_SW=1 PA=OFF",
+                     mic_select_level_, mv0, mv1);
             if (callback_) callback_(true);
         }
 
         // 拔出确认（防抖 3 次）
         if (inserted_ && remove_cnt >= 3) {
             remove_cnt = 0;
+            ESP_LOGW(TAG, "🔊🔊🔊 HEADSET REMOVING: cc_mv=%d, USB_SW=0, PA=ON", cc_mv);
             gpio_set_level(cfg_.pa_pin, 0);
             gpio_set_level(cfg_.usb_sw_pin, 0);
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -157,7 +168,7 @@ void TypecHeadset::DetectLoop() {
             inserted_ = false;
             mic_select_level_ = 0;
             gpio_set_level(cfg_.mic_select_pin, 0);
-            ESP_LOGI(TAG, "Headset removed, speaker mode");
+            ESP_LOGW(TAG, "🔊🔊🔊 HEADSET REMOVED: speaker mode, USB_SW=0 PA=ON");
             if (callback_) callback_(false);
         }
 
@@ -182,7 +193,8 @@ void TypecHeadset::Start(adc_oneshot_unit_handle_t shared_adc) {
 
     running_ = true;
     xTaskCreatePinnedToCore(TaskFunc, "headset", 3072, this, 3, &task_, 0);
-    ESP_LOGI(TAG, "Detection started");
+    ESP_LOGW(TAG, "🔊 Detection started: USB_DET=%d USB_SW=0 PA=ON (speaker mode)",
+             gpio_get_level(cfg_.usb_det_pin));
 }
 
 void TypecHeadset::Stop() {

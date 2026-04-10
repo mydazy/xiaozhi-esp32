@@ -901,8 +901,8 @@ private:
         nfc_->StartDetection(300);
     }
 
-    // GPS 初始化（4G 网络连接后调用）
     void InitializeHeadset() {
+#if TYPEC_HEADSET_ENABLED
         TypecHeadsetConfig hcfg = {
             .usb_det_pin = USB_DET_GPIO,
             .cc_adc_pin = CC_ADC_PIN,
@@ -920,7 +920,6 @@ private:
         headset_ = new TypecHeadset(hcfg);
 
         headset_->SetCallback([this](bool inserted) {
-            // 切换 codec 耳机增益模式
             auto* codec = dynamic_cast<Es7111AudioCodec*>(GetAudioCodec());
             if (codec) codec->SetHeadsetMode(inserted);
 
@@ -931,8 +930,10 @@ private:
             WakeUp();
         });
 
-        // 共享 PowerManager 的 ADC handle（同一个 ADC1）
         headset_->Start(PowerManager::GetSharedAdcHandle());
+#else
+        ESP_LOGW(TAG, "⚠️ Type-C headset detection DISABLED (TYPEC_HEADSET_ENABLED=0)");
+#endif
     }
 
     void StartGnss() {
