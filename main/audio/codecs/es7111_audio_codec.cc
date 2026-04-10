@@ -11,7 +11,7 @@
 
 #define TAG "Es7111Es7210"
 
-Es7111Es7210AudioCodec::Es7111Es7210AudioCodec(
+Es7111AudioCodec::Es7111AudioCodec(
     void* i2c_master_handle,
     int input_sample_rate, int output_sample_rate,
     gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws,
@@ -80,7 +80,7 @@ Es7111Es7210AudioCodec::Es7111Es7210AudioCodec(
     ESP_LOGI(TAG, "Initialized: ES7111(DAC,no-I2C) + ES7210(ADC,gain=%.0fdB)", input_gain_);
 }
 
-Es7111Es7210AudioCodec::~Es7111Es7210AudioCodec() {
+Es7111AudioCodec::~Es7111AudioCodec() {
     if (input_dev_) {
         esp_codec_dev_close(input_dev_);
         esp_codec_dev_delete(input_dev_);
@@ -91,7 +91,7 @@ Es7111Es7210AudioCodec::~Es7111Es7210AudioCodec() {
     if (data_if_) audio_codec_delete_data_if(data_if_);
 }
 
-void Es7111Es7210AudioCodec::CreateDuplexChannels(
+void Es7111AudioCodec::CreateDuplexChannels(
     gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws,
     gpio_num_t dout, gpio_num_t din) {
 
@@ -179,7 +179,7 @@ void Es7111Es7210AudioCodec::CreateDuplexChannels(
              mclk, bclk, ws, dout, din);
 }
 
-void Es7111Es7210AudioCodec::SetOutputVolume(int volume) {
+void Es7111AudioCodec::SetOutputVolume(int volume) {
     // ES7111 无音量寄存器，用软件音量控制（PA GPIO 开关）
     if (pa_pin_ != GPIO_NUM_NC) {
         gpio_set_level(pa_pin_, volume > 0 ? 1 : 0);
@@ -187,13 +187,13 @@ void Es7111Es7210AudioCodec::SetOutputVolume(int volume) {
     AudioCodec::SetOutputVolume(volume);
 }
 
-void Es7111Es7210AudioCodec::SetInputGain(float gain) {
+void Es7111AudioCodec::SetInputGain(float gain) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     input_gain_ = gain;
     AudioCodec::SetInputGain(gain);
 }
 
-void Es7111Es7210AudioCodec::EnableInput(bool enable) {
+void Es7111AudioCodec::EnableInput(bool enable) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (enable == input_enabled_) return;
 
@@ -223,7 +223,7 @@ void Es7111Es7210AudioCodec::EnableInput(bool enable) {
     AudioCodec::EnableInput(enable);
 }
 
-void Es7111Es7210AudioCodec::EnableOutput(bool enable) {
+void Es7111AudioCodec::EnableOutput(bool enable) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (enable == output_enabled_) return;
 
@@ -234,19 +234,28 @@ void Es7111Es7210AudioCodec::EnableOutput(bool enable) {
     AudioCodec::EnableOutput(enable);
 }
 
-int Es7111Es7210AudioCodec::Read(int16_t* dest, int samples) {
+int Es7111AudioCodec::Read(int16_t* dest, int samples) {
     if (input_enabled_ && input_dev_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(input_dev_, dest, samples * sizeof(int16_t)));
     }
     return samples;
 }
 
-int Es7111Es7210AudioCodec::Write(const int16_t* data, int samples) {
+int Es7111AudioCodec::Write(const int16_t* data, int samples) {
     if (output_enabled_) {
-        // ES7111 通过 I2S TX 直接写入
+        // mono→stereo: ES7111 是 mono DAC，I2S 配置为 stereo，数据放左声道
+        // 同时做软件音量控制（ES7111 无音量寄存器）
+        std::vector<int16_t> stereo(samples * 2);
+        int32_t vol_factor = static_cast<int32_t>(pow(output_volume_ / 100.0, 2) * 256);
+        for (int i = 0; i < samples; i++) {
+            int16_t sample = static_cast<int16_t>((static_cast<int32_t>(data[i]) * vol_factor) >> 8);
+            stereo[i * 2] = sample;      // 左声道（ES7111 使用）
+            stereo[i * 2 + 1] = 0;       // 右声道（静音）
+        }
         size_t bytes_written;
-        i2s_channel_write(tx_handle_, data, samples * sizeof(int16_t), &bytes_written, pdMS_TO_TICKS(500));
-        return bytes_written / sizeof(int16_t);
+        i2s_channel_write(tx_handle_, stereo.data(), stereo.size() * sizeof(int16_t),
+                          &bytes_written, pdMS_TO_TICKS(500));
+        return samples;
     }
     return samples;
 }

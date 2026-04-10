@@ -14,16 +14,16 @@
 #include <esp_codec_dev_defaults.h>
 #include <mutex>
 
-class Es7111Es7210AudioCodec : public AudioCodec {
+class Es7111AudioCodec : public AudioCodec {
 public:
-    Es7111Es7210AudioCodec(void* i2c_master_handle,
+    Es7111AudioCodec(void* i2c_master_handle,
                            int input_sample_rate, int output_sample_rate,
                            gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws,
                            gpio_num_t dout, gpio_num_t din,
                            gpio_num_t pa_pin,
                            uint8_t es7210_addr,
                            bool input_reference);
-    virtual ~Es7111Es7210AudioCodec();
+    virtual ~Es7111AudioCodec();
 
     virtual void SetOutputVolume(int volume) override;
     virtual void SetInputGain(float gain) override;

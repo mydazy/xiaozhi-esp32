@@ -141,8 +141,7 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
     std_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
     std_cfg.gpio_cfg.din = mic_din;
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle_, &std_cfg));
-    ESP_LOGI(TAG, "Simplex: SPK(bclk=%d ws=%d dout=%d) MIC(sck=%d ws=%d din=%d) rate=%d/%d",
-             spk_bclk, spk_ws, spk_dout, mic_sck, mic_ws, mic_din, input_sample_rate_, output_sample_rate_);
+    ESP_LOGI(TAG, "Simplex channels created");
 }
 
 NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, i2s_std_slot_mask_t spk_slot_mask, gpio_num_t mic_sck, gpio_num_t mic_ws, gpio_num_t mic_din, i2s_std_slot_mask_t mic_slot_mask){
@@ -243,28 +242,11 @@ int NoAudioCodec::Read(int16_t* dest, int samples) {
     constexpr TickType_t kReadTimeoutTicks = pdMS_TO_TICKS(200);
 
     std::vector<int32_t> bit32_buffer(samples);
-    esp_err_t err = i2s_channel_read(rx_handle_, bit32_buffer.data(), samples * sizeof(int32_t), &bytes_read, kReadTimeoutTicks);
-    if (err != ESP_OK) {
-        static int read_err_count = 0;
-        if (++read_err_count % 100 == 1) {
-            ESP_LOGW(TAG, "I2S read failed: %s (count=%d, rx_handle=%p)", esp_err_to_name(err), read_err_count, rx_handle_);
-        }
+    if (i2s_channel_read(rx_handle_, bit32_buffer.data(), samples * sizeof(int32_t), &bytes_read, kReadTimeoutTicks) != ESP_OK) {
         return 0;
     }
 
     samples = bytes_read / sizeof(int32_t);
-
-    // 音量检测日志（每 500 次打印一次）
-    static int read_count = 0;
-    if (++read_count % 500 == 1) {
-        int32_t max_val = 0;
-        for (int i = 0; i < samples; i++) {
-            int32_t abs_val = bit32_buffer[i] > 0 ? bit32_buffer[i] : -bit32_buffer[i];
-            if (abs_val > max_val) max_val = abs_val;
-        }
-        ESP_LOGI(TAG, "MIC read: %d samples, max_raw=%ld, bytes=%zu", samples, (long)max_val, bytes_read);
-    }
-
     for (int i = 0; i < samples; i++) {
         int32_t value = bit32_buffer[i] >> 12;
         dest[i] = (value > INT16_MAX) ? INT16_MAX : (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
@@ -277,7 +259,6 @@ void NoAudioCodec::EnableInput(bool enable) {
     if (enable == input_enabled_) {
         return;
     }
-    ESP_LOGI(TAG, "EnableInput(%s) rx_handle=%p", enable ? "true" : "false", rx_handle_);
     if (enable) {
         ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
     } else {

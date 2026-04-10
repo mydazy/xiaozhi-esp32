@@ -21,6 +21,7 @@
 #include "mcp_server.h"
 #include "rtc_wake_stub.h"
 #include "ota.h"
+#include <cJSON.h>
 #include "assets.h"         // 预加载 logo 资源
 #include "esp_nfc_ws1850s.h"
 #include "ibeacon.h"
@@ -778,6 +779,55 @@ private:
         }
     }
 
+    // NFC 刷卡 → HTTP POST {command:"/switch", uid:"XX:XX"} 到 OTA 地址
+    void NfcRequestSwitch(NfcCardType type, const NfcUid& uid) {
+        auto uid_str = uid.ToString();
+        auto type_name = std::string(NfcTypeName(type));
+
+        // 在主任务中执行 HTTP 请求（需要网络访问）
+        Application::GetInstance().Schedule([uid_str, type_name]() {
+            auto& board = Board::GetInstance();
+            auto network = board.GetNetwork();
+            if (!network) return;
+
+            Settings settings("wifi", false);
+            std::string url = settings.GetString("ota_url");
+            if (url.empty()) url = CONFIG_OTA_URL;
+            if (url.length() < 10) {
+                ESP_LOGW("NFC", "OTA URL 未配置");
+                return;
+            }
+
+            auto http = network->CreateHttp(0);
+            if (!http) return;
+
+            // Headers: Device-Id + Client-Id
+            http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
+            http->SetHeader("Client-Id", board.GetUuid());
+            http->SetHeader("Content-Type", "application/json");
+
+            // Body: {"command":"/switch","uid":"04:A3:B2:C1","type":"M1-1K"}
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddStringToObject(root, "command", "/switch");
+            cJSON_AddStringToObject(root, "uid", uid_str.c_str());
+            cJSON_AddStringToObject(root, "type", type_name.c_str());
+            char* json = cJSON_PrintUnformatted(root);
+            http->SetContent(std::string(json));
+            cJSON_free(json);
+            cJSON_Delete(root);
+
+            ESP_LOGI("NFC", "POST %s", url.c_str());
+            if (http->Open("POST", url)) {
+                int code = http->GetStatusCode();
+                std::string body = http->ReadAll();
+                http->Close();
+                ESP_LOGI("NFC", "响应: %d, %s", code, body.c_str());
+            } else {
+                ESP_LOGW("NFC", "请求失败: %d", http->GetLastError());
+            }
+        });
+    }
+
     void InitializeNfc() {
         if (!i2c_bus_) return;
 
@@ -795,6 +845,9 @@ private:
                 snprintf(text, sizeof(text), "%s: %s", NfcTypeName(type), uid.ToString().c_str());
                 display->SetChatMessage("system", text);
             }
+
+            // NFC 刷卡 → HTTP POST 到 OTA 地址，携带 /switch + UID
+            NfcRequestSwitch(type, uid);
         });
 
         nfc_->StartDetection(300);
@@ -1056,7 +1109,7 @@ public:
 
     virtual AudioCodec* GetAudioCodec() override {
         // ES7111(DAC,纯I2S无I2C) + ES7210(ADC,I2C初始化) 共享 duplex 总线
-        static Es7111Es7210AudioCodec audio_codec(
+        static Es7111AudioCodec audio_codec(
             i2c_bus_,
             AUDIO_INPUT_SAMPLE_RATE,
             AUDIO_OUTPUT_SAMPLE_RATE,
