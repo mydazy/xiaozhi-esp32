@@ -67,8 +67,6 @@ list(APPEND SOURCES
     "boards/common/sy6970.cc"
     "boards/common/system_reset.cc"
     "boards/common/ml307_gnss.cc"
-    "boards/common/axs5106l_touch.cc"
-    "boards/common/axs5106l_upgrade.cc"
     "boards/common/sc7a20h.cc"
     "boards/common/rtc_wake_stub.cc"
 )
@@ -929,7 +927,8 @@ idf_component_register(SRCS ${SOURCES}
                         bt
                         fatfs
                         lcd_driver
-                        ckv__esp_lcd_jd9853
+                        esp_lcd_jd9853
+                        esp_lcd_touch_axs5106l
                         esp_nfc_ws1850s
                     )
 

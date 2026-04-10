@@ -29,7 +29,7 @@ list(APPEND DRIVER_SRCS lcd_1p28_240x240_st77916.cc)
 list(APPEND DRIVER_SRCS lcd_1p32_128x128_gc9106.cc)
 
 # 芯片专用头文件依赖（本组件内部使用，放 PRIV_REQUIRES）
-list(APPEND DRIVER_PRIV_REQS ckv__esp_lcd_jd9853)
+list(APPEND DRIVER_PRIV_REQS esp_lcd_jd9853)
 list(APPEND DRIVER_PRIV_REQS espressif__esp_lcd_st77916)
 list(APPEND DRIVER_PRIV_REQS espressif__esp_lcd_gc9a01)
 list(APPEND DRIVER_PRIV_REQS esp_lcd_gc9a01)

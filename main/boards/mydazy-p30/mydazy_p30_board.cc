@@ -929,7 +929,7 @@ public:
         InitializePowerSaveTimer(); // 9. 初始化省电定时器
         InitializeButtons();        // 10. 初始化按钮 (最后初始化)
         InitializeNfc();            // 11. 初始化 NFC（WS1850S I2C）
-        InitializeIBeacon();        // 12. 初始化 iBeacon 扫描（等 BLE 就绪后启动）
+        // InitializeIBeacon();     // TODO: iBeacon 需等 BLE host sync 后启动，暂禁用
 
         // 13. GPS 延迟启动（等 4G modem 网络就绪后启动）
         xTaskCreatePinnedToCore([](void* arg) {
