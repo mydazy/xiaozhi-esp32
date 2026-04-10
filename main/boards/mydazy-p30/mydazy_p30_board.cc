@@ -931,14 +931,18 @@ public:
         InitializeNfc();            // 11. 初始化 NFC（WS1850S I2C）
         // InitializeIBeacon();     // TODO: iBeacon 需等 BLE host sync 后启动，暂禁用
 
-        // 13. GPS 延迟启动（等 4G modem 网络就绪后启动）
+        // 13. GPS 延迟启动（等 modem 检测到即可，不依赖网络注册）
         xTaskCreatePinnedToCore([](void* arg) {
             auto* self = static_cast<MyDazyP30Board*>(arg);
-            // 等待网络就绪（modem 初始化完成）
-            for (int i = 0; i < 60; i++) {
+            if (self->GetNetworkType() != NetworkType::ML307) {
+                vTaskDelete(NULL);
+                return;
+            }
+            // 等 modem 初始化完成（最多 30 秒）
+            for (int i = 0; i < 15; i++) {
                 vTaskDelay(pdMS_TO_TICKS(2000));
-                auto state = Application::GetInstance().GetDeviceState();
-                if (state == kDeviceStateIdle || state == kDeviceStateListening) {
+                auto& ml307 = dynamic_cast<Ml307Board&>(self->GetCurrentBoard());
+                if (ml307.GetModem() != nullptr) {
                     self->StartGnss();
                     break;
                 }
