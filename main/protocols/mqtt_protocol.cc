@@ -44,12 +44,6 @@ MqttProtocol::~MqttProtocol() {
         esp_timer_delete(reconnect_timer_);
     }
 
-    // 优雅关闭 MQTT 连接
-    if (mqtt_ != nullptr && mqtt_->IsConnected()) {
-        mqtt_->Disconnect();
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-
     udp_.reset();
     mqtt_.reset();
     

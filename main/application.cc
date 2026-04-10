@@ -484,7 +484,7 @@ void Application::InitializeProtocol() {
         // JoyAI 协议分发：检查 websocket URL 是否指向 joyinside.jd.com
         Settings ws_settings("websocket", false);
         std::string ws_url = ws_settings.GetString("url", "");
-        if (ws_url.find("joyinside.jd.com") != std::string::npos) {
+        if (ws_url.find("joyinside") != std::string::npos) {
             ESP_LOGI(TAG, "Using JoyAI WebSocket protocol");
             protocol_ = std::make_unique<WebsocketJoeaiProtocol>();
         } else {

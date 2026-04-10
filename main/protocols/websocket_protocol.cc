@@ -17,12 +17,6 @@ WebsocketProtocol::WebsocketProtocol() {
 }
 
 WebsocketProtocol::~WebsocketProtocol() {
-    // 优雅关闭 WebSocket 连接
-    if (websocket_ != nullptr && websocket_->IsConnected()) {
-        websocket_->Close();
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-    websocket_.reset();
     vEventGroupDelete(event_group_handle_);
 }
 

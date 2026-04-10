@@ -53,14 +53,7 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     es8311_cfg.hw_gain.pa_voltage = 5.0;
     es8311_cfg.hw_gain.codec_dac_voltage = 3.3;
     out_codec_if_ = es8311_codec_new(&es8311_cfg);
-    if (out_codec_if_ == NULL) {
-        ESP_LOGE(TAG, "ES8311 codec init failed, retrying...");
-        vTaskDelay(pdMS_TO_TICKS(200));
-        out_codec_if_ = es8311_codec_new(&es8311_cfg);
-    }
-    if (out_codec_if_ == NULL) {
-        ESP_LOGE(TAG, "ES8311 codec init failed after retry");
-    }
+    assert(out_codec_if_ != NULL);
 
     esp_codec_dev_cfg_t dev_cfg = {
         .dev_type = ESP_CODEC_DEV_TYPE_OUT,
@@ -68,9 +61,7 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
         .data_if = data_if_,
     };
     output_dev_ = esp_codec_dev_new(&dev_cfg);
-    if (output_dev_ == NULL) {
-        ESP_LOGE(TAG, "Output device creation failed");
-    }
+    assert(output_dev_ != NULL);
 
     // Input
     i2c_cfg.addr = es7210_addr;
@@ -81,18 +72,14 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     es7210_cfg.ctrl_if = in_ctrl_if_;
     es7210_cfg.mic_selected = ES7210_SEL_MIC1 | ES7210_SEL_MIC2 | ES7210_SEL_MIC3 | ES7210_SEL_MIC4;
     in_codec_if_ = es7210_codec_new(&es7210_cfg);
-    if (in_codec_if_ == NULL) {
-        ESP_LOGE(TAG, "ES7210 codec init failed");
-    }
+    assert(in_codec_if_ != NULL);
 
     dev_cfg.dev_type = ESP_CODEC_DEV_TYPE_IN;
     dev_cfg.codec_if = in_codec_if_;
     input_dev_ = esp_codec_dev_new(&dev_cfg);
-    if (input_dev_ == NULL) {
-        ESP_LOGE(TAG, "Input device creation failed");
-    }
+    assert(input_dev_ != NULL);
 
-    ESP_LOGI(TAG, "BoxAudioDevice initialized (MIC gain=%.1fdB)", input_gain_);
+    ESP_LOGI(TAG, "BoxAudioDevice initialized");
 }
 
 BoxAudioCodec::~BoxAudioCodec() {
