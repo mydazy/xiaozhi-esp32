@@ -2,7 +2,7 @@
 #include "ml307_board.h"
 #include "wifi_board.h"
 #include "assets/lang_config.h"
-#include "codecs/no_audio_codec.h"
+#include "codecs/box_audio_codec.h"
 #include "display/display.h"
 #include "display/emote_display.h"
 #include "display/lcd_display.h"
@@ -469,7 +469,7 @@ private:
 
         // 8. 重置音频相关GPIO
         ESP_LOGI(TAG, "重置音频GPIO");
-        gpio_reset_pin(AUDIO_MIC_GPIO_SCK);
+        gpio_reset_pin(AUDIO_I2S_GPIO_MCLK);
         gpio_reset_pin(AUDIO_I2S_GPIO_BCLK);
         gpio_reset_pin(AUDIO_I2S_GPIO_WS);
         gpio_reset_pin(AUDIO_I2S_GPIO_DIN);
@@ -491,7 +491,7 @@ private:
 
         // 配置GPIO为输入模式
         gpio_config_t input_conf = {
-            .pin_bit_mask = (1ULL << AUDIO_MIC_GPIO_SCK) | (1ULL << AUDIO_I2S_GPIO_BCLK) |
+            .pin_bit_mask = (1ULL << AUDIO_I2S_GPIO_MCLK) | (1ULL << AUDIO_I2S_GPIO_BCLK) |
                             (1ULL << AUDIO_I2S_GPIO_WS) | (1ULL << AUDIO_I2S_GPIO_DIN) |
                             (1ULL << AUDIO_I2S_GPIO_DOUT) | (1ULL << AUDIO_CODEC_I2C_SDA_PIN) |
                             (1ULL << AUDIO_CODEC_I2C_SCL_PIN) | (1ULL << AUDIO_CODEC_PA_PIN) |
@@ -773,11 +773,7 @@ private:
             return;
         }
 
-        NfcWs1850sConfig nfc_cfg = {
-            .reset_pin = GPIO_NUM_NC,
-            .irq_pin = GPIO_NUM_NC,
-        };
-        nfc_ = new NfcWs1850s(i2c_bus_, nfc_cfg);
+        nfc_ = new NfcWs1850s(i2c_bus_);
 
         if (nfc_->Initialize() != ESP_OK) {
             ESP_LOGE(TAG, "NFC WS1850S init failed");
@@ -1060,11 +1056,22 @@ public:
     }
 
     virtual AudioCodec* GetAudioCodec() override {
-        // P32: 直连音频模式（无 ES8311/ES7210，I2S 直连功放+模拟麦）
-        static NoAudioCodecSimplex audio_codec(
-            AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_SPK_GPIO_BCLK, AUDIO_SPK_GPIO_WS, AUDIO_SPK_GPIO_DOUT,
-            AUDIO_MIC_GPIO_SCK, AUDIO_MIC_GPIO_WS, AUDIO_MIC_GPIO_DIN);
+        // ES7111(DAC) + ES7210(ADC) 共享 I2S duplex 总线
+        // ES8311 地址初始化会失败（实际芯片是 ES7111），不影响功能
+        // ES7210 必须 I2C 初始化，否则麦克风无数据
+        static BoxAudioCodec audio_codec(
+            i2c_bus_,
+            AUDIO_INPUT_SAMPLE_RATE,
+            AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_MCLK,
+            AUDIO_I2S_GPIO_BCLK,
+            AUDIO_I2S_GPIO_WS,
+            AUDIO_I2S_GPIO_DOUT,
+            AUDIO_I2S_GPIO_DIN,
+            AUDIO_CODEC_PA_PIN,
+            AUDIO_CODEC_ES8311_ADDR,
+            AUDIO_CODEC_ES7210_ADDR,
+            AUDIO_INPUT_REFERENCE);
         return &audio_codec;
     }
 

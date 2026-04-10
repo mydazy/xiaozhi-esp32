@@ -10,31 +10,24 @@
 #define MYDAZY_HAS_ACCELEROMETER 1  // 加速度计支持
 #define MYDAZY_HAS_BATTERY     1    // 电池支持
 
-// 音频配置（直连模式：I2S → 功放，模拟麦 → I2S）
-#define MYDAZY_USE_NO_AUDIO_CODEC 1   // 音频直连模式（无 ES8311/ES7210）
+// 音频配置（ES7111 DAC + ES7210 ADC，共享 I2S duplex 总线）
+// 注意: 硬件用 ES7111 替代 ES8311，ES7111 I2C 初始化会失败（正常）
+// ES7210 ADC 必须 I2C 初始化才能工作
 #define AUDIO_INPUT_SAMPLE_RATE  24000   // 硬件采样率 (Hz)
 #define AUDIO_OUTPUT_SAMPLE_RATE 24000   // 硬件采样率 (Hz)
-#define AUDIO_INPUT_REFERENCE    false   // 直连模式无 AEC 参考信号
+#define AUDIO_INPUT_REFERENCE    true    // ES7210 双通道（MIC + AEC REF）
 
-// 单麦克风配置
-#define AUDIO_MIC_SPACING_MM     0
-#define AUDIO_MIC_SPACING_M      0.0f
+// 双麦克风物理配置
+#define AUDIO_MIC_SPACING_MM     14
+#define AUDIO_MIC_SPACING_M      0.014f
 #define AUDIO_DOA_ENABLED        0
 
-// 喇叭输出 I2S GPIO（Standard 模式）
-#define AUDIO_SPK_GPIO_BCLK     GPIO_NUM_16    // 喇叭 I2S 位时钟
-#define AUDIO_SPK_GPIO_WS       GPIO_NUM_14    // 喇叭 I2S 字选择
-#define AUDIO_SPK_GPIO_DOUT     GPIO_NUM_13    // 喇叭 I2S 数据输出
-// 麦克风输入 I2S GPIO（Standard 模式）
-#define AUDIO_MIC_GPIO_SCK      GPIO_NUM_17    // 麦克风 I2S 时钟
-#define AUDIO_MIC_GPIO_WS       GPIO_NUM_18    // 麦克风 I2S 字选择
-#define AUDIO_MIC_GPIO_DIN      GPIO_NUM_43    // 麦克风 I2S 数据输入 TODO: 确认实际引脚
-
-// 兼容旧定义（供 board 文件引用）
-#define AUDIO_I2S_GPIO_BCLK     AUDIO_SPK_GPIO_BCLK
-#define AUDIO_I2S_GPIO_WS       AUDIO_SPK_GPIO_WS
-#define AUDIO_I2S_GPIO_DOUT     AUDIO_SPK_GPIO_DOUT
-#define AUDIO_I2S_GPIO_DIN      AUDIO_MIC_GPIO_DIN
+// I2S GPIO（ES7111 DAC + ES7210 ADC 共用 duplex 总线）
+#define AUDIO_I2S_GPIO_MCLK     GPIO_NUM_17    // 主时钟（ES7210+ES7111 共用）
+#define AUDIO_I2S_GPIO_BCLK     GPIO_NUM_16    // 位时钟
+#define AUDIO_I2S_GPIO_WS       GPIO_NUM_14    // 字选择
+#define AUDIO_I2S_GPIO_DOUT     GPIO_NUM_13    // ESP32→ES7111 DAC 数据
+#define AUDIO_I2S_GPIO_DIN      GPIO_NUM_18    // ES7210 ADC→ESP32 数据
 
 // 音频电源/功放
 #define AUDIO_PWR_EN_GPIO       GPIO_NUM_15     // 音频电源使能
@@ -42,9 +35,11 @@
 
 #define CC_ADC_PIN              GPIO_NUM_6 //CC_ADC YZT
 
-// I2C 配置（触摸屏 + NFC + 传感器共用总线）
+// I2C 配置（音频 codec + 触摸屏 + NFC + 传感器共用总线）
 #define AUDIO_CODEC_I2C_SDA_PIN  GPIO_NUM_11   // I2C 数据线
 #define AUDIO_CODEC_I2C_SCL_PIN  GPIO_NUM_12   // I2C 时钟线
+#define AUDIO_CODEC_ES8311_ADDR  ES8311_CODEC_DEFAULT_ADDR  // 实际芯片 ES7111（I2C 会失败，正常）
+#define AUDIO_CODEC_ES7210_ADDR  ES7210_CODEC_DEFAULT_ADDR  // ES7210 ADC（必须初始化）
 
 // ============================================================
 // 按钮 GPIO 配置
