@@ -788,7 +788,7 @@ private:
 
         ESP_LOGI(TAG, "NFC WS1850S initialized, chip version: 0x%02X", nfc_->GetChipVersion());
 
-        // 检测到卡片时显示到屏幕
+        // 检测到卡片时在底部文字区域显示
         nfc_->SetCardCallback([this](NfcCardType type, const NfcUid& uid) {
             std::string uid_str = uid.ToString();
             ESP_LOGI(TAG, "NFC标签: %s", uid_str.c_str());
@@ -797,12 +797,12 @@ private:
             if (display) {
                 char text[64];
                 snprintf(text, sizeof(text), "NFC标签: %s", uid_str.c_str());
-                display->ShowNotification(text, 10000);
+                display->SetChatMessage("system", text);
             }
         });
 
-        // 启动后台检测（200ms 间隔）
-        nfc_->StartDetection(200);
+        // 启动后台检测（300ms 间隔，相同标签 5 秒去重）
+        nfc_->StartDetection(300);
     }
 
     // GPS 初始化（4G 网络连接后调用）
