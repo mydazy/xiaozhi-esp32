@@ -931,6 +931,21 @@ public:
         InitializeNfc();            // 11. 初始化 NFC（WS1850S I2C）
         InitializeIBeacon();        // 12. 初始化 iBeacon 扫描（等 BLE 就绪后启动）
 
+        // 13. GPS 延迟启动（等 4G modem 网络就绪后启动）
+        xTaskCreatePinnedToCore([](void* arg) {
+            auto* self = static_cast<MyDazyP30Board*>(arg);
+            // 等待网络就绪（modem 初始化完成）
+            for (int i = 0; i < 60; i++) {
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                auto state = Application::GetInstance().GetDeviceState();
+                if (state == kDeviceStateIdle || state == kDeviceStateListening) {
+                    self->StartGnss();
+                    break;
+                }
+            }
+            vTaskDelete(NULL);
+        }, "gnss_init", 3072, this, 2, NULL, 0);
+
         // 灯光控制
         GetBacklight()->RestoreBrightness();
 
@@ -993,6 +1008,12 @@ public:
         // 清理 iBeacon
         IBeacon::GetInstance().Stop();
 
+        // 清理 GNSS
+        if (gnss_) {
+            gnss_->Stop();
+            delete gnss_;
+            gnss_ = nullptr;
+        }
         // 清理 NFC
         if (nfc_) {
             nfc_->StopDetection();
