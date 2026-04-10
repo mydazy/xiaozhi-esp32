@@ -2,7 +2,7 @@
 #include "ml307_board.h"
 #include "wifi_board.h"
 #include "assets/lang_config.h"
-#include "codecs/box_audio_codec.h"
+#include "codecs/es7111_audio_codec.h"
 #include "display/display.h"
 #include "display/emote_display.h"
 #include "display/lcd_display.h"
@@ -767,37 +767,36 @@ private:
     std::atomic<int> gnss_satellites_{0};
     std::atomic<bool> gnss_fixed_{false};
 
-    void InitializeNfc() {
-        if (i2c_bus_ == nullptr) {
-            ESP_LOGE(TAG, "NFC: I2C bus not ready");
-            return;
+    static const char* NfcTypeName(NfcCardType type) {
+        switch (type) {
+            case NfcCardType::kMifareClassic1K: return "M1-1K";
+            case NfcCardType::kMifareClassic4K: return "M1-4K";
+            case NfcCardType::kUltralight:      return "NTAG";
+            case NfcCardType::kMifarePlus:      return "Plus";
+            case NfcCardType::kIso14443A4:      return "CPU";
+            default:                            return "NFC";
         }
+    }
+
+    void InitializeNfc() {
+        if (!i2c_bus_) return;
 
         nfc_ = new NfcWs1850s(i2c_bus_);
-
         if (nfc_->Initialize() != ESP_OK) {
-            ESP_LOGE(TAG, "NFC WS1850S init failed");
             delete nfc_;
             nfc_ = nullptr;
             return;
         }
 
-        ESP_LOGI(TAG, "NFC WS1850S initialized, chip version: 0x%02X", nfc_->GetChipVersion());
-
-        // 检测到卡片时在底部文字区域显示
         nfc_->SetCardCallback([this](NfcCardType type, const NfcUid& uid) {
-            std::string uid_str = uid.ToString();
-            ESP_LOGI(TAG, "NFC标签: %s", uid_str.c_str());
-
             auto display = GetDisplay();
             if (display) {
                 char text[64];
-                snprintf(text, sizeof(text), "NFC标签: %s", uid_str.c_str());
+                snprintf(text, sizeof(text), "%s: %s", NfcTypeName(type), uid.ToString().c_str());
                 display->SetChatMessage("system", text);
             }
         });
 
-        // 启动后台检测（300ms 间隔，相同标签 5 秒去重）
         nfc_->StartDetection(300);
     }
 
@@ -1056,10 +1055,8 @@ public:
     }
 
     virtual AudioCodec* GetAudioCodec() override {
-        // ES7111(DAC) + ES7210(ADC) 共享 I2S duplex 总线
-        // ES8311 地址初始化会失败（实际芯片是 ES7111），不影响功能
-        // ES7210 必须 I2C 初始化，否则麦克风无数据
-        static BoxAudioCodec audio_codec(
+        // ES7111(DAC,纯I2S无I2C) + ES7210(ADC,I2C初始化) 共享 duplex 总线
+        static Es7111Es7210AudioCodec audio_codec(
             i2c_bus_,
             AUDIO_INPUT_SAMPLE_RATE,
             AUDIO_OUTPUT_SAMPLE_RATE,
@@ -1069,7 +1066,6 @@ public:
             AUDIO_I2S_GPIO_DOUT,
             AUDIO_I2S_GPIO_DIN,
             AUDIO_CODEC_PA_PIN,
-            AUDIO_CODEC_ES8311_ADDR,
             AUDIO_CODEC_ES7210_ADDR,
             AUDIO_INPUT_REFERENCE);
         return &audio_codec;
