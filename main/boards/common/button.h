@@ -7,6 +7,7 @@
 #include <button_adc.h>
 #include <button_gpio.h>
 #include <functional>
+#include <map>
 
 class Button {
 public:
@@ -30,7 +31,7 @@ protected:
     std::function<void()> on_long_press_;
     std::function<void()> on_click_;
     std::function<void()> on_double_click_;
-    std::function<void()> on_multiple_click_;
+    std::map<uint8_t, std::function<void()>> multiple_click_callbacks_;  // 支持多个不同click_count的回调
 };
 
 #if CONFIG_SOC_ADC_SUPPORTED

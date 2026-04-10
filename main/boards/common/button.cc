@@ -110,16 +110,34 @@ void Button::OnMultipleClick(std::function<void()> callback, uint8_t click_count
     if (button_handle_ == nullptr) {
         return;
     }
-    on_multiple_click_ = callback;
+
+    // 将回调存储在map中，支持多个不同click_count的回调
+    multiple_click_callbacks_[click_count] = callback;
+
     button_event_args_t event_args = {
         .multiple_clicks = {
             .clicks = click_count
         }
     };
+
+    // 创建上下文结构，包含Button指针和click_count
+    struct CallbackContext {
+        Button* button;
+        uint8_t click_count;
+    };
+    auto* context = new CallbackContext{this, click_count};
+
+    // 注册回调，传递context作为usr_data
     iot_button_register_cb(button_handle_, BUTTON_MULTIPLE_CLICK, &event_args, [](void* handle, void* usr_data) {
-        Button* button = static_cast<Button*>(usr_data);
-        if (button->on_multiple_click_) {
-            button->on_multiple_click_();
+        auto* context = static_cast<CallbackContext*>(usr_data);
+        Button* button = context->button;
+        uint8_t click_count = context->click_count;
+
+        // 从map中查找并调用对应click_count的回调
+        auto it = button->multiple_click_callbacks_.find(click_count);
+        if (it != button->multiple_click_callbacks_.end() && it->second) {
+            ESP_LOGI(TAG, "触发%d次点击回调", click_count);
+            it->second();
         }
-    }, this);
+    }, context);
 }

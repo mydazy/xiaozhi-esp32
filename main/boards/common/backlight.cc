@@ -114,7 +114,7 @@ PwmBacklight::~PwmBacklight() {
 
 void PwmBacklight::SetBrightnessImpl(uint8_t brightness) {
     // LEDC resolution set to 10bits, thus: 100% = 1023
-    uint32_t duty_cycle = (1023 * brightness) / 100;
+    uint32_t duty_cycle = (350 * brightness) / 100;
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty_cycle);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 }
