@@ -21,9 +21,9 @@
 #include "mcp_server.h"
 #include "rtc_wake_stub.h"
 #include "ota.h"
-#include <cJSON.h>
-#include "assets.h"         // 预加载 logo 资源
+#include "assets.h"
 #include "esp_nfc_ws1850s.h"
+#include "typec_headset.h"
 #include "ibeacon.h"
 #include "ml307_gnss.h"
 #include <font_awesome.h>
@@ -765,8 +765,12 @@ private:
 
     // GNSS 定位
     Ml307Gnss* gnss_ = nullptr;
+
+    // Type-C 耳机检测
+    TypecHeadset* headset_ = nullptr;
     std::atomic<int> gnss_satellites_{0};
     std::atomic<bool> gnss_fixed_{false};
+    double gnss_lat_ = 0.0, gnss_lon_ = 0.0;
 
     static const char* NfcTypeName(NfcCardType type) {
         switch (type) {
@@ -779,53 +783,97 @@ private:
         }
     }
 
-    // NFC 刷卡 → HTTP POST {command:"/switch", uid:"XX:XX"} 到 OTA 地址
+    // NFC → POST OTA_URL/switch {"type":"nfc","uid":"...","card_type":"..."}
     void NfcRequestSwitch(NfcCardType type, const NfcUid& uid) {
         auto uid_str = uid.ToString();
         auto type_name = std::string(NfcTypeName(type));
-
-        // 在主任务中执行 HTTP 请求（需要网络访问）
         Application::GetInstance().Schedule([uid_str, type_name]() {
-            auto& board = Board::GetInstance();
-            auto network = board.GetNetwork();
-            if (!network) return;
-
-            Settings settings("wifi", false);
-            std::string url = settings.GetString("ota_url");
-            if (url.empty()) url = CONFIG_OTA_URL;
-            if (url.length() < 10) {
-                ESP_LOGW("NFC", "OTA URL 未配置");
-                return;
-            }
-
-            auto http = network->CreateHttp(0);
-            if (!http) return;
-
-            // Headers: Device-Id + Client-Id
-            http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
-            http->SetHeader("Client-Id", board.GetUuid());
-            http->SetHeader("Content-Type", "application/json");
-
-            // Body: {"command":"/switch","uid":"04:A3:B2:C1","type":"M1-1K"}
-            cJSON* root = cJSON_CreateObject();
-            cJSON_AddStringToObject(root, "command", "/switch");
-            cJSON_AddStringToObject(root, "uid", uid_str.c_str());
-            cJSON_AddStringToObject(root, "type", type_name.c_str());
-            char* json = cJSON_PrintUnformatted(root);
-            http->SetContent(std::string(json));
-            cJSON_free(json);
-            cJSON_Delete(root);
-
-            ESP_LOGI("NFC", "POST %s", url.c_str());
-            if (http->Open("POST", url)) {
-                int code = http->GetStatusCode();
-                std::string body = http->ReadAll();
-                http->Close();
-                ESP_LOGI("NFC", "响应: %d, %s", code, body.c_str());
-            } else {
-                ESP_LOGW("NFC", "请求失败: %d", http->GetLastError());
-            }
+            cJSON* p = cJSON_CreateObject();
+            cJSON_AddStringToObject(p, "uid", uid_str.c_str());
+            cJSON_AddStringToObject(p, "card_type", type_name.c_str());
+            Ota::RequestSwitch("nfc", p);
         });
+    }
+
+    // iBeacon → POST OTA_URL/switch {"type":"ibeacon","uuid":"...","major":1,"minor":2,"rssi":-60}
+    void IBeaconRequestSwitch(const IBeaconInfo& beacon) {
+        auto uuid = beacon.uuid;
+        uint16_t major = beacon.major, minor = beacon.minor;
+        int8_t rssi = beacon.rssi;
+        Application::GetInstance().Schedule([uuid, major, minor, rssi]() {
+            cJSON* p = cJSON_CreateObject();
+            cJSON_AddStringToObject(p, "uuid", uuid.c_str());
+            cJSON_AddNumberToObject(p, "major", major);
+            cJSON_AddNumberToObject(p, "minor", minor);
+            cJSON_AddNumberToObject(p, "rssi", rssi);
+            Ota::RequestSwitch("ibeacon", p);
+        });
+    }
+
+    // 状态定时上报定时器
+    esp_timer_handle_t status_timer_ = nullptr;
+
+    // 上报设备状态 → POST OTA_URL/status
+    void ReportStatus() {
+        int battery = power_manager_ ? power_manager_->GetBatteryLevel() : -1;
+        bool charging = power_manager_ ? power_manager_->IsCharging() : false;
+        bool fixed = gnss_fixed_.load();
+        int sats = gnss_satellites_.load();
+        double lat = gnss_lat_, lon = gnss_lon_;
+        size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+
+        // 网络信息
+        int csq = -1;
+        std::string carrier;
+        if (GetNetworkType() == NetworkType::ML307) {
+            auto& ml307 = dynamic_cast<Ml307Board&>(GetCurrentBoard());
+            auto* modem = ml307.GetModem();
+            if (modem) {
+                csq = modem->GetCsq();
+                carrier = modem->GetCarrierName();
+            }
+        }
+
+        Application::GetInstance().Schedule(
+            [battery, charging, fixed, sats, lat, lon, free_heap, csq, carrier]() {
+            cJSON* p = cJSON_CreateObject();
+
+            cJSON_AddNumberToObject(p, "battery", battery);
+            cJSON_AddBoolToObject(p, "charging", charging);
+
+            cJSON* gps = cJSON_CreateObject();
+            cJSON_AddBoolToObject(gps, "fixed", fixed);
+            cJSON_AddNumberToObject(gps, "satellites", sats);
+            if (fixed) {
+                cJSON_AddNumberToObject(gps, "latitude", lat);
+                cJSON_AddNumberToObject(gps, "longitude", lon);
+            }
+            cJSON_AddItemToObject(p, "gps", gps);
+
+            cJSON* net = cJSON_CreateObject();
+            cJSON_AddStringToObject(net, "type", "cellular");
+            if (!carrier.empty()) cJSON_AddStringToObject(net, "carrier", carrier.c_str());
+            if (csq >= 0) cJSON_AddNumberToObject(net, "csq", csq);
+            cJSON_AddItemToObject(p, "network", net);
+
+            cJSON_AddNumberToObject(p, "free_heap", (double)free_heap);
+
+            Ota::ReportStatus(p);
+        });
+    }
+
+    // 启动 90 秒定时状态上报
+    void StartStatusTimer() {
+        esp_timer_create_args_t args = {
+            .callback = [](void* arg) {
+                static_cast<MyDazyP30Board*>(arg)->ReportStatus();
+            },
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "status_report",
+        };
+        esp_timer_create(&args, &status_timer_);
+        esp_timer_start_periodic(status_timer_, 90 * 1000000ULL);
     }
 
     void InitializeNfc() {
@@ -854,6 +902,35 @@ private:
     }
 
     // GPS 初始化（4G 网络连接后调用）
+    void InitializeHeadset() {
+        TypecHeadsetConfig hcfg = {
+            .usb_det_pin = USB_DET_GPIO,
+            .cc_adc_pin = CC_ADC_PIN,
+            .usb_sw_pin = USB_SW_GPIO,
+            .cc_vdd_pin = CC_VDD_GPIO,
+            .mic_select_pin = MIC_SELECT_GPIO,
+            .pa_pin = AUDIO_CODEC_PA_PIN,
+            .usb_mic_adc_pin = USB_MIC_ADC_GPIO,
+            .cc_adc_unit = CC_ADC_UNIT,
+            .cc_adc_channel = CC_ADC_CHANNEL,
+            .mic_adc_unit = USB_MIC_ADC_UNIT,
+            .mic_adc_channel = USB_MIC_ADC_CHANNEL,
+            .cc_headset_mv = CC_ADC_HEADSET_MV,
+        };
+        headset_ = new TypecHeadset(hcfg);
+
+        headset_->SetCallback([this](bool inserted) {
+            auto display = GetDisplay();
+            if (display) {
+                display->ShowNotification(inserted ? "耳机已插入" : "耳机已拔出", 3000);
+            }
+            WakeUp();
+        });
+
+        // 共享 PowerManager 的 ADC handle（同一个 ADC1）
+        headset_->Start(PowerManager::GetSharedAdcHandle());
+    }
+
     void StartGnss() {
         if (GetNetworkType() != NetworkType::ML307) return;
 
@@ -881,6 +958,8 @@ private:
         gnss_->SetFixCallback([this](const GnssFix& fix) {
             gnss_fixed_ = fix.valid;
             gnss_satellites_ = fix.satellites;
+            gnss_lat_ = fix.latitude;
+            gnss_lon_ = fix.longitude;
             auto display = GetDisplay();
             if (display) {
                 char text[48];
@@ -888,6 +967,8 @@ private:
                          fix.satellites, fix.latitude, fix.longitude);
                 display->SetStatus(text);
             }
+            // 定位成功时上报状态
+            if (fix.valid) ReportStatus();
         });
 
         gnss_->Start(kGnssGps | kGnssBds);
@@ -906,6 +987,7 @@ private:
                          beacon.CalculateDistance());
                 display->ShowNotification(text, 10000);
             }
+            IBeaconRequestSwitch(beacon);
         });
 
         // 延迟启动：等 BLE 协议栈就绪后再开始扫描
@@ -977,6 +1059,7 @@ public:
         InitializePowerSaveTimer(); // 9. 初始化省电定时器
         InitializeButtons();        // 10. 初始化按钮 (最后初始化)
         InitializeNfc();            // 11. 初始化 NFC（WS1850S I2C）
+        InitializeHeadset();        // 12. Type-C 耳机动态检测
         // InitializeIBeacon();     // TODO: iBeacon 需等 BLE host sync 后启动，暂禁用
 
         // 13. GPS 延迟启动（等 modem 检测到即可，不依赖网络注册）
@@ -1060,6 +1143,8 @@ public:
         // 清理 iBeacon
         IBeacon::GetInstance().Stop();
 
+        // 清理耳机检测
+        if (headset_) { headset_->Stop(); delete headset_; headset_ = nullptr; }
         // 清理 GNSS
         if (gnss_) {
             gnss_->Stop();

@@ -15,6 +15,14 @@ public:
 
     esp_err_t CheckVersion();
     esp_err_t Activate();
+
+    /// POST OTA_URL/switch — 切换智能体（NFC/iBeacon/自定义）
+    /// @param type 触发类型（"nfc", "ibeacon" 等）
+    /// @param data 附加数据（调用后自动释放）
+    static esp_err_t RequestSwitch(const std::string& type, cJSON* data);
+
+    /// POST OTA_URL/status — 上报设备状态（GPS、电量等）
+    static esp_err_t ReportStatus(cJSON* payload);
     bool ReportStatus();
     bool ProcessCustomContent(cJSON* custom_array, const std::string& context = "");
     bool HasActivationChallenge() { return has_activation_challenge_; }
@@ -56,6 +64,9 @@ private:
     bool IsNewVersionAvailable(const std::string& currentVersion, const std::string& newVersion);
     std::string GetActivationPayload();
     std::unique_ptr<Http> SetupHttp();
+
+    /// 通用: POST OTA_URL/<path>，payload 由调用方构建，调用后自动释放
+    static esp_err_t PostToOta(const std::string& path, cJSON* payload);
 };
 
 #endif // _OTA_H

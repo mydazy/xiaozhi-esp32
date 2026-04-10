@@ -61,6 +61,7 @@ list(APPEND SOURCES
     "boards/common/press_to_talk_mcp_tool.cc"
     "boards/common/system_reset.cc"
     "boards/common/ml307_gnss.cc"
+    "boards/common/typec_headset.cc"
     "boards/common/sc7a20h.cc"
     "boards/common/rtc_wake_stub.cc"
 )

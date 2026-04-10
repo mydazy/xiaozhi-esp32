@@ -245,6 +245,64 @@ esp_err_t Ota::CheckVersion() {
     return ESP_OK;
 }
 
+// ============================================================
+// 通用 POST OTA_URL/<path>
+// ============================================================
+
+esp_err_t Ota::PostToOta(const std::string& path, cJSON* payload) {
+    auto& board = Board::GetInstance();
+    auto network = board.GetNetwork();
+    if (!network) return ESP_ERR_INVALID_STATE;
+
+    Settings settings("wifi", false);
+    std::string url = settings.GetString("ota_url");
+    if (url.empty()) url = CONFIG_OTA_URL;
+    if (url.length() < 10) return ESP_ERR_INVALID_ARG;
+    url += path;
+
+    auto http = network->CreateHttp(0);
+    if (!http) return ESP_ERR_NO_MEM;
+
+    http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
+    http->SetHeader("Client-Id", board.GetUuid());
+    http->SetHeader("Content-Type", "application/json");
+
+    char* json = cJSON_PrintUnformatted(payload);
+    http->SetContent(std::string(json));
+    cJSON_free(json);
+    cJSON_Delete(payload);
+
+    ESP_LOGI(TAG, "POST %s", url.c_str());
+    if (!http->Open("POST", url)) {
+        ESP_LOGW(TAG, "POST %s failed: %d", path.c_str(), http->GetLastError());
+        return ESP_FAIL;
+    }
+
+    int code = http->GetStatusCode();
+    std::string body = http->ReadAll();
+    http->Close();
+    ESP_LOGI(TAG, "%s response: %d %s", path.c_str(), code, body.c_str());
+
+    return (code >= 200 && code < 300) ? ESP_OK : ESP_FAIL;
+}
+
+// ============================================================
+// /switch — NFC 或 iBeacon 触发切换
+// ============================================================
+
+esp_err_t Ota::RequestSwitch(const std::string& type, cJSON* data) {
+    cJSON_AddStringToObject(data, "type", type.c_str());
+    return PostToOta("/switch", data);
+}
+
+// ============================================================
+// /status — 上报设备状态
+// ============================================================
+
+esp_err_t Ota::ReportStatus(cJSON* payload) {
+    return PostToOta("/status", payload);
+}
+
 void Ota::MarkCurrentVersionValid() {
     auto partition = esp_ota_get_running_partition();
     if (strcmp(partition->label, "factory") == 0) {
