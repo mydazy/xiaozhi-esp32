@@ -23,7 +23,7 @@ Es7111AudioCodec::Es7111AudioCodec(
 
     duplex_ = true;
     input_reference_ = input_reference;
-    input_channels_ = 2;
+    input_channels_ = input_reference ? 2 : 1;  // 有回声参考=2ch(MIC+REF)，无=1ch(双麦混合)
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
 
@@ -266,10 +266,18 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
         ESP_LOGE(TAG, "esp_codec_dev_read failed: %d", ret);
         return 0;
     }
-    // 4ch→2ch: ch0=mic, ch2=reference（耳机模式下 ch2 无数据=0）
-    for (int f = 0; f < frames; f++) {
-        dest[f * 2]     = tdm_buf_[f * 4 + 0];
-        dest[f * 2 + 1] = tdm_buf_[f * 4 + 2];
+    if (input_reference_) {
+        // 有回声参考：2ch 输出 (ch0=mic, ch2=reference)
+        for (int f = 0; f < frames; f++) {
+            dest[f * 2]     = tdm_buf_[f * 4 + 0];
+            dest[f * 2 + 1] = tdm_buf_[f * 4 + 2];
+        }
+    } else {
+        // 双麦混合成单路：(ch0 + ch2) / 2，提升信噪比
+        for (int f = 0; f < frames; f++) {
+            int32_t mixed = ((int32_t)tdm_buf_[f * 4 + 0] + (int32_t)tdm_buf_[f * 4 + 2]) / 2;
+            dest[f] = (int16_t)mixed;
+        }
     }
     // 每 2 秒诊断
     static int read_count = 0;
