@@ -19,7 +19,7 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     output_sample_rate_ = output_sample_rate;
     // P30: 从 NVS 读取增益，默认 33dB
     Settings settings("audio", false);
-    input_gain_ = static_cast<float>(settings.GetInt("input_gain", 33));
+    input_gain_ = static_cast<float>(settings.GetInt("input_gain", 24));
 
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
@@ -218,7 +218,6 @@ void BoxAudioCodec::EnableInput(bool enable) {
         return;
     }
     if (enable) {
-        // P30: 4通道 TDM MIC 全开（ES7210 MIC1-4）
         esp_codec_dev_sample_info_t fs = {
             .bits_per_sample = 16,
             .channel = 4,

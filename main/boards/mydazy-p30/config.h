@@ -10,42 +10,41 @@
 #define MYDAZY_HAS_ACCELEROMETER 1  // 加速度计支持
 #define MYDAZY_HAS_BATTERY     1    // 电池支持
 
-// 音频采样率配置
-// 硬件I2S共用时钟,输入输出必须相同采样率
-// 软件层自动做 24kHz ↔ 16kHz 重采样 (AFE/Opus使用16kHz)
+// 音频配置（直连模式：I2S → 功放，模拟麦 → I2S）
+#define MYDAZY_USE_NO_AUDIO_CODEC 1   // 音频直连模式（无 ES8311/ES7210）
 #define AUDIO_INPUT_SAMPLE_RATE  24000   // 硬件采样率 (Hz)
 #define AUDIO_OUTPUT_SAMPLE_RATE 24000   // 硬件采样率 (Hz)
-#define AUDIO_INPUT_REFERENCE    true    // 音频输入参考
+#define AUDIO_INPUT_REFERENCE    false   // 直连模式无 AEC 参考信号
 
-// 双麦克风物理配置（实际只连接MIC1和MIC2，14mm间距）
-#define AUDIO_MIC_SPACING_MM     14      // 麦克风间距（毫米）
-#define AUDIO_MIC_SPACING_M      0.014f  // 麦克风间距（米，用于DOA算法）
+// 单麦克风配置
+#define AUDIO_MIC_SPACING_MM     0
+#define AUDIO_MIC_SPACING_M      0.0f
+#define AUDIO_DOA_ENABLED        0
 
-// DOA声源定位配置（双麦克风左右定位，基于24kHz采样率和14mm间距）
-#define AUDIO_DOA_ENABLED        1       // 启用DOA声源定位功能
-#define AUDIO_DOA_RESOLUTION     30.0f   // DOA角度分辨率（度），双麦14mm推荐30度
-#define AUDIO_DOA_FRAME_SAMPLES  1024    // DOA处理帧大小（1024点@24kHz=42.7ms）
+// 喇叭输出 I2S GPIO（Standard 模式）
+#define AUDIO_SPK_GPIO_BCLK     GPIO_NUM_16    // 喇叭 I2S 位时钟
+#define AUDIO_SPK_GPIO_WS       GPIO_NUM_14    // 喇叭 I2S 字选择
+#define AUDIO_SPK_GPIO_DOUT     GPIO_NUM_13    // 喇叭 I2S 数据输出
+// 麦克风输入 I2S GPIO（Standard 模式）
+#define AUDIO_MIC_GPIO_SCK      GPIO_NUM_17    // 麦克风 I2S 时钟
+#define AUDIO_MIC_GPIO_WS       GPIO_NUM_18    // 麦克风 I2S 字选择
+#define AUDIO_MIC_GPIO_DIN      GPIO_NUM_43    // 麦克风 I2S 数据输入 TODO: 确认实际引脚
 
-// 音频 GPIO 配置
-#define AUDIO_I2S_GPIO_DOUT     GPIO_NUM_13    // I2S 数据输出（DAC输出到ES8311）
-#define AUDIO_I2S_GPIO_WS       GPIO_NUM_14    // I2S 字选择信号（左右声道切换）
-#define AUDIO_I2S_8311_DIN      GPIO_NUM_15    // ES8311 ASDOUT（AEC参考信号）
-#define AUDIO_I2S_GPIO_BCLK     GPIO_NUM_16    // I2S 位时钟（串行时钟）
-#define AUDIO_I2S_GPIO_MCLK     GPIO_NUM_17    // I2S 主时钟（256fs基准时钟）
-#define AUDIO_I2S_GPIO_DIN      GPIO_NUM_18    // I2S 数据输入（ADC输入从ES7210）
+// 兼容旧定义（供 board 文件引用）
+#define AUDIO_I2S_GPIO_BCLK     AUDIO_SPK_GPIO_BCLK
+#define AUDIO_I2S_GPIO_WS       AUDIO_SPK_GPIO_WS
+#define AUDIO_I2S_GPIO_DOUT     AUDIO_SPK_GPIO_DOUT
+#define AUDIO_I2S_GPIO_DIN      AUDIO_MIC_GPIO_DIN
 
-// 音频编解码器 I2C 配置（外部已有10kΩ上拉，禁用内部上拉）
-// #define AUDIO_PWR_EN_GPIO       GPIO_NUM_48// tiger 9     // 音频电源使能（控制音频芯片供电）
-#define AUDIO_PWR_EN_GPIO       GPIO_NUM_15     // 音频电源使能（控制音频芯片供电）
+// 音频电源/功放
+#define AUDIO_PWR_EN_GPIO       GPIO_NUM_15     // 音频电源使能
 #define AUDIO_CODEC_PA_PIN      GPIO_NUM_10    // 音频功放使能（PA功放控制）
 
-#define CC_ADC_PIN              GPIO_NUM_6 //CC_ADC YZT 
+#define CC_ADC_PIN              GPIO_NUM_6 //CC_ADC YZT
 
-#define AUDIO_CODEC_I2C_SDA_PIN  GPIO_NUM_11   // I2C 数据线（与触摸屏共用）
-#define AUDIO_CODEC_I2C_SCL_PIN  GPIO_NUM_12   // I2C 时钟线（与触摸屏共用）
-#define AUDIO_CODEC_ES8311_ADDR  ES8311_CODEC_DEFAULT_ADDR  // ES8311 DAC地址
-#define AUDIO_CODEC_ES7210_ADDR  ES7210_CODEC_DEFAULT_ADDR  // ES7210 ADC地址
-//#define AUDIO_CODEC_ES7243E_ADDR  ES7243E_CODEC_DEFAULT_ADDR  //tiger  ES7243E ADC地址
+// I2C 配置（触摸屏 + NFC + 传感器共用总线）
+#define AUDIO_CODEC_I2C_SDA_PIN  GPIO_NUM_11   // I2C 数据线
+#define AUDIO_CODEC_I2C_SCL_PIN  GPIO_NUM_12   // I2C 时钟线
 
 // ============================================================
 // 按钮 GPIO 配置
