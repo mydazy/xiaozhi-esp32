@@ -920,6 +920,10 @@ private:
         headset_ = new TypecHeadset(hcfg);
 
         headset_->SetCallback([this](bool inserted) {
+            // 切换 codec 耳机增益模式
+            auto* codec = dynamic_cast<Es7111AudioCodec*>(GetAudioCodec());
+            if (codec) codec->SetHeadsetMode(inserted);
+
             auto display = GetDisplay();
             if (display) {
                 display->ShowNotification(inserted ? "耳机已插入" : "耳机已拔出", 3000);
@@ -1081,6 +1085,9 @@ public:
             vTaskDelete(NULL);
         }, "gnss_init", 3072, this, 2, NULL, 0);
 
+        // 14. 定时状态上报（90 秒间隔）
+        StartStatusTimer();
+
         // 灯光控制
         GetBacklight()->RestoreBrightness();
 
@@ -1143,6 +1150,12 @@ public:
         // 清理 iBeacon
         IBeacon::GetInstance().Stop();
 
+        // 清理状态上报定时器
+        if (status_timer_) {
+            esp_timer_stop(status_timer_);
+            esp_timer_delete(status_timer_);
+            status_timer_ = nullptr;
+        }
         // 清理耳机检测
         if (headset_) { headset_->Stop(); delete headset_; headset_ = nullptr; }
         // 清理 GNSS

@@ -243,14 +243,18 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
 
 int Es7111AudioCodec::Write(const int16_t* data, int samples) {
     if (output_enabled_) {
-        // mono→stereo: ES7111 是 mono DAC，I2S 配置为 stereo，数据放左声道
-        // 同时做软件音量控制（ES7111 无音量寄存器）
+        // mono→stereo: ES7111 mono DAC，I2S stereo 配置，数据放左声道
+        // 耳机模式增益 2x 补偿（耳机阻抗高，需要更大驱动）
         std::vector<int16_t> stereo(samples * 2);
         int32_t vol_factor = static_cast<int32_t>(pow(output_volume_ / 100.0, 2) * 256);
+        if (headset_mode_) vol_factor *= 2; // 耳机增益补偿
         for (int i = 0; i < samples; i++) {
-            int16_t sample = static_cast<int16_t>((static_cast<int32_t>(data[i]) * vol_factor) >> 8);
-            stereo[i * 2] = sample;      // 左声道（ES7111 使用）
-            stereo[i * 2 + 1] = 0;       // 右声道（静音）
+            int32_t val = (static_cast<int32_t>(data[i]) * vol_factor) >> 8;
+            // 软限幅防爆音
+            if (val > INT16_MAX) val = INT16_MAX;
+            if (val < INT16_MIN) val = INT16_MIN;
+            stereo[i * 2] = static_cast<int16_t>(val);
+            stereo[i * 2 + 1] = 0;
         }
         size_t bytes_written;
         i2s_channel_write(tx_handle_, stereo.data(), stereo.size() * sizeof(int16_t),

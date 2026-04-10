@@ -30,6 +30,9 @@ public:
     virtual void EnableInput(bool enable) override;
     virtual void EnableOutput(bool enable) override;
 
+    /// 设置耳机模式（增益补偿 2x）
+    void SetHeadsetMode(bool headset) { headset_mode_ = headset; }
+
 private:
     // ES7210 ADC (I2C 控制)
     const audio_codec_data_if_t* data_if_ = nullptr;
@@ -40,6 +43,7 @@ private:
 
     // ES7111 无需 codec 设备，直接 I2S 写入
     gpio_num_t pa_pin_;
+    bool headset_mode_ = false;
     std::mutex data_if_mutex_;
 
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws,
