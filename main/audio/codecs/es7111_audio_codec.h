@@ -5,6 +5,9 @@
  * ES7111: 纯 I2S DAC，无 I2C，硬件自配置，喂数据即出声
  * ES7210: 4通道 I2C ADC，需要 I2C 初始化
  * 两颗芯片共享 I2S duplex 总线（MCLK/BCLK/WS）
+ *
+ * 耳机模式: USB_SW 切换模拟开关后，I2S DIN 从 ES7210 切到耳机 mic，
+ *           RX 需从 TDM 重配为 Standard 模式
  */
 
 #pragma once
@@ -12,7 +15,9 @@
 #include "audio_codec.h"
 #include <esp_codec_dev.h>
 #include <esp_codec_dev_defaults.h>
+#include <driver/i2s_tdm.h>
 #include <mutex>
+#include <vector>
 
 class Es7111AudioCodec : public AudioCodec {
 public:
@@ -30,8 +35,8 @@ public:
     virtual void EnableInput(bool enable) override;
     virtual void EnableOutput(bool enable) override;
 
-    /// 设置耳机模式（增益补偿 2x）
-    void SetHeadsetMode(bool headset) { headset_mode_ = headset; }
+    /// 切换耳机模式（重配 I2S RX + 增益补偿）
+    void SetHeadsetMode(bool headset);
 
 private:
     // ES7210 ADC (I2C 控制)
@@ -45,6 +50,7 @@ private:
     gpio_num_t pa_pin_;
     bool headset_mode_ = false;
     std::mutex data_if_mutex_;
+    std::vector<int16_t> tdm_buf_;  // 4ch TDM 读取缓冲区（复用避免频繁分配）
 
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws,
                               gpio_num_t dout, gpio_num_t din);

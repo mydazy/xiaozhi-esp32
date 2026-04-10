@@ -216,6 +216,20 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     last_input_time_ = std::chrono::steady_clock::now();
     debug_statistics_.input_count++;
 
+    // 每 2 秒打印一次 ReadAudioData 诊断
+    static int rad_count = 0;
+    if (++rad_count % 200 == 0) {
+        int16_t max_v = 0;
+        int non_zero = 0;
+        for (size_t i = 0; i < data.size(); i++) {
+            if (data[i] != 0) non_zero++;
+            if (abs(data[i]) > abs(max_v)) max_v = data[i];
+        }
+        ESP_LOGW(TAG, "ReadAudioData: size=%u ch=%d sr=%d→%d non_zero=%d/%u peak=%d",
+                 (unsigned)data.size(), codec_->input_channels(), codec_->input_sample_rate(),
+                 sample_rate, non_zero, (unsigned)data.size(), max_v);
+    }
+
 #if CONFIG_USE_AUDIO_DEBUGGER
     // 音频调试：发送原始音频数据
     if (audio_debugger_ == nullptr) {

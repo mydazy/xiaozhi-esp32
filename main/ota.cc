@@ -1,5 +1,6 @@
 #include "ota.h"
 #include "ota_http_download.h"
+#include "application.h"
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
@@ -8,6 +9,7 @@
 #include <freertos/task.h>
 #include <cJSON.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <esp_partition.h>
 #include <esp_ota_ops.h>
 #include <esp_app_format.h>
@@ -93,22 +95,25 @@ esp_err_t Ota::CheckVersion() {
 
     std::string data = board.GetSystemInfoJson();
     std::string method = data.length() > 0 ? "POST" : "GET";
+    ESP_LOGI(TAG, "%s %s body=%s", method.c_str(), url.c_str(), data.c_str());
     http->SetContent(std::move(data));
 
+    int64_t t0 = esp_timer_get_time();
     if (!http->Open(method, url)) {
         int last_error = http->GetLastError();
-        ESP_LOGE(TAG, "Failed to open HTTP connection, code=0x%x", last_error);
+        ESP_LOGE(TAG, "HTTP failed: 0x%x (%ld ms)", last_error, (long)((esp_timer_get_time() - t0) / 1000));
         return last_error;
     }
 
     auto status_code = http->GetStatusCode();
-    if (status_code != 200) {
-        ESP_LOGE(TAG, "Failed to check version, status code: %d", status_code);
-        return status_code;
-    }
-
     data = http->ReadAll();
     http->Close();
+    long elapsed = (long)((esp_timer_get_time() - t0) / 1000);
+    ESP_LOGI(TAG, "Response: %d (%ld ms) %s", status_code, elapsed, data.empty() ? "(empty)" : data.c_str());
+
+    if (status_code != 200) {
+        return status_code;
+    }
 
     // Response: { "firmware": { "version": "1.0.0", "url": "http://" } }
     // Parse the JSON response and check if the version is newer
@@ -250,19 +255,35 @@ esp_err_t Ota::CheckVersion() {
 // ============================================================
 
 esp_err_t Ota::PostToOta(const std::string& path, cJSON* payload) {
+    // 设备未就绪（启动中/激活中）时跳过，避免网络未连接时阻塞
+    auto state = Application::GetInstance().GetDeviceState();
+    if (state < kDeviceStateIdle) {
+        cJSON_Delete(payload);
+        return ESP_ERR_INVALID_STATE;
+    }
+
     auto& board = Board::GetInstance();
     auto network = board.GetNetwork();
-    if (!network) return ESP_ERR_INVALID_STATE;
+    if (!network) {
+        cJSON_Delete(payload);
+        return ESP_ERR_INVALID_STATE;
+    }
 
     Settings settings("wifi", false);
     std::string url = settings.GetString("ota_url");
     if (url.empty()) url = CONFIG_OTA_URL;
     if (url.length() < 10) return ESP_ERR_INVALID_ARG;
+    // 去掉末尾 / 避免双斜杠
+    while (!url.empty() && url.back() == '/') url.pop_back();
     url += path;
 
     auto http = network->CreateHttp(0);
-    if (!http) return ESP_ERR_NO_MEM;
+    if (!http) {
+        cJSON_Delete(payload);
+        return ESP_ERR_NO_MEM;
+    }
 
+    http->SetTimeout(10000);  // 10 秒超时
     http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     http->SetHeader("Client-Id", board.GetUuid());
     http->SetHeader("Content-Type", "application/json");

@@ -52,7 +52,7 @@
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
 
-#define TAG "MyDazyP30Board"
+#define TAG "MyDazyP31Board"
 
 // 耳机检测全局状态（audio_service.cc 访问）
 bool headset_present = false;
@@ -85,7 +85,7 @@ static bool ReadAdcMv(adc_oneshot_unit_handle_t handle, adc_cali_handle_t cali_h
 }
 
 
-class MyDazyP30Board : public DualNetworkBoard {
+class MyDazyP31Board : public DualNetworkBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     Button boot_button_;
@@ -866,7 +866,7 @@ private:
     void StartStatusTimer() {
         esp_timer_create_args_t args = {
             .callback = [](void* arg) {
-                static_cast<MyDazyP30Board*>(arg)->ReportStatus();
+                static_cast<MyDazyP31Board*>(arg)->ReportStatus();
             },
             .arg = this,
             .dispatch_method = ESP_TIMER_TASK,
@@ -1032,7 +1032,7 @@ private:
                     char volume_text[64];
                     snprintf(volume_text, sizeof(volume_text), "%s %d", Lang::Strings::VOLUME, v);
                     Board::GetInstance().GetDisplay()->SetStatus(volume_text);
-                    static_cast<MyDazyP30Board&>(Board::GetInstance()).WakeUp();
+                    static_cast<MyDazyP31Board&>(Board::GetInstance()).WakeUp();
                 }
                 vTaskDelay(pdMS_TO_TICKS(200)); // 200ms间隔，每秒调节5次
             }
@@ -1043,7 +1043,7 @@ private:
     }
 
 public:
-    MyDazyP30Board() :
+    MyDazyP31Board() :
         DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC, 1),
         boot_button_(BOOT_BUTTON_GPIO, false, 1500, 400),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
@@ -1068,7 +1068,7 @@ public:
 
         // 13. GPS 延迟启动（等 modem 检测到即可，不依赖网络注册）
         xTaskCreatePinnedToCore([](void* arg) {
-            auto* self = static_cast<MyDazyP30Board*>(arg);
+            auto* self = static_cast<MyDazyP31Board*>(arg);
             if (self->GetNetworkType() != NetworkType::ML307) {
                 vTaskDelete(NULL);
                 return;
@@ -1110,7 +1110,7 @@ public:
          if (first_boot_) {
             TaskHandle_t temp_handle = nullptr;
             xTaskCreatePinnedToCore([](void* arg){
-                auto self = static_cast<MyDazyP30Board*>(arg);
+                auto self = static_cast<MyDazyP31Board*>(arg);
                 auto& app = Application::GetInstance();
                 vTaskDelay(pdMS_TO_TICKS(1500));
 
@@ -1146,7 +1146,7 @@ public:
         }
     }
 
-    ~MyDazyP30Board() {
+    ~MyDazyP31Board() {
         // 清理 iBeacon
         IBeacon::GetInstance().Stop();
 
@@ -1311,4 +1311,4 @@ public:
 
 };
 
-DECLARE_BOARD(MyDazyP30Board);
+DECLARE_BOARD(MyDazyP31Board);
