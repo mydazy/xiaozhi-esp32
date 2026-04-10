@@ -44,7 +44,7 @@ set(SOURCES "audio/audio_codec.cc"
             "main.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/demuxer" "protocols" "blufi" "nfc")
+set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/demuxer" "protocols" "blufi")
 
 # Add board common files
 list(APPEND SOURCES
@@ -71,10 +71,6 @@ list(APPEND SOURCES
     "boards/common/sc7a20h.cc"
     "boards/common/rtc_wake_stub.cc"
 )
-
-# P30: NFC 源文件
-file(GLOB NFC_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/nfc/*.c)
-list(APPEND SOURCES ${NFC_SOURCES})
 list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/common)
 
 
@@ -933,6 +929,7 @@ idf_component_register(SRCS ${SOURCES}
                         fatfs
                         lcd_driver
                         ckv__esp_lcd_jd9853
+                        esp_nfc_ws1850s
                     )
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME

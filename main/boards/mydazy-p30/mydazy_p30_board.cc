@@ -22,8 +22,7 @@
 #include "rtc_wake_stub.h"
 #include "ota.h"
 #include "assets.h"         // 预加载 logo 资源
-#include "nfc.h"
-#include "ws1850_iic.h"
+#include "esp_nfc_ws1850s.h"
 #include "ml307_gnss_at_test.h"
 #include <sys/stat.h>       // 文件属性头文件
 #include <sys/unistd.h>
@@ -784,6 +783,47 @@ private:
         volume_down_button_.OnPressUp([this]() { vol_down_running_ = false; });
     }
 
+    // NFC 读写器
+    NfcWs1850s* nfc_ = nullptr;
+
+    void InitializeNfc() {
+        if (i2c_bus_ == nullptr) {
+            ESP_LOGE(TAG, "NFC: I2C bus not ready");
+            return;
+        }
+
+        NfcWs1850sConfig nfc_cfg = {
+            .reset_pin = GPIO_NUM_NC,
+            .irq_pin = GPIO_NUM_NC,
+        };
+        nfc_ = new NfcWs1850s(i2c_bus_, nfc_cfg);
+
+        if (nfc_->Initialize() != ESP_OK) {
+            ESP_LOGE(TAG, "NFC WS1850S init failed");
+            delete nfc_;
+            nfc_ = nullptr;
+            return;
+        }
+
+        ESP_LOGI(TAG, "NFC WS1850S initialized, chip version: 0x%02X", nfc_->GetChipVersion());
+
+        // 检测到卡片时显示到屏幕
+        nfc_->SetCardCallback([this](NfcCardType type, const NfcUid& uid) {
+            std::string uid_str = uid.ToString();
+            ESP_LOGI(TAG, "NFC标签: %s", uid_str.c_str());
+
+            auto display = GetDisplay();
+            if (display) {
+                char text[64];
+                snprintf(text, sizeof(text), "NFC标签: %s", uid_str.c_str());
+                display->ShowNotification(text, 10000);
+            }
+        });
+
+        // 启动后台检测（200ms 间隔）
+        nfc_->StartDetection(200);
+    }
+
     // 音量调节函数（单次调节）
     void AdjustVolume(int delta) {
         auto codec = GetAudioCodec();
@@ -848,6 +888,7 @@ public:
         InitializePowerManager();  // 8. 初始化电池监控
         InitializePowerSaveTimer(); // 9. 初始化省电定时器
         InitializeButtons();        // 10. 初始化按钮 (最后初始化)
+        InitializeNfc();            // 11. 初始化 NFC（WS1850S I2C）
 
         // 灯光控制
         GetBacklight()->RestoreBrightness();
@@ -908,6 +949,12 @@ public:
     }
 
     ~MyDazyP30Board() {
+        // 清理 NFC
+        if (nfc_) {
+            nfc_->StopDetection();
+            delete nfc_;
+            nfc_ = nullptr;
+        }
         // 清理音量调节任务
         vol_up_running_ = false;
         vol_down_running_ = false;
