@@ -93,10 +93,14 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
                            int width, int height, int offset_x, int offset_y, bool mirror_x, bool mirror_y, bool swap_xy)
     : LcdDisplay(panel_io, panel, width, height) {
 
-    // draw white
-    std::vector<uint16_t> buffer(width_, 0xFFFF);
-    for (int y = 0; y < height_; y++) {
-        esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + 1, buffer.data());
+    // 清屏白色（按 10 行一批减少 SPI 事务）
+    {
+        const int batch = 10;
+        std::vector<uint16_t> buffer(width_ * batch, 0xFFFF);
+        for (int y = 0; y < height_; y += batch) {
+            int rows = std::min(batch, height_ - y);
+            esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + rows, buffer.data());
+        }
     }
 
     // Set the display to on
@@ -127,9 +131,10 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
 
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    port_cfg.task_priority = 1;
+    port_cfg.task_priority = 5;         // P5: LVGL 渲染优先级（低于音频，高于 main_loop）
+    port_cfg.timer_period_ms = 33;      // ~30 FPS 刷新 + 触摸轮询
 #if CONFIG_SOC_CPU_CORES_NUM > 1
-    port_cfg.task_affinity = 1;
+    port_cfg.task_affinity = 1;         // Core1: 与音频 I/O、AFE 同核
 #endif
     lvgl_port_init(&port_cfg);
 
@@ -138,7 +143,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 48),
+        .buffer_size = static_cast<uint32_t>(width_ * height_ / 4),  // 1/4 屏 PSRAM 双缓冲
         .double_buffer = true,
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),
@@ -178,10 +183,14 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
                            bool mirror_x, bool mirror_y, bool swap_xy)
     : LcdDisplay(panel_io, panel, width, height) {
 
-    // draw white
-    std::vector<uint16_t> buffer(width_, 0xFFFF);
-    for (int y = 0; y < height_; y++) {
-        esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + 1, buffer.data());
+    // 清屏白色（按 10 行一批减少 SPI 事务）
+    {
+        const int batch = 10;
+        std::vector<uint16_t> buffer(width_ * batch, 0xFFFF);
+        for (int y = 0; y < height_; y += batch) {
+            int rows = std::min(batch, height_ - y);
+            esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + rows, buffer.data());
+        }
     }
 
     ESP_LOGI(TAG, "Initialize LVGL library");

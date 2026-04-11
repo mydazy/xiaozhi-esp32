@@ -6,7 +6,6 @@
 #include "display/display.h"
 #include "display/emote_display.h"
 #include "display/lcd_display.h"
-#include "lcd_driver_factory.h"
 #include "esp_lcd_jd9853.h"
 #include "axs5106l_touch.h"
 #include "sc7a20h.h"
@@ -526,29 +525,10 @@ private:
         esp_lcd_panel_io_handle_t panel_io_ = nullptr;
         esp_lcd_panel_handle_t panel_ = nullptr;
 
-        display_panel_spi_params_t params = {
-            .host = DISPLAY_SPI_HOST,
-            .cs_gpio_num = DISPLAY_LCD_CS,
-            .dc_gpio_num = DISPLAY_LCD_DC,
-            .reset_gpio_num = DISPLAY_LCD_RESET,    
-            .pclk_hz = (50 * 1000 * 1000),
-            .trans_queue_depth = 10,
-            .lcd_cmd_bits = 8,
-            .lcd_param_bits = 8,
-            .width = DISPLAY_WIDTH,
-            .height = DISPLAY_HEIGHT,
-            .offset_x = DISPLAY_OFFSET_X,
-            .offset_y = DISPLAY_OFFSET_Y,
-            .swap_xy = DISPLAY_SWAP_XY,
-            .mirror_x = DISPLAY_MIRROR_X,
-            .mirror_y = DISPLAY_MIRROR_Y,
-            .invert_color = DISPLAY_INVERT_COLOR,
-        };
-        display_panel_result_t result = {};
-        ESP_ERROR_CHECK(display_panel_create_jd9853(&params, &result));
-        // 保存句柄用于动态切换
-        panel_io_ = result.io_handle;
-        panel_ = result.panel_handle;
+        ESP_ERROR_CHECK(esp_lcd_jd9853_create_panel(
+            DISPLAY_SPI_HOST, DISPLAY_LCD_CS, DISPLAY_LCD_DC, DISPLAY_LCD_RESET,
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, DISPLAY_INVERT_COLOR,
+            &panel_io_, &panel_));
 
 #if CONFIG_USE_EMOTE_MESSAGE_STYLE
         display_ = new emote::EmoteDisplay(panel_, panel_io_, DISPLAY_WIDTH, DISPLAY_HEIGHT);

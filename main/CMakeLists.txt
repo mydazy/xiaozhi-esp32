@@ -288,7 +288,6 @@ idf_component_register(SRCS ${SOURCES}
                         efuse
                         bt
                         fatfs
-                        lcd_driver
                         esp_lcd_jd9853
                         esp_lcd_touch_axs5106l
                         esp_nfc_ws1850s
