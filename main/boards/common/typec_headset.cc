@@ -117,7 +117,7 @@ void TypecHeadset::DetectLoop() {
         static int dbg_cnt = 0;
         if (++dbg_cnt % 50 == 0) {
             ESP_LOGW(TAG, "🎧 USB_DET=LOW cc_mv=%d (thr=%d) inserted=%d insert_cnt=%d remove_cnt=%d",
-                     cc_mv, cfg_.cc_headset_mv, inserted_, insert_cnt, remove_cnt);
+                     cc_mv, cfg_.cc_headset_mv, inserted_.load(), insert_cnt, remove_cnt);
         }
 
         if (cc_mv < cfg_.cc_headset_mv) {

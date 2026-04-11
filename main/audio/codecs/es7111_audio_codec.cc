@@ -5,11 +5,12 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <driver/i2c_master.h>
+#include <driver/i2s_std.h>
 #include <driver/i2s_tdm.h>
 #include <driver/gpio.h>
 #include <cmath>
 
-#define TAG "Es7111Es7210"
+#define TAG "Es7111AudioCodec"
 
 Es7111AudioCodec::Es7111AudioCodec(
     void* i2c_master_handle,
@@ -33,11 +34,13 @@ Es7111AudioCodec::Es7111AudioCodec(
     // 1. 创建 duplex I2S 通道（ES7111 + ES7210 共享总线）
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
-    // 2. I2S 数据接口（供 ES7210 codec_dev 使用）
+    // 2. I2S 数据接口（仅 RX，供 ES7210 codec_dev 使用）
+    // 不传 tx_handle：ES7111 输出用直接 i2s_channel_write，不由 codec_dev 管理
+    // 若传入 tx_handle，esp_codec_dev_open(input) 会 disable→reconfig TX 导致输出中断
     audio_codec_i2s_cfg_t i2s_cfg = {
         .port = I2S_NUM_0,
         .rx_handle = rx_handle_,
-        .tx_handle = tx_handle_,
+        .tx_handle = NULL,
     };
     data_if_ = audio_codec_new_i2s_data(&i2s_cfg);
     assert(data_if_ != NULL);
@@ -108,7 +111,9 @@ void Es7111AudioCodec::CreateDuplexChannels(
     };
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, &rx_handle_));
 
-    // TX: Standard 模式 → ES7111 DAC
+    // TX: Standard 模式 → ES7111 DAC（标准 I2S slave，无 I2C）
+    // RX: TDM 模式 → ES7210 ADC（4 通道）
+    // duplex 共享 BCK/WS，STD 2×32bit = TDM 4×16bit = 64bit/frame，时钟兼容
     i2s_std_config_t std_cfg = {
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)output_sample_rate_,
@@ -175,7 +180,7 @@ void Es7111AudioCodec::CreateDuplexChannels(
     ESP_ERROR_CHECK(i2s_channel_init_tdm_mode(rx_handle_, &tdm_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
-    ESP_LOGI(TAG, "Duplex: TX(std)→ES7111 RX(tdm)←ES7210 mclk=%d bclk=%d ws=%d dout=%d din=%d",
+    ESP_LOGI(TAG, "Duplex: TX(STD)→ES7111 RX(TDM)←ES7210 mclk=%d bclk=%d ws=%d dout=%d din=%d",
              mclk, bclk, ws, dout, din);
 }
 
@@ -217,6 +222,7 @@ void Es7111AudioCodec::EnableInput(bool enable) {
     // 喇叭模式：ES7210 ADC 数据通过 TDM 4ch 进来
     // 耳机模式：耳机 mic 通过 USB_SW 模拟开关接到 I2S DIN，映射到 TDM slot0
     if (enable) {
+        // 4ch TDM 全通道 mask（Read() 需要读到全部 4ch 才能提取 ch0+ch2）
         esp_codec_dev_sample_info_t fs = {
             .bits_per_sample = 16,
             .channel = 4,
@@ -230,7 +236,7 @@ void Es7111AudioCodec::EnableInput(bool enable) {
         if (input_dev_) {
             ESP_ERROR_CHECK(esp_codec_dev_open(input_dev_, &fs));
             ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_,
-                ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(3), input_gain_));
+                ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2), input_gain_));
         }
     } else {
         if (input_dev_) {
@@ -279,7 +285,7 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
             dest[f] = (int16_t)mixed;
         }
     }
-    // 每 2 秒诊断
+    // 诊断日志（DEBUG 级别，默认不输出）
     static int read_count = 0;
     if (++read_count % 200 == 0) {
         int16_t ch_max[4] = {0};
@@ -289,7 +295,7 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
                 if (abs(v) > abs(ch_max[c])) ch_max[c] = v;
             }
         }
-        ESP_LOGW(TAG, "AudioIn(%s): frames=%d ch_peak=[%d,%d,%d,%d]",
+        ESP_LOGD(TAG, "AudioIn(%s): frames=%d ch_peak=[%d,%d,%d,%d]",
                  headset_mode_ ? "headset" : "speaker",
                  frames, ch_max[0], ch_max[1], ch_max[2], ch_max[3]);
     }
@@ -297,15 +303,24 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
 }
 
 int Es7111AudioCodec::Write(const int16_t* data, int samples) {
+    // 每 100 次打印一次写入诊断
+    static int write_count = 0;
+    if (++write_count % 100 == 0) {
+        int16_t peak = 0;
+        for (int i = 0; i < samples; i++) {
+            if (abs(data[i]) > abs(peak)) peak = data[i];
+        }
+        ESP_LOGW(TAG, "Write: samples=%d enabled=%d vol=%d peak=%d headset=%d",
+                 samples, output_enabled_, output_volume_, peak, headset_mode_);
+    }
     if (output_enabled_) {
-        // mono→stereo: ES7111 mono DAC，I2S stereo 配置，数据放左声道
+        // mono→stereo: ES7111 标准 I2S DAC，数据放左声道
         // 耳机模式增益 2x 补偿（耳机阻抗高，需要更大驱动）
         std::vector<int16_t> stereo(samples * 2);
         int32_t vol_factor = static_cast<int32_t>(pow(output_volume_ / 100.0, 2) * 256);
-        if (headset_mode_) vol_factor *= 2; // 耳机增益补偿
+        if (headset_mode_) vol_factor *= 2;
         for (int i = 0; i < samples; i++) {
             int32_t val = (static_cast<int32_t>(data[i]) * vol_factor) >> 8;
-            // 软限幅防爆音
             if (val > INT16_MAX) val = INT16_MAX;
             if (val < INT16_MIN) val = INT16_MIN;
             stereo[i * 2] = static_cast<int16_t>(val);
