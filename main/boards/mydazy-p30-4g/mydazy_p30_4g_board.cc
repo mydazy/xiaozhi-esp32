@@ -219,9 +219,9 @@ private:
             TOUCH_INT_NUM,
             DISPLAY_WIDTH,
             DISPLAY_HEIGHT,
-            DISPLAY_SWAP_XY,
-            DISPLAY_MIRROR_X,
-            DISPLAY_MIRROR_Y
+            TOUCH_SWAP_XY,
+            TOUCH_MIRROR_X,
+            TOUCH_MIRROR_Y
         );
 
         if (!touch_driver_->InitializeHardware()) {
