@@ -24,32 +24,40 @@ Es7111AudioCodec::Es7111AudioCodec(
 
     duplex_ = true;
     input_reference_ = input_reference;
-    input_channels_ = input_reference ? 2 : 1;  // 有回声参考=2ch(MIC+REF)，无=1ch(双麦混合)
+    input_channels_ = input_reference ? 2 : 1;
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
 
     Settings settings("audio", false);
     input_gain_ = static_cast<float>(settings.GetInt("input_gain", 36));
 
-    // 1. 创建 duplex I2S 通道（ES7111 + ES7210 共享总线）
+    // 1. 创建 duplex I2S 通道
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
-    // 2. I2S 数据接口（仅 RX，供 ES7210 codec_dev 使用）
-    // 不传 tx_handle：ES7111 输出用直接 i2s_channel_write，不由 codec_dev 管理
-    // 若传入 tx_handle，esp_codec_dev_open(input) 会 disable→reconfig TX 导致输出中断
+    // 2. I2S 数据接口（TX+RX 共享，与 BoxAudioCodec 完全一致）
+    // 注意：即使传 tx_handle=NULL，I2S_IF 也会自动从 rx_handle 找到 tx_handle
+    // 所以不要试图"隔离"TX — 直接传入让框架统一管理
     audio_codec_i2s_cfg_t i2s_cfg = {
         .port = I2S_NUM_0,
         .rx_handle = rx_handle_,
-        .tx_handle = NULL,
+        .tx_handle = tx_handle_,
     };
     data_if_ = audio_codec_new_i2s_data(&i2s_cfg);
     assert(data_if_ != NULL);
 
-    // 3. PA GPIO 配置
+    // 3. PA GPIO
     gpio_if_ = audio_codec_new_gpio();
 
-    // 4. ES7111 DAC: 不需要任何初始化（纯 I2S，硬件自配置）
-    ESP_LOGI(TAG, "ES7111 DAC: no I2C needed (hardware auto-config)");
+    // 4. ES7111 DAC 输出设备（codec_if=NULL — 纯 I2S DAC 无需 I2C 控制）
+    // 与 BoxAudioCodec 唯一区别：ES8311 有 codec_if，ES7111 没有
+    esp_codec_dev_cfg_t out_dev_cfg = {
+        .dev_type = ESP_CODEC_DEV_TYPE_OUT,
+        .codec_if = NULL,
+        .data_if = data_if_,
+    };
+    output_dev_ = esp_codec_dev_new(&out_dev_cfg);
+    assert(output_dev_ != NULL);
+    ESP_LOGI(TAG, "ES7111 DAC: output_dev created (no I2C, codec_dev manages I2S)");
 
     // 5. ES7210 ADC: I2C 初始化
     audio_codec_i2c_cfg_t i2c_cfg = {
@@ -70,20 +78,24 @@ Es7111AudioCodec::Es7111AudioCodec(
         ESP_LOGE(TAG, "ES7210 codec init failed");
     }
 
-    esp_codec_dev_cfg_t dev_cfg = {
+    esp_codec_dev_cfg_t in_dev_cfg = {
         .dev_type = ESP_CODEC_DEV_TYPE_IN,
         .codec_if = in_codec_if_,
         .data_if = data_if_,
     };
-    input_dev_ = esp_codec_dev_new(&dev_cfg);
+    input_dev_ = esp_codec_dev_new(&in_dev_cfg);
     if (input_dev_ == NULL) {
         ESP_LOGE(TAG, "Input device creation failed");
     }
 
-    ESP_LOGI(TAG, "Initialized: ES7111(DAC,no-I2C) + ES7210(ADC,gain=%.0fdB)", input_gain_);
+    ESP_LOGI(TAG, "Initialized: ES7111(DAC,codec_dev) + ES7210(ADC,gain=%.0fdB)", input_gain_);
 }
 
 Es7111AudioCodec::~Es7111AudioCodec() {
+    if (output_dev_) {
+        esp_codec_dev_close(output_dev_);
+        esp_codec_dev_delete(output_dev_);
+    }
     if (input_dev_) {
         esp_codec_dev_close(input_dev_);
         esp_codec_dev_delete(input_dev_);
@@ -111,9 +123,9 @@ void Es7111AudioCodec::CreateDuplexChannels(
     };
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, &rx_handle_));
 
-    // TX: Standard 模式 → ES7111 DAC（标准 I2S slave，无 I2C）
+    // TX: Standard 模式 → ES7111 DAC
     // RX: TDM 模式 → ES7210 ADC（4 通道）
-    // duplex 共享 BCK/WS，STD 2×32bit = TDM 4×16bit = 64bit/frame，时钟兼容
+    // 与 BoxAudioCodec 完全一致的配置
     i2s_std_config_t std_cfg = {
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)output_sample_rate_,
@@ -143,7 +155,6 @@ void Es7111AudioCodec::CreateDuplexChannels(
         },
     };
 
-    // RX: TDM 模式 → ES7210 ADC（4通道）
     i2s_tdm_config_t tdm_cfg = {
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)input_sample_rate_,
@@ -184,24 +195,15 @@ void Es7111AudioCodec::CreateDuplexChannels(
              mclk, bclk, ws, dout, din);
 }
 
-// 注意：I2S duplex 模式下 TX/RX 共享控制器，不能单独删除重建 RX。
-// 耳机模式保持 TDM RX 不变，耳机 mic 信号通过模拟开关(USB_SW)
-// 接入 I2S DIN，会映射到 TDM slot0，Read() 中 ch0 提取即可。
-
 void Es7111AudioCodec::SetHeadsetMode(bool headset) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (headset == headset_mode_) return;
     headset_mode_ = headset;
-
-    // I2S RX 保持 TDM 不变（duplex 共享控制器，不能单独重建）
-    // USB_SW 模拟开关已由 TypecHeadset 切换，耳机 mic 信号映射到 TDM slot0
-    // Read() 中提取 ch0 即可拿到耳机 mic 数据
     ESP_LOGI(TAG, "Headset mode %s (output gain %s)", headset ? "ON" : "OFF",
              headset ? "2x" : "1x");
 }
 
 void Es7111AudioCodec::SetOutputVolume(int volume) {
-    // ES7111 无音量寄存器，用软件音量控制（PA GPIO 开关）
     if (pa_pin_ != GPIO_NUM_NC) {
         gpio_set_level(pa_pin_, volume > 0 ? 1 : 0);
     }
@@ -218,11 +220,7 @@ void Es7111AudioCodec::EnableInput(bool enable) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (enable == input_enabled_) return;
 
-    // I2S RX 始终是 TDM 模式（duplex 共享控制器）
-    // 喇叭模式：ES7210 ADC 数据通过 TDM 4ch 进来
-    // 耳机模式：耳机 mic 通过 USB_SW 模拟开关接到 I2S DIN，映射到 TDM slot0
     if (enable) {
-        // 4ch TDM 全通道 mask（Read() 需要读到全部 4ch 才能提取 ch0+ch2）
         esp_codec_dev_sample_info_t fs = {
             .bits_per_sample = 16,
             .channel = 4,
@@ -250,9 +248,30 @@ void Es7111AudioCodec::EnableOutput(bool enable) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (enable == output_enabled_) return;
 
-    // ES7111 无 I2C 控制，直接开关 PA
-    if (pa_pin_ != GPIO_NUM_NC) {
-        gpio_set_level(pa_pin_, enable ? 1 : 0);
+    if (enable) {
+        // 与 BoxAudioCodec 完全一致：通过 codec_dev 打开，让 I2S_IF 管理格式
+        esp_codec_dev_sample_info_t fs = {
+            .bits_per_sample = 16,
+            .channel = 1,
+            .channel_mask = 0,
+            .sample_rate = (uint32_t)output_sample_rate_,
+            .mclk_multiple = 0,
+        };
+        if (output_dev_) {
+            ESP_ERROR_CHECK(esp_codec_dev_open(output_dev_, &fs));
+        }
+        if (pa_pin_ != GPIO_NUM_NC) {
+            gpio_set_level(pa_pin_, 1);
+        }
+        ESP_LOGI(TAG, "EnableOutput: codec_dev opened, PA on, sr=%d", output_sample_rate_);
+    } else {
+        if (pa_pin_ != GPIO_NUM_NC) {
+            gpio_set_level(pa_pin_, 0);
+        }
+        if (output_dev_) {
+            ESP_ERROR_CHECK(esp_codec_dev_close(output_dev_));
+        }
+        ESP_LOGI(TAG, "EnableOutput: codec_dev closed, PA off");
     }
     AudioCodec::EnableOutput(enable);
 }
@@ -260,8 +279,6 @@ void Es7111AudioCodec::EnableOutput(bool enable) {
 int Es7111AudioCodec::Read(int16_t* dest, int samples) {
     if (!input_enabled_ || !input_dev_) return samples;
 
-    // 统一走 ES7210 codec dev 读 4ch TDM，提取 2ch
-    // 耳机模式下 USB_SW 已切换，耳机 mic 映射到 TDM slot0 (ch0)
     int frames = samples / input_channels_;
     int tdm_samples = frames * 4;
     if ((int)tdm_buf_.size() < tdm_samples) {
@@ -273,19 +290,16 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
         return 0;
     }
     if (input_reference_) {
-        // 有回声参考：2ch 输出 (ch0=mic, ch2=reference)
         for (int f = 0; f < frames; f++) {
             dest[f * 2]     = tdm_buf_[f * 4 + 0];
             dest[f * 2 + 1] = tdm_buf_[f * 4 + 2];
         }
     } else {
-        // 双麦混合成单路：(ch0 + ch2) / 2，提升信噪比
         for (int f = 0; f < frames; f++) {
             int32_t mixed = ((int32_t)tdm_buf_[f * 4 + 0] + (int32_t)tdm_buf_[f * 4 + 2]) / 2;
             dest[f] = (int16_t)mixed;
         }
     }
-    // 诊断日志（DEBUG 级别，默认不输出）
     static int read_count = 0;
     if (++read_count % 200 == 0) {
         int16_t ch_max[4] = {0};
@@ -303,9 +317,8 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
 }
 
 int Es7111AudioCodec::Write(const int16_t* data, int samples) {
-    // 每 100 次打印一次写入诊断
     static int write_count = 0;
-    if (++write_count % 100 == 0) {
+    if (++write_count % 50 == 0) {
         int16_t peak = 0;
         for (int i = 0; i < samples; i++) {
             if (abs(data[i]) > abs(peak)) peak = data[i];
@@ -313,22 +326,20 @@ int Es7111AudioCodec::Write(const int16_t* data, int samples) {
         ESP_LOGW(TAG, "Write: samples=%d enabled=%d vol=%d peak=%d headset=%d",
                  samples, output_enabled_, output_volume_, peak, headset_mode_);
     }
-    if (output_enabled_) {
-        // mono→stereo: ES7111 标准 I2S DAC，数据放左声道
-        // 耳机模式增益 2x 补偿（耳机阻抗高，需要更大驱动）
-        std::vector<int16_t> stereo(samples * 2);
+    if (output_enabled_ && output_dev_) {
+        // 软件音量（ES7111 无硬件音量寄存器，BoxAudioCodec 用 esp_codec_dev_set_out_vol）
         int32_t vol_factor = static_cast<int32_t>(pow(output_volume_ / 100.0, 2) * 256);
         if (headset_mode_) vol_factor *= 2;
+        std::vector<int16_t> vol_data(samples);
         for (int i = 0; i < samples; i++) {
             int32_t val = (static_cast<int32_t>(data[i]) * vol_factor) >> 8;
             if (val > INT16_MAX) val = INT16_MAX;
             if (val < INT16_MIN) val = INT16_MIN;
-            stereo[i * 2] = static_cast<int16_t>(val);
-            stereo[i * 2 + 1] = 0;
+            vol_data[i] = static_cast<int16_t>(val);
         }
-        size_t bytes_written;
-        i2s_channel_write(tx_handle_, stereo.data(), stereo.size() * sizeof(int16_t),
-                          &bytes_written, pdMS_TO_TICKS(500));
+        // 通过 codec_dev 写入 — I2S_IF 自动处理 slot_bit 调整和 DMA 格式转换
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            esp_codec_dev_write(output_dev_, vol_data.data(), vol_data.size() * sizeof(int16_t)));
         return samples;
     }
     return samples;

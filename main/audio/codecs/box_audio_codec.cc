@@ -1,9 +1,6 @@
 #include "box_audio_codec.h"
-#include "settings.h"
 
 #include <esp_log.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include <driver/i2c_master.h>
 #include <driver/i2s_tdm.h>
 
@@ -14,12 +11,10 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     gpio_num_t pa_pin, uint8_t es8311_addr, uint8_t es7210_addr, bool input_reference) {
     duplex_ = true; // 是否双工
     input_reference_ = input_reference; // 是否使用参考输入，实现回声消除
-    input_channels_ = 2; // P30: 固定2通道（MIC + REF）
+    input_channels_ = input_reference_ ? 2 : 1; // 输入通道数
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
-    // P30: 从 NVS 读取增益，默认 33dB
-    Settings settings("audio", false);
-    input_gain_ = static_cast<float>(settings.GetInt("input_gain", 24));
+    input_gain_ = 30;
 
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
@@ -187,16 +182,8 @@ void BoxAudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_
 }
 
 void BoxAudioCodec::SetOutputVolume(int volume) {
-    int set_volume = volume;
-    if (set_volume > 92) set_volume = 92; // P30: 上限 92 防爆音
-    ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, set_volume));
+    ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, volume));
     AudioCodec::SetOutputVolume(volume);
-}
-
-void BoxAudioCodec::SetInputGain(float gain) {
-    std::lock_guard<std::mutex> lock(data_if_mutex_);
-    input_gain_ = gain;
-    AudioCodec::SetInputGain(gain);
 }
 
 void BoxAudioCodec::EnableInput(bool enable) {
@@ -208,20 +195,15 @@ void BoxAudioCodec::EnableInput(bool enable) {
         esp_codec_dev_sample_info_t fs = {
             .bits_per_sample = 16,
             .channel = 4,
-            .channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1)
-                          | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(3),
-            .sample_rate = (uint32_t)input_sample_rate_,
+            .channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0),
+            .sample_rate = (uint32_t)output_sample_rate_,
             .mclk_multiple = 0,
         };
-        ESP_ERROR_CHECK(esp_codec_dev_open(input_dev_, &fs));
-        // MIC1(slot0) 和 MIC4(slot3) 使用相同增益
-        ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_,
-            ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(3), input_gain_));
         if (input_reference_) {
-            // MIC2(slot1) 作为回声消除参考
-            ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_,
-                ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1), input_gain_));
+            fs.channel_mask |= ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1);
         }
+        ESP_ERROR_CHECK(esp_codec_dev_open(input_dev_, &fs));
+        ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
     } else {
         ESP_ERROR_CHECK(esp_codec_dev_close(input_dev_));
     }

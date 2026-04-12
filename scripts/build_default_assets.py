@@ -219,12 +219,13 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
     """Process emoji_collection parameter"""
     if not emoji_collection_dir:
         return []
-    
+
     emoji_list = []
-    
+    emoji_names = set()
+
     # Check if this is otto-gif collection
     is_otto_gif = 'otto-emoji-gif-component' in emoji_collection_dir or emoji_collection_dir.endswith('otto-gif')
-    
+
     # Otto GIF emoji aliases mapping
     otto_gif_aliases = {
         "staticstate": ["neutral", "relaxed", "sleepy", "idle"],
@@ -234,7 +235,7 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
         "scare": ["surprised", "shocked"],
         "buxue": ["thinking", "confused", "embarrassed"]
     }
-    
+
     # Copy each image from input directory to build/assets directory
     for root, dirs, files in os.walk(emoji_collection_dir):
         for file in files:
@@ -245,13 +246,14 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
                 if copy_file(src_file, dst_file):
                     # Get filename without extension
                     filename_without_ext = os.path.splitext(file)[0]
-                    
+
                     # Add main emoji entry
                     emoji_list.append({
                         "name": filename_without_ext,
                         "file": file
                     })
-                    
+                    emoji_names.add(filename_without_ext)
+
                     # Add aliases for otto-gif emojis
                     if is_otto_gif and filename_without_ext in otto_gif_aliases:
                         for alias in otto_gif_aliases[filename_without_ext]:
@@ -259,7 +261,27 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
                                 "name": alias,
                                 "file": file
                             })
-    
+
+    # Append custom emojis from project main/assets/<collection_name>/
+    collection_name = os.path.basename(emoji_collection_dir)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    custom_dir = os.path.join(project_root, "main", "assets", collection_name)
+    if os.path.isdir(custom_dir):
+        for file in sorted(os.listdir(custom_dir)):
+            if file.lower().endswith(('.png', '.gif')):
+                filename_without_ext = os.path.splitext(file)[0]
+                if filename_without_ext not in emoji_names:
+                    src_file = os.path.join(custom_dir, file)
+                    dst_file = os.path.join(assets_dir, file)
+                    if copy_file(src_file, dst_file):
+                        emoji_list.append({
+                            "name": filename_without_ext,
+                            "file": file
+                        })
+                        emoji_names.add(filename_without_ext)
+        print(f"  Custom emojis from {custom_dir}: {len(emoji_names) - len([e for e in emoji_list if e['name'] in emoji_names])} added")
+
     return emoji_list
 
 

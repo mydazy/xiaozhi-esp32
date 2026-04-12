@@ -958,6 +958,36 @@ private:
 
         gnss_->Start(kGnssGps | kGnssBds);
         ESP_LOGI(TAG, "GNSS started (GPS+BDS)");
+
+        // 注册 GPS MCP tool
+        auto& mcp = McpServer::GetInstance();
+        mcp.AddTool("self.gps.get_location",
+            "Get the current GPS/BDS location of the device. Returns latitude, longitude, "
+            "satellite count, HDOP, UTC time and fix status. Use this tool when the user "
+            "asks about current location, coordinates, or position.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                cJSON* json = cJSON_CreateObject();
+                bool fixed = gnss_fixed_.load();
+                int sats = gnss_satellites_.load();
+                cJSON_AddBoolToObject(json, "fixed", fixed);
+                cJSON_AddNumberToObject(json, "satellites", sats);
+                if (fixed) {
+                    cJSON_AddNumberToObject(json, "latitude", gnss_lat_);
+                    cJSON_AddNumberToObject(json, "longitude", gnss_lon_);
+                    if (gnss_) {
+                        auto& last = gnss_->GetLastFix();
+                        cJSON_AddNumberToObject(json, "hdop", last.hdop);
+                        if (last.utc_time[0] != '\0') {
+                            cJSON_AddStringToObject(json, "utc_time", last.utc_time);
+                        }
+                    }
+                } else {
+                    cJSON_AddStringToObject(json, "status",
+                        sats > 0 ? "searching" : "no_signal");
+                }
+                return json;
+            });
     }
 
     // iBeacon 扫描器

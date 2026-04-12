@@ -6,8 +6,8 @@
  * ES7210: 4通道 I2C ADC，需要 I2C 初始化
  * 两颗芯片共享 I2S duplex 总线（MCLK/BCLK/WS）
  *
- * 耳机模式: USB_SW 切换模拟开关后，I2S DIN 从 ES7210 切到耳机 mic，
- *           RX 需从 TDM 重配为 Standard 模式
+ * TX/RX 均通过 esp_codec_dev 框架管理，共享 data_if，
+ * 确保 I2S 通道状态由框架协调，不直接调用 i2s_channel_write。
  */
 
 #pragma once
@@ -39,18 +39,22 @@ public:
     void SetHeadsetMode(bool headset);
 
 private:
-    // ES7210 ADC (I2C 控制)
+    // 共享 data_if（TX+RX 都通过它操作 I2S）
     const audio_codec_data_if_t* data_if_ = nullptr;
+    const audio_codec_gpio_if_t* gpio_if_ = nullptr;
+
+    // ES7210 ADC (I2C 控制)
     const audio_codec_ctrl_if_t* in_ctrl_if_ = nullptr;
     const audio_codec_if_t* in_codec_if_ = nullptr;
-    const audio_codec_gpio_if_t* gpio_if_ = nullptr;
     esp_codec_dev_handle_t input_dev_ = nullptr;
 
-    // ES7111 无需 codec 设备，直接 I2S 写入
+    // ES7111 DAC (无 I2C，通过 codec_dev 管理 I2S TX)
+    esp_codec_dev_handle_t output_dev_ = nullptr;
+
     gpio_num_t pa_pin_;
     bool headset_mode_ = false;
     std::mutex data_if_mutex_;
-    std::vector<int16_t> tdm_buf_;  // 4ch TDM 读取缓冲区（复用避免频繁分配）
+    std::vector<int16_t> tdm_buf_;
 
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws,
                               gpio_num_t dout, gpio_num_t din);
