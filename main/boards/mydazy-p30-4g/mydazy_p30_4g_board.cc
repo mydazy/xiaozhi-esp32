@@ -857,6 +857,44 @@ public:
         }
     }
 
+    // 切换网络前关闭 LDO，防止重启后黑屏
+    // 电路: GPIO9 -> ME6211 LDO EN -> AUD_VDD-3.3V -> LCD + 音频
+    // esp_restart() 只重置 CPU，LCD 控制器 (JD9853) 不会复位，需要断电重置
+    virtual void SwitchNetworkType() override {
+        auto display = GetDisplay();
+        if (GetNetworkType() == NetworkType::WIFI) {
+            SaveNetworkTypeToSettings(NetworkType::ML307);
+            display->ShowNotification(Lang::Strings::SWITCH_TO_4G_NETWORK);
+        } else {
+            SaveNetworkTypeToSettings(NetworkType::WIFI);
+            display->ShowNotification(Lang::Strings::SWITCH_TO_WIFI_NETWORK);
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // 停止音频服务
+        auto& app = Application::GetInstance();
+        app.GetAudioService().Stop();
+
+        // 关闭功放
+        if (audio_codec_) {
+            audio_codec_->EnableOutput(false);
+        }
+
+        // 关闭背光
+        auto backlight = GetBacklight();
+        if (backlight) {
+            backlight->SetBrightness(0);
+        }
+
+        // 关闭 LDO (GPIO9)，LCD + 音频断电
+        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
+
+        // 等待 22uF 电容放电（~500ms）
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        esp_restart();
+    }
+
     void CleanupDisplay() {
         auto backlight = GetBacklight();
         if (backlight) {
