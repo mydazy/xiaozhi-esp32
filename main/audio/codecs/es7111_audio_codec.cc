@@ -34,13 +34,13 @@ Es7111AudioCodec::Es7111AudioCodec(
     // 1. 创建 duplex I2S 通道
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
-    // 2. I2S 数据接口（TX+RX 共享，与 BoxAudioCodec 完全一致）
-    // 注意：即使传 tx_handle=NULL，I2S_IF 也会自动从 rx_handle 找到 tx_handle
-    // 所以不要试图"隔离"TX — 直接传入让框架统一管理
+    // 2. I2S 数据接口（仅 RX，供 ES7210 codec_dev 使用）
+    // 不传 tx_handle：ES7111 输出用直接 i2s_channel_write，不由 codec_dev 管理
+    // 若传入 tx_handle，esp_codec_dev_open(input) 会 disable→reconfig TX 导致输出中断
     audio_codec_i2s_cfg_t i2s_cfg = {
         .port = I2S_NUM_0,
         .rx_handle = rx_handle_,
-        .tx_handle = tx_handle_,
+        .tx_handle = NULL,
     };
     data_if_ = audio_codec_new_i2s_data(&i2s_cfg);
     assert(data_if_ != NULL);
@@ -48,16 +48,8 @@ Es7111AudioCodec::Es7111AudioCodec(
     // 3. PA GPIO
     gpio_if_ = audio_codec_new_gpio();
 
-    // 4. ES7111 DAC 输出设备（codec_if=NULL — 纯 I2S DAC 无需 I2C 控制）
-    // 与 BoxAudioCodec 唯一区别：ES8311 有 codec_if，ES7111 没有
-    esp_codec_dev_cfg_t out_dev_cfg = {
-        .dev_type = ESP_CODEC_DEV_TYPE_OUT,
-        .codec_if = NULL,
-        .data_if = data_if_,
-    };
-    output_dev_ = esp_codec_dev_new(&out_dev_cfg);
-    assert(output_dev_ != NULL);
-    ESP_LOGI(TAG, "ES7111 DAC: output_dev created (no I2C, codec_dev manages I2S)");
+    // 4. ES7111 DAC: 不需要任何初始化（纯 I2S，硬件自配置）
+    ESP_LOGI(TAG, "ES7111 DAC: no I2C needed (hardware auto-config)");
 
     // 5. ES7210 ADC: I2C 初始化
     audio_codec_i2c_cfg_t i2c_cfg = {
@@ -88,14 +80,10 @@ Es7111AudioCodec::Es7111AudioCodec(
         ESP_LOGE(TAG, "Input device creation failed");
     }
 
-    ESP_LOGI(TAG, "Initialized: ES7111(DAC,codec_dev) + ES7210(ADC,gain=%.0fdB)", input_gain_);
+    ESP_LOGI(TAG, "Initialized: ES7111(DAC,no-I2C) + ES7210(ADC,gain=%.0fdB)", input_gain_);
 }
 
 Es7111AudioCodec::~Es7111AudioCodec() {
-    if (output_dev_) {
-        esp_codec_dev_close(output_dev_);
-        esp_codec_dev_delete(output_dev_);
-    }
     if (input_dev_) {
         esp_codec_dev_close(input_dev_);
         esp_codec_dev_delete(input_dev_);
@@ -248,30 +236,9 @@ void Es7111AudioCodec::EnableOutput(bool enable) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (enable == output_enabled_) return;
 
-    if (enable) {
-        // 与 BoxAudioCodec 完全一致：通过 codec_dev 打开，让 I2S_IF 管理格式
-        esp_codec_dev_sample_info_t fs = {
-            .bits_per_sample = 16,
-            .channel = 1,
-            .channel_mask = 0,
-            .sample_rate = (uint32_t)output_sample_rate_,
-            .mclk_multiple = 0,
-        };
-        if (output_dev_) {
-            ESP_ERROR_CHECK(esp_codec_dev_open(output_dev_, &fs));
-        }
-        if (pa_pin_ != GPIO_NUM_NC) {
-            gpio_set_level(pa_pin_, 1);
-        }
-        ESP_LOGI(TAG, "EnableOutput: codec_dev opened, PA on, sr=%d", output_sample_rate_);
-    } else {
-        if (pa_pin_ != GPIO_NUM_NC) {
-            gpio_set_level(pa_pin_, 0);
-        }
-        if (output_dev_) {
-            ESP_ERROR_CHECK(esp_codec_dev_close(output_dev_));
-        }
-        ESP_LOGI(TAG, "EnableOutput: codec_dev closed, PA off");
+    // ES7111 无 I2C 控制，直接开关 PA
+    if (pa_pin_ != GPIO_NUM_NC) {
+        gpio_set_level(pa_pin_, enable ? 1 : 0);
     }
     AudioCodec::EnableOutput(enable);
 }
@@ -326,20 +293,21 @@ int Es7111AudioCodec::Write(const int16_t* data, int samples) {
         ESP_LOGW(TAG, "Write: samples=%d enabled=%d vol=%d peak=%d headset=%d",
                  samples, output_enabled_, output_volume_, peak, headset_mode_);
     }
-    if (output_enabled_ && output_dev_) {
-        // 软件音量（ES7111 无硬件音量寄存器，BoxAudioCodec 用 esp_codec_dev_set_out_vol）
+    if (output_enabled_) {
+        // mono→stereo: ES7111 标准 I2S DAC，数据放左声道
+        std::vector<int16_t> stereo(samples * 2);
         int32_t vol_factor = static_cast<int32_t>(pow(output_volume_ / 100.0, 2) * 256);
         if (headset_mode_) vol_factor *= 2;
-        std::vector<int16_t> vol_data(samples);
         for (int i = 0; i < samples; i++) {
             int32_t val = (static_cast<int32_t>(data[i]) * vol_factor) >> 8;
             if (val > INT16_MAX) val = INT16_MAX;
             if (val < INT16_MIN) val = INT16_MIN;
-            vol_data[i] = static_cast<int16_t>(val);
+            stereo[i * 2] = static_cast<int16_t>(val);
+            stereo[i * 2 + 1] = 0;
         }
-        // 通过 codec_dev 写入 — I2S_IF 自动处理 slot_bit 调整和 DMA 格式转换
-        ESP_ERROR_CHECK_WITHOUT_ABORT(
-            esp_codec_dev_write(output_dev_, vol_data.data(), vol_data.size() * sizeof(int16_t)));
+        size_t bytes_written;
+        i2s_channel_write(tx_handle_, stereo.data(), stereo.size() * sizeof(int16_t),
+                          &bytes_written, pdMS_TO_TICKS(500));
         return samples;
     }
     return samples;
