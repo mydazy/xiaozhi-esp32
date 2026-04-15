@@ -647,6 +647,11 @@ private:
             EnterDeepSleep(false);
         }, 4);
 
+        // 连按5次：GPS 演示模式（切换开关）
+        boot_button_.OnMultipleClick([this]() {
+            ToggleGpsDemo();
+        }, 5);
+
         // 连按6次：进入音频测试模式（任意状态下都可用）
         boot_button_.OnMultipleClick([this]() {
             auto& app = Application::GetInstance();
@@ -751,6 +756,72 @@ private:
     std::atomic<int> gnss_satellites_{0};
     std::atomic<bool> gnss_fixed_{false};
     double gnss_lat_ = 0.0, gnss_lon_ = 0.0;
+
+    // GPS 演示模式（连按5次切换）
+    bool gps_demo_active_ = false;
+    esp_timer_handle_t gps_demo_timer_ = nullptr;
+
+    void RefreshGpsDemo() {
+        if (!gps_demo_active_) return;
+        auto display = GetDisplay();
+        if (!display) return;
+
+        bool fixed = gnss_fixed_.load();
+        int sats = gnss_satellites_.load();
+
+        // 顶部：卫星数 + 系统类型
+        char top[48];
+        snprintf(top, sizeof(top), FONT_AWESOME_LOCATION_DOT " %d sats  GPS+BDS  %s",
+                 sats, fixed ? "Fixed" : "...");
+        display->SetStatus(top);
+
+        // 底部：定位信息
+        char bot[128];
+        if (fixed) {
+            auto& fix = gnss_->GetLastFix();
+            snprintf(bot, sizeof(bot),
+                "Lat %.6f  Lon %.6f\n"
+                "HDOP %.1f  UTC %.6s",
+                gnss_lat_, gnss_lon_, fix.hdop, fix.utc_time);
+        } else {
+            snprintf(bot, sizeof(bot), "Waiting for fix...");
+        }
+        display->SetChatMessage("system", bot);
+    }
+
+    void ToggleGpsDemo() {
+        gps_demo_active_ = !gps_demo_active_;
+        ESP_LOGI(TAG, "GPS demo %s", gps_demo_active_ ? "ON" : "OFF");
+        auto display = GetDisplay();
+
+        if (gps_demo_active_) {
+            if (display) display->ShowNotification("GPS Demo ON", 2000);
+            RefreshGpsDemo();
+            // 定时 2 秒刷新
+            esp_timer_create_args_t args = {
+                .callback = [](void* arg) {
+                    static_cast<MyDazyP31Board*>(arg)->RefreshGpsDemo();
+                },
+                .arg = this,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "gps_demo",
+                .skip_unhandled_events = true,
+            };
+            esp_timer_create(&args, &gps_demo_timer_);
+            esp_timer_start_periodic(gps_demo_timer_, 2000000);
+        } else {
+            if (gps_demo_timer_) {
+                esp_timer_stop(gps_demo_timer_);
+                esp_timer_delete(gps_demo_timer_);
+                gps_demo_timer_ = nullptr;
+            }
+            if (display) {
+                display->ShowNotification("GPS Demo OFF", 2000);
+                display->SetChatMessage("system", "");
+                display->SetStatus("");
+            }
+        }
+    }
 
     static const char* NfcTypeName(NfcCardType type) {
         switch (type) {
@@ -928,9 +999,10 @@ private:
 
         gnss_ = new Ml307Gnss(modem->GetAtUart());
 
-        // 搜星回调 → 更新状态栏
+        // 搜星回调 → 更新状态栏（demo 模式由定时器刷新）
         gnss_->SetSatCallback([this](int sats) {
             gnss_satellites_ = sats;
+            if (gps_demo_active_) return;  // demo 模式下由定时器统一刷新
             auto display = GetDisplay();
             if (display) {
                 char text[32];
@@ -945,14 +1017,15 @@ private:
             gnss_satellites_ = fix.satellites;
             gnss_lat_ = fix.latitude;
             gnss_lon_ = fix.longitude;
-            auto display = GetDisplay();
-            if (display) {
-                char text[48];
-                snprintf(text, sizeof(text), FONT_AWESOME_LOCATION_DOT " %d  %.4f,%.4f",
-                         fix.satellites, fix.latitude, fix.longitude);
-                display->SetStatus(text);
+            if (!gps_demo_active_) {
+                auto display = GetDisplay();
+                if (display) {
+                    char text[48];
+                    snprintf(text, sizeof(text), FONT_AWESOME_LOCATION_DOT " %d  %.4f,%.4f",
+                             fix.satellites, fix.latitude, fix.longitude);
+                    display->SetStatus(text);
+                }
             }
-            // 定位成功时上报状态
             if (fix.valid) ReportStatus();
         });
 
