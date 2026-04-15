@@ -12,6 +12,20 @@
 
 #define TAG "Es7111AudioCodec"
 
+namespace {
+constexpr int kEs7210SlotCount = 4;
+constexpr int kPrimaryMicSlot = 0;
+constexpr int kSecondaryMicSlot = 2;
+constexpr uint32_t kEs7210AllSlotMask =
+    ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) |
+    ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1) |
+    ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2) |
+    ESP_CODEC_DEV_MAKE_CHANNEL_MASK(3);
+constexpr uint32_t kEs7210ActiveMicMask =
+    ESP_CODEC_DEV_MAKE_CHANNEL_MASK(kPrimaryMicSlot) |
+    ESP_CODEC_DEV_MAKE_CHANNEL_MASK(kSecondaryMicSlot);
+}  // namespace
+
 Es7111AudioCodec::Es7111AudioCodec(
     void* i2c_master_handle,
     int input_sample_rate, int output_sample_rate,
@@ -70,17 +84,17 @@ Es7111AudioCodec::Es7111AudioCodec(
         ESP_LOGE(TAG, "ES7210 codec init failed");
     }
 
-    esp_codec_dev_cfg_t in_dev_cfg = {
+    esp_codec_dev_cfg_t dev_cfg = {
         .dev_type = ESP_CODEC_DEV_TYPE_IN,
         .codec_if = in_codec_if_,
         .data_if = data_if_,
     };
-    input_dev_ = esp_codec_dev_new(&in_dev_cfg);
+    input_dev_ = esp_codec_dev_new(&dev_cfg);
     if (input_dev_ == NULL) {
         ESP_LOGE(TAG, "Input device creation failed");
     }
 
-    ESP_LOGI(TAG, "Initialized: ES7111(DAC,no-I2C) + ES7210(ADC,gain=%.0fdB)", input_gain_);
+    ESP_LOGI(TAG, "Initialized: ES7111(DAC,direct-I2S) + ES7210(ADC,box-like-RX,gain=%.0fdB)", input_gain_);
 }
 
 Es7111AudioCodec::~Es7111AudioCodec() {
@@ -112,8 +126,8 @@ void Es7111AudioCodec::CreateDuplexChannels(
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, &rx_handle_));
 
     // TX: Standard 模式 → ES7111 DAC
-    // RX: TDM 模式 → ES7210 ADC（4 通道）
-    // 与 BoxAudioCodec 完全一致的配置
+    // ES7111 规格书定义为标准 I2S，从左声道取单声道数据。
+    // 保持 16-bit slot，软件层补成 L/R 双 slot，兼容项目现有 PCM 输出链。
     i2s_std_config_t std_cfg = {
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)output_sample_rate_,
@@ -175,12 +189,31 @@ void Es7111AudioCodec::CreateDuplexChannels(
         },
     };
 
+    tx_std_cfg_ = std_cfg;  // 保存 TX 配置，EnableInput 后恢复用
+
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_init_tdm_mode(rx_handle_, &tdm_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
     ESP_LOGI(TAG, "Duplex: TX(STD)→ES7111 RX(TDM)←ES7210 mclk=%d bclk=%d ws=%d dout=%d din=%d",
              mclk, bclk, ws, dout, din);
+}
+
+void Es7111AudioCodec::ReinitTxChannel() {
+    // esp_codec_dev_open(input) 会通过 I2S 端口内部 duplex 配对找到 TX 并重配，
+    // 导致 slot_bit 从 16→32，破坏 ES7111 期望的标准 I2S 时序。
+    // 这里分别重配 clock/slot/gpio 恢复正确配置。
+    ESP_ERROR_CHECK(i2s_channel_disable(tx_handle_));
+    ESP_ERROR_CHECK(i2s_channel_reconfig_std_clock(tx_handle_, &tx_std_cfg_.clk_cfg));
+    ESP_ERROR_CHECK(i2s_channel_reconfig_std_slot(tx_handle_, &tx_std_cfg_.slot_cfg));
+    ESP_ERROR_CHECK(i2s_channel_reconfig_std_gpio(tx_handle_, &tx_std_cfg_.gpio_cfg));
+    ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
+
+    // 恢复 PA 状态（I2S 重配可能影响 GPIO 矩阵）
+    if (pa_pin_ != GPIO_NUM_NC && output_enabled_) {
+        gpio_set_level(pa_pin_, 1);
+    }
+    ESP_LOGW(TAG, "TX channel re-initialized after input open");
 }
 
 void Es7111AudioCodec::SetHeadsetMode(bool headset) {
@@ -192,6 +225,8 @@ void Es7111AudioCodec::SetHeadsetMode(bool headset) {
 }
 
 void Es7111AudioCodec::SetOutputVolume(int volume) {
+    ESP_LOGW(TAG, "SetOutputVolume: %d→%d pa_pin=%d output_enabled=%d",
+             output_volume_, volume, pa_pin_, output_enabled_);
     if (pa_pin_ != GPIO_NUM_NC) {
         gpio_set_level(pa_pin_, volume > 0 ? 1 : 0);
     }
@@ -201,19 +236,22 @@ void Es7111AudioCodec::SetOutputVolume(int volume) {
 void Es7111AudioCodec::SetInputGain(float gain) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     input_gain_ = gain;
+    ApplyInputGainLocked();
     AudioCodec::SetInputGain(gain);
 }
 
 void Es7111AudioCodec::EnableInput(bool enable) {
+    ESP_LOGW(TAG, "EnableInput: %d→%d output_enabled=%d", input_enabled_, enable, output_enabled_);
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (enable == input_enabled_) return;
 
     if (enable) {
         esp_codec_dev_sample_info_t fs = {
             .bits_per_sample = 16,
-            .channel = 4,
-            .channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1)
-                          | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(3),
+            .channel = kEs7210SlotCount,
+            // 和 BoxAudioCodec 的差异点：P31 需要保留完整 4-slot TDM，
+            // 后续在 Read() 中从 slot0/slot2 提取或混合双麦数据。
+            .channel_mask = kEs7210AllSlotMask,
             .sample_rate = (uint32_t)input_sample_rate_,
             .mclk_multiple = 0,
         };
@@ -221,8 +259,10 @@ void Es7111AudioCodec::EnableInput(bool enable) {
                  input_sample_rate_, input_gain_, headset_mode_);
         if (input_dev_) {
             ESP_ERROR_CHECK(esp_codec_dev_open(input_dev_, &fs));
-            ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_,
-                ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2), input_gain_));
+            // esp_codec_dev_open 会通过 duplex 配对重配 TX（slot_bit 16→32），
+            // 必须立即恢复 TX 的 STD 模式配置，否则 ES7111 DAC 输出时序错误
+            ReinitTxChannel();
+            ApplyInputGainLocked();
         }
     } else {
         if (input_dev_) {
@@ -233,12 +273,14 @@ void Es7111AudioCodec::EnableInput(bool enable) {
 }
 
 void Es7111AudioCodec::EnableOutput(bool enable) {
+    ESP_LOGW(TAG, "EnableOutput: %d→%d pa_pin=%d input_enabled=%d vol=%d",
+             output_enabled_, enable, pa_pin_, input_enabled_, output_volume_);
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (enable == output_enabled_) return;
 
-    // ES7111 无 I2C 控制，直接开关 PA
     if (pa_pin_ != GPIO_NUM_NC) {
         gpio_set_level(pa_pin_, enable ? 1 : 0);
+        ESP_LOGW(TAG, "PA pin %d → %d", pa_pin_, enable ? 1 : 0);
     }
     AudioCodec::EnableOutput(enable);
 }
@@ -247,7 +289,7 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
     if (!input_enabled_ || !input_dev_) return samples;
 
     int frames = samples / input_channels_;
-    int tdm_samples = frames * 4;
+    int tdm_samples = frames * kEs7210SlotCount;
     if ((int)tdm_buf_.size() < tdm_samples) {
         tdm_buf_.resize(tdm_samples);
     }
@@ -258,21 +300,22 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
     }
     if (input_reference_) {
         for (int f = 0; f < frames; f++) {
-            dest[f * 2]     = tdm_buf_[f * 4 + 0];
-            dest[f * 2 + 1] = tdm_buf_[f * 4 + 2];
+            dest[f * 2]     = tdm_buf_[f * kEs7210SlotCount + kPrimaryMicSlot];
+            dest[f * 2 + 1] = tdm_buf_[f * kEs7210SlotCount + kSecondaryMicSlot];
         }
     } else {
         for (int f = 0; f < frames; f++) {
-            int32_t mixed = ((int32_t)tdm_buf_[f * 4 + 0] + (int32_t)tdm_buf_[f * 4 + 2]) / 2;
+            int32_t mixed = ((int32_t)tdm_buf_[f * kEs7210SlotCount + kPrimaryMicSlot]
+                           + (int32_t)tdm_buf_[f * kEs7210SlotCount + kSecondaryMicSlot]) / 2;
             dest[f] = (int16_t)mixed;
         }
     }
     static int read_count = 0;
     if (++read_count % 200 == 0) {
-        int16_t ch_max[4] = {0};
+        int16_t ch_max[kEs7210SlotCount] = {0};
         for (int f = 0; f < frames; f++) {
-            for (int c = 0; c < 4; c++) {
-                int16_t v = tdm_buf_[f * 4 + c];
+            for (int c = 0; c < kEs7210SlotCount; c++) {
+                int16_t v = tdm_buf_[f * kEs7210SlotCount + c];
                 if (abs(v) > abs(ch_max[c])) ch_max[c] = v;
             }
         }
@@ -283,18 +326,29 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
     return samples;
 }
 
+void Es7111AudioCodec::ApplyInputGainLocked() {
+    if (!input_dev_ || !input_enabled_) {
+        return;
+    }
+    ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, kEs7210ActiveMicMask, input_gain_));
+}
+
 int Es7111AudioCodec::Write(const int16_t* data, int samples) {
     static int write_count = 0;
-    if (++write_count % 50 == 0) {
-        int16_t peak = 0;
-        for (int i = 0; i < samples; i++) {
-            if (abs(data[i]) > abs(peak)) peak = data[i];
-        }
-        ESP_LOGW(TAG, "Write: samples=%d enabled=%d vol=%d peak=%d headset=%d",
-                 samples, output_enabled_, output_volume_, peak, headset_mode_);
+    static bool was_enabled = true;
+    int16_t peak = 0;
+    for (int i = 0; i < samples; i++) {
+        if (abs(data[i]) > abs(peak)) peak = data[i];
+    }
+    // 每 50 次或状态变化时打印
+    if (++write_count % 50 == 0 || was_enabled != output_enabled_) {
+        ESP_LOGW(TAG, "Write[%d]: samples=%d enabled=%d vol=%d peak=%d headset=%d pa=%d",
+                 write_count, samples, output_enabled_, output_volume_, peak, headset_mode_,
+                 (pa_pin_ != GPIO_NUM_NC) ? gpio_get_level(pa_pin_) : -1);
+        was_enabled = output_enabled_;
     }
     if (output_enabled_) {
-        // mono→stereo: ES7111 标准 I2S DAC，数据放左声道
+        // mono→stereo: ES7111 标准 I2S DAC，单声道放左声道，右声道填 0
         std::vector<int16_t> stereo(samples * 2);
         int32_t vol_factor = static_cast<int32_t>(pow(output_volume_ / 100.0, 2) * 256);
         if (headset_mode_) vol_factor *= 2;
@@ -305,9 +359,12 @@ int Es7111AudioCodec::Write(const int16_t* data, int samples) {
             stereo[i * 2] = static_cast<int16_t>(val);
             stereo[i * 2 + 1] = 0;
         }
-        size_t bytes_written;
-        i2s_channel_write(tx_handle_, stereo.data(), stereo.size() * sizeof(int16_t),
+        size_t bytes_written = 0;
+        esp_err_t ret = i2s_channel_write(tx_handle_, stereo.data(), stereo.size() * sizeof(int16_t),
                           &bytes_written, pdMS_TO_TICKS(500));
+        if (ret != ESP_OK || bytes_written == 0) {
+            ESP_LOGE(TAG, "i2s_channel_write failed: ret=%s bytes=%zu", esp_err_to_name(ret), bytes_written);
+        }
         return samples;
     }
     return samples;
