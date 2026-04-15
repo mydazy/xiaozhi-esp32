@@ -771,8 +771,8 @@ private:
 
         // 顶部：卫星数 + 系统类型
         char top[48];
-        snprintf(top, sizeof(top), FONT_AWESOME_LOCATION_DOT " %d sats  GPS+BDS  %s",
-                 sats, fixed ? "Fixed" : "...");
+        snprintf(top, sizeof(top), FONT_AWESOME_LOCATION_DOT " GPS %d %s",
+                 sats, fixed ? "OK" : "...");
         display->SetStatus(top);
 
         // 底部：定位信息
