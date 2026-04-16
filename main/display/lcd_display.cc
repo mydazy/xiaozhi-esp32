@@ -143,7 +143,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * height_ / 4),  // 1/4 屏 PSRAM 双缓冲
+        .buffer_size = static_cast<uint32_t>(width_ * 48),  // 48 行 PSRAM 双缓冲（匹配 SPI max_transfer_sz）
         .double_buffer = true,
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),

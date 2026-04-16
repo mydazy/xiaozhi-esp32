@@ -149,10 +149,11 @@ private:
             .sclk_io_num = DISPLAY_SPI_SCLK,
             .quadwp_io_num = GPIO_NUM_NC,
             .quadhd_io_num = GPIO_NUM_NC,
-            .max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t), // 284×48×2=27.3KB
+            .max_transfer_sz = DISPLAY_WIDTH * 48 * sizeof(uint16_t),  // 48 行/次，DMA 描述符占内部 RAM
             .flags = SPICOMMON_BUSFLAG_MASTER,
         };
-        ESP_ERROR_CHECK(spi_bus_initialize(DISPLAY_SPI_HOST, &buscfg, SPI_DMA_DISABLED));
+        // DMA 自动分配通道，SPI 传输由 DMA 搬运，CPU 不阻塞
+        ESP_ERROR_CHECK(spi_bus_initialize(DISPLAY_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
 
     void InitializeGpio() {

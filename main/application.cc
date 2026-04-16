@@ -696,8 +696,14 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
     }
 #endif
 
-    // 语音播报激活码
-    Alert(Lang::Strings::ACTIVATION, message.c_str(), "link", Lang::Sounds::OGG_ACTIVATION);
+    // 语音播报激活码（不调 SetEmotion，避免表情图片覆盖 QR 码）
+    {
+        auto display = Board::GetInstance().GetDisplay();
+        display->SetStatus(Lang::Strings::ACTIVATION);
+        // display->SetEmotion("link");  // 注释掉：防止 emote.json 的 link 图片和 QR 码重叠
+        display->SetChatMessage("system", message.c_str());
+        audio_service_.PlaySound(Lang::Sounds::OGG_ACTIVATION);
+    }
     for (const auto& digit : code) {
         auto it = std::find_if(digit_sounds.begin(), digit_sounds.end(),
             [digit](const digit_sound& ds) { return ds.digit == digit; });
