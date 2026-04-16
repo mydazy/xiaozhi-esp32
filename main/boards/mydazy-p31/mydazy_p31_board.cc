@@ -590,20 +590,8 @@ private:
                 return;
             }
 
-            #if CONFIG_USE_DEVICE_AEC
-            if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
-                if (status == kDeviceStateSpeaking) {
-                    app.AbortSpeaking(kAbortReasonNone);
-                }
-                app.SetDeviceState(kDeviceStateIdle);
-                if (app.GetAecMode() == kAecOff) {
-                    app.SetAecMode(kAecOnDeviceSide);
-                } else{
-                    app.SetAecMode(kAecOff);
-                }
-                WakeUp();
-            }
-            #endif
+            // P31 硬件无 AEC 回采，双击不切换 AEC 模式
+            ESP_LOGI(TAG, "P31: 双击（AEC 不可用，硬件无回采通道）");
         });
 
         // 连按3次进入配网模式
@@ -1188,7 +1176,11 @@ public:
         Settings wifi_settings("wifi", true);
         wifi_settings.SetInt("blufi", 1);
 
-        ESP_LOGI(TAG, "MyDazy P30 4G 初始化完成 (支持4G、ULP、电源管理、触摸屏)");
+        // P31 软件回采 AEC：Es7111AudioCodec 内部用 TX 环形缓冲区做参考信号
+        // CONFIG_USE_DEVICE_AEC=y 时 Application 构造已设置 kAecOnDeviceSide
+        ESP_LOGI(TAG, "P31: 软件回采 AEC 已启用（TX→ringbuf→Read channel 1）");
+
+        ESP_LOGI(TAG, "MyDazy P31 初始化完成 (ES7111+ES7210, 4G, NFC, GPS, 触摸屏)");
 
         // 首次开机欢迎音（可开关：Settings("audio").playWelcome 默认开启）
          if (first_boot_) {

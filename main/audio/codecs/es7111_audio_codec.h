@@ -13,6 +13,12 @@
  *
  * 绕过 esp_codec_dev（避免 paired data 机制干扰 TX）。
  * ES7210 通过 codec_if 直接 I2C 控制。
+ *
+ * 软件回采 AEC：
+ *   ES7111 无硬件环回，ES7210 4路 MIC 全接物理麦克风。
+ *   Write() 将播放 PCM 写入环形缓冲区，Read() 从中取出作为 AEC 参考信号。
+ *   输出格式：channel 0 = MIC1+MIC3 混合，channel 1 = TX 回采参考。
+ *   AFE pipeline 用 "MR" 格式启用 AEC，实现任意打断。
  */
 
 #pragma once
@@ -21,6 +27,8 @@
 #include <esp_codec_dev.h>
 #include <esp_codec_dev_defaults.h>
 #include <driver/i2s_tdm.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/ringbuf.h>
 #include <mutex>
 #include <vector>
 
@@ -53,6 +61,10 @@ private:
     std::mutex mutex_;
     std::vector<int16_t> tdm_buf_;
     std::vector<int16_t> write_buf_;
+
+    // 软件回采环形缓冲区（Write→Read 传递 TX PCM 作为 AEC 参考）
+    RingbufHandle_t ref_ringbuf_ = nullptr;
+    static constexpr int kRefBufSamples = 4800;  // 200ms @24kHz
 
     void ApplyInputGainLocked();
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws,

@@ -31,8 +31,10 @@ Es7111AudioCodec::Es7111AudioCodec(
     : pa_pin_(pa_pin) {
 
     duplex_ = true;
-    input_reference_ = input_reference;
-    input_channels_ = input_reference ? 2 : 1;
+    // 强制启用 input_reference：软件回采 AEC
+    // ES7111 无硬件环回，用 Write() 的 TX 数据做参考信号
+    input_reference_ = true;
+    input_channels_ = 2;  // channel 0 = mic, channel 1 = TX reference
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
 
@@ -65,10 +67,22 @@ Es7111AudioCodec::Es7111AudioCodec(
         ESP_LOGE(TAG, "ES7210 codec init failed");
     }
 
-    ESP_LOGI(TAG, "Initialized: ES7111(DAC,32bit-slot) + ES7210(ADC,direct-I2S,gain=%.0fdB)", input_gain_);
+    // 创建软件回采环形缓冲区（PSRAM，NoSplit 类型保证原子读写）
+    ref_ringbuf_ = xRingbufferCreateWithCaps(
+        kRefBufSamples * sizeof(int16_t), RINGBUF_TYPE_BYTEBUF,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!ref_ringbuf_) {
+        ESP_LOGE(TAG, "Failed to create ref ringbuf, AEC disabled");
+        input_reference_ = false;
+        input_channels_ = 1;
+    }
+
+    ESP_LOGI(TAG, "Initialized: ES7111(DAC) + ES7210(ADC) gain=%.0fdB ref=%s",
+             input_gain_, input_reference_ ? "software-loopback" : "off");
 }
 
 Es7111AudioCodec::~Es7111AudioCodec() {
+    if (ref_ringbuf_) vRingbufferDelete(ref_ringbuf_);
     if (codec_opened_ && in_codec_if_ && in_codec_if_->close) {
         in_codec_if_->close(in_codec_if_);
     }
@@ -211,13 +225,13 @@ void Es7111AudioCodec::EnableOutput(bool enable) {
 int Es7111AudioCodec::Read(int16_t* dest, int samples) {
     if (!input_enabled_) return samples;
 
+    // input_channels_ = 2 时 samples = frames * 2
     int frames = samples / input_channels_;
     int tdm_samples = frames * kEs7210SlotCount;
     if ((int)tdm_buf_.size() < tdm_samples) {
         tdm_buf_.resize(tdm_samples);
     }
 
-    // 直接 i2s_channel_read，绕过 esp_codec_dev
     size_t bytes_read = 0;
     esp_err_t ret = i2s_channel_read(rx_handle_, tdm_buf_.data(),
                                       tdm_samples * sizeof(int16_t),
@@ -227,12 +241,31 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
         return 0;
     }
 
-    if (input_reference_) {
+    if (input_reference_ && ref_ringbuf_) {
+        // 软件回采 AEC 模式：
+        //   channel 0 = MIC1 + MIC3 混合（双麦信噪比更好）
+        //   channel 1 = TX 回采参考（从环形缓冲区读取）
+        size_t ref_bytes_needed = frames * sizeof(int16_t);
+        size_t ref_bytes_got = 0;
+        int16_t* ref_data = (int16_t*)xRingbufferReceiveUpTo(
+            ref_ringbuf_, &ref_bytes_got, 0, ref_bytes_needed);
+
+        int ref_frames = ref_data ? (int)(ref_bytes_got / sizeof(int16_t)) : 0;
+
         for (int f = 0; f < frames; f++) {
-            dest[f * 2]     = tdm_buf_[f * kEs7210SlotCount + kPrimaryMicSlot];
-            dest[f * 2 + 1] = tdm_buf_[f * kEs7210SlotCount + kSecondaryMicSlot];
+            // Channel 0: 双麦混合
+            int32_t mixed = ((int32_t)tdm_buf_[f * kEs7210SlotCount + kPrimaryMicSlot]
+                           + (int32_t)tdm_buf_[f * kEs7210SlotCount + kSecondaryMicSlot]) / 2;
+            dest[f * 2] = (int16_t)mixed;
+            // Channel 1: TX 回采参考（不足部分填 0 = 静音）
+            dest[f * 2 + 1] = (f < ref_frames) ? ref_data[f] : 0;
+        }
+
+        if (ref_data) {
+            vRingbufferReturnItem(ref_ringbuf_, ref_data);
         }
     } else {
+        // 无 AEC 回退：单声道混合
         for (int f = 0; f < frames; f++) {
             int32_t mixed = ((int32_t)tdm_buf_[f * kEs7210SlotCount + kPrimaryMicSlot]
                            + (int32_t)tdm_buf_[f * kEs7210SlotCount + kSecondaryMicSlot]) / 2;
@@ -254,10 +287,14 @@ void Es7111AudioCodec::ApplyInputGainLocked() {
 }
 
 int Es7111AudioCodec::Write(const int16_t* data, int samples) {
+    // 软件回采：将原始 PCM 写入环形缓冲区（不含音量缩放，AEC 需要原始信号）
+    if (ref_ringbuf_) {
+        xRingbufferSend(ref_ringbuf_, data, samples * sizeof(int16_t), 0);
+    }
+
     if (!output_enabled_) return samples;
 
     // TDM 4-slot × 16-bit: 音频放 slot0，slot1-3 静音
-    // ES7111 从 WS=low 相位（slot0-1）读取 slot0 的 16-bit 数据
     int tdm_samples = samples * kEs7210SlotCount;
     if ((int)write_buf_.size() < tdm_samples) {
         write_buf_.resize(tdm_samples);
@@ -270,7 +307,7 @@ int Es7111AudioCodec::Write(const int16_t* data, int samples) {
         if (val > INT16_MAX) val = INT16_MAX;
         if (val < INT16_MIN) val = INT16_MIN;
         int base = i * kEs7210SlotCount;
-        write_buf_[base]     = (int16_t)val;  // Slot 0: audio → ES7111
+        write_buf_[base]     = (int16_t)val;
         write_buf_[base + 1] = 0;
         write_buf_[base + 2] = 0;
         write_buf_[base + 3] = 0;
