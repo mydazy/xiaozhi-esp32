@@ -18,6 +18,11 @@
 #include <arpa/inet.h>
 #include <font_awesome.h>
 
+// QR 码生成（esp_emote_gfx 组件已内置 qrcodegen）
+extern "C" {
+#include "../managed_components/espressif2022__esp_emote_gfx/src/lib/qrcode/qrcodegen.h"
+}
+
 #define TAG "Application"
 
 
@@ -625,7 +630,7 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
     };
     static const std::array<digit_sound, 10> digit_sounds{{
         digit_sound{'0', Lang::Sounds::OGG_0},
-        digit_sound{'1', Lang::Sounds::OGG_1}, 
+        digit_sound{'1', Lang::Sounds::OGG_1},
         digit_sound{'2', Lang::Sounds::OGG_2},
         digit_sound{'3', Lang::Sounds::OGG_3},
         digit_sound{'4', Lang::Sounds::OGG_4},
@@ -636,9 +641,63 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
         digit_sound{'9', Lang::Sounds::OGG_9}
     }};
 
-    // This sentence uses 9KB of SRAM, so we need to wait for it to finish
-    Alert(Lang::Strings::ACTIVATION, message.c_str(), "link", Lang::Sounds::OGG_ACTIVATION);
+    // 显示 MAC 绑定二维码（165×165，居中）
+#if HAVE_LVGL
+    auto display = Board::GetInstance().GetDisplay();
+    std::string mac = SystemInfo::GetMacAddress();
+    ESP_LOGI(TAG, "Activation QR: %s", mac.c_str());
 
+    // 生成 QR 码数据
+    uint8_t qr_buf[qrcodegen_BUFFER_LEN_FOR_VERSION(5)];
+    uint8_t tmp_buf[qrcodegen_BUFFER_LEN_FOR_VERSION(5)];
+    bool ok = qrcodegen_encodeText(mac.c_str(), tmp_buf, qr_buf,
+                                    qrcodegen_Ecc_LOW, 1, 5, qrcodegen_Mask_AUTO, true);
+    if (ok) {
+        int qr_size = qrcodegen_getSize(qr_buf);
+        constexpr int canvas_px = 165;
+        int scale = canvas_px / qr_size;
+        if (scale < 1) scale = 1;
+        int actual_px = qr_size * scale;
+
+        DisplayLockGuard lock(display);
+        // 白底 canvas
+        lv_obj_t* canvas = lv_canvas_create(lv_screen_active());
+        static lv_color_t* cbuf = nullptr;
+        if (!cbuf) {
+            cbuf = (lv_color_t*)heap_caps_malloc(actual_px * actual_px * sizeof(lv_color_t),
+                                                  MALLOC_CAP_SPIRAM);
+        }
+        if (cbuf) {
+            lv_canvas_set_buffer(canvas, cbuf, actual_px, actual_px, LV_COLOR_FORMAT_NATIVE);
+            lv_canvas_fill_bg(canvas, lv_color_white(), LV_OPA_COVER);
+            // 逐模块画黑点
+            for (int y = 0; y < qr_size; y++) {
+                for (int x = 0; x < qr_size; x++) {
+                    if (qrcodegen_getModule(qr_buf, x, y)) {
+                        for (int dy = 0; dy < scale; dy++) {
+                            for (int dx = 0; dx < scale; dx++) {
+                                lv_canvas_set_px(canvas, x * scale + dx, y * scale + dy,
+                                                 lv_color_black(), LV_OPA_COVER);
+                            }
+                        }
+                    }
+                }
+            }
+            lv_obj_center(canvas);
+        }
+        // 底部显示 MAC 文字
+        lv_obj_t* label = lv_label_create(lv_screen_active());
+        lv_label_set_text(label, mac.c_str());
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(label, lv_color_white(), 0);
+        lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -2);
+    } else {
+        ESP_LOGE(TAG, "QR encode failed for: %s", mac.c_str());
+    }
+#endif
+
+    // 语音播报激活码
+    Alert(Lang::Strings::ACTIVATION, message.c_str(), "link", Lang::Sounds::OGG_ACTIVATION);
     for (const auto& digit : code) {
         auto it = std::find_if(digit_sounds.begin(), digit_sounds.end(),
             [digit](const digit_sound& ds) { return ds.digit == digit; });
