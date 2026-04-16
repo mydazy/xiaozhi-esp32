@@ -31,15 +31,13 @@ Es7111AudioCodec::Es7111AudioCodec(
     : pa_pin_(pa_pin) {
 
     duplex_ = true;
-    // 强制启用 input_reference：软件回采 AEC
-    // ES7111 无硬件环回，用 Write() 的 TX 数据做参考信号
-    input_reference_ = true;
-    input_channels_ = 2;  // channel 0 = mic, channel 1 = TX reference
+    input_reference_ = input_reference;
+    input_channels_ = input_reference ? 2 : 1;
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
 
     Settings settings("audio", false);
-    input_gain_ = static_cast<float>(settings.GetInt("input_gain", 16));
+    input_gain_ = static_cast<float>(settings.GetInt("input_gain", 24));
 
     // 1. 创建 duplex I2S 通道
     CreateDuplexChannels(mclk, bclk, ws, dout, din);

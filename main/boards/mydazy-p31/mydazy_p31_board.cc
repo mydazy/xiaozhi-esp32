@@ -1176,9 +1176,9 @@ public:
         Settings wifi_settings("wifi", true);
         wifi_settings.SetInt("blufi", 1);
 
-        // P31 软件回采 AEC：Es7111AudioCodec 内部用 TX 环形缓冲区做参考信号
-        // CONFIG_USE_DEVICE_AEC=y 时 Application 构造已设置 kAecOnDeviceSide
-        ESP_LOGI(TAG, "P31: 软件回采 AEC 已启用（TX→ringbuf→Read channel 1）");
+        // P31 关闭 AEC 测试：排查断续问题
+        Application::GetInstance().SetAecMode(kAecOff);
+        ESP_LOGI(TAG, "P31: AEC 已关闭（排查断续问题）");
 
         ESP_LOGI(TAG, "MyDazy P31 初始化完成 (ES7111+ES7210, 4G, NFC, GPS, 触摸屏)");
 
