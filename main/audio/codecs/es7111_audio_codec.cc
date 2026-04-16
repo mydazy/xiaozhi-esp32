@@ -39,7 +39,7 @@ Es7111AudioCodec::Es7111AudioCodec(
     output_sample_rate_ = output_sample_rate;
 
     Settings settings("audio", false);
-    input_gain_ = static_cast<float>(settings.GetInt("input_gain", 36));
+    input_gain_ = static_cast<float>(settings.GetInt("input_gain", 16));
 
     // 1. 创建 duplex I2S 通道
     CreateDuplexChannels(mclk, bclk, ws, dout, din);

@@ -110,7 +110,7 @@
 // Type-C 耳机检测 GPIO 配置
 // 调试期间设为 0 防止 USB_SW 切换导致 CDC/JTAG 断连
 // ============================================================
-#define TYPEC_HEADSET_ENABLED   0
+#define TYPEC_HEADSET_ENABLED   1
 
 
 #define USB_DET_GPIO            GPIO_NUM_7     // USB 检测引脚（高=充电器，低=可能耳机）
