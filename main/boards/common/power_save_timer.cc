@@ -75,8 +75,9 @@ void PowerSaveTimer::PowerSaveCheck() {
                 on_enter_sleep_mode_();
             }
 
-            if (cpu_max_freq_ != -1) {
-                // Disable wake word detection
+            if (cpu_max_freq_ < 120) {
+                // 深度省电模式：关闭唤醒词检测和音频输入（< 80 MHz）
+                ESP_LOGI(TAG, "深度省电模式：关闭音频，降频至 %d MHz", cpu_max_freq_);
                 auto& audio_service = app.GetAudioService();
                 is_wake_word_running_ = audio_service.IsWakeWordRunning();
                 if (is_wake_word_running_) {
@@ -116,6 +117,12 @@ void PowerSaveTimer::WakeUp() {
                 .light_sleep_enable = false,
             };
             esp_pm_configure(&pm_config);
+
+            // 恢复音频输入
+            auto codec = Board::GetInstance().GetAudioCodec();
+            if (codec) {
+                codec->EnableInput(true);
+            }
 
             // Enable wake word detection
             auto& app = Application::GetInstance();

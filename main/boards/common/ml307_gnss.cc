@@ -47,7 +47,7 @@ void Ml307Gnss::ParseGga(const char* sentence) {
     int sats = (fields[7] && fields[7][0]) ? atoi(fields[7]) : 0;
 
     if (!fields[6] || fields[6][0] == '0') {
-        // 未定位，报告搜星数
+        ESP_LOGD(TAG, "GGA: no fix, sats_in_use=%d", sats);
         if (sat_callback_) sat_callback_(sats);
         return;
     }
@@ -62,6 +62,9 @@ void Ml307Gnss::ParseGga(const char* sentence) {
     last_fix_.satellites = sats;
     last_fix_.hdop = strtod(fields[8], nullptr);
     strncpy(last_fix_.utc_time, fields[1], sizeof(last_fix_.utc_time) - 1);
+
+    ESP_LOGI(TAG, "FIX: lat=%.6f lon=%.6f sats=%d hdop=%.1f utc=%s",
+             lat, lon, sats, last_fix_.hdop, last_fix_.utc_time);
 
     if (fix_callback_) fix_callback_(last_fix_);
     if (sat_callback_) sat_callback_(last_fix_.satellites);
@@ -112,6 +115,14 @@ void Ml307Gnss::ParseNmea(const std::string& line) {
     if (star != std::string::npos) clean.resize(star);
 
     const char* type = clean.c_str() + 3;
+    // 每 10 秒打印一次原始 NMEA（避免刷屏）
+    static int64_t last_log_time = 0;
+    int64_t now = esp_timer_get_time() / 1000;
+    if (now - last_log_time > 10000) {
+        ESP_LOGI(TAG, "NMEA: %.80s", clean.c_str());
+        last_log_time = now;
+    }
+
     if (strncmp(type, "GGA", 3) == 0) ParseGga(clean.c_str());
     else if (strncmp(type, "RMC", 3) == 0) ParseRmc(clean.c_str());
     else if (strncmp(type, "GSV", 3) == 0) ParseGsv(clean.c_str());
@@ -130,7 +141,8 @@ bool Ml307Gnss::Start(uint8_t systems) {
     urc_registered_ = true;
 
     // NMEA mask: GGA(1) + GSV(8) + RMC(16) = 25
-    uart_->SendCommand("AT+MGNSSCFG=\"nmea/mask\",25", 1000);
+    bool ok1 = uart_->SendCommand("AT+MGNSSCFG=\"nmea/mask\",25", 1000);
+    ESP_LOGI(TAG, "NMEA mask → %s", ok1 ? "OK" : "FAIL");
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // 定位系统: 1=GPS, 2=BDS, 3=GPS+BDS, 5=GPS+GLONASS, 7=ALL
@@ -139,16 +151,18 @@ bool Ml307Gnss::Start(uint8_t systems) {
     if (systems & kGnssBds) mode |= 2;
     if (systems & kGnssGlonass) mode |= 4;
     if (mode == 0) mode = 3;
-    char cmd[32];
+    char cmd[64];
     snprintf(cmd, sizeof(cmd), "AT+MGNSS=%d", mode);
-    uart_->SendCommand(cmd, 1000);
+    bool ok2 = uart_->SendCommand(cmd, 1000);
+    ESP_LOGI(TAG, "MGNSS=%d → %s", mode, ok2 ? "OK" : "FAIL");
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // 开启持续 NMEA 输出
-    uart_->SendCommand("AT+MGNSSLOC=1", 2000);
+    bool ok3 = uart_->SendCommand("AT+MGNSSLOC=1", 2000);
+    ESP_LOGI(TAG, "MGNSSLOC=1 → %s", ok3 ? "OK" : "FAIL");
 
     running_ = true;
-    ESP_LOGI(TAG, "GNSS started");
+    ESP_LOGI(TAG, "GNSS started (mode=%d, mask=25, cmd_ok=%d/%d/%d)", mode, ok1, ok2, ok3);
     return true;
 }
 

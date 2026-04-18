@@ -42,8 +42,7 @@ void McpServer::AddCommonTools() {
 
     // Do not add custom tools here.
     // Custom tools must be added in the board's InitializeTools function.
-
-    // P30: MAC 地址查询工具
+    // 获取MAC地址工具
     AddTool("self.get_mac_address",
         "Get the device MAC address.",
         PropertyList(),
@@ -61,9 +60,9 @@ void McpServer::AddCommonTools() {
             return board.GetDeviceStatusJson();
         });
 
-    // P30: AEC 控制工具
+    // AEC控制工具
     AddTool("self.audio.set_aec",
-        "Set AEC mode: 'off' (disable interrupt), 'device' (enable interrupt)",
+        "Set AEC mode: 'off' '关闭自然交流' (关闭打断), 'device' '开启自然交流' (开启任意打断)",
         PropertyList({Property("mode", kPropertyTypeString)}),
         [&board](const PropertyList& properties) -> ReturnValue {
             auto& app = Application::GetInstance();

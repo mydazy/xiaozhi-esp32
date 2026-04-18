@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <atomic>
 
 #include <esp_timer.h>
 #include <esp_pm.h>
@@ -20,10 +21,10 @@ private:
     void PowerSaveCheck();
 
     esp_timer_handle_t power_save_timer_ = nullptr;
-    bool enabled_ = false;
-    bool in_sleep_mode_ = false;
-    bool is_wake_word_running_ = false;
-    int ticks_ = 0;
+    std::atomic<bool> enabled_{false};
+    std::atomic<bool> in_sleep_mode_{false};
+    std::atomic<bool> is_wake_word_running_{false};
+    std::atomic<int> ticks_{0};
     int cpu_max_freq_;
     int seconds_to_sleep_;
     int seconds_to_shutdown_;

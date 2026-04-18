@@ -32,7 +32,7 @@ Backlight::~Backlight() {
 void Backlight::RestoreBrightness() {
     // Load brightness from settings
     Settings settings("display");  
-    int saved_brightness = settings.GetInt("brightness", 75);
+    int saved_brightness = settings.GetInt("brightness", 35);
     
     // 检查亮度值是否为0或过小，设置默认值
     if (saved_brightness <= 0) {
@@ -48,6 +48,11 @@ void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
         brightness = 100;
     }
 
+    // 非0时强制最低亮度为10%
+    if (brightness != 0 && brightness < 15) {
+        brightness = 15;
+    }
+
     if (brightness_ == brightness) {
         return;
     }
@@ -61,6 +66,7 @@ void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
     step_ = (target_brightness_ > brightness_) ? 1 : -1;
 
     if (transition_timer_ != nullptr) {
+        esp_timer_stop(transition_timer_);
         // 启动定时器，每 5ms 更新一次
         esp_timer_start_periodic(transition_timer_, 5 * 1000);
     }

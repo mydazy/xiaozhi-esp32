@@ -16,7 +16,6 @@
 #include <wifi_manager.h>
 #include <wifi_station.h>
 #include <ssid_manager.h>
-#include "afsk_demod.h"
 #ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
 #include "blufi.h"
 #endif

@@ -226,6 +226,9 @@ void GpioLed::OnStateChanged() {
             TurnOn();
             break;
         case kDeviceStateListening:
+            SetBrightness(SPEAKING_BRIGHTNESS);
+            TurnOn();
+            break;
         case kDeviceStateAudioTesting:
             if (app.IsVoiceDetected()) {
                 SetBrightness(HIGH_BRIGHTNESS);
@@ -237,7 +240,7 @@ void GpioLed::OnStateChanged() {
             break;
         case kDeviceStateSpeaking:
             SetBrightness(SPEAKING_BRIGHTNESS);
-            TurnOn();
+            StartContinuousBlink(500);
             break;
         case kDeviceStateUpgrading:
             SetBrightness(UPGRADING_BRIGHTNESS);

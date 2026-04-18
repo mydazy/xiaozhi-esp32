@@ -32,7 +32,8 @@ Application::Application() {
 #if CONFIG_USE_DEVICE_AEC && CONFIG_USE_SERVER_AEC
 #error "CONFIG_USE_DEVICE_AEC and CONFIG_USE_SERVER_AEC cannot be enabled at the same time"
 #elif CONFIG_USE_DEVICE_AEC
-    aec_mode_ = kAecOnDeviceSide;
+    Settings settings("aecMode", false);
+    aec_mode_ = (AecMode)settings.GetInt("deviceAec", 1);
 #elif CONFIG_USE_SERVER_AEC
     aec_mode_ = kAecOnServerSide;
 #else
@@ -423,7 +424,7 @@ void Application::CheckNewVersion() {
             snprintf(error_message, sizeof(error_message), "code=%d, url=%s", err, ota_->GetCheckVersionUrl().c_str());
             char buffer[256];
             snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, error_message);
-            Alert(Lang::Strings::ERROR, buffer, "cloud_slash", Lang::Sounds::OGG_EXCLAMATION);
+            Alert(Lang::Strings::ERROR, buffer, "logo", Lang::Sounds::OGG_DISCONNECT);
 
             ESP_LOGW(TAG, "Check new version failed, retry in %d seconds (%d/%d)", retry_delay, retry_count, MAX_RETRY);
             for (int i = 0; i < retry_delay; i++) {
@@ -1016,6 +1017,55 @@ void Application::AbortSpeaking(AbortReason reason) {
     }
 }
 
+void Application::CloseAudioChannel() {
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        protocol_->CloseAudioChannel();
+    }
+}
+
+void Application::SendTextToTts(const std::string& text) {
+    if (text.empty() || !protocol_) return;
+    if (!protocol_->IsAudioChannelOpened() && !protocol_->OpenAudioChannel()) {
+        ESP_LOGE(TAG, "TTS failed: OpenAudioChannel failed");
+        return;
+    }
+    protocol_->SendTextToTts(text);
+}
+
+void Application::SendTextToAI(const std::string& text) {
+    if (text.empty() || !protocol_) return;
+    if (protocol_->IsAudioChannelOpened() && protocol_->SendTextToAI(text)) {
+        return;
+    }
+    WakeWordInvoke(text);
+}
+
+bool Application::SendProtocolText(const std::string& text) {
+    if (text.empty() || !protocol_) return false;
+    return protocol_->SendRawText(text);
+}
+
+void Application::ScheduleDelayedWake(const std::string& wake_text, uint64_t delay_us) {
+    if (delayed_wake_timer_ != nullptr) {
+        esp_timer_stop(delayed_wake_timer_);
+    }
+    if (delayed_wake_timer_ == nullptr) {
+        esp_timer_create_args_t timer_args = {
+            .callback = [](void* arg) {
+                auto app = (Application*)arg;
+                app->Schedule([app]() {
+                    app->WakeWordInvoke(app->pending_wake_text_);
+                });
+            },
+            .arg = this,
+            .name = "delayed_wake",
+        };
+        esp_timer_create(&timer_args, &delayed_wake_timer_);
+    }
+    pending_wake_text_ = wake_text;
+    esp_timer_start_once(delayed_wake_timer_, delay_us);
+}
+
 void Application::SetListeningMode(ListeningMode mode) {
     listening_mode_ = mode;
     SetDeviceState(kDeviceStateListening);
@@ -1152,20 +1202,26 @@ void Application::SendMcpMessage(const std::string& payload) {
 void Application::SetAecMode(AecMode mode) {
     aec_mode_ = mode;
     Schedule([this]() {
+        Settings settings("aecMode", true);
         auto& board = Board::GetInstance();
         auto display = board.GetDisplay();
         switch (aec_mode_) {
         case kAecOff:
+            settings.SetInt("deviceAec", 0);
             audio_service_.EnableDeviceAec(false);
-            display->ShowNotification(Lang::Strings::RTC_MODE_OFF);
+            Alert(Lang::Strings::RTC_MODE_OFF, "", "", Lang::Sounds::OGG_AEC_OFF);
+            vTaskDelay(pdMS_TO_TICKS(2000));
             break;
         case kAecOnServerSide:
+            settings.SetInt("deviceAec", 0);
             audio_service_.EnableDeviceAec(false);
             display->ShowNotification(Lang::Strings::RTC_MODE_ON);
             break;
         case kAecOnDeviceSide:
+            settings.SetInt("deviceAec", 1);
             audio_service_.EnableDeviceAec(true);
-            display->ShowNotification(Lang::Strings::RTC_MODE_ON);
+            Alert(Lang::Strings::RTC_MODE_ON, "", "", Lang::Sounds::OGG_AEC_ON);
+            vTaskDelay(pdMS_TO_TICKS(2000));
             break;
         }
 

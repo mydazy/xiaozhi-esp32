@@ -88,6 +88,18 @@ void Settings::SetBool(const std::string& key, bool value) {
     }
 }
 
+float Settings::GetFloat(const std::string& key, float default_value) {
+    int32_t raw = GetInt(key, INT32_MIN);
+    if (raw == INT32_MIN) {
+        return default_value;
+    }
+    return raw / 1000.0f;
+}
+
+void Settings::SetFloat(const std::string& key, float value) {
+    SetInt(key, static_cast<int32_t>(value * 1000.0f));
+}
+
 void Settings::EraseKey(const std::string& key) {
     if (read_write_) {
         auto ret = nvs_erase_key(nvs_handle_, key.c_str());

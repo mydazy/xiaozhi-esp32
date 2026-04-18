@@ -73,6 +73,14 @@ public:
     virtual void SendStopListening();
     virtual void SendAbortSpeaking(AbortReason reason);
     virtual void SendMcpMessage(const std::string& message);
+    virtual bool SendTextToTts(const std::string& text) { return false; }
+    virtual bool SendTextToAI(const std::string& text) { return false; }
+    virtual int client_frame_duration() const { return 60; }
+    bool SendRawText(const std::string& text) { return SendText(text); }
+
+    void UpdateLastIncomingTime() {
+        last_incoming_time_ = std::chrono::steady_clock::now();
+    }
 
 protected:
     std::function<void(const cJSON* root)> on_incoming_json_;

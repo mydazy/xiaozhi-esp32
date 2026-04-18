@@ -108,6 +108,12 @@ public:
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
+    void CloseAudioChannel();
+    void SendTextToTts(const std::string& text);
+    void SendTextToAI(const std::string& text);
+    bool SendProtocolText(const std::string& text);
+    void ForceListeningMode(ListeningMode mode) { listening_mode_ = mode; }
+    void ScheduleDelayedWake(const std::string& wake_text, uint64_t delay_us);
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
@@ -135,6 +141,8 @@ private:
     std::string last_error_message_;
     AudioService audio_service_;
     std::unique_ptr<Ota> ota_;
+    esp_timer_handle_t delayed_wake_timer_ = nullptr;
+    std::string pending_wake_text_;
 
     bool has_server_time_ = false;
     bool aborted_ = false;

@@ -140,6 +140,9 @@ void SingleLed::OnStateChanged() {
             TurnOn();
             break;
         case kDeviceStateListening:
+             SetColor(0, DEFAULT_BRIGHTNESS, 0);
+             TurnOn();
+             break;
         case kDeviceStateAudioTesting:
             if (app.IsVoiceDetected()) {
                 SetColor(HIGH_BRIGHTNESS, 0, 0);
@@ -150,7 +153,7 @@ void SingleLed::OnStateChanged() {
             break;
         case kDeviceStateSpeaking:
             SetColor(0, DEFAULT_BRIGHTNESS, 0);
-            TurnOn();
+            StartContinuousBlink(500);
             break;
         case kDeviceStateUpgrading:
             SetColor(0, DEFAULT_BRIGHTNESS, 0);

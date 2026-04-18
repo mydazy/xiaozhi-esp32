@@ -12,7 +12,7 @@
 #include "freertos/task.h"
 #include "wifi_manager.h"
 
-#define BLUFI_DEVICE_NAME "Xiaozhi-Blufi"
+#define BLUFI_DEVICE_NAME "MyDazy-Blufi"
 
 #ifdef CONFIG_BT_BLUEDROID_ENABLED
 #include "esp_bt_device.h"

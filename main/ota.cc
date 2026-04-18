@@ -106,14 +106,15 @@ esp_err_t Ota::CheckVersion() {
     }
 
     auto status_code = http->GetStatusCode();
-    data = http->ReadAll();
-    http->Close();
-    long elapsed = (long)((esp_timer_get_time() - t0) / 1000);
-    ESP_LOGI(TAG, "Response: %d (%ld ms) %s", status_code, elapsed, data.empty() ? "(empty)" : data.c_str());
-
     if (status_code != 200) {
+        ESP_LOGE(TAG, "Failed to check version, status code: %d", status_code);
         return status_code;
     }
+
+    data = http->ReadAll();
+    http->Close();
+
+    ESP_LOGI(TAG, "Response: %s", data.c_str());
 
     // Response: { "firmware": { "version": "1.0.0", "url": "http://" } }
     // Parse the JSON response and check if the version is newer

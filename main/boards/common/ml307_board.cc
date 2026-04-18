@@ -260,6 +260,7 @@ std::string Ml307Board::GetDeviceStatusJson() {
     } else if (csq >= 25 && csq <= 31) {
         cJSON_AddStringToObject(network, "signal", "strong");
     }
+    cJSON_AddNumberToObject(network, "csq", csq);
     cJSON_AddItemToObject(root, "network", network);
 
     auto json_str = cJSON_PrintUnformatted(root);

@@ -1147,13 +1147,16 @@ public:
                 return;
             }
             // 等 modem 初始化完成（最多 30 秒）
+            ESP_LOGI(TAG, "GPS: waiting for modem...");
             for (int i = 0; i < 15; i++) {
                 vTaskDelay(pdMS_TO_TICKS(2000));
                 auto& ml307 = dynamic_cast<Ml307Board&>(self->GetCurrentBoard());
                 if (ml307.GetModem() != nullptr) {
+                    ESP_LOGI(TAG, "GPS: modem ready after %ds, starting GNSS", (i + 1) * 2);
                     self->StartGnss();
                     break;
                 }
+                ESP_LOGD(TAG, "GPS: modem not ready, retry %d/15", i + 1);
             }
             vTaskDelete(NULL);
         }, "gnss_init", 3072, this, 2, NULL, 0);
