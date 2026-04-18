@@ -128,6 +128,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_MYDAZY_P30_4G
         bool "MyDazy P30 4G (4G+WiFi, ES8311+ES7210)"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_MYDAZY_P30_WIFI
+        bool "MyDazy P30 WiFi (WiFi only, ES8311+ES7210)"
+        depends on IDF_TARGET_ESP32S3
 endchoice
 
 choice

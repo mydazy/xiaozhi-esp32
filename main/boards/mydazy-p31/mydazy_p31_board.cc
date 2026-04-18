@@ -215,9 +215,6 @@ private:
                 is_alarm_clock_ = true;
                 // 预留：闹钟功能
                 break;
-            case ESP_SLEEP_WAKEUP_ULP:
-                ESP_LOGI(TAG, "从 ULP 唤醒");
-                break;
             default:
                 ESP_LOGI(TAG, "首次启动或复位 (原因=%u)", wakeup_reason);
                 first_boot_ = true;

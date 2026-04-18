@@ -19,9 +19,6 @@
                 "CONFIG_MBEDTLS_DHM_C=y",
                 "CONFIG_SPIRAM=y",
                 "CONFIG_SPIRAM_MODE_OCT=y",
-                "CONFIG_ULP_COPROC_ENABLED=y",
-                "CONFIG_ESP32S3_ULP_COPROC_ENABLED=y",
-                "CONFIG_ESP32S3_ULP_COPROC_RISCV=y",
                 "CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y"
             ]
         }

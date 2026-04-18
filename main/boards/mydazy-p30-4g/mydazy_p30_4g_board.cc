@@ -176,9 +176,6 @@ private:
                 ESP_LOGI(TAG, "从定时器唤醒");
                 is_alarm_clock_ = true;
                 break;
-            case ESP_SLEEP_WAKEUP_ULP:
-                ESP_LOGI(TAG, "从 ULP 唤醒");
-                break;
             default:
                 ESP_LOGI(TAG, "首次启动或复位 (原因=%u)", wakeup_reason);
                 first_boot_ = true;
@@ -744,7 +741,7 @@ public:
         Settings wifi_settings("wifi", true);
         wifi_settings.SetInt("blufi", 1);
 
-        ESP_LOGI(TAG, "MyDazy P30 4G 初始化完成 (ES8311+ES7210, 支持4G、ULP、电源管理、触摸屏)");
+        ESP_LOGI(TAG, "MyDazy P30 4G 初始化完成 (ES8311+ES7210, 支持4G、电源管理、触摸屏)");
 
         // 首次开机欢迎音
         if (first_boot_) {

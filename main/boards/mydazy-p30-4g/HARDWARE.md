@@ -168,16 +168,10 @@
 - **检测**：
   - 电压：ADC1_CH7（GPIO8）读取分压后的电池电压
   - 充电：GPIO21 电平检测（高=充电中）
-- **深睡**：ESP32 Deep Sleep + ULP RISC-V 协处理器
+- **深睡**：ESP32 Deep Sleep（原生 wake source，未启用 ULP 协处理器）
 - **唤醒源**：
   1. EXT0/EXT1：BOOT 键 + SC7A20H 中断
-  2. TIMER：定时器唤醒（闹钟/分段校时）
-  3. ULP：RISC-V 低功耗检测按键（200ms 轮询）
-
-### 3.7 ULP 协处理器
-- **架构**：RISC-V ULP（ESP32-S3 特性）
-- **周期**：200ms 唤醒一次
-- **用途**：深睡期间轮询按键/传感器，降低主 CPU 唤醒频率
+  2. TIMER：定时器唤醒（闹钟/定时上报）
 
 ---
 
@@ -229,11 +223,10 @@
 4. **TE 信号已引出** — 硬件预留 VSYNC，未来可解决撕裂
 5. **音频独立电源控制** — LDO 软件开关，深睡完全断电降低待机功耗
 6. **PA 独立使能** — 不播放时关闭 PA，降低底噪和电流
-7. **ULP 协处理器利用** — ESP32-S3 专属能力，主 CPU 睡眠时 ULP 轮询
-8. **SPI 单向传输** — 省掉 MISO 引脚（LCD 不需要读）
-9. **BOOT 键多功能复用** — 一个物理按键通过软件区分单击/双击/长按
-10. **多唤醒源** — EXT0/EXT1/TIMER/ULP 组合，应对多种使用场景
-11. **触摸硬件 INT 确认** — 避免 4G RF 干扰导致的 I2C 伪触发
+7. **SPI 单向传输** — 省掉 MISO 引脚（LCD 不需要读）
+8. **BOOT 键多功能复用** — 一个物理按键通过软件区分单击/双击/长按
+9. **多唤醒源** — EXT0/EXT1/TIMER 组合，应对多种使用场景
+10. **触摸硬件 INT 确认** — 避免 4G RF 干扰导致的 I2C 伪触发
 
 ---
 
@@ -379,7 +372,6 @@
 |------|-----|------|
 | 音频采样率 | 24000 Hz | `config.h` |
 | 显示刷新 | LVGL 33ms 周期 | `config.json` `CONFIG_LV_DEF_REFR_PERIOD=33` |
-| ULP 唤醒周期 | 200ms | `InitUlpProgram()` |
 | 触摸 I2C 速率 | 400 kHz | `config.h` |
 | SPI DMA 分片 | 284×48×2 = 27.3KB | `InitializeSpi()` |
 | SPIFFS 挂载 | /storage | `CONFIG_SPIFFS_BASE_PATH` |
