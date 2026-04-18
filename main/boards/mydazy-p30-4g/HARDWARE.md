@@ -84,7 +84,7 @@
 | **18** | I2S_DIN | IN | I2S 录音数据（ES7210→） | |
 | 19 | — | USB D- | 内部 USB | ESP32-S3 USB-OTG |
 | 20 | — | USB D+ | 内部 USB | ESP32-S3 USB-OTG |
-| **21** | CHARGE_DET | IN | 充电状态检测（高=充电） | |
+| **21** | CHARGE_DET | IN | 充电状态检测（**低=充电中**，开漏输出 + 内部上拉） | |
 | 26-32 | — | SPI Flash/PSRAM | ESP32-S3 内部占用 | 不可用 |
 | 33-37 | — | Octal PSRAM | 若使用 Octal PSRAM | 部分可能占用 |
 | **38** | LCD_MOSI | SPI OUT | LCD SPI 数据 | |
@@ -167,7 +167,7 @@
 - **电池**：1000mAh（小容量，续航约 2-4 小时对话）
 - **检测**：
   - 电压：ADC1_CH7（GPIO8）读取分压后的电池电压
-  - 充电：GPIO21 电平检测（高=充电中）
+  - 充电：GPIO21 电平检测（**低=充电中**，充电芯片开漏输出，ESP32 内部上拉拉高表示未充电）
 - **深睡**：ESP32 Deep Sleep（原生 wake source，未启用 ULP 协处理器）
 - **唤醒源**：
   1. EXT0/EXT1：BOOT 键 + SC7A20H 中断

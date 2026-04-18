@@ -7,7 +7,7 @@
 
 // MyDazy UI硬件能力定义（编译时确定，运行时可检测更新）
 #define MYDAZY_HAS_TOUCH       1    // 触摸屏支持
-#define MYDAZY_HAS_4G_CAPABLE  1    // 4G模块支持（可能存在）
+#define MYDAZY_HAS_4G_CAPABLE  0    // 4G模块支持（WiFi版本无4G）
 #define MYDAZY_HAS_ACCELEROMETER 1  // 加速度计支持
 #define MYDAZY_HAS_BATTERY     1    // 电池支持
 
@@ -18,7 +18,7 @@
 #define CONFIG_EN_SC7A20H_WAKE  1     // 启用SC7A20H传感器唤醒功能
 
 // ============================================================
-// 音频系统配置（ES8311 DAC + ES7210 ADC，老版本硬件）
+// 音频系统配置（ES8311 DAC + ES7210 ADC，与4G版硬件相同）
 // ============================================================
 
 // 音频采样率配置
@@ -27,7 +27,7 @@
 #define AUDIO_INPUT_REFERENCE    true    // 音频输入参考
 
 // ===== GPIO配置 =====
-#define AUDIO_PWR_EN_GPIO       GPIO_NUM_9     // 音频芯片电源控制
+#define AUDIO_PWR_EN_GPIO       GPIO_NUM_9     // 音频芯片电源控制（LDO总开关，LCD+音频共用）
 #define AUDIO_CODEC_PA_PIN      GPIO_NUM_10    // PA功放使能
 
 // I2S接口
@@ -87,25 +87,10 @@
 #define TOUCH_MIRROR_Y     false               // 触摸Y轴镜像
 // 注意：触摸屏与音频编解码器共用I2C总线（GPIO11/GPIO12，外部10kΩ上拉）
 
-// 触摸屏坐标变换（独立于显示配置，根据触摸芯片安装方向调整）
-#define TOUCH_SWAP_XY      false               // 交换XY坐标（逆向旋转）
-#define TOUCH_MIRROR_X     false               // X轴镜像
-#define TOUCH_MIRROR_Y     false               // Y轴镜像
-
-// ============================================================
-// 4G模块配置（ML307R）
-// ============================================================
-#define ML307_IS_EXIST   1                     // ML307模块存在标志
-#define ML307_RX_PIN     GPIO_NUM_1            // ML307 UART接收引脚（ESP32 TX -> ML307 RX）
-#define ML307_TX_PIN     GPIO_NUM_2            // ML307 UART发送引脚（ESP32 RX <- ML307 TX）
-#define ML307R_PWR_GPIO  GPIO_NUM_NC           // ML307 电源控制（未连接，模块常供电）
-#define ML307_RST_GPIO   GPIO_NUM_NC           // ML307 复位引脚（未连接，软件复位）
-// 注意：ML307模块无DTR引脚，深度睡眠后无法通过UART自动唤醒，依赖模块自身电源管理
-
 // ============================================================
 // 电源管理配置
 // ============================================================
-#define POWER_MANAGER_GPIO  GPIO_NUM_21    // 充电状态检测（低电平=充电中，开漏+内部上拉）
+#define POWER_MANAGER_GPIO  GPIO_NUM_21    // 充电状态检测（低电平=充电中，与 P30-4G 同款电路）
 #define BATTERY_ADC_GPIO    GPIO_NUM_8     // 电池电压ADC检测（ADC1_CHANNEL_7）
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_7  // ADC通道（对应GPIO8）
 #define BATTERY_CAPACITY_MAH 1000          // 电池容量（mAh）

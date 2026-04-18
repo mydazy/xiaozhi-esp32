@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include <functional>
+#include <algorithm>
+#include <cctype>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -99,10 +101,11 @@ Blufi::Blufi() {
     }
 
     #ifdef CONFIG_BT_NIMBLE_ENABLED
-    // 使用统一方法获取MAC地址后4位
-    std::string mac_last4 = SystemInfo::GetMacAddressLast4();
+    // MAC 后 4 位（大写无冒号），用于蓝牙设备名后缀
+    auto mac = SystemInfo::GetMacAddress();
+    std::string mac_last4 = mac.substr(12, 2) + mac.substr(15, 2);
+    std::transform(mac_last4.begin(), mac_last4.end(), mac_last4.begin(), ::toupper);
     char name[32] = {0};
-    // 使用动态前缀生成蓝牙名称，支持中文
     snprintf(name, sizeof(name), "%s_%s", ssid_prefix_.c_str(), mac_last4.c_str());
     ret = ble_svc_gap_device_name_set(name);
     if (ret == ESP_OK) {
@@ -124,8 +127,9 @@ void Blufi::SetSsidPrefix(const std::string& prefix) {
     ssid_prefix_ = prefix;
 
     #ifdef CONFIG_BT_NIMBLE_ENABLED
-    // 更新蓝牙设备名称 - 使用统一方法
-    std::string mac_last4 = SystemInfo::GetMacAddressLast4();
+    auto mac = SystemInfo::GetMacAddress();
+    std::string mac_last4 = mac.substr(12, 2) + mac.substr(15, 2);
+    std::transform(mac_last4.begin(), mac_last4.end(), mac_last4.begin(), ::toupper);
     char name[32] = {0};
     snprintf(name, sizeof(name), "%s_%s", ssid_prefix_.c_str(), mac_last4.c_str());
 
