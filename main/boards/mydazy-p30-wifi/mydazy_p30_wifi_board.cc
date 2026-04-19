@@ -224,7 +224,7 @@ private:
             return;
         }
 
-        touch_driver_->SetTouchCallback([this]() {
+        touch_driver_->SetWakeCallback([this]() {
             WakeUp();
         });
 
