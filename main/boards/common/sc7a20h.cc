@@ -123,10 +123,6 @@ bool Sc7a20h::SetMotionDetection(bool enable) {
     return true;
 }
 
-void Sc7a20h::SetWakeupCallback(WakeupCallback callback) {
-    wakeup_callback_ = callback;
-}
-
 bool Sc7a20h::EnterPowerDown() {
     if (!initialized_) {
         return false;

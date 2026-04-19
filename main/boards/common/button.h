@@ -17,7 +17,13 @@ public:
 
     void OnPressDown(std::function<void()> callback);
     void OnPressUp(std::function<void()> callback);
-    void OnLongPress(std::function<void()> callback);
+    /**
+     * @brief 注册长按回调
+     * @param callback 回调函数
+     * @param press_time_ms 触发时长(ms)。0 = 使用构造时设的默认 long_press_time_ms。
+     *                      传不同的 press_time_ms 可注册多个长按时间点（互不冲突）。
+     */
+    void OnLongPress(std::function<void()> callback, uint16_t press_time_ms = 0);
     void OnClick(std::function<void()> callback);
     void OnDoubleClick(std::function<void()> callback);
     void OnMultipleClick(std::function<void()> callback, uint8_t click_count = 3);
@@ -28,10 +34,10 @@ protected:
 
     std::function<void()> on_press_down_;
     std::function<void()> on_press_up_;
-    std::function<void()> on_long_press_;
     std::function<void()> on_click_;
     std::function<void()> on_double_click_;
-    std::map<uint8_t, std::function<void()>> multiple_click_callbacks_;  // 支持多个不同click_count的回调
+    std::map<uint8_t, std::function<void()>> multiple_click_callbacks_;
+    std::map<uint16_t, std::function<void()>> long_press_callbacks_;  // press_time_ms → callback
 };
 
 #if CONFIG_SOC_ADC_SUPPORTED

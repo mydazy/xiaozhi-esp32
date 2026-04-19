@@ -67,17 +67,31 @@ void Button::OnPressUp(std::function<void()> callback) {
     }, this);
 }
 
-void Button::OnLongPress(std::function<void()> callback) {
+void Button::OnLongPress(std::function<void()> callback, uint16_t press_time_ms) {
     if (button_handle_ == nullptr) {
         return;
     }
-    on_long_press_ = callback;
-    iot_button_register_cb(button_handle_, BUTTON_LONG_PRESS_START, nullptr, [](void* handle, void* usr_data) {
-        Button* button = static_cast<Button*>(usr_data);
-        if (button->on_long_press_) {
-            button->on_long_press_();
-        }
-    }, this);
+
+    long_press_callbacks_[press_time_ms] = callback;
+
+    button_event_args_t event_args = {};
+    event_args.long_press.press_time = press_time_ms;
+
+    struct CallbackContext {
+        Button* button;
+        uint16_t press_time_ms;
+    };
+    auto* context = new CallbackContext{this, press_time_ms};
+
+    iot_button_register_cb(button_handle_, BUTTON_LONG_PRESS_START, &event_args,
+        [](void* handle, void* usr_data) {
+            auto* ctx = static_cast<CallbackContext*>(usr_data);
+            auto it = ctx->button->long_press_callbacks_.find(ctx->press_time_ms);
+            if (it != ctx->button->long_press_callbacks_.end() && it->second) {
+                ESP_LOGI(TAG, "长按 %u ms 触发", ctx->press_time_ms);
+                it->second();
+            }
+        }, context);
 }
 
 void Button::OnClick(std::function<void()> callback) {

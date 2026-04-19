@@ -63,7 +63,6 @@ list(APPEND SOURCES
     "boards/common/ml307_gnss.cc"
     "boards/common/typec_headset.cc"
     "boards/common/sc7a20h.cc"
-    "boards/common/rtc_wake_stub.cc"
 )
 list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/common)
 

@@ -18,7 +18,6 @@
 #include "power_save_timer.h"
 #include "power_manager.h"
 #include "mcp_server.h"
-#include "rtc_wake_stub.h"
 #include "ota.h"
 #include "assets.h"
 #include <font_awesome.h>
@@ -84,6 +83,7 @@ private:
 
     bool first_boot_ = false;
     bool is_alarm_clock_ = false;
+    bool boot_long_press_confirmed_ = false;  // 开机长按 2 秒确认标记，影响欢迎音
 
     // 音量调节任务（多核共享，用 atomic）
     TaskHandle_t vol_up_task_ = nullptr;
@@ -94,6 +94,9 @@ private:
     // 长按录音状态跟踪（按键线程 vs 主循环）
     std::atomic<bool> is_recording_for_test_{false};
     std::atomic<bool> is_recording_for_send_{false};
+
+    // 关机三段长按状态（3秒提醒、5秒执行、PressUp 取消）
+    std::atomic<bool> shutdown_armed_{false};
 
     // 欢迎音异步任务句柄
     std::atomic<TaskHandle_t> welcome_task_handle_{nullptr};
@@ -144,6 +147,12 @@ private:
             case ESP_SLEEP_WAKEUP_EXT0:
                 ESP_LOGI(TAG, "从开机键唤醒");
                 first_boot_ = true;
+                // 按 BOOT 键唤醒时，要求持续按住 2 秒才真正开机（防止口袋误触）
+                if (!CheckBootHoldOnWakeup()) {
+                    ESP_LOGI(TAG, "开机长按未达 2 秒，立即回深睡");
+                    EnterDeepSleep(true);  // 不会返回
+                }
+                boot_long_press_confirmed_ = true;
                 break;
             case ESP_SLEEP_WAKEUP_EXT1:
                 ESP_LOGI(TAG, "从陀螺仪唤醒");
@@ -153,14 +162,41 @@ private:
                 ESP_LOGI(TAG, "从定时器唤醒");
                 is_alarm_clock_ = true;
                 break;
-            case ESP_SLEEP_WAKEUP_ULP:
-                ESP_LOGI(TAG, "从 ULP 唤醒");
-                break;
             default:
                 ESP_LOGI(TAG, "首次启动或复位 (原因=%u)", wakeup_reason);
                 first_boot_ = true;
                 break;
         }
+    }
+
+    // 开机长按 2 秒检测：返回 true=按够 2 秒可开机，false=未到 2 秒应回深睡
+    bool CheckBootHoldOnWakeup() {
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&io_conf);
+
+        if (gpio_get_level(BOOT_BUTTON_GPIO) != 0) {
+            // 唤醒瞬间已经松开（按一下就放）→ 不开机
+            return false;
+        }
+
+        const int kHoldRequiredMs = 2000;
+        const int kStepMs = 50;
+        int elapsed = 0;
+        while (elapsed < kHoldRequiredMs) {
+            vTaskDelay(pdMS_TO_TICKS(kStepMs));
+            if (gpio_get_level(BOOT_BUTTON_GPIO) != 0) {
+                return false;  // 中途松开 → 不开机
+            }
+            elapsed += kStepMs;
+        }
+        ESP_LOGI(TAG, "开机长按 2 秒确认，准备启动");
+        return true;
     }
 
     void InitializeGpio() {
@@ -212,17 +248,6 @@ private:
 
         if (sc7a20h_sensor_->Initialize()) {
             ESP_LOGI(TAG, "SC7A20H传感器初始化成功");
-
-            sc7a20h_sensor_->SetWakeupCallback([this]() {
-                static uint64_t last_wakeup_time = 0;
-                uint64_t current_time = esp_timer_get_time();
-                if (current_time - last_wakeup_time > 500000) {
-                    last_wakeup_time = current_time;
-                    WakeUp();
-                    ESP_LOGI(TAG, "SC7A20H触发设备唤醒");
-                }
-            });
-
             sc7a20h_sensor_->SetMotionDetection(true);
             sc7a20h_initialized_ = true;
         } else {
@@ -419,8 +444,6 @@ private:
 
         ResetAllGpiosForSleep();
 
-        esp_set_deep_sleep_wake_stub(&wake_stub);
-
         ESP_LOGI(TAG, "准备进入深度睡眠");
         vTaskDelay(pdMS_TO_TICKS(200));
         esp_deep_sleep_start();
@@ -569,6 +592,12 @@ private:
 
     void HandleBootPressUp() {
         auto& app = Application::GetInstance();
+        // 关机倒计时未到 5 秒就松开 → 取消
+        if (shutdown_armed_.exchange(false)) {
+            ESP_LOGI(TAG, "关机倒计时取消");
+            app.PlaySound(Lang::Sounds::OGG_POPUP);
+            return;
+        }
         if (is_recording_for_test_.exchange(false)) {
             app.SetDeviceState(kDeviceStateAudioTesting);
             app.StopListening();
@@ -579,6 +608,31 @@ private:
         }
     }
 
+    // 长按 3 秒：提醒"再按 2 秒关机"，同时停止录音避免冲突
+    void HandleBootLongPress3s_ShutdownWarn() {
+        auto& app = Application::GetInstance();
+
+        // 停掉可能的录音（不发送）
+        if (is_recording_for_send_.exchange(false) || is_recording_for_test_.exchange(false)) {
+            app.StopListening();
+        }
+
+        shutdown_armed_.store(true);
+        ESP_LOGI(TAG, "长按 3 秒：关机倒计时开始");
+        app.Alert("再按 2 秒关机", "继续按住...", "logo", Lang::Sounds::OGG_SHUTDOWN);
+    }
+
+    // 长按 5 秒：真正关机
+    void HandleBootLongPress5s_ShutdownConfirm() {
+        if (!shutdown_armed_.load()) return;
+        shutdown_armed_.store(false);
+        ESP_LOGI(TAG, "长按 5 秒：执行关机");
+        AbortIfSpeaking();
+        Application::GetInstance().Alert("关机中", "拜拜^-^", "", Lang::Sounds::OGG_SHUTDOWN);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        EnterDeepSleep(false);
+    }
+
     void InitializeButtons() {
         boot_button_.OnClick([this]() { HandleBootClick(); });
         boot_button_.OnDoubleClick([this]() { HandleBootDoubleClick(); });
@@ -586,7 +640,10 @@ private:
         boot_button_.OnMultipleClick([this]() { HandleBootMultiClick4_PowerOff(); }, 4);
         boot_button_.OnMultipleClick([this]() { HandleBootMultiClick6_AudioTest(); }, 6);
         boot_button_.OnMultipleClick([this]() { HandleBootMultiClick9_FactoryReset(); }, 9);
-        boot_button_.OnLongPress([this]() { HandleBootLongPress(); });
+        // 长按多段：0.7s 录音、3s 关机提醒、5s 真正关机
+        boot_button_.OnLongPress([this]() { HandleBootLongPress(); }, 700);
+        boot_button_.OnLongPress([this]() { HandleBootLongPress3s_ShutdownWarn(); }, 3000);
+        boot_button_.OnLongPress([this]() { HandleBootLongPress5s_ShutdownConfirm(); }, 5000);
         boot_button_.OnPressUp([this]() { HandleBootPressUp(); });
 
         volume_up_button_.OnClick([this]() { AdjustVolume(+10); });
@@ -757,7 +814,7 @@ private:
 public:
     MyDazyP30_4GBoard() :
         DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC, 1),
-        boot_button_(BOOT_BUTTON_GPIO, false, 1500, 400),
+        boot_button_(BOOT_BUTTON_GPIO, false, 800, 400),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
 

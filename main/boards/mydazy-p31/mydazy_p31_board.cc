@@ -18,7 +18,6 @@
 #include "power_save_timer.h"
 #include "power_manager.h"
 #include "mcp_server.h"
-#include "rtc_wake_stub.h"
 #include "ota.h"
 #include "assets.h"
 #include "esp_nfc_ws1850s.h"
@@ -231,20 +230,7 @@ private:
         if (sc7a20h_sensor_->Initialize()) {
             ESP_LOGI(TAG, "SC7A20H传感器初始化成功");
 
-            // 设置唤醒回调，添加防抖处理
-            sc7a20h_sensor_->SetWakeupCallback([this]() {
-                static uint64_t last_wakeup_time = 0;
-                uint64_t current_time = esp_timer_get_time();
-
-                // 防抖：500ms内只允许一次唤醒
-                if (current_time - last_wakeup_time > 500000) {
-                    last_wakeup_time = current_time;
-                    WakeUp();
-                    ESP_LOGI(TAG, "SC7A20H触发设备唤醒");
-                }
-            });
-
-            // 启用运动检测，设置更严格的阈值
+            // 启用运动检测（INT1 → ESP32 GPIO，深睡时通过 ext1_wakeup 唤醒主 CPU）
             sc7a20h_sensor_->SetMotionDetection(true);
             sc7a20h_initialized_ = true;
             ESP_LOGI(TAG, "SC7A20H传感器初始化完成，已启用防抖处理和运动检测");
@@ -509,9 +495,7 @@ private:
 
         ESP_LOGI(TAG, "[6/8] 音频和显示系统已完全关闭");
 
-        // 9. 设置 Wake Stub
-        esp_set_deep_sleep_wake_stub(&wake_stub);
-        // 10. 最终等待，确保所有操作完成
+        // 最终等待，确保所有操作完成
         ESP_LOGI(TAG, "准备进入深度睡眠");
         vTaskDelay(pdMS_TO_TICKS(200)); // 确保所有日志输出完成
 

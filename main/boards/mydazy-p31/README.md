@@ -33,7 +33,6 @@ main/boards/mydazy-p30/
 ├── 📄 config.h                    # 硬件配置（GPIO、显示、音频等）
 ├── 📄 config.json                 # 构建配置（目标芯片、编译选项）
 ├── 📄 mydazy_p30_board.cc         # 开发板实现（核心逻辑）
-├── 📄 rtc_wake_stub.c/.h          # RTC唤醒功能
 ├── 📄 README.md                   # 使用说明（本文件）
 ├── 📂 ui/                     # UI资源系统
 │   ├── ui_assets.h/.c             # 资源管理接口

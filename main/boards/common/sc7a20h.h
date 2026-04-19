@@ -2,7 +2,6 @@
 #define __SC7A20H_H__
 
 #include "i2c_device.h"
-#include <functional>
 
 /**
  * @brief SC7A20H 三轴加速度计传感器类
@@ -10,10 +9,6 @@
  * 简化版本，专注于基本的运动检测和唤醒功能
  */
 class Sc7a20h : public I2cDevice {
-public:
-    // 简化的中断回调函数类型
-    using WakeupCallback = std::function<void()>;
-
 public:
     /**
      * @brief 构造函数
@@ -35,16 +30,14 @@ public:
 
     /**
      * @brief 启用/禁用运动检测中断
+     *
+     * INT1 引脚连到 ESP32 RTC GPIO，深睡时通过 esp_sleep_enable_ext1_wakeup 唤醒主 CPU。
+     * Active 模式不监听该引脚（主 CPU 已在跑，无需"再次唤醒"）。
+     *
      * @param enable true启用, false禁用
      * @return true 成功, false 失败
      */
     bool SetMotionDetection(bool enable);
-
-    /**
-     * @brief 设置唤醒回调
-     * @param callback 回调函数
-     */
-    void SetWakeupCallback(WakeupCallback callback);
 
     /**
      * @brief 进入低功耗模式
@@ -59,14 +52,9 @@ public:
     bool ExitPowerDown();
 
 private:
-    // 私有成员变量
     bool initialized_;
     bool motion_detection_enabled_;
-    
-    // 回调函数
-    WakeupCallback wakeup_callback_;
 
-    // 私有方法
     bool CheckDeviceId();
     bool ConfigureSensor();
 };

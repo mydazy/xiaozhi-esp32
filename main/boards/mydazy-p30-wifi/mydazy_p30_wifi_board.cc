@@ -16,7 +16,6 @@
 #include "power_save_timer.h"
 #include "power_manager.h"
 #include "mcp_server.h"
-#include "rtc_wake_stub.h"
 #include "ota.h"
 #include "assets.h"
 #include <font_awesome.h>
@@ -186,17 +185,6 @@ private:
 
         if (sc7a20h_sensor_->Initialize()) {
             ESP_LOGI(TAG, "SC7A20H传感器初始化成功");
-
-            sc7a20h_sensor_->SetWakeupCallback([this]() {
-                static uint64_t last_wakeup_time = 0;
-                uint64_t current_time = esp_timer_get_time();
-                if (current_time - last_wakeup_time > 500000) {
-                    last_wakeup_time = current_time;
-                    WakeUp();
-                    ESP_LOGI(TAG, "SC7A20H触发设备唤醒");
-                }
-            });
-
             sc7a20h_sensor_->SetMotionDetection(true);
             sc7a20h_initialized_ = true;
         } else {
@@ -414,9 +402,6 @@ private:
             .intr_type = GPIO_INTR_DISABLE
         };
         gpio_config(&input_conf);
-
-        // 设置 Wake Stub
-        esp_set_deep_sleep_wake_stub(&wake_stub);
 
         ESP_LOGI(TAG, "准备进入深度睡眠");
         vTaskDelay(pdMS_TO_TICKS(200));
