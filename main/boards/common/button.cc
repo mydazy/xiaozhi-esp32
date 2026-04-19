@@ -74,16 +74,22 @@ void Button::OnLongPress(std::function<void()> callback, uint16_t press_time_ms)
 
     long_press_callbacks_[press_time_ms] = callback;
 
-    button_event_args_t event_args = {};
-    event_args.long_press.press_time = press_time_ms;
-
     struct CallbackContext {
         Button* button;
         uint16_t press_time_ms;
     };
     auto* context = new CallbackContext{this, press_time_ms};
 
-    iot_button_register_cb(button_handle_, BUTTON_LONG_PRESS_START, &event_args,
+    // press_time_ms == 0 时传 nullptr，iot_button 使用构造时的默认 long_press_time
+    // press_time_ms > 0 时传具体值，注册多个时长点
+    button_event_args_t event_args = {};
+    button_event_args_t* event_args_ptr = nullptr;
+    if (press_time_ms > 0) {
+        event_args.long_press.press_time = press_time_ms;
+        event_args_ptr = &event_args;
+    }
+
+    iot_button_register_cb(button_handle_, BUTTON_LONG_PRESS_START, event_args_ptr,
         [](void* handle, void* usr_data) {
             auto* ctx = static_cast<CallbackContext*>(usr_data);
             auto it = ctx->button->long_press_callbacks_.find(ctx->press_time_ms);
