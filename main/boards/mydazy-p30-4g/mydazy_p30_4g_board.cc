@@ -46,7 +46,27 @@
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
 
+#include <atomic>
+
 #define TAG "MyDazyP30_4GBoard"
+
+namespace {
+// 常量
+constexpr int      kDefaultVolume              = 80;
+constexpr int      kMinValidVolume             = 50;
+constexpr uint64_t kStatusReportIntervalUs     = 90ULL * 1000000ULL;  // 90s
+constexpr uint64_t kFactoryResetConfirmWindowUs = 15ULL * 1000000ULL; // 15s
+constexpr int      kVolumeTaskStepMs           = 200;
+constexpr int      kVolumeTaskExitWaitMs       = 500;
+
+// 小工具：处于 Speaking 时先 Abort，避免状态冲突
+inline void AbortIfSpeaking() {
+    auto& app = Application::GetInstance();
+    if (app.GetDeviceState() == kDeviceStateSpeaking) {
+        app.AbortSpeaking(kAbortReasonNone);
+    }
+}
+}  // namespace
 
 class MyDazyP30_4GBoard : public DualNetworkBoard {
 private:
@@ -72,24 +92,30 @@ private:
 
     bool first_boot_ = false;
     bool is_alarm_clock_ = false;
-    time_t start_time_;
 
-    // 音量调节任务
+    // 音量调节任务（多核共享，用 atomic）
     TaskHandle_t vol_up_task_ = nullptr;
     TaskHandle_t vol_down_task_ = nullptr;
-    volatile bool vol_up_running_ = false;
-    volatile bool vol_down_running_ = false;
+    std::atomic<bool> vol_up_running_{false};
+    std::atomic<bool> vol_down_running_{false};
 
-    // 长按录音状态跟踪
-    volatile bool is_recording_for_test_ = false;
-    volatile bool is_recording_for_send_ = false;
+    // 长按录音状态跟踪（按键线程 vs 主循环）
+    std::atomic<bool> is_recording_for_test_{false};
+    std::atomic<bool> is_recording_for_send_{false};
 
     // 欢迎音异步任务句柄
-    volatile TaskHandle_t welcome_task_handle_ = nullptr;
+    std::atomic<TaskHandle_t> welcome_task_handle_{nullptr};
 
     // 恢复出厂设置确认状态
-    volatile bool waiting_factory_reset_confirm_ = false;
+    std::atomic<bool> waiting_factory_reset_confirm_{false};
     uint64_t factory_reset_request_time_ = 0;
+
+    // 状态定时上报
+    esp_timer_handle_t status_timer_ = nullptr;
+
+    // ========================================================
+    // 硬件初始化
+    // ========================================================
 
     void InitializeI2c() {
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -120,6 +146,31 @@ private:
         ESP_ERROR_CHECK(spi_bus_initialize(DISPLAY_SPI_HOST, &buscfg, SPI_DMA_DISABLED));
     }
 
+    void HandleWakeupCause() {
+        esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+        switch (wakeup_reason) {
+            case ESP_SLEEP_WAKEUP_EXT0:
+                ESP_LOGI(TAG, "从开机键唤醒");
+                first_boot_ = true;
+                break;
+            case ESP_SLEEP_WAKEUP_EXT1:
+                ESP_LOGI(TAG, "从陀螺仪唤醒");
+                first_boot_ = true;
+                break;
+            case ESP_SLEEP_WAKEUP_TIMER:
+                ESP_LOGI(TAG, "从定时器唤醒");
+                is_alarm_clock_ = true;
+                break;
+            case ESP_SLEEP_WAKEUP_ULP:
+                ESP_LOGI(TAG, "从 ULP 唤醒");
+                break;
+            default:
+                ESP_LOGI(TAG, "首次启动或复位 (原因=%u)", wakeup_reason);
+                first_boot_ = true;
+                break;
+        }
+    }
+
     void InitializeGpio() {
         // 先关闭背光，防止重启后显示随机GRAM数据
         gpio_reset_pin(DISPLAY_BACKLIGHT);
@@ -131,7 +182,7 @@ private:
         gpio_set_direction(AUDIO_CODEC_PA_PIN, GPIO_MODE_OUTPUT);
         gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
 
-        // 配置音频电源GPIO为输出模式
+        // 配置音频电源GPIO为输出模式（LDO 总开关，控制 LCD+音频+4G VDD_EXT）
         gpio_config_t output_conf = {
             .pin_bit_mask = (1ULL << AUDIO_PWR_EN_GPIO),
             .mode = GPIO_MODE_OUTPUT,
@@ -150,9 +201,8 @@ private:
 
         // 音频芯片上电稳定时间 200ms（ES8311/ES7210 datasheet 建议）
         vTaskDelay(pdMS_TO_TICKS(200));
-        ESP_LOGI(TAG, "音频电源稳定，I2C通信就绪");
 
-        // 配置TE输入GPIO
+        // 配置TE输入GPIO（当前未启用 VSYNC，硬件预留）
         gpio_config_t input_conf = {
             .pin_bit_mask = (1ULL << DISPLAY_LCD_TE),
             .mode = GPIO_MODE_INPUT,
@@ -162,25 +212,7 @@ private:
         };
         gpio_config(&input_conf);
 
-        esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-        switch (wakeup_reason) {
-            case ESP_SLEEP_WAKEUP_EXT0:
-                ESP_LOGI(TAG, "从开机键唤醒");
-                first_boot_ = true;
-                break;
-            case ESP_SLEEP_WAKEUP_EXT1:
-                ESP_LOGI(TAG, "从陀螺仪唤醒");
-                first_boot_ = true;
-                break;
-            case ESP_SLEEP_WAKEUP_TIMER:
-                ESP_LOGI(TAG, "从定时器唤醒");
-                is_alarm_clock_ = true;
-                break;
-            default:
-                ESP_LOGI(TAG, "首次启动或复位 (原因=%u)", wakeup_reason);
-                first_boot_ = true;
-                break;
-        }
+        HandleWakeupCause();
     }
 
     void InitializeSc7a20h() {
@@ -244,51 +276,39 @@ private:
 
         touch_driver_->SetGestureCallback([this](TouchGesture gesture, int16_t x, int16_t y) {
             WakeUp();
-
-            switch (gesture) {
-                case TouchGesture::SingleClick: {
-                    Settings settings("status", false);
-                    int touch_interrupt = settings.GetInt("touchInterrupt", 1);
-                    if (!touch_interrupt) break;
-
-                    auto& app = Application::GetInstance();
-                    auto state = app.GetDeviceState();
-
-                    if (state == kDeviceStateIdle) {
-                        ESP_LOGI(TAG, "单击唤醒对话");
-                        app.PlaySound(Lang::Sounds::OGG_WAKEUP);
-                        vTaskDelay(pdMS_TO_TICKS(800));
-                        app.ToggleChatState();
-                    } else if (state == kDeviceStateSpeaking) {
-                        ESP_LOGI(TAG, "单击打断TTS");
-                        app.AbortSpeaking(kAbortReasonNone);
-                    }
-                    break;
-                }
-                default:
-                    break;
+            if (gesture == TouchGesture::SingleClick) {
+                HandleTouchSingleClick();
             }
         });
 
         ESP_LOGI(TAG, "触摸屏初始化完成");
     }
 
+    void HandleTouchSingleClick() {
+        Settings settings("status", false);
+        int touch_interrupt = settings.GetInt("touchInterrupt", 1);
+        if (!touch_interrupt) return;
+
+        auto& app = Application::GetInstance();
+        auto state = app.GetDeviceState();
+
+        if (state == kDeviceStateIdle) {
+            ESP_LOGI(TAG, "单击唤醒对话");
+            app.PlaySound(Lang::Sounds::OGG_WAKEUP);
+            vTaskDelay(pdMS_TO_TICKS(800));
+            app.ToggleChatState();
+        } else if (state == kDeviceStateSpeaking) {
+            ESP_LOGI(TAG, "单击打断TTS");
+            app.AbortSpeaking(kAbortReasonNone);
+        }
+    }
+
     void InitializePowerManager() {
         power_manager_ = new PowerManager(POWER_MANAGER_GPIO);
-        power_manager_->OnChargingStatusChanged([this](bool is_charging) {
-            Settings settings("status", false);
-            int deep_sleep_enabled = settings.GetInt("deepSleep", 1);
-            if (deep_sleep_enabled) {
-                power_save_timer_->SetEnabled(true);
-            } else {
-                power_save_timer_->SetEnabled(false);
-            }
-        });
 
         power_manager_->OnLowBatteryStatusChanged([this](bool is_low_battery) {
             if (is_low_battery) {
-                auto& app = Application::GetInstance();
-                app.Alert("电量不足", "请充电", "", Lang::Sounds::OGG_CHARGE);
+                Application::GetInstance().Alert("电量不足", "请充电", "", Lang::Sounds::OGG_CHARGE);
             }
         });
         vTaskDelay(pdMS_TO_TICKS(200));
@@ -320,27 +340,21 @@ private:
             ESP_LOGI(TAG, "退出省电模式");
             GetBacklight()->RestoreBrightness();
         });
-
-        power_save_timer_->OnShutdownRequest([this]() {
-            Settings settings("status", false);
-            int deep_sleep_enabled = settings.GetInt("deepSleep", 1);
+        power_save_timer_->OnShutdownRequest([this, deep_sleep_enabled]() {
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
                 EnterDeepSleep(true);
             }
         });
 
-        if (deep_sleep_enabled) {
-            power_save_timer_->SetEnabled(true);
-        } else {
-            power_save_timer_->SetEnabled(false);
-        }
+        power_save_timer_->SetEnabled(deep_sleep_enabled != 0);
     }
 
-    void EnterDeepSleep(bool enable_gyro_wakeup = true) {
-        ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
+    // ========================================================
+    // 深度睡眠（拆分子步骤，保证每个函数 ≤ 50 行）
+    // ========================================================
 
-        // 先关闭触摸屏
+    void ShutdownTouchAndAudioForSleep() {
         if (touch_driver_) {
             touch_driver_->Cleanup();
             delete touch_driver_;
@@ -351,80 +365,78 @@ private:
         ESP_LOGI(TAG, "关闭音频电源");
         gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
         rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
+    }
 
-        // 按键唤醒
+    void ConfigureDeepSleepWakeupSources(bool enable_gyro_wakeup) {
+        // 按键唤醒（低电平 = 按下）
         ESP_ERROR_CHECK(esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0));
         ESP_ERROR_CHECK(rtc_gpio_pullup_en(BOOT_BUTTON_GPIO));
         ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(BOOT_BUTTON_GPIO));
 
         vTaskDelay(pdMS_TO_TICKS(200));
 
-        // 陀螺仪唤醒
-        if (enable_gyro_wakeup) {
-            Settings settings("status", false);
-            int32_t pickup_wake = settings.GetInt("pickupWake", 1);
-            if (pickup_wake && sc7a20h_initialized_) {
-                ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io((1ULL << SC7A20H_GPIO_INT1), ESP_EXT1_WAKEUP_ANY_LOW));
-                ESP_ERROR_CHECK(rtc_gpio_pullup_en(SC7A20H_GPIO_INT1));
-                ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(SC7A20H_GPIO_INT1));
-            }
+        if (!enable_gyro_wakeup) return;
+        Settings settings("status", false);
+        int32_t pickup_wake = settings.GetInt("pickupWake", 1);
+        if (pickup_wake && sc7a20h_initialized_) {
+            ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io(
+                (1ULL << SC7A20H_GPIO_INT1), ESP_EXT1_WAKEUP_ANY_LOW));
+            ESP_ERROR_CHECK(rtc_gpio_pullup_en(SC7A20H_GPIO_INT1));
+            ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(SC7A20H_GPIO_INT1));
         }
+    }
 
-        if (GetNetworkType() == NetworkType::WIFI) {
-            WifiManager::GetInstance().StopStation();
+    void ResetAllGpiosForSleep() {
+        constexpr gpio_num_t kGpiosToReset[] = {
+            AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS,
+            AUDIO_I2S_GPIO_DIN,  AUDIO_I2S_GPIO_DOUT, AUDIO_CODEC_I2C_SDA_PIN,
+            AUDIO_CODEC_I2C_SCL_PIN, AUDIO_CODEC_PA_PIN,
+            DISPLAY_SPI_MOSI, DISPLAY_SPI_SCLK, DISPLAY_LCD_DC, DISPLAY_LCD_CS,
+            DISPLAY_BACKLIGHT, TOUCH_RST_NUM, TOUCH_INT_NUM,
+        };
+        uint64_t pin_mask = 0;
+        for (gpio_num_t pin : kGpiosToReset) {
+            gpio_reset_pin(pin);
+            pin_mask |= (1ULL << pin);
         }
-
-        if (power_save_timer_) {
-            power_save_timer_->SetEnabled(false);
-        }
-
-        gpio_set_level(DISPLAY_BACKLIGHT, 0);
-
-        // 重置音频GPIO
-        gpio_reset_pin(AUDIO_I2S_GPIO_MCLK);
-        gpio_reset_pin(AUDIO_I2S_GPIO_BCLK);
-        gpio_reset_pin(AUDIO_I2S_GPIO_WS);
-        gpio_reset_pin(AUDIO_I2S_GPIO_DIN);
-        gpio_reset_pin(AUDIO_I2S_GPIO_DOUT);
-        gpio_reset_pin(AUDIO_CODEC_I2C_SDA_PIN);
-        gpio_reset_pin(AUDIO_CODEC_I2C_SCL_PIN);
-        gpio_reset_pin(AUDIO_CODEC_PA_PIN);
-
-        // 显示GPIO
-        gpio_reset_pin(DISPLAY_SPI_MOSI);
-        gpio_reset_pin(DISPLAY_SPI_SCLK);
-        gpio_reset_pin(DISPLAY_LCD_DC);
-        gpio_reset_pin(DISPLAY_LCD_CS);
-        gpio_reset_pin(DISPLAY_BACKLIGHT);
-
-        // 触摸屏GPIO
-        gpio_reset_pin(TOUCH_RST_NUM);
-        gpio_reset_pin(TOUCH_INT_NUM);
 
         // 配置GPIO为输入模式降低功耗
         gpio_config_t input_conf = {
-            .pin_bit_mask = (1ULL << AUDIO_I2S_GPIO_MCLK) | (1ULL << AUDIO_I2S_GPIO_BCLK) |
-                            (1ULL << AUDIO_I2S_GPIO_WS) | (1ULL << AUDIO_I2S_GPIO_DIN) |
-                            (1ULL << AUDIO_I2S_GPIO_DOUT) | (1ULL << AUDIO_CODEC_I2C_SDA_PIN) |
-                            (1ULL << AUDIO_CODEC_I2C_SCL_PIN) | (1ULL << AUDIO_CODEC_PA_PIN) |
-                            (1ULL << DISPLAY_SPI_MOSI) | (1ULL << DISPLAY_SPI_SCLK) |
-                            (1ULL << DISPLAY_LCD_DC) | (1ULL << DISPLAY_LCD_CS) |
-                            (1ULL << DISPLAY_BACKLIGHT) | (1ULL << TOUCH_RST_NUM) |
-                            (1ULL << TOUCH_INT_NUM),
+            .pin_bit_mask = pin_mask,
             .mode = GPIO_MODE_INPUT,
             .pull_up_en = GPIO_PULLUP_DISABLE,
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
             .intr_type = GPIO_INTR_DISABLE
         };
         gpio_config(&input_conf);
+    }
 
-        // 设置 Wake Stub
+    void EnterDeepSleep(bool enable_gyro_wakeup = true) {
+        ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
+
+        ShutdownTouchAndAudioForSleep();
+        ConfigureDeepSleepWakeupSources(enable_gyro_wakeup);
+
+        if (GetNetworkType() == NetworkType::WIFI) {
+            WifiManager::GetInstance().StopStation();
+        }
+        if (power_save_timer_) {
+            power_save_timer_->SetEnabled(false);
+        }
+        gpio_set_level(DISPLAY_BACKLIGHT, 0);
+
+        ResetAllGpiosForSleep();
+
         esp_set_deep_sleep_wake_stub(&wake_stub);
 
         ESP_LOGI(TAG, "准备进入深度睡眠");
         vTaskDelay(pdMS_TO_TICKS(200));
         esp_deep_sleep_start();
     }
+
+    // ========================================================
+    // 显示
+    // ========================================================
 
     void InitializeDisplay() {
         esp_lcd_panel_io_handle_t panel_io_ = nullptr;
@@ -448,170 +460,160 @@ private:
         SystemInfo::PrintHeapStats();
     }
 
-    void InitializeButtons() {
-        boot_button_.OnClick([this]() {
-            auto& app = Application::GetInstance();
-            auto status = app.GetDeviceState();
-            ESP_LOGI(TAG, "单击 button 状态: %u", status);
-            waiting_factory_reset_confirm_ = false;
-            if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
-                if (status == kDeviceStateIdle) {
-                    app.PlaySound(Lang::Sounds::OGG_WAKEUP);
-                    vTaskDelay(pdMS_TO_TICKS(1500));
-                } else if (status == kDeviceStateListening) {
-                    app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
-                }
-                app.ToggleChatState();
-            }
-        });
+    // ========================================================
+    // 按键处理（单独方法，InitializeButtons 仅做注册）
+    // ========================================================
 
-        boot_button_.OnDoubleClick([this]() {
-            auto& app = Application::GetInstance();
-            auto status = app.GetDeviceState();
+    void HandleBootClick() {
+        auto& app = Application::GetInstance();
+        auto status = app.GetDeviceState();
+        ESP_LOGI(TAG, "单击 button 状态: %u", status);
+        waiting_factory_reset_confirm_.store(false);
+        if (status != kDeviceStateIdle && status != kDeviceStateListening && status != kDeviceStateSpeaking) {
+            return;
+        }
+        if (status == kDeviceStateIdle) {
+            app.PlaySound(Lang::Sounds::OGG_WAKEUP);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+        } else if (status == kDeviceStateListening) {
+            app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
+        }
+        app.ToggleChatState();
+    }
 
-            if (waiting_factory_reset_confirm_) {
-                uint64_t now = esp_timer_get_time();
-                if (now - factory_reset_request_time_ > 15000000) {
-                    waiting_factory_reset_confirm_ = false;
-                    return;
-                }
-                waiting_factory_reset_confirm_ = false;
-                if (status == kDeviceStateSpeaking) {
-                    app.AbortSpeaking(kAbortReasonNone);
-                }
-                app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
-                vTaskDelay(pdMS_TO_TICKS(3000));
-                nvs_flash_erase();
-                nvs_flash_init();
-                app.Reboot();
+    void HandleBootDoubleClick() {
+        auto& app = Application::GetInstance();
+        auto status = app.GetDeviceState();
+
+        if (waiting_factory_reset_confirm_.load()) {
+            uint64_t now = esp_timer_get_time();
+            if (now - factory_reset_request_time_ > kFactoryResetConfirmWindowUs) {
+                waiting_factory_reset_confirm_.store(false);
                 return;
             }
-
-            #if CONFIG_USE_DEVICE_AEC
-            if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
-                if (status == kDeviceStateSpeaking) {
-                    app.AbortSpeaking(kAbortReasonNone);
-                }
-                app.SetDeviceState(kDeviceStateIdle);
-                if (app.GetAecMode() == kAecOff) {
-                    app.SetAecMode(kAecOnDeviceSide);
-                } else {
-                    app.SetAecMode(kAecOff);
-                }
-                WakeUp();
-            }
-            #endif
-        });
-
-        // 连按3次进入配网模式
-        boot_button_.OnMultipleClick([this]() {
-            auto& app = Application::GetInstance();
-            if (app.GetDeviceState() != kDeviceStateWifiConfiguring) {
-                if (app.GetDeviceState() == kDeviceStateSpeaking) {
-                    app.AbortSpeaking(kAbortReasonNone);
-                }
-                if (GetNetworkType() == NetworkType::ML307) {
-                    app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到WiFi", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
-                    vTaskDelay(pdMS_TO_TICKS(1500));
-                    SwitchNetworkType();
-                } else {
-                    app.Schedule([this]() {
-                        auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
-                        wifi_board.EnterWifiConfigMode();
-                    });
-                }
-            } else {
-                app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到4G", "logo", Lang::Sounds::OGG_NETWORK_4G);
-                vTaskDelay(pdMS_TO_TICKS(1500));
-                SwitchNetworkType();
-            }
-        }, 3);
-
-        // 连按4次关机
-        boot_button_.OnMultipleClick([this]() {
-            auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateSpeaking) {
-                app.AbortSpeaking(kAbortReasonNone);
-            }
-            app.Alert("连按4次关机", "拜拜^-^", "", Lang::Sounds::OGG_SHUTDOWN);
+            waiting_factory_reset_confirm_.store(false);
+            AbortIfSpeaking();
+            app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
             vTaskDelay(pdMS_TO_TICKS(3000));
-            EnterDeepSleep(false);
-        }, 4);
+            nvs_flash_erase();
+            nvs_flash_init();
+            app.Reboot();
+            return;
+        }
 
-        // 连按6次：音频测试模式
-        boot_button_.OnMultipleClick([this]() {
-            auto& app = Application::GetInstance();
-            auto status = app.GetDeviceState();
-            if (status == kDeviceStateSpeaking) {
-                app.AbortSpeaking(kAbortReasonNone);
-            }
-            app.SetDeviceState(kDeviceStateWifiConfiguring);
-            app.StartListening();
-            app.Alert("音频测试", "", "", Lang::Sounds::OGG_AUDIO_TEST);
-            vTaskDelay(pdMS_TO_TICKS(3000));
-            app.SetDeviceState(kDeviceStateAudioTesting);
-            app.StopListening();
-        }, 6);
+#if CONFIG_USE_DEVICE_AEC
+        if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
+            AbortIfSpeaking();
+            app.SetDeviceState(kDeviceStateIdle);
+            app.SetAecMode(app.GetAecMode() == kAecOff ? kAecOnDeviceSide : kAecOff);
+            WakeUp();
+        }
+#endif
+    }
 
-        // 连按9次：恢复出厂设置确认
-        boot_button_.OnMultipleClick([this]() {
-            auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateSpeaking) {
-                app.AbortSpeaking(kAbortReasonNone);
-            }
-            waiting_factory_reset_confirm_ = true;
-            factory_reset_request_time_ = esp_timer_get_time();
-            app.Alert("恢复出厂设置", "10秒内双击确认", "logo", Lang::Sounds::OGG_FACTORY_RESET);
-        }, 9);
+    void HandleBootMultiClick3_SwitchNetwork() {
+        auto& app = Application::GetInstance();
+        if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
+            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到4G", "logo", Lang::Sounds::OGG_NETWORK_4G);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            SwitchNetworkType();
+            return;
+        }
+        AbortIfSpeaking();
+        if (GetNetworkType() == NetworkType::ML307) {
+            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到WiFi", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            SwitchNetworkType();
+        } else {
+            app.Schedule([this]() {
+                auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
+                wifi_board.EnterWifiConfigMode();
+            });
+        }
+    }
 
-        // 长按按钮处理
-        boot_button_.OnLongPress([this]() {
-            auto& app = Application::GetInstance();
-            auto status = app.GetDeviceState();
-            if (status == kDeviceStateIdle || status == kDeviceStateSpeaking || status == kDeviceStateListening) {
-                if (status != kDeviceStateListening) {
-                    app.StartListening();
-                }
-                is_recording_for_send_ = true;
-            } else if (status == kDeviceStateStarting || status == kDeviceStateActivating || status == kDeviceStateWifiConfiguring) {
-                is_recording_for_test_ = true;
-                app.SetDeviceState(kDeviceStateWifiConfiguring);
-                vTaskDelay(pdMS_TO_TICKS(100));
+    void HandleBootMultiClick4_PowerOff() {
+        auto& app = Application::GetInstance();
+        AbortIfSpeaking();
+        app.Alert("连按4次关机", "拜拜^-^", "", Lang::Sounds::OGG_SHUTDOWN);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        EnterDeepSleep(false);
+    }
+
+    void HandleBootMultiClick6_AudioTest() {
+        auto& app = Application::GetInstance();
+        AbortIfSpeaking();
+        app.SetDeviceState(kDeviceStateWifiConfiguring);
+        app.StartListening();
+        app.Alert("音频测试", "", "", Lang::Sounds::OGG_AUDIO_TEST);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        app.SetDeviceState(kDeviceStateAudioTesting);
+        app.StopListening();
+    }
+
+    void HandleBootMultiClick9_FactoryReset() {
+        auto& app = Application::GetInstance();
+        AbortIfSpeaking();
+        waiting_factory_reset_confirm_.store(true);
+        factory_reset_request_time_ = esp_timer_get_time();
+        app.Alert("恢复出厂设置", "10秒内双击确认", "logo", Lang::Sounds::OGG_FACTORY_RESET);
+    }
+
+    void HandleBootLongPress() {
+        auto& app = Application::GetInstance();
+        auto status = app.GetDeviceState();
+        if (status == kDeviceStateIdle || status == kDeviceStateSpeaking || status == kDeviceStateListening) {
+            if (status != kDeviceStateListening) {
                 app.StartListening();
             }
-        });
+            is_recording_for_send_.store(true);
+        } else if (status == kDeviceStateStarting || status == kDeviceStateActivating || status == kDeviceStateWifiConfiguring) {
+            is_recording_for_test_.store(true);
+            app.SetDeviceState(kDeviceStateWifiConfiguring);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            app.StartListening();
+        }
+    }
 
-        boot_button_.OnPressUp([this]() {
-            auto& app = Application::GetInstance();
-            if (is_recording_for_test_) {
-                is_recording_for_test_ = false;
-                app.SetDeviceState(kDeviceStateAudioTesting);
-                app.StopListening();
-            } else if (is_recording_for_send_) {
-                is_recording_for_send_ = false;
-                app.StopListening();
-                vTaskDelay(pdMS_TO_TICKS(100));
-                app.PlaySound(Lang::Sounds::OGG_POPUP);
-            }
-        });
+    void HandleBootPressUp() {
+        auto& app = Application::GetInstance();
+        if (is_recording_for_test_.exchange(false)) {
+            app.SetDeviceState(kDeviceStateAudioTesting);
+            app.StopListening();
+        } else if (is_recording_for_send_.exchange(false)) {
+            app.StopListening();
+            vTaskDelay(pdMS_TO_TICKS(100));
+            app.PlaySound(Lang::Sounds::OGG_POPUP);
+        }
+    }
 
-        // 音量按钮
+    void InitializeButtons() {
+        boot_button_.OnClick([this]() { HandleBootClick(); });
+        boot_button_.OnDoubleClick([this]() { HandleBootDoubleClick(); });
+        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick3_SwitchNetwork(); }, 3);
+        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick4_PowerOff(); }, 4);
+        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick6_AudioTest(); }, 6);
+        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick9_FactoryReset(); }, 9);
+        boot_button_.OnLongPress([this]() { HandleBootLongPress(); });
+        boot_button_.OnPressUp([this]() { HandleBootPressUp(); });
+
         volume_up_button_.OnClick([this]() { AdjustVolume(+10); });
         volume_down_button_.OnClick([this]() { AdjustVolume(-10); });
 
         volume_up_button_.OnLongPress([this]() {
             StartVolumeTask(+5, &vol_up_task_, &vol_up_running_);
         });
-        volume_up_button_.OnPressUp([this]() { vol_up_running_ = false; });
+        volume_up_button_.OnPressUp([this]() { vol_up_running_.store(false); });
 
         volume_down_button_.OnLongPress([this]() {
             StartVolumeTask(-5, &vol_down_task_, &vol_down_running_);
         });
-        volume_down_button_.OnPressUp([this]() { vol_down_running_ = false; });
+        volume_down_button_.OnPressUp([this]() { vol_down_running_.store(false); });
     }
 
-    // 状态定时上报定时器
-    esp_timer_handle_t status_timer_ = nullptr;
+    // ========================================================
+    // 状态上报
+    // ========================================================
 
     void ReportStatus() {
         int battery = power_manager_ ? power_manager_->GetBatteryLevel() : -1;
@@ -656,35 +658,43 @@ private:
             .name = "status_report",
         };
         esp_timer_create(&args, &status_timer_);
-        esp_timer_start_periodic(status_timer_, 90 * 1000000ULL);
+        esp_timer_start_periodic(status_timer_, kStatusReportIntervalUs);
     }
+
+    // ========================================================
+    // 音量
+    // ========================================================
 
     void AdjustVolume(int delta) {
         auto codec = GetAudioCodec();
-        if (codec) {
-            int volume = codec->output_volume() + delta;
-            if (volume > 100) volume = 100;
-            if (volume < 0) volume = 0;
-            codec->SetOutputVolume(volume);
-            char volume_text[64];
-            snprintf(volume_text, sizeof(volume_text), "%s %d", Lang::Strings::VOLUME, volume);
-            GetDisplay()->SetStatus(volume_text);
-            WakeUp();
-        }
+        if (!codec) return;
+        int volume = codec->output_volume() + delta;
+        if (volume > 100) volume = 100;
+        if (volume < 0) volume = 0;
+        codec->SetOutputVolume(volume);
+        char volume_text[64];
+        snprintf(volume_text, sizeof(volume_text), "%s %d", Lang::Strings::VOLUME, volume);
+        GetDisplay()->SetStatus(volume_text);
+        WakeUp();
     }
 
-    void StartVolumeTask(int delta, TaskHandle_t* task_handle, volatile bool* running) {
-        if (*task_handle != NULL) return;
-        *running = true;
-        xTaskCreatePinnedToCore([](void* arg) {
-            auto [delta, running, task_handle] = *static_cast<std::tuple<int, volatile bool*, TaskHandle_t*>*>(arg);
-            auto* params = static_cast<std::tuple<int, volatile bool*, TaskHandle_t*>*>(arg);
-            delete params;
+    struct VolumeTaskCtx {
+        int delta;
+        std::atomic<bool>* running;
+        TaskHandle_t* task_handle;
+    };
 
-            while (*running) {
+    void StartVolumeTask(int delta, TaskHandle_t* task_handle, std::atomic<bool>* running) {
+        if (*task_handle != nullptr) return;
+        running->store(true);
+
+        auto* ctx = new VolumeTaskCtx{delta, running, task_handle};
+        xTaskCreatePinnedToCore([](void* arg) {
+            auto* ctx = static_cast<VolumeTaskCtx*>(arg);
+            while (ctx->running->load()) {
                 auto codec = Board::GetInstance().GetAudioCodec();
                 if (codec) {
-                    int v = codec->output_volume() + delta;
+                    int v = codec->output_volume() + ctx->delta;
                     if (v > 100) v = 100;
                     if (v < 0) v = 0;
                     codec->SetOutputVolume(v);
@@ -693,12 +703,63 @@ private:
                     Board::GetInstance().GetDisplay()->SetStatus(volume_text);
                     static_cast<MyDazyP30_4GBoard&>(Board::GetInstance()).WakeUp();
                 }
-                vTaskDelay(pdMS_TO_TICKS(200));
+                vTaskDelay(pdMS_TO_TICKS(kVolumeTaskStepMs));
             }
-
-            *task_handle = NULL;
+            *(ctx->task_handle) = nullptr;
+            delete ctx;
             vTaskDelete(NULL);
-        }, "vol_adjust", 2048, new std::tuple<int, volatile bool*, TaskHandle_t*>(delta, running, task_handle), 5, task_handle, 1);
+        }, "vol_adjust", 2048, ctx, 5, task_handle, 1);
+    }
+
+    // ========================================================
+    // 初始化业务逻辑
+    // ========================================================
+
+    void ApplyDefaultSettings() {
+        // 音量范围修正（50-100）
+        Settings audio_settings("audio", true);
+        int original_volume = audio_settings.GetInt("output_volume", kDefaultVolume);
+        if (original_volume < kMinValidVolume) {
+            audio_settings.SetInt("output_volume", kDefaultVolume);
+            ESP_LOGI(TAG, "检测到音量%d小于%d，自动调整为%d",
+                     original_volume, kMinValidVolume, kDefaultVolume);
+        }
+        // 默认使用蓝牙配网
+        Settings wifi_settings("wifi", true);
+        wifi_settings.SetInt("blufi", 1);
+    }
+
+    static void WelcomeTaskEntry(void* arg) {
+        auto* self = static_cast<MyDazyP30_4GBoard*>(arg);
+        auto& app = Application::GetInstance();
+        vTaskDelay(pdMS_TO_TICKS(1500));
+
+        if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
+            self->welcome_task_handle_.store(nullptr);
+            vTaskDelete(NULL);
+            return;
+        }
+
+        Settings audio_settings("audio", false);
+        int enabled = audio_settings.GetInt("playWelcome", 1);
+        if (self->first_boot_ && enabled) {
+            app.PlaySound(Lang::Sounds::OGG_WELCOME);
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            if (app.GetDeviceState() == kDeviceStateIdle) {
+                app.ToggleChatState();
+            }
+        }
+
+        self->welcome_task_handle_.store(nullptr);
+        vTaskDelete(NULL);
+    }
+
+    void StartWelcomeTask() {
+        if (!first_boot_) return;
+        TaskHandle_t temp_handle = nullptr;
+        xTaskCreatePinnedToCore(&MyDazyP30_4GBoard::WelcomeTaskEntry,
+                                "welcome_init", 3072, this, 3, &temp_handle, 1);
+        welcome_task_handle_.store(temp_handle);
     }
 
 public:
@@ -718,74 +779,29 @@ public:
         InitializePowerManager();
         InitializePowerSaveTimer();
         InitializeButtons();
-
-        // 定时状态上报（90 秒间隔）
         StartStatusTimer();
 
-        // 初始化音频编解码器
         GetAudioCodec();
-
-        // 灯光控制
         GetBacklight()->RestoreBrightness();
 
-        // 音量初始化：开机检查并修正音量范围（50-100）
-        Settings audio_settings("audio", true);
-        int DEFAULT_VOLUME = 80;
-        int original_volume = audio_settings.GetInt("output_volume", DEFAULT_VOLUME);
-        if (original_volume < 50) {
-            audio_settings.SetInt("output_volume", DEFAULT_VOLUME);
-            ESP_LOGI(TAG, "检测到音量%d小于50，自动调整为%d", original_volume, DEFAULT_VOLUME);
-        }
-
-        // WiFi配网模式初始化：确保默认使用蓝牙配网
-        Settings wifi_settings("wifi", true);
-        wifi_settings.SetInt("blufi", 1);
+        ApplyDefaultSettings();
 
         ESP_LOGI(TAG, "MyDazy P30 4G 初始化完成 (ES8311+ES7210, 支持4G、电源管理、触摸屏)");
 
-        // 首次开机欢迎音
-        if (first_boot_) {
-            TaskHandle_t temp_handle = nullptr;
-            xTaskCreatePinnedToCore([](void* arg) {
-                auto self = static_cast<MyDazyP30_4GBoard*>(arg);
-                auto& app = Application::GetInstance();
-                vTaskDelay(pdMS_TO_TICKS(1500));
-
-                if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
-                    self->welcome_task_handle_ = nullptr;
-                    vTaskDelete(NULL);
-                    return;
-                }
-
-                Settings audio_settings("audio", false);
-                int enabled = audio_settings.GetInt("playWelcome", 1);
-                if (self->first_boot_ && enabled) {
-                    app.PlaySound(Lang::Sounds::OGG_WELCOME);
-                    vTaskDelay(pdMS_TO_TICKS(3000));
-                    if (app.GetDeviceState() == kDeviceStateIdle) {
-                        app.ToggleChatState();
-                    }
-                }
-
-                self->welcome_task_handle_ = nullptr;
-                vTaskDelete(NULL);
-            }, "welcome_init", 3072, this, 3, &temp_handle, 1);
-            welcome_task_handle_ = temp_handle;
-        }
+        StartWelcomeTask();
     }
 
     ~MyDazyP30_4GBoard() {
-        // 清理状态上报定时器
         if (status_timer_) {
             esp_timer_stop(status_timer_);
             esp_timer_delete(status_timer_);
             status_timer_ = nullptr;
         }
-        // 清理音量调节任务
-        vol_up_running_ = false;
-        vol_down_running_ = false;
-        if (vol_up_task_) { vTaskDelete(vol_up_task_); vol_up_task_ = NULL; }
-        if (vol_down_task_) { vTaskDelete(vol_down_task_); vol_down_task_ = NULL; }
+        // 信号让音量任务自行退出（任务内部在 while 循环末尾 vTaskDelete(NULL) 并清空 handle）
+        // 禁止在此直接 vTaskDelete — 会与任务自删竞争造成双删
+        vol_up_running_.store(false);
+        vol_down_running_.store(false);
+        vTaskDelay(pdMS_TO_TICKS(kVolumeTaskExitWaitMs));
 
         if (sc7a20h_sensor_) { delete sc7a20h_sensor_; sc7a20h_sensor_ = nullptr; }
         if (audio_codec_) { delete audio_codec_; audio_codec_ = nullptr; }
@@ -811,10 +827,6 @@ public:
                 AUDIO_INPUT_REFERENCE);
         }
         return audio_codec_;
-    }
-
-    i2c_master_bus_handle_t GetI2cBus() {
-        return i2c_bus_;
     }
 
     virtual void SetPowerSaveLevel(PowerSaveLevel level) override {
@@ -855,7 +867,7 @@ public:
     }
 
     // 切换网络前关闭 LDO，防止重启后黑屏
-    // 电路: GPIO9 -> ME6211 LDO EN -> AUD_VDD-3.3V -> LCD + 音频
+    // 电路: GPIO9 -> ME6211 LDO EN -> AUD_VDD-3.3V -> LCD + 音频 + 4G VDD_EXT
     // esp_restart() 只重置 CPU，LCD 控制器 (JD9853) 不会复位，需要断电重置
     virtual void SwitchNetworkType() override {
         auto display = GetDisplay();
@@ -869,8 +881,7 @@ public:
         vTaskDelay(pdMS_TO_TICKS(1000));
 
         // 停止音频服务
-        auto& app = Application::GetInstance();
-        app.GetAudioService().Stop();
+        Application::GetInstance().GetAudioService().Stop();
 
         // 关闭功放
         if (audio_codec_) {
@@ -890,30 +901,6 @@ public:
         vTaskDelay(pdMS_TO_TICKS(500));
 
         esp_restart();
-    }
-
-    void CleanupDisplay() {
-        auto backlight = GetBacklight();
-        if (backlight) {
-            backlight->SetBrightness(0);
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));
-
-        if (touch_driver_) {
-            touch_driver_->Cleanup();
-            delete touch_driver_;
-            touch_driver_ = nullptr;
-        }
-
-        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
-        rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
-
-        vTaskDelay(pdMS_TO_TICKS(100));
-
-        if (display_ != nullptr) {
-            delete display_;
-            display_ = nullptr;
-        }
     }
 };
 
