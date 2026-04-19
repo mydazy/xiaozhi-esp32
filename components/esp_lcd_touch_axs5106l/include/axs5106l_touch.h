@@ -23,7 +23,7 @@
 // 触摸校准调试开关（量产保持 0）。=1 时屏幕会画四条 2px 红色边缘线 + 红色跟手圆点，
 // 并每 20 次触摸打印一次 chip 原始输出范围，用于观察 edge suppression 覆盖。
 #ifndef AXS5106L_TOUCH_DEBUG_OVERLAY
-#define AXS5106L_TOUCH_DEBUG_OVERLAY 0
+#define AXS5106L_TOUCH_DEBUG_OVERLAY 1   // 临时开启测试边界，测完改回 0
 #endif
 
 enum class TouchGesture {

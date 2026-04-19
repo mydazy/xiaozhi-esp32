@@ -28,8 +28,8 @@ static const char* TAG = "Axs5106lTouch";
 #define AXS_POINT_X(buf)    (((uint16_t)(buf[2] & 0x0F) << 8) | buf[3])
 #define AXS_POINT_Y(buf)    (((uint16_t)(buf[4] & 0x0F) << 8) | buf[5])
 
-// chip V2905 固件直接输出 landscape 像素坐标，驱动 1:1 直出不缩放
-// 实测 raw 覆盖 [21..273]×[1..236]（chip 内置 edge suppression，见 README.md）
+// chip V2905 固件已做 rotation，直接输出 landscape 像素（见 README.md）
+// AA 硬编码 [21..273]×[1..236]，无寄存器可配；超出此 + 50 余量即视为噪声帧
 #define TOUCH_MAX_X   284
 #define TOUCH_MAX_Y   240
 
@@ -354,7 +354,7 @@ bool Axs5106lTouch::ReadTouch(uint16_t& x, uint16_t& y) {
     }
 #endif
 
-    // 坐标映射：chip 已做旋转 → 1:1 直出；swap/mirror 按 config 标志应用
+    // chip V2905 已输出 landscape，swap/mirror 默认全 false；保留参数供特殊贴片方向兼容
     uint16_t sx = raw_x, sy = raw_y;
     if (swap_xy_) std::swap(sx, sy);
     if (sx >= width_)  sx = width_  - 1;

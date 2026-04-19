@@ -82,9 +82,9 @@
 #define TOUCH_RST_NUM      GPIO_NUM_4          // 触摸屏复位引脚
 #define TOUCH_INT_NUM      GPIO_NUM_5          // 触摸屏中断引脚（触摸时触发）
 #define TOUCH_I2C_SPEED_HZ (400 * 1000)        // 触摸屏I2C速率（400kHz，官方推荐速率）
-#define TOUCH_SWAP_XY      false               // 触摸坐标交换（独立于显示方向，按触控芯片安装方向调整）
-#define TOUCH_MIRROR_X     false               // 触摸X轴镜像
-#define TOUCH_MIRROR_Y     false               // 触摸Y轴镜像
+#define TOUCH_SWAP_XY      false               // chip V2905 固件已内部 rotation，host 不再旋转
+#define TOUCH_MIRROR_X     false               // 同上
+#define TOUCH_MIRROR_Y     false               // 同上
 // 注意：触摸屏与音频编解码器共用I2C总线（GPIO11/GPIO12，外部10kΩ上拉）
 
 // ============================================================
