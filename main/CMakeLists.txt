@@ -90,7 +90,7 @@ set(EMOTE_RESOLUTION "284_240")
 # Add board files according to BOARD_TYPE
 # Set default assets if the board uses partition table V2
 if(CONFIG_BOARD_TYPE_MYDAZY_P31)
-    set(BOARD_TYPE "mydazy-p30-gps")
+    set(BOARD_TYPE "mydazy-p31")
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
     set(BUILTIN_ICON_FONT font_awesome_20_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)

@@ -93,13 +93,10 @@ private:
     }
 
     void CheckBatteryStatus() {
-        // 充电检测：充电芯片开漏输出 → ESP32 内部上拉
-        //   充电中: 芯片拉低 → GPIO 读到 0
-        //   未充电: 高阻态 → 内部上拉 → GPIO 读到 1
+        // Get charging status
         bool new_charging_status = gpio_get_level(charging_pin_) == 0;
         if (new_charging_status != is_charging_) {
             is_charging_ = new_charging_status;
-            ESP_LOGI(POWER_MANAGER_TAG, "充电状态变化: %s", is_charging_ ? "充电中" : "未充电");
             if (on_charging_status_changed_) {
                 on_charging_status_changed_(is_charging_);
             }
@@ -124,9 +121,9 @@ private:
     void ReadBatteryAdcData() {
         int adc_value;
         int voltage;
-
+        
         ESP_ERROR_CHECK(adc_oneshot_read(adc_handle_, ADC_CHANNEL, &adc_value));
-
+        
         // 将 ADC 值添加到队列中
         adc_values_.push_back(adc_value);
         if (adc_values_.size() > kBatteryAdcDataCount) {
@@ -225,10 +222,6 @@ public:
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
         gpio_config(&io_conf);
-
-        ESP_LOGI(POWER_MANAGER_TAG, "充电检测引脚 GPIO%d 启动电平=%d (%s)",
-                 charging_pin_, gpio_get_level(charging_pin_),
-                 gpio_get_level(charging_pin_) == 0 ? "充电中" : "未充电");
 
         // 创建电池电量检查定时器
         esp_timer_create_args_t timer_args = {

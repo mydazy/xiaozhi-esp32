@@ -94,8 +94,8 @@
 // ============================================================
 // 电源管理配置
 // ============================================================
-//#define POWER_MANAGER_GPIO  GPIO_NUM_21    // 原 P30-4G 引脚（已实测低=充电）
-#define POWER_MANAGER_GPIO  GPIO_NUM_44    // P31 充电检测（YZT 定制硬件，⚠️ 极性待实测，PowerManager 默认按低=充电处理）
+//#define POWER_MANAGER_GPIO  GPIO_NUM_21    // 充电状态检测（低电平=充电中）
+#define POWER_MANAGER_GPIO  GPIO_NUM_44    // 充电状态检测（高电平=充电中）ADD YZT
 #define BATTERY_ADC_GPIO    GPIO_NUM_8     // 电池电压ADC检测（ADC1_CHANNEL_7）
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_7  // ADC通道（对应GPIO8）
 #define BATTERY_CAPACITY_MAH 1000          // 电池容量（mAh）

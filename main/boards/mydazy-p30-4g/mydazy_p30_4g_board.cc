@@ -51,14 +51,6 @@
 #define TAG "MyDazyP30_4GBoard"
 
 namespace {
-// 常量
-constexpr int      kDefaultVolume              = 80;
-constexpr int      kMinValidVolume             = 50;
-constexpr uint64_t kStatusReportIntervalUs     = 90ULL * 1000000ULL;  // 90s
-constexpr uint64_t kFactoryResetConfirmWindowUs = 15ULL * 1000000ULL; // 15s
-constexpr int      kVolumeTaskStepMs           = 200;
-constexpr int      kVolumeTaskExitWaitMs       = 500;
-
 // 小工具：处于 Speaking 时先 Abort，避免状态冲突
 inline void AbortIfSpeaking() {
     auto& app = Application::GetInstance();
@@ -487,7 +479,7 @@ private:
 
         if (waiting_factory_reset_confirm_.load()) {
             uint64_t now = esp_timer_get_time();
-            if (now - factory_reset_request_time_ > kFactoryResetConfirmWindowUs) {
+            if (now - factory_reset_request_time_ > 15000000) {
                 waiting_factory_reset_confirm_.store(false);
                 return;
             }
@@ -658,7 +650,7 @@ private:
             .name = "status_report",
         };
         esp_timer_create(&args, &status_timer_);
-        esp_timer_start_periodic(status_timer_, kStatusReportIntervalUs);
+        esp_timer_start_periodic(status_timer_, 90 * 1000000ULL);
     }
 
     // ========================================================
@@ -703,7 +695,7 @@ private:
                     Board::GetInstance().GetDisplay()->SetStatus(volume_text);
                     static_cast<MyDazyP30_4GBoard&>(Board::GetInstance()).WakeUp();
                 }
-                vTaskDelay(pdMS_TO_TICKS(kVolumeTaskStepMs));
+                vTaskDelay(pdMS_TO_TICKS(200));
             }
             *(ctx->task_handle) = nullptr;
             delete ctx;
@@ -718,11 +710,11 @@ private:
     void ApplyDefaultSettings() {
         // 音量范围修正（50-100）
         Settings audio_settings("audio", true);
-        int original_volume = audio_settings.GetInt("output_volume", kDefaultVolume);
-        if (original_volume < kMinValidVolume) {
-            audio_settings.SetInt("output_volume", kDefaultVolume);
-            ESP_LOGI(TAG, "检测到音量%d小于%d，自动调整为%d",
-                     original_volume, kMinValidVolume, kDefaultVolume);
+        int DEFAULT_VOLUME = 80;
+        int original_volume = audio_settings.GetInt("output_volume", DEFAULT_VOLUME);
+        if (original_volume < 50) {
+            audio_settings.SetInt("output_volume", DEFAULT_VOLUME);
+            ESP_LOGI(TAG, "检测到音量%d小于50，自动调整为%d", original_volume, DEFAULT_VOLUME);
         }
         // 默认使用蓝牙配网
         Settings wifi_settings("wifi", true);
@@ -801,7 +793,7 @@ public:
         // 禁止在此直接 vTaskDelete — 会与任务自删竞争造成双删
         vol_up_running_.store(false);
         vol_down_running_.store(false);
-        vTaskDelay(pdMS_TO_TICKS(kVolumeTaskExitWaitMs));
+        vTaskDelay(pdMS_TO_TICKS(500));
 
         if (sc7a20h_sensor_) { delete sc7a20h_sensor_; sc7a20h_sensor_ = nullptr; }
         if (audio_codec_) { delete audio_codec_; audio_codec_ = nullptr; }
