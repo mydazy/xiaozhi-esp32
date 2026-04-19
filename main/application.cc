@@ -1085,6 +1085,15 @@ void Application::Reboot() {
     audio_service_.Stop();
 
     vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // 关背光避免重启时残留 GRAM 花屏；再切 LDO 让 LCD/音频 CODEC 真正下电复位
+    auto& board = Board::GetInstance();
+    auto* backlight = board.GetBacklight();
+    if (backlight) {
+        backlight->SetBrightness(0);
+    }
+    board.PrepareForReboot();
+
     esp_restart();
 }
 

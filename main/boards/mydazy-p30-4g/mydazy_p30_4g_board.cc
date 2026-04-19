@@ -510,8 +510,8 @@ private:
             AbortIfSpeaking();
             app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
             vTaskDelay(pdMS_TO_TICKS(3000));
-            nvs_flash_erase();
-            nvs_flash_init();
+            // 服务器解绑 + NVS 擦除 + otadata 擦除；app.Reboot() 内部会切 LDO 复位 LCD/音频
+            SystemReset::DoFactoryReset();
             app.Reboot();
             return;
         }
@@ -913,6 +913,22 @@ public:
         if (power_save_timer_) {
             power_save_timer_->WakeUp();
         }
+    }
+
+    // 重启前硬件清理：切 AUDIO_PWR_EN_GPIO 让 LCD (JD9853) + 音频 CODEC 真正下电复位
+    // 否则 esp_restart() 只重置 CPU，LCD 保持上电 → 重启后黑屏/花屏
+    virtual void PrepareForReboot() override {
+        ESP_LOGI(TAG, "PrepareForReboot: 关 LDO 复位 LCD/音频");
+        if (audio_codec_) {
+            audio_codec_->EnableOutput(false);
+        }
+        auto* bl = GetBacklight();
+        if (bl) {
+            bl->SetBrightness(0);
+        }
+        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
+        rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);     // 穿越 esp_restart() 保持 LOW
+        vTaskDelay(pdMS_TO_TICKS(500));          // 等 22uF 电容放电
     }
 
     // 切换网络前关闭 LDO，防止重启后黑屏

@@ -463,8 +463,8 @@ private:
                 }
                 app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
                 vTaskDelay(pdMS_TO_TICKS(3000));
-                nvs_flash_erase();
-                nvs_flash_init();
+                // 服务器解绑 + NVS 擦除 + otadata 擦除；app.Reboot() 内部会切 LDO 复位 LCD/音频
+                SystemReset::DoFactoryReset();
                 app.Reboot();
                 return;
             }
@@ -809,6 +809,21 @@ public:
     virtual Backlight* GetBacklight() override {
         static PwmBacklight backlight(DISPLAY_BACKLIGHT, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
+    }
+
+    // 重启前硬件清理：切 AUDIO_PWR_EN_GPIO (GPIO9) 让 LCD + 音频 CODEC 真正下电复位
+    virtual void PrepareForReboot() override {
+        ESP_LOGI(TAG, "PrepareForReboot: 关 LDO 复位 LCD/音频");
+        if (audio_codec_) {
+            audio_codec_->EnableOutput(false);
+        }
+        auto* bl = GetBacklight();
+        if (bl) {
+            bl->SetBrightness(0);
+        }
+        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
+        rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 
     void WakeUp() {

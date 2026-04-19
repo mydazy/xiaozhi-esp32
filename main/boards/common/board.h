@@ -82,6 +82,8 @@ public:
     virtual void SetPowerSaveLevel(PowerSaveLevel level) = 0;
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
+    // 默认空实现：大部分板子 esp_restart() 即可；P30 系列必须切 AUDIO_PWR_EN_GPIO，否则 LCD 黑屏
+    virtual void PrepareForReboot() {}
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \
