@@ -224,28 +224,10 @@ void Axs5106lTouch::LvglReadCallback(lv_indev_t* indev, lv_indev_data_t* data) {
     }
 
 #if AXS5106L_TOUCH_DEBUG_OVERLAY
-    // 首次回调创建调试 overlay：四边 2px 红线 + 跟手红圆点
+    // 首次回调创建调试 overlay：跟手红圆点
     if (!self->debug_dot_) {
         lv_obj_t* scr = lv_screen_active();
         if (scr) {
-            int32_t sw = lv_display_get_horizontal_resolution(NULL);
-            int32_t sh = lv_display_get_vertical_resolution(NULL);
-            auto make_edge = [&](int32_t x, int32_t y, int32_t w, int32_t h) {
-                lv_obj_t* o = lv_obj_create(scr);
-                lv_obj_remove_style_all(o);
-                lv_obj_set_pos(o, x, y);
-                lv_obj_set_size(o, w, h);
-                lv_obj_set_style_bg_color(o, lv_color_make(0xFF, 0x30, 0x30), 0);
-                lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-                lv_obj_add_flag(o, LV_OBJ_FLAG_IGNORE_LAYOUT);
-                lv_obj_move_foreground(o);
-                return o;
-            };
-            self->debug_edges_[0] = make_edge(0,      0,      sw, 2);
-            self->debug_edges_[1] = make_edge(0,      sh - 2, sw, 2);
-            self->debug_edges_[2] = make_edge(0,      0,      2,  sh);
-            self->debug_edges_[3] = make_edge(sw - 2, 0,      2,  sh);
-
             self->debug_dot_ = lv_obj_create(scr);
             lv_obj_remove_style_all(self->debug_dot_);
             lv_obj_set_size(self->debug_dot_, 12, 12);

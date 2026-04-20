@@ -252,7 +252,7 @@ bool Axs5106lUpgrade::WriteFlash(const uint8_t* data, size_t len) {
 
         // 每 1KB 打印进度
         if ((i + 1) % 1024 == 0) {
-            ESP_LOGI(TAG, "写入进度: %zu / %zu", i + 1, len);
+            ESP_LOGI(TAG, "写入进度: %u / %u", (unsigned)(i + 1), (unsigned)len);
         }
     }
 
@@ -260,7 +260,7 @@ bool Axs5106lUpgrade::WriteFlash(const uint8_t* data, size_t len) {
     cmd[2] = 0x00;
     WriteRegister(0x90, cmd, 3);
 
-    ESP_LOGI(TAG, "固件写入完成，共 %zu 字节", len);
+    ESP_LOGI(TAG, "固件写入完成，共 %u 字节", (unsigned)len);
     return true;
 }
 
@@ -289,19 +289,19 @@ bool Axs5106lUpgrade::VerifyFlash(const uint8_t* data, size_t len) {
 
     for (size_t i = 0; i < len; i++) {
         if (!ReadRegisters(write_buf, 3, read_buf, 1)) {
-            ESP_LOGE(TAG, "验证读取失败，位置: %zu", i);
+            ESP_LOGE(TAG, "验证读取失败，位置: %u", (unsigned)i);
             goto verify_exit;
         }
 
         if (read_buf[0] != data[i]) {
-            ESP_LOGE(TAG, "验证失败，位置: %zu, 期望: 0x%02X, 实际: 0x%02X",
-                     i, data[i], read_buf[0]);
+            ESP_LOGE(TAG, "验证失败，位置: %u, 期望: 0x%02X, 实际: 0x%02X",
+                     (unsigned)i, data[i], read_buf[0]);
             goto verify_exit;
         }
 
         // 每 1KB 打印进度
         if ((i + 1) % 1024 == 0) {
-            ESP_LOGI(TAG, "验证进度: %zu / %zu", i + 1, len);
+            ESP_LOGI(TAG, "验证进度: %u / %u", (unsigned)(i + 1), (unsigned)len);
         }
     }
 
@@ -320,7 +320,7 @@ verify_exit:
 }
 
 bool Axs5106lUpgrade::DoUpgrade() {
-    ESP_LOGI(TAG, "开始升级，固件大小: %zu 字节", sizeof(kFirmwareData));
+    ESP_LOGI(TAG, "开始升级，固件大小: %u 字节", (unsigned)sizeof(kFirmwareData));
 
     // 1. 进入调试模式
     if (!EnterDebugMode()) {
