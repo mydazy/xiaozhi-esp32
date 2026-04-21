@@ -414,7 +414,7 @@ config AUDIO_DEBUG_UDP_SERVER
 
 config RECEIVE_CUSTOM_MESSAGE
     bool "Enable Custom Message Reception"
-    default n
+    default y
     help
         Enable custom message reception, allow the device to receive custom messages from the server (preferably through the MQTT protocol)
 

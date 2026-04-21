@@ -90,7 +90,8 @@ void McpServer::AddCommonTools() {
         "Use this tool when the user asks to play music, a song, or any MP3 audio. "
         "The 'title' is optional and displayed/logged as current track name. "
         "Any ongoing TTS or previous music will be stopped automatically. "
-        "The user can interrupt playback by saying the wake word or pressing a button.",
+        "The user can interrupt playback by saying the wake word or pressing a button. "
+        "Returns JSON {\"success\":bool,\"error\":string} — check 'success' before telling user.",
         PropertyList({
             Property("url", kPropertyTypeString),
             Property("title", kPropertyTypeString, std::string(""))
@@ -98,6 +99,15 @@ void McpServer::AddCommonTools() {
         [](const PropertyList& properties) -> ReturnValue {
             std::string url = properties["url"].value<std::string>();
             std::string title = properties["title"].value<std::string>();
+
+            // 同步校验（不开后台任务，快速返回给云端）
+            if (url.empty()) {
+                return std::string("{\"success\":false,\"error\":\"URL is empty\"}");
+            }
+            if (url.substr(0, 7) != "http://" && url.substr(0, 8) != "https://") {
+                return std::string("{\"success\":false,\"error\":\"URL must start with http:// or https://\"}");
+            }
+
             auto& app = Application::GetInstance();
             app.Schedule([url = std::move(url), title = std::move(title)]() {
                 auto& app = Application::GetInstance();
@@ -105,19 +115,29 @@ void McpServer::AddCommonTools() {
                     app.AbortSpeaking(kAbortReasonNone);
                 }
                 app.GetAudioService().ResetDecoder();
-                MusicPlayer::GetInstance().Play(url, title);
+
+                std::string err;
+                if (!MusicPlayer::GetInstance().Play(url, title, &err)) {
+                    ESP_LOGW(TAG, "MCP music.play 启动失败: %s", err.c_str());
+                    app.Alert("播放失败", err.c_str(), "", "");
+                } else if (!title.empty()) {
+                    Board::GetInstance().GetDisplay()->ShowNotification(title.c_str(), 3000);
+                }
             });
-            return true;
+            // 异步启动成功：后续错误（HTTP/解码）通过 UI Alert 反馈
+            return std::string("{\"success\":true,\"playing\":true}");
         });
 
     AddTool("self.music.stop",
-        "Stop the currently playing MP3 music. Use when user says stop/pause/quiet.",
+        "Stop the currently playing MP3 music. Use when user says stop/pause/quiet. "
+        "Returns JSON {\"was_playing\":bool}.",
         PropertyList(),
         [](const PropertyList& properties) -> ReturnValue {
+            bool was_playing = MusicPlayer::GetInstance().IsPlaying();
             Application::GetInstance().Schedule([]() {
                 MusicPlayer::GetInstance().Stop();
             });
-            return true;
+            return std::string(was_playing ? "{\"was_playing\":true}" : "{\"was_playing\":false}");
         });
     
     auto backlight = board.GetBacklight();

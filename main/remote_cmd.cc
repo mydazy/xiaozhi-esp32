@@ -435,13 +435,15 @@ void RemoteCmd::PostSttText(const std::string& text) {
 void RemoteCmd::OnMusicPlay(const cJSON* msg) {
     auto url_item = cJSON_GetObjectItem(msg, "url");
     auto title_item = cJSON_GetObjectItem(msg, "title");
+
     if (!cJSON_IsString(url_item) || url_item->valuestring == nullptr || url_item->valuestring[0] == '\0') {
-        ESP_LOGW(TAG, "music_play 缺少 url");
+        ESP_LOGW(TAG, "music_play 缺少 url 字段");
+        app_->Alert("播放失败", "URL 为空", "", "");
         return;
     }
 
     std::string url = url_item->valuestring;
-    std::string title = cJSON_IsString(title_item) ? title_item->valuestring : "";
+    std::string title = cJSON_IsString(title_item) && title_item->valuestring ? title_item->valuestring : "";
     ESP_LOGI(TAG, "music_play: %s (%s)", title.c_str(), url.c_str());
 
     app_->Schedule([url = std::move(url), title = std::move(title)]() {
@@ -455,13 +457,25 @@ void RemoteCmd::OnMusicPlay(const cJSON* msg) {
         if (auto* lc = app.GetLiveCompanion(); lc && lc->IsRunning()) {
             lc->Suspend();
         }
-        MusicPlayer::GetInstance().Play(url, title);
+
+        std::string err;
+        if (!MusicPlayer::GetInstance().Play(url, title, &err)) {
+            ESP_LOGW(TAG, "music_play 启动失败: %s", err.c_str());
+            app.Alert("播放失败", err.c_str(), "", "");
+        } else if (!title.empty()) {
+            // 成功：状态栏显示曲名，给用户反馈
+            Board::GetInstance().GetDisplay()->ShowNotification(title.c_str(), 3000);
+        }
     });
 }
 
 void RemoteCmd::OnMusicStop() {
     ESP_LOGI(TAG, "music_stop");
     app_->Schedule([]() {
+        bool was_playing = MusicPlayer::GetInstance().IsPlaying();
         MusicPlayer::GetInstance().Stop();
+        if (was_playing) {
+            Board::GetInstance().GetDisplay()->ShowNotification("已停止播放", 1500);
+        }
     });
 }

@@ -293,7 +293,8 @@ void MusicPlayer::DecodeLoop() {
     dec_cfg.type = ESP_AUDIO_TYPE_MP3;
     esp_audio_dec_handle_t dec = nullptr;
     if (esp_audio_dec_open(&dec_cfg, &dec) != ESP_AUDIO_ERR_OK) {
-        ESP_LOGE(TAG, "MP3 decoder open 失败");
+        ESP_LOGE(TAG, "MP3 解码器打开失败");
+        AsyncAlert("播放失败", "MP3 解码器初始化失败");
         return;
     }
 
@@ -433,6 +434,9 @@ void MusicPlayer::DecodeLoop() {
         } else {
             if (++consecutive_errors >= 16) {
                 ESP_LOGE(TAG, "连续解码错误 %d 次，退出", consecutive_errors);
+                // 若从未解出过样本（src_rate==0）→ 文件格式不是 MP3 或已损坏
+                AsyncAlert("播放失败",
+                           src_rate == 0 ? "音频格式非 MP3 或已损坏" : "音频解码异常");
                 break;
             }
             // 跳过 1 字节寻找同步字
