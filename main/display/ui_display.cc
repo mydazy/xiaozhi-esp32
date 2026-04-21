@@ -440,7 +440,6 @@ void UiDisplay::ShowWifiQrCode(const char* qr_content, const char* hint,
     lv_obj_set_style_pad_all(wifi_qr_overlay_, 0, 0);
 
     constexpr int kBarW = 40;
-    constexpr int kQrSize = 140;
     const int kCenterW = LV_HOR_RES - kBarW * 2;
     const lv_color_t color_on  = lv_color_hex(0x2196F3);
     const lv_color_t color_off = lv_color_hex(0xE0E0E0);
@@ -495,8 +494,9 @@ void UiDisplay::ShowWifiQrCode(const char* qr_content, const char* hint,
     }
 
     // QR 码
-    bool is_url = (strncmp(qr_content, "http", 4) == 0);
 #if CONFIG_LV_USE_QRCODE
+    constexpr int kQrSize = 160;
+    const bool is_url = (strncmp(qr_content, "http", 4) == 0);
     char qr_data[256];
     if (is_url) snprintf(qr_data, sizeof(qr_data), "%s", qr_content);
     else        snprintf(qr_data, sizeof(qr_data), "WIFI:T:nopass;S:%s;;", qr_content);

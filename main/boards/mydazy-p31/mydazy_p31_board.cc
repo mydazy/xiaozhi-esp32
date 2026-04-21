@@ -11,6 +11,7 @@
 #include "axs5106l_touch.h"
 #include "sc7a20h.h"
 #include "application.h"
+#include "audio/music_player.h"
 #include "button.h"
 #include "config.h"
 #include "settings.h"
@@ -298,6 +299,13 @@ private:
 
                     auto& app = Application::GetInstance();
                     auto state = app.GetDeviceState();
+
+                    // MP3 播放中：单击 = 停音乐，不进入对话
+                    if (MusicPlayer::GetInstance().IsPlaying()) {
+                        ESP_LOGI(TAG, "单击停止 MP3 播放");
+                        MusicPlayer::GetInstance().Stop();
+                        break;
+                    }
 
                     if (state == kDeviceStateIdle) {
                         // 空闲状态：单击唤醒并开始对话

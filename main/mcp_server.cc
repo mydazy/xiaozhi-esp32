@@ -18,6 +18,7 @@
 #include "settings.h"
 #include "lvgl_theme.h"
 #include "lvgl_display.h"
+#include "audio/music_player.h"
 
 #define TAG "MCP"
 
@@ -76,10 +77,46 @@ void McpServer::AddCommonTools() {
         "Set the volume of the audio speaker. If the current volume is unknown, you must call `self.get_device_status` tool first and then call this tool.",
         PropertyList({
             Property("volume", kPropertyTypeInteger, 0, 100)
-        }), 
+        }),
         [&board](const PropertyList& properties) -> ReturnValue {
             auto codec = board.GetAudioCodec();
             codec->SetOutputVolume(properties["volume"].value<int>());
+            return true;
+        });
+
+    // MP3 流式播放 — 云端识别到 MP3 URL 后通过此 tool 让设备播放
+    AddTool("self.music.play",
+        "Play an MP3 audio stream from an HTTP(S) URL. "
+        "Use this tool when the user asks to play music, a song, or any MP3 audio. "
+        "The 'title' is optional and displayed/logged as current track name. "
+        "Any ongoing TTS or previous music will be stopped automatically. "
+        "The user can interrupt playback by saying the wake word or pressing a button.",
+        PropertyList({
+            Property("url", kPropertyTypeString),
+            Property("title", kPropertyTypeString, std::string(""))
+        }),
+        [](const PropertyList& properties) -> ReturnValue {
+            std::string url = properties["url"].value<std::string>();
+            std::string title = properties["title"].value<std::string>();
+            auto& app = Application::GetInstance();
+            app.Schedule([url = std::move(url), title = std::move(title)]() {
+                auto& app = Application::GetInstance();
+                if (app.GetDeviceState() == kDeviceStateSpeaking) {
+                    app.AbortSpeaking(kAbortReasonNone);
+                }
+                app.GetAudioService().ResetDecoder();
+                MusicPlayer::GetInstance().Play(url, title);
+            });
+            return true;
+        });
+
+    AddTool("self.music.stop",
+        "Stop the currently playing MP3 music. Use when user says stop/pause/quiet.",
+        PropertyList(),
+        [](const PropertyList& properties) -> ReturnValue {
+            Application::GetInstance().Schedule([]() {
+                MusicPlayer::GetInstance().Stop();
+            });
             return true;
         });
     

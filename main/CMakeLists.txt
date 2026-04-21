@@ -1,6 +1,7 @@
 # Define source files
 set(SOURCES "audio/audio_codec.cc"
             "audio/audio_service.cc"
+            "audio/music_player.cc"
             "audio/demuxer/ogg_demuxer.cc"
             "audio/codecs/no_audio_codec.cc"
             "audio/codecs/box_audio_codec.cc"
@@ -108,7 +109,7 @@ elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_4G)
     set(BUILTIN_ICON_FONT font_awesome_20_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
     # UI 资源（状态栏 PNG 图标 + maru 88/30 大字号时钟字体）→ assets 分区
-    set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/images")
+    set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons")
 elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
     set(BOARD_TYPE "mydazy-p30-wifi")
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)

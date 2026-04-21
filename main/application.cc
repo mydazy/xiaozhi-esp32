@@ -15,6 +15,7 @@
 #include "remote_cmd.h"
 #include "live_companion.h"
 #include "device_state_event.h"
+#include "audio/music_player.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -79,6 +80,9 @@ void Application::Initialize() {
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
     audio_service_.Start();
+
+    // MP3 流式播放器（远程 music_play 命令触发）
+    MusicPlayer::GetInstance().Initialize(codec);
 
     AudioServiceCallbacks callbacks;
     callbacks.on_send_queue_available = [this]() {
@@ -701,8 +705,11 @@ void Application::StopListening() {
 }
 
 void Application::HandleToggleChatEvent() {
+    // 任何"用户主动发起交互"（按键/触屏）先停 MP3
+    MusicPlayer::GetInstance().Stop();
+
     auto state = GetDeviceState();
-    
+
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;
@@ -755,8 +762,11 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
 }
 
 void Application::HandleStartListeningEvent() {
+    // 长按/按键/外部 StartListening() 触发 → 先停 MP3
+    MusicPlayer::GetInstance().Stop();
+
     auto state = GetDeviceState();
-    
+
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;
@@ -806,6 +816,9 @@ void Application::HandleWakeWordDetectedEvent() {
     if (!protocol_) {
         return;
     }
+
+    // 唤醒词检测 → 打断 MP3 播放（"小智" 优先级最高）
+    MusicPlayer::GetInstance().Stop();
 
     auto state = GetDeviceState();
     auto wake_word = audio_service_.GetLastWakeWord();

@@ -1,6 +1,7 @@
 #include "remote_cmd.h"
 #include "application.h"
 #include "live_companion.h"
+#include "audio/music_player.h"
 #include "board.h"
 #include "display.h"
 #include "device_state.h"
@@ -61,6 +62,8 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "vad_config") == 0) OnVadConfig(msg);
     else if (strcmp(type, "live_companion") == 0) OnLiveCompanion(msg);
     else if (strcmp(type, "stt_url") == 0) OnSttUrl(msg);
+    else if (strcmp(type, "music_play") == 0) OnMusicPlay(msg);
+    else if (strcmp(type, "music_stop") == 0) OnMusicStop();
     else {
         ESP_LOGW(TAG, "未知命令: %s", type);
         handled = false;
@@ -427,4 +430,38 @@ void RemoteCmd::PostSttText(const std::string& text) {
         stt_posting_.store(false);
         delete args;
     }
+}
+
+void RemoteCmd::OnMusicPlay(const cJSON* msg) {
+    auto url_item = cJSON_GetObjectItem(msg, "url");
+    auto title_item = cJSON_GetObjectItem(msg, "title");
+    if (!cJSON_IsString(url_item) || url_item->valuestring == nullptr || url_item->valuestring[0] == '\0') {
+        ESP_LOGW(TAG, "music_play 缺少 url");
+        return;
+    }
+
+    std::string url = url_item->valuestring;
+    std::string title = cJSON_IsString(title_item) ? title_item->valuestring : "";
+    ESP_LOGI(TAG, "music_play: %s (%s)", title.c_str(), url.c_str());
+
+    app_->Schedule([url = std::move(url), title = std::move(title)]() {
+        auto& app = Application::GetInstance();
+        // 打断当前 TTS + 清空 opus 解码队列（避免与 MP3 PCM 串音）
+        if (app.GetDeviceState() == kDeviceStateSpeaking) {
+            app.AbortSpeaking(kAbortReasonNone);
+        }
+        app.GetAudioService().ResetDecoder();
+        // 暂停直播伴侣
+        if (auto* lc = app.GetLiveCompanion(); lc && lc->IsRunning()) {
+            lc->Suspend();
+        }
+        MusicPlayer::GetInstance().Play(url, title);
+    });
+}
+
+void RemoteCmd::OnMusicStop() {
+    ESP_LOGI(TAG, "music_stop");
+    app_->Schedule([]() {
+        MusicPlayer::GetInstance().Stop();
+    });
 }

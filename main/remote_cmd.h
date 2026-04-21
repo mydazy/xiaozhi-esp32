@@ -32,6 +32,8 @@ class Application;
  * │ live_companion│ {"type":"live_companion","action":"start/stop/status/load"} │
  * │ stt_url       │ {"type":"stt_url", "url":"https://www.mydazy.com/v1/ota/pushstt"}  设置STT回调地址    │
  * │               │ {"type":"stt_url", "url":""}  清除STT回调                   │
+ * │ music_play    │ {"type":"music_play","url":"https://xxx.mp3","title":"xxx"} │
+ * │ music_stop    │ {"type":"music_stop"}                                       │
  * └───────────────┴────────────────────────────────────────────────────────────┘
  *
  * 完整示例:
@@ -61,6 +63,8 @@ private:
     void OnSleep(const cJSON* msg);
     void OnLiveCompanion(const cJSON* msg);
     void OnSttUrl(const cJSON* msg);
+    void OnMusicPlay(const cJSON* msg);
+    void OnMusicStop();
 
     Application* app_;
     std::string stt_url_;  // 运行时缓存，启动时从 NVS 加载
