@@ -1,6 +1,8 @@
 #include "application.h"
 #include "board.h"
 #include "display.h"
+#include "display/ui_display.h"
+#include "display/ui/resources/ui_image_manager.h"
 #include "system_info.h"
 #include "audio_codec.h"
 #include "mqtt_protocol.h"
@@ -10,6 +12,9 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "remote_cmd.h"
+#include "live_companion.h"
+#include "device_state_event.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -17,11 +22,6 @@
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 #include <font_awesome.h>
-
-// QR 码生成（esp_emote_gfx 组件已内置 qrcodegen）
-extern "C" {
-#include "../managed_components/espressif2022__esp_emote_gfx/src/lib/qrcode/qrcodegen.h"
-}
 
 #define TAG "Application"
 
@@ -95,6 +95,8 @@ void Application::Initialize() {
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_STATE_CHANGED);
+        // 广播设备状态变化事件（LiveCompanion 等订阅方依赖此回调）
+        DeviceStateEventManager::GetInstance().PostStateChangeEvent(old_state, new_state);
     });
 
     // Start the clock timer to update the status bar
@@ -398,6 +400,7 @@ void Application::CheckAssetsVersion() {
 
     // Apply assets
     assets.Apply();
+    UiImageManager::GetInstance().LoadAll();
     display->SetChatMessage("system", "");
     display->SetEmotion("logo");
 }
@@ -483,6 +486,10 @@ void Application::InitializeProtocol() {
     auto codec = board.GetAudioCodec();
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
+
+    // 初始化远程命令处理器和直播伴侣
+    remote_cmd_ = std::make_unique<RemoteCmd>(this);
+    live_companion_ = std::make_unique<LiveCompanion>(this);
 
     if (ota_->HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
@@ -607,13 +614,10 @@ void Application::InitializeProtocol() {
 #if CONFIG_RECEIVE_CUSTOM_MESSAGE
         } else if (strcmp(type->valuestring, "custom") == 0) {
             auto payload = cJSON_GetObjectItem(root, "payload");
-            ESP_LOGI(TAG, "Received custom message: %s", cJSON_PrintUnformatted(root));
-            if (cJSON_IsObject(payload)) {
-                Schedule([this, display, payload_str = std::string(cJSON_PrintUnformatted(payload))]() {
-                    display->SetChatMessage("system", payload_str.c_str());
-                });
+            if (cJSON_IsObject(payload) && remote_cmd_) {
+                remote_cmd_->Handle(payload);
             } else {
-                ESP_LOGW(TAG, "Invalid custom message format: missing payload");
+                ESP_LOGW(TAG, "Invalid custom message or remote_cmd not ready");
             }
 #endif
         } else {
@@ -642,69 +646,19 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
         digit_sound{'9', Lang::Sounds::OGG_9}
     }};
 
-    // 显示 MAC 绑定二维码（165×165，居中）
-#if HAVE_LVGL
     auto display = Board::GetInstance().GetDisplay();
     std::string mac = SystemInfo::GetMacAddress();
-    ESP_LOGI(TAG, "Activation QR: %s", mac.c_str());
+    ESP_LOGI(TAG, "Activation: mac=%s code=%s", mac.c_str(), code.c_str());
 
-    // 生成 QR 码数据
-    uint8_t qr_buf[qrcodegen_BUFFER_LEN_FOR_VERSION(5)];
-    uint8_t tmp_buf[qrcodegen_BUFFER_LEN_FOR_VERSION(5)];
-    bool ok = qrcodegen_encodeText(mac.c_str(), tmp_buf, qr_buf,
-                                    qrcodegen_Ecc_LOW, 1, 5, qrcodegen_Mask_AUTO, true);
-    if (ok) {
-        int qr_size = qrcodegen_getSize(qr_buf);
-        constexpr int canvas_px = 165;
-        int scale = canvas_px / qr_size;
-        if (scale < 1) scale = 1;
-        int actual_px = qr_size * scale;
-
-        DisplayLockGuard lock(display);
-        // 白底 canvas
-        lv_obj_t* canvas = lv_canvas_create(lv_screen_active());
-        static lv_color_t* cbuf = nullptr;
-        if (!cbuf) {
-            cbuf = (lv_color_t*)heap_caps_malloc(actual_px * actual_px * sizeof(lv_color_t),
-                                                  MALLOC_CAP_SPIRAM);
-        }
-        if (cbuf) {
-            lv_canvas_set_buffer(canvas, cbuf, actual_px, actual_px, LV_COLOR_FORMAT_NATIVE);
-            lv_canvas_fill_bg(canvas, lv_color_white(), LV_OPA_COVER);
-            // 逐模块画黑点
-            for (int y = 0; y < qr_size; y++) {
-                for (int x = 0; x < qr_size; x++) {
-                    if (qrcodegen_getModule(qr_buf, x, y)) {
-                        for (int dy = 0; dy < scale; dy++) {
-                            for (int dx = 0; dx < scale; dx++) {
-                                lv_canvas_set_px(canvas, x * scale + dx, y * scale + dy,
-                                                 lv_color_black(), LV_OPA_COVER);
-                            }
-                        }
-                    }
-                }
-            }
-            lv_obj_center(canvas);
-        }
-        // 底部显示 MAC 文字
-        lv_obj_t* label = lv_label_create(lv_screen_active());
-        lv_label_set_text(label, mac.c_str());
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(label, lv_color_white(), 0);
-        lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -2);
+    // UiDisplay 独立渲染激活页（QR + 激活码）；其它 Display 子类 fallback 为聊天消息
+    if (auto* ui = dynamic_cast<UiDisplay*>(display)) {
+        ui->ShowActivationPage(mac.c_str(), code.c_str());
     } else {
-        ESP_LOGE(TAG, "QR encode failed for: %s", mac.c_str());
-    }
-#endif
-
-    // 语音播报激活码（不调 SetEmotion，避免表情图片覆盖 QR 码）
-    {
-        auto display = Board::GetInstance().GetDisplay();
-        display->SetStatus(Lang::Strings::ACTIVATION);
-        // display->SetEmotion("link");  // 注释掉：防止 emote.json 的 link 图片和 QR 码重叠
         display->SetChatMessage("system", message.c_str());
-        audio_service_.PlaySound(Lang::Sounds::OGG_ACTIVATION);
     }
+
+    display->SetStatus(Lang::Strings::ACTIVATION);
+    audio_service_.PlaySound(Lang::Sounds::OGG_ACTIVATION);
     for (const auto& digit : code) {
         auto it = std::find_if(digit_sounds.begin(), digit_sounds.end(),
             [digit](const digit_sound& ds) { return ds.digit == digit; });
@@ -935,7 +889,10 @@ void Application::HandleStateChangedEvent() {
     auto display = board.GetDisplay();
     auto led = board.GetLed();
     led->OnStateChanged();
-    
+
+    // UI 页面切换：idle 切时钟主屏，对话/配网切 chat 模式（显示表情/emoji/提示）
+    auto* lcd = dynamic_cast<UiDisplay*>(display);
+
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
@@ -944,11 +901,13 @@ void Application::HandleStateChangedEvent() {
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
+            if (lcd) lcd->SwitchToClockMode();   // idle 回时钟主屏
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
+            if (lcd) lcd->SwitchToChatMode();    // 对话开始，表情/消息可见
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
@@ -994,6 +953,10 @@ void Application::HandleStateChangedEvent() {
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(false);
+            // 配网模式切到 chat UI 层（隐藏时钟容器），让 Alert 的 SSID/URL 提示可见
+            if (auto* lcd = dynamic_cast<UiDisplay*>(display)) {
+                lcd->SwitchToChatMode();
+            }
             break;
         default:
             // Do nothing

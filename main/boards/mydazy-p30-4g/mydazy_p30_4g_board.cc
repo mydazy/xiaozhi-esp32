@@ -6,6 +6,7 @@
 #include "display/display.h"
 #include "display/emote_display.h"
 #include "display/lcd_display.h"
+#include "display/ui_display.h"
 #include "esp_lcd_jd9853.h"
 #include "axs5106l_touch.h"
 #include "sc7a20h.h"
@@ -293,8 +294,24 @@ private:
 
         touch_driver_->SetGestureCallback([this](TouchGesture gesture, int16_t x, int16_t y) {
             WakeUp();
-            if (gesture == TouchGesture::SingleClick) {
-                HandleTouchSingleClick();
+            switch (gesture) {
+                case TouchGesture::SingleClick:
+                    HandleTouchSingleClick();
+                    break;
+                case TouchGesture::SwipeDown:
+                    // 下拉呼出控制中心（idle/chat 都可打开）
+                    if (auto* lcd = dynamic_cast<UiDisplay*>(GetDisplay())) {
+                        if (!lcd->IsControlCenterVisible()) lcd->ShowControlCenter();
+                    }
+                    break;
+                case TouchGesture::SwipeUp:
+                    // 上滑关闭控制中心
+                    if (auto* lcd = dynamic_cast<UiDisplay*>(GetDisplay())) {
+                        if (lcd->IsControlCenterVisible()) lcd->HideControlCenter();
+                    }
+                    break;
+                default:
+                    break;
             }
         });
 
@@ -466,10 +483,10 @@ private:
         display_ = new emote::EmoteDisplay(panel_, panel_io_, DISPLAY_WIDTH, DISPLAY_HEIGHT);
         ESP_LOGI(TAG, "表情包显示模式已启用");
 #else
-        display_ = new SpiLcdDisplay(panel_io_, panel_,
-                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
-                                     DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
-        ESP_LOGI(TAG, "LVGL显示模式已启用");
+        display_ = new UiDisplay(panel_io_, panel_,
+                                 DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
+                                 DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        ESP_LOGI(TAG, "UiDisplay 已启用 (时钟 + 配网 + 激活 + 控制中心)");
 #endif
 
         SystemInfo::PrintHeapStats();

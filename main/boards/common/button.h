@@ -8,6 +8,8 @@
 #include <button_gpio.h>
 #include <functional>
 #include <map>
+#include <memory>
+#include <vector>
 
 class Button {
 public:
@@ -17,12 +19,6 @@ public:
 
     void OnPressDown(std::function<void()> callback);
     void OnPressUp(std::function<void()> callback);
-    /**
-     * @brief 注册长按回调
-     * @param callback 回调函数
-     * @param press_time_ms 触发时长(ms)。0 = 使用构造时设的默认 long_press_time_ms。
-     *                      传不同的 press_time_ms 可注册多个长按时间点（互不冲突）。
-     */
     void OnLongPress(std::function<void()> callback, uint16_t press_time_ms = 0);
     void OnClick(std::function<void()> callback);
     void OnDoubleClick(std::function<void()> callback);

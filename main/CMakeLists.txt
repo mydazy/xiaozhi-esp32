@@ -22,6 +22,10 @@ set(SOURCES "audio/audio_codec.cc"
             "display/lvgl_display/gif/gifdec.c"
             "display/lvgl_display/jpg/image_to_jpeg.cpp"
             "display/lvgl_display/jpg/jpeg_to_image.c"
+            # UiDisplay（p30-4g / p31 专用）：内联三页面 + 状态栏 + 开机动画 + 控制中心
+            "display/ui_display.cc"
+            "display/ui/resources/ui_image_manager.cc"
+            "display/ui/widgets/control_center.cc"
             "protocols/protocol.cc"
             "protocols/mqtt_protocol.cc"
             "protocols/websocket_protocol.cc"
@@ -37,11 +41,16 @@ set(SOURCES "audio/audio_codec.cc"
             "ota.cc"
             "settings.cc"
             "device_state_machine.cc"
+            "device_state_event.cc"
+            "live_companion.cc"
+            "remote_cmd.cc"
             "assets.cc"
             "main.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/demuxer" "protocols" "blufi")
+set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg"
+    "display/ui" "display/ui/core" "display/ui/theme" "display/ui/resources" "display/ui/widgets"
+    "audio" "audio/demuxer" "protocols" "blufi")
 
 # Add board common files
 list(APPEND SOURCES
@@ -98,6 +107,8 @@ elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_4G)
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
     set(BUILTIN_ICON_FONT font_awesome_20_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
+    # UI 资源（状态栏 PNG 图标 + maru 88/30 大字号时钟字体）→ assets 分区
+    set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/images")
 elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
     set(BOARD_TYPE "mydazy-p30-wifi")
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)

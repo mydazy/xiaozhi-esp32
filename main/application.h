@@ -17,6 +17,9 @@
 #include "device_state.h"
 #include "device_state_machine.h"
 
+class LiveCompanion;
+class RemoteCmd;
+
 // Main event bits
 #define MAIN_EVENT_SCHEDULE             (1 << 0)
 #define MAIN_EVENT_SEND_AUDIO           (1 << 1)
@@ -118,7 +121,11 @@ public:
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
-    
+
+    // UI 主屏时钟与对话模式切换（由 remote_cmd 调用）
+    LiveCompanion* GetLiveCompanion() { return live_companion_.get(); }
+    RemoteCmd* GetRemoteCmd() { return remote_cmd_.get(); }
+
     /**
      * Reset protocol resources (thread-safe)
      * Can be called from any task to release resources allocated after network connected
@@ -141,6 +148,8 @@ private:
     std::string last_error_message_;
     AudioService audio_service_;
     std::unique_ptr<Ota> ota_;
+    std::unique_ptr<RemoteCmd> remote_cmd_;
+    std::unique_ptr<LiveCompanion> live_companion_;
     esp_timer_handle_t delayed_wake_timer_ = nullptr;
     std::string pending_wake_text_;
 

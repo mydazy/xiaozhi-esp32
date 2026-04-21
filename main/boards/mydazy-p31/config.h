@@ -132,11 +132,4 @@
 #define NFC_WRITE_TEST_ENABLE   0
 #define NFC_WRITE_TEST_BLOCK    4
 
-// GPS 测试开关
-#define GNSS_AT_TEST_ENABLED    false
-
-// 触摸屏 I2C 单独测试
-#define MYDAZY_TOUCH_I2C_ONLY_TEST 1
-
-
 #endif // _BOARD_CONFIG_H_

@@ -6,6 +6,7 @@
 #include "display/display.h"
 #include "display/emote_display.h"
 #include "display/lcd_display.h"
+#include "display/ui_display.h"
 #include "esp_lcd_jd9853.h"
 #include "axs5106l_touch.h"
 #include "sc7a20h.h"
@@ -24,7 +25,9 @@
 #include "typec_headset.h"
 #include "ibeacon.h"
 #include "ml307_gnss.h"
+#include "device_state_event.h"
 #include <font_awesome.h>
+#include <mutex>
 #include <sys/stat.h>       // 文件属性头文件
 #include <sys/unistd.h>
 #include <dirent.h>         // 目录操作头文件
@@ -309,6 +312,16 @@ private:
                     }
                     break;
                 }
+                case TouchGesture::SwipeDown:
+                    if (auto* lcd = dynamic_cast<UiDisplay*>(GetDisplay())) {
+                        if (!lcd->IsControlCenterVisible()) lcd->ShowControlCenter();
+                    }
+                    break;
+                case TouchGesture::SwipeUp:
+                    if (auto* lcd = dynamic_cast<UiDisplay*>(GetDisplay())) {
+                        if (lcd->IsControlCenterVisible()) lcd->HideControlCenter();
+                    }
+                    break;
                 default:
                     break;
             }
@@ -516,10 +529,10 @@ private:
         display_ = new emote::EmoteDisplay(panel_, panel_io_, DISPLAY_WIDTH, DISPLAY_HEIGHT);
         ESP_LOGI(TAG, "表情包显示模式已启用");
 #else
-        display_ = new SpiLcdDisplay(panel_io_, panel_,
-                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
-                                     DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
-        ESP_LOGI(TAG, "LVGL显示模式已启用");
+        display_ = new UiDisplay(panel_io_, panel_,
+                                 DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
+                                 DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        ESP_LOGI(TAG, "UiDisplay 已启用 (时钟 + 配网 + 激活 + 控制中心)");
 #endif
 
         // 关键节点：显示初始化完成后打印内存
@@ -722,16 +735,52 @@ private:
 
     // Type-C 耳机检测
     TypecHeadset* headset_ = nullptr;
-    std::atomic<int> gnss_satellites_{0};
+
+    // GPS 状态（多核共享）
+    // - 原子量适合单字段 boolean/int；double 在 32 位核上非原子，用 mutex 保护整组位置
+    std::atomic<int> gnss_satellites_{0};       // 当前使用卫星数（来自 GGA）
+    std::atomic<int> gnss_sats_in_view_{0};     // 可见卫星数（来自 GSV）
     std::atomic<bool> gnss_fixed_{false};
-    double gnss_lat_ = 0.0, gnss_lon_ = 0.0;
+    std::atomic<int64_t> gnss_last_fix_us_{0};  // 最近一次成功 fix 的时间戳
+    std::atomic<bool> gnss_started_{false};     // 当前是否运行中（可切换）
+    std::atomic<bool> gnss_auto_started_{false};  // 首次 idle 自动启动标志
+    std::atomic<bool> gnss_user_disabled_{false}; // MCP stop 后不再自动重启
+    mutable std::mutex gnss_pos_mutex_;
+    double gnss_lat_ = 0.0;
+    double gnss_lon_ = 0.0;
+    double gnss_hdop_ = 0.0;
+    char gnss_utc_time_[16] = {};
+
+    // 状态栏节流：仅在卫星数或 fix 状态变化时刷新
+    std::atomic<int> last_status_sats_{-1};
+    std::atomic<bool> last_status_fixed_{false};
 
     // GPS 演示模式（连按5次切换）
-    bool gps_demo_active_ = false;
+    std::atomic<bool> gps_demo_active_{false};
     esp_timer_handle_t gps_demo_timer_ = nullptr;
+    esp_timer_handle_t gnss_watchdog_timer_ = nullptr;  // fix 超时降级
+
+    // 快照读取，避免在持锁时访问 LCD/网络
+    struct GnssPos { double lat; double lon; double hdop; char utc[16]; };
+    GnssPos GetGnssPos() const {
+        std::lock_guard<std::mutex> lock(gnss_pos_mutex_);
+        GnssPos p{gnss_lat_, gnss_lon_, gnss_hdop_, {}};
+        memcpy(p.utc, gnss_utc_time_, sizeof(p.utc));
+        return p;
+    }
+    void SetGnssPos(double lat, double lon, double hdop, const char* utc) {
+        std::lock_guard<std::mutex> lock(gnss_pos_mutex_);
+        gnss_lat_ = lat;
+        gnss_lon_ = lon;
+        gnss_hdop_ = hdop;
+        if (utc) {
+            strncpy(gnss_utc_time_, utc, sizeof(gnss_utc_time_) - 1);
+            gnss_utc_time_[sizeof(gnss_utc_time_) - 1] = '\0';
+        }
+    }
 
     void RefreshGpsDemo() {
-        if (!gps_demo_active_) return;
+        if (!gps_demo_active_.load()) return;
         auto display = GetDisplay();
         if (!display) return;
 
@@ -744,45 +793,47 @@ private:
                  sats, fixed ? "OK" : "...");
         display->SetStatus(top);
 
-        // 底部：定位信息
+        // 底部：定位信息（使用线程安全快照，不触碰 gnss_ 裸指针）
         char bot[128];
         if (fixed) {
-            auto& fix = gnss_->GetLastFix();
+            auto pos = GetGnssPos();
             snprintf(bot, sizeof(bot),
                 "Lat %.6f  Lon %.6f\n"
                 "HDOP %.1f  UTC %.6s",
-                gnss_lat_, gnss_lon_, fix.hdop, fix.utc_time);
+                pos.lat, pos.lon, pos.hdop, pos.utc);
         } else {
-            snprintf(bot, sizeof(bot), "Waiting for fix...");
+            snprintf(bot, sizeof(bot), "Waiting for fix... (%d sats in view)",
+                     gnss_sats_in_view_.load());
         }
         display->SetChatMessage("system", bot);
     }
 
     void ToggleGpsDemo() {
-        gps_demo_active_ = !gps_demo_active_;
-        ESP_LOGI(TAG, "GPS demo %s", gps_demo_active_ ? "ON" : "OFF");
+        bool was_active = gps_demo_active_.exchange(!gps_demo_active_.load());
+        bool now_active = !was_active;
+        ESP_LOGI(TAG, "GPS demo %s", now_active ? "ON" : "OFF");
         auto display = GetDisplay();
 
-        if (gps_demo_active_) {
+        if (now_active) {
             if (display) display->ShowNotification("GPS Demo ON", 2000);
             RefreshGpsDemo();
-            // 定时 2 秒刷新
-            esp_timer_create_args_t args = {
-                .callback = [](void* arg) {
-                    static_cast<MyDazyP31Board*>(arg)->RefreshGpsDemo();
-                },
-                .arg = this,
-                .dispatch_method = ESP_TIMER_TASK,
-                .name = "gps_demo",
-                .skip_unhandled_events = true,
-            };
-            esp_timer_create(&args, &gps_demo_timer_);
+            if (!gps_demo_timer_) {
+                esp_timer_create_args_t args = {
+                    .callback = [](void* arg) {
+                        static_cast<MyDazyP31Board*>(arg)->RefreshGpsDemo();
+                    },
+                    .arg = this,
+                    .dispatch_method = ESP_TIMER_TASK,
+                    .name = "gps_demo",
+                    .skip_unhandled_events = true,
+                };
+                esp_timer_create(&args, &gps_demo_timer_);
+            }
             esp_timer_start_periodic(gps_demo_timer_, 2000000);
         } else {
             if (gps_demo_timer_) {
                 esp_timer_stop(gps_demo_timer_);
-                esp_timer_delete(gps_demo_timer_);
-                gps_demo_timer_ = nullptr;
+                // 复用 timer，不每次 delete（避免 demo 反复切换泄漏）
             }
             if (display) {
                 display->ShowNotification("GPS Demo OFF", 2000);
@@ -839,7 +890,8 @@ private:
         bool charging = power_manager_ ? power_manager_->IsCharging() : false;
         bool fixed = gnss_fixed_.load();
         int sats = gnss_satellites_.load();
-        double lat = gnss_lat_, lon = gnss_lon_;
+        auto pos = GetGnssPos();
+        double lat = pos.lat, lon = pos.lon;
         size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
 
         // 网络信息
@@ -956,77 +1008,188 @@ private:
 #endif
     }
 
-    void StartGnss() {
-        if (GetNetworkType() != NetworkType::ML307) return;
+    // 状态栏节流：卫星数/fix 变化时才刷新，避免 1Hz 覆盖真正的业务状态
+    void UpdateGpsStatusBar() {
+        if (gps_demo_active_.load()) return;  // demo 模式由自己的定时器刷
+
+        int sats = gnss_satellites_.load();
+        bool fixed = gnss_fixed_.load();
+        int prev_sats = last_status_sats_.exchange(sats);
+        bool prev_fixed = last_status_fixed_.exchange(fixed);
+        if (sats == prev_sats && fixed == prev_fixed) return;
+
+        auto display = GetDisplay();
+        if (!display) return;
+
+        char text[48];
+        if (fixed) {
+            auto pos = GetGnssPos();
+            snprintf(text, sizeof(text), FONT_AWESOME_LOCATION_DOT " %d  %.4f,%.4f",
+                     sats, pos.lat, pos.lon);
+        } else {
+            snprintf(text, sizeof(text), FONT_AWESOME_LOCATION_DOT " %d", sats);
+        }
+        display->SetStatus(text);
+    }
+
+    // fix 超时降级：>10s 无新 fix → 清除 fixed 标志
+    static void GnssWatchdogThunk(void* arg) {
+        auto* self = static_cast<MyDazyP31Board*>(arg);
+        if (!self->gnss_fixed_.load()) return;
+        int64_t now = esp_timer_get_time();
+        int64_t last = self->gnss_last_fix_us_.load();
+        if (now - last > 10 * 1000000LL) {
+            self->gnss_fixed_ = false;
+            ESP_LOGW(TAG, "GNSS: fix stale (>10s), demoting to searching");
+            self->UpdateGpsStatusBar();
+        }
+    }
+
+    // 惰性创建 Ml307Gnss 实例（需要 modem 已 ready）；成功返回 true
+    bool EnsureGnssInstance() {
+        if (gnss_) return true;
+        if (GetNetworkType() != NetworkType::ML307) return false;
 
         auto& ml307_board = dynamic_cast<Ml307Board&>(GetCurrentBoard());
         auto* modem = ml307_board.GetModem();
         if (!modem) {
             ESP_LOGW(TAG, "GNSS: modem not ready");
-            return;
+            return false;
         }
 
         gnss_ = new Ml307Gnss(modem->GetAtUart());
 
-        // 搜星回调 → 更新状态栏（demo 模式由定时器刷新）
-        gnss_->SetSatCallback([this](int sats) {
-            gnss_satellites_ = sats;
-            if (gps_demo_active_) return;  // demo 模式下由定时器统一刷新
-            auto display = GetDisplay();
-            if (display) {
-                char text[32];
-                snprintf(text, sizeof(text), FONT_AWESOME_LOCATION_DOT " %d", sats);
-                display->SetStatus(text);
+        // GSV: 可见卫星数（搜星指示）
+        gnss_->SetSatCallback([this](int sats_in_view) {
+            gnss_sats_in_view_ = sats_in_view;
+            if (!gnss_fixed_.load()) {
+                gnss_satellites_ = sats_in_view;
+                UpdateGpsStatusBar();
             }
         });
 
-        // 定位成功回调
+        // GGA: 定位结果（fix + 使用中卫星数）
         gnss_->SetFixCallback([this](const GnssFix& fix) {
-            gnss_fixed_ = fix.valid;
-            gnss_satellites_ = fix.satellites;
-            gnss_lat_ = fix.latitude;
-            gnss_lon_ = fix.longitude;
-            if (!gps_demo_active_) {
-                auto display = GetDisplay();
-                if (display) {
-                    char text[48];
-                    snprintf(text, sizeof(text), FONT_AWESOME_LOCATION_DOT " %d  %.4f,%.4f",
-                             fix.satellites, fix.latitude, fix.longitude);
-                    display->SetStatus(text);
-                }
+            if (fix.valid) {
+                SetGnssPos(fix.latitude, fix.longitude, fix.hdop, fix.utc_time);
+                gnss_satellites_ = fix.satellites;
+                gnss_last_fix_us_ = esp_timer_get_time();
+                bool was_fixed = gnss_fixed_.exchange(true);
+                UpdateGpsStatusBar();
+                if (!was_fixed) ReportStatus();  // 仅首次上报，避免 1Hz 轰炸后端
+            } else {
+                gnss_fixed_ = false;
+                UpdateGpsStatusBar();
             }
-            if (fix.valid) ReportStatus();
         });
 
-        gnss_->Start(kGnssGps | kGnssBds);
+        return true;
+    }
+
+    // 启动 GPS（幂等）；返回是否当前处于运行状态
+    bool StartGnss() {
+        if (gnss_started_.load()) return true;
+        if (!EnsureGnssInstance()) return false;
+
+        if (!gnss_->Start(kGnssGps | kGnssBds)) {
+            ESP_LOGE(TAG, "GNSS: Start() failed");
+            return false;
+        }
+        gnss_started_ = true;
         ESP_LOGI(TAG, "GNSS started (GPS+BDS)");
 
-        // 注册 GPS MCP tool
+        // fix watchdog: 每 3 秒检查一次；复用已创建的 timer
+        if (!gnss_watchdog_timer_) {
+            esp_timer_create_args_t args = {
+                .callback = GnssWatchdogThunk,
+                .arg = this,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "gnss_wdt",
+                .skip_unhandled_events = true,
+            };
+            esp_timer_create(&args, &gnss_watchdog_timer_);
+        }
+        esp_timer_start_periodic(gnss_watchdog_timer_, 3 * 1000000ULL);
+        return true;
+    }
+
+    // 停止 GPS（幂等）；不销毁 gnss_ 实例以便再次 Start 复用 URC 回调
+    void StopGnss() {
+        if (!gnss_started_.exchange(false)) return;
+        if (gnss_) gnss_->Stop();
+        if (gnss_watchdog_timer_) esp_timer_stop(gnss_watchdog_timer_);
+
+        gnss_fixed_ = false;
+        gnss_satellites_ = 0;
+        gnss_sats_in_view_ = 0;
+        last_status_sats_ = -1;
+        last_status_fixed_ = false;
+        auto display = GetDisplay();
+        if (display) display->SetStatus("");
+        ESP_LOGI(TAG, "GNSS stopped");
+    }
+
+    // 注册 GPS 相关 MCP tools（独立于启动状态，Board 初始化时调一次即可）
+    void InitializeGnssMcp() {
         auto& mcp = McpServer::GetInstance();
+
+        // 开启 GPS
+        mcp.AddTool("self.gps.start",
+            "Turn on GPS/BDS positioning. Call this before asking for coordinates. "
+            "Returns whether GPS is now running. Requires 4G modem to be ready.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                gnss_user_disabled_ = false;
+                bool ok = StartGnss();
+                cJSON* json = cJSON_CreateObject();
+                cJSON_AddBoolToObject(json, "started", ok);
+                cJSON_AddBoolToObject(json, "running", gnss_started_.load());
+                if (!ok) {
+                    cJSON_AddStringToObject(json, "reason",
+                        GetNetworkType() == NetworkType::ML307 ? "modem_not_ready" : "not_4g_mode");
+                }
+                return json;
+            });
+
+        // 关闭 GPS
+        mcp.AddTool("self.gps.stop",
+            "Turn off GPS/BDS positioning to save power. Device will stop reporting location "
+            "until self.gps.start is called again.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                StopGnss();
+                gnss_user_disabled_ = true;  // 禁止再自动启动
+                cJSON* json = cJSON_CreateObject();
+                cJSON_AddBoolToObject(json, "stopped", true);
+                return json;
+            });
+
+        // 查询定位
         mcp.AddTool("self.gps.get_location",
-            "Get the current GPS/BDS location of the device. Returns latitude, longitude, "
-            "satellite count, HDOP, UTC time and fix status. Use this tool when the user "
-            "asks about current location, coordinates, or position.",
+            "Get the current GPS/BDS location. Returns latitude, longitude, satellite count, "
+            "HDOP, UTC time and fix status. If GPS is not running, call self.gps.start first.",
             PropertyList(),
             [this](const PropertyList&) -> ReturnValue {
                 cJSON* json = cJSON_CreateObject();
+                bool running = gnss_started_.load();
                 bool fixed = gnss_fixed_.load();
                 int sats = gnss_satellites_.load();
+                cJSON_AddBoolToObject(json, "running", running);
                 cJSON_AddBoolToObject(json, "fixed", fixed);
                 cJSON_AddNumberToObject(json, "satellites", sats);
-                if (fixed) {
-                    cJSON_AddNumberToObject(json, "latitude", gnss_lat_);
-                    cJSON_AddNumberToObject(json, "longitude", gnss_lon_);
-                    if (gnss_) {
-                        auto& last = gnss_->GetLastFix();
-                        cJSON_AddNumberToObject(json, "hdop", last.hdop);
-                        if (last.utc_time[0] != '\0') {
-                            cJSON_AddStringToObject(json, "utc_time", last.utc_time);
-                        }
+                if (!running) {
+                    cJSON_AddStringToObject(json, "status", "off");
+                } else if (fixed) {
+                    auto pos = GetGnssPos();
+                    cJSON_AddNumberToObject(json, "latitude", pos.lat);
+                    cJSON_AddNumberToObject(json, "longitude", pos.lon);
+                    cJSON_AddNumberToObject(json, "hdop", pos.hdop);
+                    if (pos.utc[0] != '\0') {
+                        cJSON_AddStringToObject(json, "utc_time", pos.utc);
                     }
                 } else {
                     cJSON_AddStringToObject(json, "status",
-                        sats > 0 ? "searching" : "no_signal");
+                        gnss_sats_in_view_.load() > 0 ? "searching" : "no_signal");
                 }
                 return json;
             });
@@ -1108,10 +1271,7 @@ public:
         InitializeSpi();            // 4. 初始化SPI总线 (显示需要)
         InitializeDisplay();        // 5. 初始化显示 (依赖SPI)
         InitializeTouch();          // 6. LCD/LVGL 就绪后再注册触摸输入
-                                     //    这样触摸初始化不会在显示点亮后再拉共享 RST。
-// #if !MYDAZY_TOUCH_I2C_ONLY_TEST 
         InitializeSc7a20h();        // 7. 初始化SC7A20H传感器 (依赖I2C)
-// #endif
         InitializePowerManager();  // 8. 初始化电池监控
         InitializePowerSaveTimer(); // 9. 初始化省电定时器
         InitializeButtons();        // 10. 初始化按钮 (最后初始化)
@@ -1119,27 +1279,18 @@ public:
         InitializeHeadset();        // 12. Type-C 耳机动态检测
         // InitializeIBeacon();     // TODO: iBeacon 需等 BLE host sync 后启动，暂禁用
 
-        // 13. GPS 延迟启动（等 modem 检测到即可，不依赖网络注册）
-        xTaskCreatePinnedToCore([](void* arg) {
-            auto* self = static_cast<MyDazyP31Board*>(arg);
-            if (self->GetNetworkType() != NetworkType::ML307) {
-                vTaskDelete(NULL);
-                return;
-            }
-            // 等 modem 初始化完成（最多 30 秒）
-            ESP_LOGI(TAG, "GPS: waiting for modem...");
-            for (int i = 0; i < 15; i++) {
-                vTaskDelay(pdMS_TO_TICKS(2000));
-                auto& ml307 = dynamic_cast<Ml307Board&>(self->GetCurrentBoard());
-                if (ml307.GetModem() != nullptr) {
-                    ESP_LOGI(TAG, "GPS: modem ready after %ds, starting GNSS", (i + 1) * 2);
-                    self->StartGnss();
-                    break;
-                }
-                ESP_LOGD(TAG, "GPS: modem not ready, retry %d/15", i + 1);
-            }
-            vTaskDelete(NULL);
-        }, "gnss_init", 3072, this, 2, NULL, 0);
+        // 13. GPS：注册 MCP tool（无论网络类型，tool 始终可调用）+ 订阅首次 Idle 事件
+        //     首次进入 kDeviceStateIdle 表示激活已完成，4G 必然已联网，此时自动开 GPS。
+        //     用户通过 self.gps.stop 关闭后，gnss_user_disabled_ 置位，不再自动重启。
+        InitializeGnssMcp();
+        DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
+            [this](DeviceState /*prev*/, DeviceState curr) {
+                if (curr != kDeviceStateIdle) return;
+                if (gnss_auto_started_.load()) return;
+                if (gnss_user_disabled_.load()) return;
+                if (GetNetworkType() != NetworkType::ML307) return;  // WiFi 模式无 GPS
+                if (StartGnss()) gnss_auto_started_ = true;
+            });
 
         // 14. 定时状态上报（90 秒间隔）
         StartStatusTimer();
@@ -1219,6 +1370,16 @@ public:
         // 清理耳机检测
         if (headset_) { headset_->Stop(); delete headset_; headset_ = nullptr; }
         // 清理 GNSS
+        if (gnss_watchdog_timer_) {
+            esp_timer_stop(gnss_watchdog_timer_);
+            esp_timer_delete(gnss_watchdog_timer_);
+            gnss_watchdog_timer_ = nullptr;
+        }
+        if (gps_demo_timer_) {
+            esp_timer_stop(gps_demo_timer_);
+            esp_timer_delete(gps_demo_timer_);
+            gps_demo_timer_ = nullptr;
+        }
         if (gnss_) {
             gnss_->Stop();
             delete gnss_;

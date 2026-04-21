@@ -244,7 +244,7 @@ endchoice
 choice DISPLAY_ESP32S3_TOUCH_LCD_1_85C
     depends on BOARD_TYPE_WAVESHARE_ESP32_S3_TOUCH_LCD_1_85C
     prompt "ESP32S3_TOUCH_LCD_1_85C version"
-    default VERSION_2_0 
+    default VERSION_2_0
     help
         hardware version
     config VERSION_1_0

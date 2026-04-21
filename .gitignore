@@ -17,3 +17,4 @@ main/mmap_generate_emoji.h
 mmap_generate_*.h
 .clangd
 .idea/
+.claude/settings.local.json

@@ -133,7 +133,7 @@ bool Ml307Gnss::Start(uint8_t systems) {
 
     ESP_LOGI(TAG, "Starting GNSS (systems=0x%02X)", systems);
 
-    // 注册 URC 回调捕获 NMEA
+    // 注册 URC 回调捕获 NMEA（现在 AtUart 已将 '$' 行作为 URC 推送）
     urc_handle_ = uart_->RegisterUrcCallback(
         [this](const std::string& cmd, const std::vector<AtArgumentValue>&) {
             if (cmd.size() > 3 && cmd[0] == '$') ParseNmea(cmd);
@@ -141,8 +141,12 @@ bool Ml307Gnss::Start(uint8_t systems) {
     urc_registered_ = true;
 
     // NMEA mask: GGA(1) + GSV(8) + RMC(16) = 25
-    bool ok1 = uart_->SendCommand("AT+MGNSSCFG=\"nmea/mask\",25", 1000);
-    ESP_LOGI(TAG, "NMEA mask → %s", ok1 ? "OK" : "FAIL");
+    if (!uart_->SendCommand("AT+MGNSSCFG=\"nmea/mask\",25", 1000)) {
+        ESP_LOGE(TAG, "NMEA mask FAIL");
+        uart_->UnregisterUrcCallback(urc_handle_);
+        urc_registered_ = false;
+        return false;
+    }
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // 定位系统: 1=GPS, 2=BDS, 3=GPS+BDS, 5=GPS+GLONASS, 7=ALL
@@ -153,16 +157,25 @@ bool Ml307Gnss::Start(uint8_t systems) {
     if (mode == 0) mode = 3;
     char cmd[64];
     snprintf(cmd, sizeof(cmd), "AT+MGNSS=%d", mode);
-    bool ok2 = uart_->SendCommand(cmd, 1000);
-    ESP_LOGI(TAG, "MGNSS=%d → %s", mode, ok2 ? "OK" : "FAIL");
+    if (!uart_->SendCommand(cmd, 1000)) {
+        ESP_LOGE(TAG, "MGNSS=%d FAIL", mode);
+        uart_->UnregisterUrcCallback(urc_handle_);
+        urc_registered_ = false;
+        return false;
+    }
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // 开启持续 NMEA 输出
-    bool ok3 = uart_->SendCommand("AT+MGNSSLOC=1", 2000);
-    ESP_LOGI(TAG, "MGNSSLOC=1 → %s", ok3 ? "OK" : "FAIL");
+    if (!uart_->SendCommand("AT+MGNSSLOC=1", 2000)) {
+        ESP_LOGE(TAG, "MGNSSLOC=1 FAIL");
+        uart_->SendCommand("AT+MGNSS=0", 1000);  // 回滚定位系统开启
+        uart_->UnregisterUrcCallback(urc_handle_);
+        urc_registered_ = false;
+        return false;
+    }
 
     running_ = true;
-    ESP_LOGI(TAG, "GNSS started (mode=%d, mask=25, cmd_ok=%d/%d/%d)", mode, ok1, ok2, ok3);
+    ESP_LOGI(TAG, "GNSS started (mode=%d, mask=25)", mode);
     return true;
 }
 

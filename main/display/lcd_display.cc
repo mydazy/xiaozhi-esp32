@@ -96,7 +96,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     // 清屏白色（按 10 行一批减少 SPI 事务）
     {
         const int batch = 10;
-        std::vector<uint16_t> buffer(width_ * batch, 0xFFFF);
+        std::vector<uint16_t> buffer(width_ * batch, 0x0000);
         for (int y = 0; y < height_; y += batch) {
             int rows = std::min(batch, height_ - y);
             esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + rows, buffer.data());
@@ -134,7 +134,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     port_cfg.task_priority = 5;         // P5: LVGL 渲染优先级（低于音频，高于 main_loop）
     port_cfg.timer_period_ms = 33;      // ~30 FPS 刷新 + 触摸轮询
 #if CONFIG_SOC_CPU_CORES_NUM > 1
-    port_cfg.task_affinity = 1;         // Core1: 与音频 I/O、AFE 同核
+    port_cfg.task_affinity = 1;
 #endif
     lvgl_port_init(&port_cfg);
 
@@ -186,7 +186,7 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     // 清屏白色（按 10 行一批减少 SPI 事务）
     {
         const int batch = 10;
-        std::vector<uint16_t> buffer(width_ * batch, 0xFFFF);
+        std::vector<uint16_t> buffer(width_ * batch, 0x0000);
         for (int y = 0; y < height_; y += batch) {
             int rows = std::min(batch, height_ - y);
             esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + rows, buffer.data());
@@ -199,7 +199,7 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_priority = 1;
-    port_cfg.timer_period_ms = 33; // ~30 FPS
+    port_cfg.timer_period_ms = 33;
     lvgl_port_init(&port_cfg);
 
     ESP_LOGI(TAG, "Adding LCD display");

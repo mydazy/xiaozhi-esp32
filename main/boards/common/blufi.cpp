@@ -26,11 +26,7 @@
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "services/gap/ble_svc_gap.h"
-extern void esp_blufi_gatt_svr_register_cb(struct ble_gatt_register_ctxt* ctxt, void* arg);
-extern int esp_blufi_gatt_svr_init(void);
-extern void esp_blufi_gatt_svr_deinit(void);
-extern void esp_blufi_btc_init(void);
-extern void esp_blufi_btc_deinit(void);
+// 注意：esp_blufi_* 函数声明统一放到下方 extern "C" 块（行 36-56），避免 linkage 冲突
 #endif
 
 extern "C" {

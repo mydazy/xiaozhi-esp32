@@ -282,7 +282,7 @@ void Axs5106lTouch::LvglReadCallback(lv_indev_t* indev, lv_indev_data_t* data) {
             lv_obj_set_style_bg_color(self->debug_dot_, lv_color_make(0xFF, 0x30, 0x30), 0);
             lv_obj_set_style_bg_opa(self->debug_dot_, LV_OPA_COVER, 0);
             lv_obj_set_style_radius(self->debug_dot_, LV_RADIUS_CIRCLE, 0);
-            lv_obj_add_flag(self->debug_dot_, LV_OBJ_FLAG_HIDDEN | LV_OBJ_FLAG_IGNORE_LAYOUT);
+            lv_obj_add_flag(self->debug_dot_, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_HIDDEN | LV_OBJ_FLAG_IGNORE_LAYOUT));
             lv_obj_move_foreground(self->debug_dot_);
         }
     }
