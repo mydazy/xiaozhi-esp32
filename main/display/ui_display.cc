@@ -76,12 +76,6 @@ UiDisplay::UiDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t 
 UiDisplay::~UiDisplay() {
     if (boot_timer_) { lv_timer_del(boot_timer_); boot_timer_ = nullptr; }
     if (clock_tick_) { lv_timer_del(clock_tick_); clock_tick_ = nullptr; }
-    // 先断 fallback 引用再 delete，避免 LVGL 渲染踩到已释放字体
-    const_cast<lv_font_t*>(&BUILTIN_TEXT_FONT)->fallback = nullptr;
-    if (puhui_common_font_) {
-        cbin_font_delete(const_cast<lv_font_t*>(puhui_common_font_));
-        puhui_common_font_ = nullptr;
-    }
 }
 
 // ============================================================
@@ -91,9 +85,6 @@ UiDisplay::~UiDisplay() {
 void UiDisplay::SetupUI() {
     SpiLcdDisplay::SetupUI();
     DisplayLockGuard lock(this);
-
-    // 0. 加载 puhui_common 补字字体并挂 BUILTIN_TEXT_FONT.fallback
-    LoadPuhuiCommonFont();
 
     // 1. 开机 Logo：替换父类的 FONT_AWESOME_MICROCHIP_AI 为 start_logo 图片
     if (emoji_label_) {
@@ -113,30 +104,8 @@ void UiDisplay::SetupUI() {
     StartBootAnimation();
 }
 
-// ============================================================
-// BUILTIN_TEXT_FONT 补字字体加载
-// ============================================================
-
 void UiDisplay::LoadPuhuiCommonFont() {
-    if (puhui_common_font_) return;  // 已加载
-
-    void* ptr = nullptr;
-    size_t size = 0;
-    // build_default_assets.py 在 BUILTIN_TEXT_FONT 含 "basic" 时自动把 common 版打包进 assets
-    if (!Assets::GetInstance().GetAssetData("font_puhui_common_20_4.bin", ptr, size) || !ptr) {
-        ESP_LOGW(TAG, "puhui_common_20_4 字体未在 assets 中找到，控制中心等 UI 缺字将显示方框");
-        return;
-    }
-
-    puhui_common_font_ = cbin_font_create(static_cast<uint8_t*>(ptr));
-    if (!puhui_common_font_) {
-        ESP_LOGE(TAG, "cbin_font_create(puhui_common_20_4) 失败");
-        return;
-    }
-
-    // 注入为 BUILTIN_TEXT_FONT.fallback：basic 查不到字符时走 common
-    const_cast<lv_font_t*>(&BUILTIN_TEXT_FONT)->fallback = puhui_common_font_;
-    ESP_LOGI(TAG, "puhui_common 补字字体加载成功 (%zu bytes)，覆盖 basic 缺失的常用汉字", size);
+    // 空实现，保留签名以免改 .h
 }
 
 // ============================================================
