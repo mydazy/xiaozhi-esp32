@@ -60,6 +60,7 @@ private:
     lv_obj_t* status_network_icon_ = nullptr;
     lv_obj_t* status_battery_icon_ = nullptr;
     const char* cached_net_fa_     = nullptr;
+    bool cached_battery_charging_  = false;
 
     // 时钟主屏（内联实现，无独立页面类）
     lv_obj_t* clock_container_  = nullptr;

@@ -28,6 +28,35 @@
 #include <esp_log.h>
 #include <cbin_font.h>
 
+// FontAwesome 网络图标 → PNG 资源映射。
+// 同时作为 4G/WiFi 默认图区分入口：
+//   P30-4G（modem 未 ready） → board.GetNetworkStateIcon() == SIGNAL_OFF → 返回 4G_1（4G 无信号）
+//   P30-WiFi（未连）          → board.GetNetworkStateIcon() == WIFI_SLASH → 返回 WIFI_0（WiFi 无信号）
+//   未知 fa：兜底 WIFI_0（不丢屏，但代码里所有 WiFi/4G 状态都已枚举）
+static const lv_image_dsc_t* MapNetworkIconFa(const char* fa_icon) {
+    if (!fa_icon) return UI_IMG(IMG_FILE_SIGNAL_WIFI_0);
+    if (strcmp(fa_icon, FONT_AWESOME_WIFI) == 0)          return UI_IMG(IMG_FILE_SIGNAL_WIFI);
+    if (strcmp(fa_icon, FONT_AWESOME_WIFI_FAIR) == 0)     return UI_IMG(IMG_FILE_SIGNAL_WIFI_1);
+    if (strcmp(fa_icon, FONT_AWESOME_WIFI_WEAK) == 0)     return UI_IMG(IMG_FILE_SIGNAL_WIFI_0);
+    if (strcmp(fa_icon, FONT_AWESOME_WIFI_SLASH) == 0)    return UI_IMG(IMG_FILE_SIGNAL_WIFI_0);
+    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL) == 0)        return UI_IMG(IMG_FILE_SIGNAL_4G);
+    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_STRONG) == 0) return UI_IMG(IMG_FILE_SIGNAL_4G_4);
+    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_GOOD) == 0)   return UI_IMG(IMG_FILE_SIGNAL_4G_3);
+    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_FAIR) == 0)   return UI_IMG(IMG_FILE_SIGNAL_4G_2);
+    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_WEAK) == 0)   return UI_IMG(IMG_FILE_SIGNAL_4G_1);
+    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_OFF) == 0)    return UI_IMG(IMG_FILE_SIGNAL_4G_1);
+    return UI_IMG(IMG_FILE_SIGNAL_WIFI_0);
+}
+
+// 电量档位 → PNG 图标（5 档）。充电不影响档位选择（充电靠 recolor 染色区分）。
+static const char* MapBatteryFile(int level) {
+    if (level > 80) return IMG_FILE_ICON_BATTERY_4;
+    if (level > 60) return IMG_FILE_ICON_BATTERY_3;
+    if (level > 40) return IMG_FILE_ICON_BATTERY_2;
+    if (level > 20) return IMG_FILE_ICON_BATTERY_1;
+    return IMG_FILE_ICON_BATTERY_0;
+}
+
 #define TAG "UiDisplay"
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
@@ -96,11 +125,23 @@ void UiDisplay::CreateGlobalStatusBar() {
     lv_obj_remove_flag(global_status_bar_, LV_OBJ_FLAG_SCROLLABLE);
 
     status_network_icon_ = lv_image_create(global_status_bar_);
-    if (auto* init = UI_IMG(IMG_FILE_SIGNAL_WIFI_0)) lv_image_set_src(status_network_icon_, init);
+    // 初始 src 按 board 类型自动区分（4G 板 → 4G 无信号图；WiFi 板 → WiFi 无信号图）
+    const char* init_fa = Board::GetInstance().GetNetworkStateIcon();
+    if (auto* init = MapNetworkIconFa(init_fa)) lv_image_set_src(status_network_icon_, init);
+    cached_net_fa_ = init_fa;  // 同步 cache，避免下一秒 tick 时重复 set_src
     lv_obj_align(status_network_icon_, LV_ALIGN_LEFT_MID, 16, 0);
 
     status_battery_icon_ = lv_image_create(global_status_bar_);
-    if (auto* init = UI_IMG(IMG_FILE_ICON_BATTERY_4)) lv_image_set_src(status_battery_icon_, init);
+    // 初始 src 用 board 真实电量（PowerManager 在 board 构造里已读 ADC，此时已可用）
+    int init_level = 100; bool init_charging = false, init_dis = false;
+    Board::GetInstance().GetBatteryLevel(init_level, init_charging, init_dis);
+    if (auto* init = UI_IMG(MapBatteryFile(init_level))) lv_image_set_src(status_battery_icon_, init);
+    // 充电时染黄（LVGL recolor），实时标识充电状态，无需新图素材
+    if (init_charging) {
+        lv_obj_set_style_image_recolor(status_battery_icon_, lv_color_hex(0x4CAF50), 0);
+        lv_obj_set_style_image_recolor_opa(status_battery_icon_, LV_OPA_70, 0);
+    }
+    cached_battery_charging_ = init_charging;
     lv_obj_align(status_battery_icon_, LV_ALIGN_RIGHT_MID, -16, 0);
 
     lv_obj_move_foreground(global_status_bar_);
@@ -108,34 +149,33 @@ void UiDisplay::CreateGlobalStatusBar() {
 
 void UiDisplay::UpdateGlobalStatusIcons() {
     if (!status_network_icon_ || !status_battery_icon_) return;
+    // chat 模式已隐藏全局状态栏（SwitchToChatMode 主动 add HIDDEN），早退避免空跑
+    if (global_status_bar_ && lv_obj_has_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN)) return;
 
     auto& board = Board::GetInstance();
     const char* fa_icon = board.GetNetworkStateIcon();
     if (fa_icon && fa_icon != cached_net_fa_) {
         cached_net_fa_ = fa_icon;
-        const lv_image_dsc_t* net_img = UI_IMG(IMG_FILE_SIGNAL_WIFI_0);
-        if      (strcmp(fa_icon, FONT_AWESOME_WIFI) == 0)          net_img = UI_IMG(IMG_FILE_SIGNAL_WIFI);
-        else if (strcmp(fa_icon, FONT_AWESOME_WIFI_FAIR) == 0)     net_img = UI_IMG(IMG_FILE_SIGNAL_WIFI_1);
-        else if (strcmp(fa_icon, FONT_AWESOME_WIFI_WEAK) == 0)     net_img = UI_IMG(IMG_FILE_SIGNAL_WIFI_0);
-        else if (strcmp(fa_icon, FONT_AWESOME_SIGNAL) == 0)        net_img = UI_IMG(IMG_FILE_SIGNAL_4G);
-        else if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_STRONG) == 0) net_img = UI_IMG(IMG_FILE_SIGNAL_4G_4);
-        else if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_GOOD) == 0)   net_img = UI_IMG(IMG_FILE_SIGNAL_4G_3);
-        else if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_FAIR) == 0)   net_img = UI_IMG(IMG_FILE_SIGNAL_4G_2);
-        else if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_WEAK) == 0)   net_img = UI_IMG(IMG_FILE_SIGNAL_4G_1);
-        if (net_img) lv_image_set_src(status_network_icon_, net_img);
+        if (auto* net_img = MapNetworkIconFa(fa_icon)) {
+            lv_image_set_src(status_network_icon_, net_img);
+        }
     }
 
     int level = 0;
     bool charging = false, discharging = false;
     if (board.GetBatteryLevel(level, charging, discharging)) {
-        const char* bat_file;
-        if (charging)        bat_file = IMG_FILE_ICON_BATTERY_CHARGE;
-        else if (level > 80) bat_file = IMG_FILE_ICON_BATTERY_4;
-        else if (level > 60) bat_file = IMG_FILE_ICON_BATTERY_3;
-        else if (level > 40) bat_file = IMG_FILE_ICON_BATTERY_2;
-        else if (level > 20) bat_file = IMG_FILE_ICON_BATTERY_1;
-        else                 bat_file = IMG_FILE_ICON_BATTERY_0;
-        if (auto* img = UI_IMG(bat_file)) lv_image_set_src(status_battery_icon_, img);
+        // 电量档位图：按 level 走，充电不切换档位（保留档位信息）
+        if (auto* img = UI_IMG(MapBatteryFile(level))) {
+            lv_image_set_src(status_battery_icon_, img);
+        }
+        // 充电状态：用 LVGL recolor 染黄，替代"独占充电图"方案 —— 档位 + 充电同时可见
+        if (charging != cached_battery_charging_) {
+            cached_battery_charging_ = charging;
+            lv_obj_set_style_image_recolor(status_battery_icon_,
+                                           charging ? lv_color_hex(0x4CAF50) : lv_color_white(), 0);
+            lv_obj_set_style_image_recolor_opa(status_battery_icon_,
+                                               charging ? LV_OPA_70 : LV_OPA_0, 0);
+        }
     }
 }
 
@@ -264,7 +304,10 @@ void UiDisplay::SwitchToClockMode() {
         lv_obj_remove_flag(clock_container_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(clock_container_);
     }
-    if (global_status_bar_)  lv_obj_move_foreground(global_status_bar_);
+    if (global_status_bar_) {
+        lv_obj_remove_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN);  // clock 模式主动显示
+        lv_obj_move_foreground(global_status_bar_);
+    }
     if (wifi_qr_overlay_)    lv_obj_move_foreground(wifi_qr_overlay_);
     if (activation_overlay_) lv_obj_move_foreground(activation_overlay_);
 
@@ -296,7 +339,8 @@ void UiDisplay::SwitchToChatMode() {
         lv_obj_move_foreground(emoji_box_);
     }
 
-    if (global_status_bar_)  lv_obj_move_foreground(global_status_bar_);
+    // chat 模式主动隐藏全局状态栏（信号 + 电池）—— 不依赖 z-order 巧合，语义明确且 UpdateGlobalStatusIcons 能早退省 CPU
+    if (global_status_bar_)  lv_obj_add_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN);
     if (wifi_qr_overlay_)    lv_obj_move_foreground(wifi_qr_overlay_);
     if (activation_overlay_) lv_obj_move_foreground(activation_overlay_);
 
