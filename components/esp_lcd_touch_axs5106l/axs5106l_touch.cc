@@ -60,7 +60,7 @@ static const char* TAG = "TOUCH_AXS5106L";
 // ---------- Debounce / noise ----------
 #define INT_DEBOUNCE_US   2000  // INT must stay low ≥2 ms to qualify as press
 #define RELEASE_DEBOUNCE  1     // consecutive no-touch frames before reporting release
-#define MAX_SPEED_PX_S    2000  // velocity gate: normal swipe ~1400, RF transient >3000
+#define MAX_SPEED_PX_S    3000  // velocity gate: 284px@220DPI, fast swipe ~2600, RF transient >9000
 
 // ---------- I2C ----------
 #define I2C_TIMEOUT_MS  100
