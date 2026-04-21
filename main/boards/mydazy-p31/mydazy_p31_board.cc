@@ -886,6 +886,14 @@ private:
 
     // 上报设备状态 → POST OTA_URL/status
     void ReportStatus() {
+        // 仅在 idle / listening 上报（与 P30-4G / P30-WiFi 一致）：
+        // speaking 时让位 TTS 带宽 + connecting/activating 瞬态无上报意义
+        auto state = Application::GetInstance().GetDeviceState();
+        if (state != kDeviceStateIdle && state != kDeviceStateListening) {
+            ESP_LOGD(TAG, "skip status report, state=%d (仅 idle/listening 上报)", (int)state);
+            return;
+        }
+
         int battery = power_manager_ ? power_manager_->GetBatteryLevel() : -1;
         bool charging = power_manager_ ? power_manager_->IsCharging() : false;
         bool fixed = gnss_fixed_.load();

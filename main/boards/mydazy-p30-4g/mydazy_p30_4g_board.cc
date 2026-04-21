@@ -636,7 +636,7 @@ private:
 
         shutdown_armed_.store(true);
         ESP_LOGI(TAG, "长按 3 秒：关机倒计时开始");
-        app.Alert("再按 2 秒关机", "继续按住...", "logo", Lang::Sounds::OGG_SHUTDOWN);
+        app.Alert("长按 5 秒关机", "继续按住...", "logo", Lang::Sounds::OGG_REBOOT);
     }
 
     // 长按 5 秒：真正关机
@@ -645,7 +645,6 @@ private:
         shutdown_armed_.store(false);
         ESP_LOGI(TAG, "长按 5 秒：执行关机");
         AbortIfSpeaking();
-        Application::GetInstance().Alert("关机中", "拜拜^-^", "", Lang::Sounds::OGG_SHUTDOWN);
         vTaskDelay(pdMS_TO_TICKS(2000));
         EnterDeepSleep(false);
     }
@@ -682,6 +681,15 @@ private:
     // ========================================================
 
     void ReportStatus() {
+        // 仅在 idle / listening 时上报：
+        //   - speaking：TTS 正在从云端下行音频，4G 带宽需让位，避免 HTTPS POST 挤占造成音频卡顿
+        //   - connecting / activating / wifi-configuring 等瞬态：状态不稳定，上报意义不大
+        auto state = Application::GetInstance().GetDeviceState();
+        if (state != kDeviceStateIdle && state != kDeviceStateListening) {
+            ESP_LOGD(TAG, "skip status report, state=%d (仅 idle/listening 上报)", (int)state);
+            return;
+        }
+
         int battery = power_manager_ ? power_manager_->GetBatteryLevel() : -1;
         bool charging = power_manager_ ? power_manager_->IsCharging() : false;
         size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
