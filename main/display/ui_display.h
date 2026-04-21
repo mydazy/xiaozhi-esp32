@@ -81,6 +81,9 @@ private:
     // 控制中心（懒加载）
     std::unique_ptr<ControlCenter> control_center_;
 
+    // BUILTIN_TEXT_FONT 的补字字体（覆盖 basic 缺失的 5000+ 常用汉字，如打/断/休/眠/亮/退/分 等）
+    const lv_font_t* puhui_common_font_ = nullptr;
+
     // 状态
     bool is_clock_mode_ = false;
 
@@ -91,6 +94,7 @@ private:
     void CreateClockPage();
     void UpdateClockTime();
     void LoadClockFonts();          // cbin 字体延迟加载（assets 就绪后）
+    void LoadPuhuiCommonFont();     // puhui_common 补字字体加载 + 注入 BUILTIN_TEXT_FONT.fallback
     static void ClockTickCb(lv_timer_t* t);
 
     void StartBootAnimation();

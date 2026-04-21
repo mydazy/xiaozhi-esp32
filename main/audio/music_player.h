@@ -68,9 +68,10 @@ private:
     AudioCodec* codec_ = nullptr;
 
     // 生命周期标志
-    std::atomic<bool> running_{false};        // 播放中（Play 成功→Stop/结束）
+    std::atomic<bool> running_{false};        // 播放管线是否运行（任一 task 活跃）
     std::atomic<bool> abort_{false};          // 中止标志（外部 Stop 或新 Play）
-    std::atomic<bool> download_done_{false};  // 下载任务退出标志
+    std::atomic<bool> download_done_{false};  // 下载任务退出标志（数据流结束）
+    std::atomic<int>  active_tasks_{0};       // 在跑任务数（Download+Decode，0=全部退出）
 
     // 状态保护
     mutable std::mutex state_mutex_;

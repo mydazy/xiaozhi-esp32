@@ -109,6 +109,20 @@ bool MusicPlayer::Play(const std::string& url, const std::string& title, std::st
     // 有旧任务先中止
     AbortAndJoin();
 
+    // 双重兜底：如果 AbortAndJoin 超时未清，这里再等到 active_tasks_==0（最多 15s+TLS 超时）
+    for (int i = 0; i < 2000 && active_tasks_.load(std::memory_order_acquire) > 0; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (active_tasks_.load(std::memory_order_acquire) > 0) {
+        ESP_LOGE(TAG, "Play 失败: 旧任务未结束（卡在 TLS read）");
+        set_err("旧任务未结束，请稍后重试");
+        return false;
+    }
+    if (ring_buf_) {
+        vRingbufferDeleteWithCaps(ring_buf_);
+        ring_buf_ = nullptr;
+    }
+
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
         current_url_ = url;
@@ -125,14 +139,17 @@ bool MusicPlayer::Play(const std::string& url, const std::string& title, std::st
 
     abort_.store(false, std::memory_order_release);
     download_done_.store(false, std::memory_order_release);
+    active_tasks_.store(0, std::memory_order_release);
     running_.store(true, std::memory_order_release);
 
     // 下载任务（Core 0，PSRAM 栈 6KB，一次性 I/O 任务）
     TaskHandle_t download_task = nullptr;
+    active_tasks_.fetch_add(1, std::memory_order_acq_rel);
     BaseType_t ret = xTaskCreatePinnedToCoreWithCaps(
         DownloadThunk, "mp3_dl", 6 * 1024, this, 1, &download_task, 0, MALLOC_CAP_SPIRAM);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Play 失败: 下载任务创建失败");
+        active_tasks_.fetch_sub(1, std::memory_order_acq_rel);
         vRingbufferDeleteWithCaps(ring_buf_);
         ring_buf_ = nullptr;
         running_.store(false, std::memory_order_release);
@@ -140,12 +157,15 @@ bool MusicPlayer::Play(const std::string& url, const std::string& title, std::st
         return false;
     }
 
-    // 解码任务（Core 0，P5 低于 wake_word/modem P6、AFE P8，避免抢 Core 1 AFE → AFE 饥饿刷屏）
+    // 解码任务（Core 0，P7 与 opus_codec 同级 —— 持续解码需稳定 CPU，否则 I2S DMA underrun "啪啪"爆音；
+    // 内部 RAM 栈避开 Core 0 flash op PSRAM 陷阱 §3.1）
     TaskHandle_t decode_task = nullptr;
+    active_tasks_.fetch_add(1, std::memory_order_acq_rel);
     ret = xTaskCreatePinnedToCore(
-        DecodeThunk, "mp3_dec", 10 * 1024, this, 5, &decode_task, 0);
+        DecodeThunk, "mp3_dec", 10 * 1024, this, 7, &decode_task, 0);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Play 失败: 解码任务创建失败");
+        active_tasks_.fetch_sub(1, std::memory_order_acq_rel);
         abort_.store(true, std::memory_order_release);  // 让下载任务尽快退出
         set_err("解码任务创建失败");
         return false;
@@ -161,24 +181,32 @@ void MusicPlayer::Stop() {
     ESP_LOGI(TAG, "Stop");
 }
 
-// 等待旧任务自然退出（最多 500ms）
+// 等待**全部**任务（Download + Decode）退出，再释放 ring_buf_
+// 修复：原代码只等解码任务，下载任务还在 xRingbufferSend → ring_buf_ 被释放 → spinlock assert 崩溃
 void MusicPlayer::AbortAndJoin() {
     if (!running_.load(std::memory_order_acquire)) {
+        // 兜底：Play 中途失败留下的 ring_buf_
+        if (ring_buf_) {
+            vRingbufferDeleteWithCaps(ring_buf_);
+            ring_buf_ = nullptr;
+        }
         return;
     }
     abort_.store(true, std::memory_order_release);
 
-    // 等解码任务退出（它会在循环里检查 abort_）
-    for (int i = 0; i < 50 && running_.load(std::memory_order_acquire); i++) {
+    // 等两个任务全部退出（active_tasks_ → 0）；最多 2 秒
+    // HTTP TLS 读阻塞最多 15 秒（kHttpTimeoutMs），但 abort_ 会让下载循环下次 Read 返回后立即退
+    for (int i = 0; i < 200 && active_tasks_.load(std::memory_order_acquire) > 0; i++) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    if (running_.load(std::memory_order_acquire)) {
-        ESP_LOGW(TAG, "AbortAndJoin 超时 500ms，强制清理");
-        running_.store(false, std::memory_order_release);
+    int remaining = active_tasks_.load(std::memory_order_acquire);
+    if (remaining > 0) {
+        ESP_LOGW(TAG, "AbortAndJoin 超时 2s，仍有 %d 个任务未退出（可能阻塞在 TLS read）", remaining);
+        // 不强删，等下一次 HTTP 返回后它们会自己退出
+        return;  // ring_buf_ 不释放，避免 use-after-free
     }
 
-    // ring_buf_ 由解码任务退出时 vRingbufferDeleteWithCaps；
-    // 此处兜底以防解码任务未起来（Play 分支中途失败）
+    running_.store(false, std::memory_order_release);
     if (ring_buf_) {
         vRingbufferDeleteWithCaps(ring_buf_);
         ring_buf_ = nullptr;
@@ -190,7 +218,9 @@ void MusicPlayer::AbortAndJoin() {
 // ============================================================
 
 void MusicPlayer::DownloadThunk(void* arg) {
-    static_cast<MusicPlayer*>(arg)->DownloadLoop();
+    auto* self = static_cast<MusicPlayer*>(arg);
+    self->DownloadLoop();
+    self->active_tasks_.fetch_sub(1, std::memory_order_acq_rel);
     vTaskDeleteWithCaps(nullptr);
 }
 
@@ -285,15 +315,12 @@ void MusicPlayer::DownloadLoop() {
 // ============================================================
 
 void MusicPlayer::DecodeThunk(void* arg) {
-    static_cast<MusicPlayer*>(arg)->DecodeLoop();
-    // 解码任务是生命周期所有者，负责清理
     auto* self = static_cast<MusicPlayer*>(arg);
-    if (self->ring_buf_) {
-        vRingbufferDeleteWithCaps(self->ring_buf_);
-        self->ring_buf_ = nullptr;
-    }
-    self->running_.store(false, std::memory_order_release);
-    vTaskDelete(nullptr);  // 内部 RAM 栈用普通 vTaskDelete
+    self->DecodeLoop();
+    // 注意：ring_buf_ 不在这里释放（下载任务可能还在 send）
+    //       由 AbortAndJoin 等两个任务都退出后统一释放
+    self->active_tasks_.fetch_sub(1, std::memory_order_acq_rel);
+    vTaskDelete(nullptr);
 }
 
 void MusicPlayer::DecodeLoop() {
