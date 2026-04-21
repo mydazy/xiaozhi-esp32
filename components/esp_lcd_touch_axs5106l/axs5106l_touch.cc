@@ -49,17 +49,17 @@ static const char* TAG = "TOUCH_AXS5106L";
 #define TOUCH_X_RAW_RANGE  (TOUCH_X_RAW_MAX - TOUCH_X_RAW_MIN)  // 263
 
 // ---------- Gesture thresholds ----------
-#define SWIPE_THRESHOLD      40       // min travel for swipe (px)
+#define SWIPE_THRESHOLD      30       // min travel for swipe (px)
 #define CLICK_MAX_TIME_US    400000   // max press duration for tap (400 ms)
-#define CLICK_MIN_TIME_US    30000    // min press duration for tap, filters RF spikes (30 ms)
-#define CLICK_MAX_MOVE       30       // max travel still considered a tap (px)
+#define CLICK_MIN_TIME_US    20000    // min press duration for tap, filters RF spikes (20 ms)
+#define CLICK_MAX_MOVE       35       // max travel still considered a tap (px)
 #define LONG_PRESS_TIME_US   600000   // long-press threshold (600 ms)
 #define DOUBLE_CLICK_TIME_US 500000   // max interval between two taps for double-tap (500 ms)
 #define DOUBLE_CLICK_DIST    60       // max distance between tap positions for double-tap (px)
 
 // ---------- Debounce / noise ----------
-#define INT_DEBOUNCE_US   3000  // INT must stay low ≥3 ms to qualify as press
-#define RELEASE_DEBOUNCE  2     // consecutive no-touch frames before reporting release
+#define INT_DEBOUNCE_US   2000  // INT must stay low ≥2 ms to qualify as press
+#define RELEASE_DEBOUNCE  1     // consecutive no-touch frames before reporting release
 #define MAX_SPEED_PX_S    2000  // velocity gate: normal swipe ~1400, RF transient >3000
 
 // ---------- I2C ----------
@@ -228,9 +228,16 @@ bool Axs5106lTouch::ReadRegister(uint8_t reg, uint8_t* data, size_t len) {
     for (int i = 0; i < I2C_RETRIES; i++) {
         if (i2c_master_transmit(i2c_handle_, &reg, 1, I2C_TIMEOUT_MS) == ESP_OK &&
             i2c_master_receive(i2c_handle_, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
+            i2c_err_streak_ = 0;
             return true;
         }
         vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    // 连续失败累积：4G RF 弱网时可能锁死 SDA，发 9 个 SCL 脉冲解锁整条总线
+    if (++i2c_err_streak_ >= 3) {
+        ESP_LOGW(TAG, "I2C bus recovery (streak=%d)", i2c_err_streak_);
+        i2c_master_bus_reset(i2c_bus_);
+        i2c_err_streak_ = 0;
     }
     return false;
 }

@@ -77,6 +77,10 @@ private:
     std::function<void()> wake_callback_;
     TouchGestureCallback  gesture_callback_;
 
+    // I2C bus-recovery counter: when 4G RF locks SDA, consecutive read failures
+    // accumulate; on threshold, i2c_master_bus_reset() sends 9 SCL pulses to unlock.
+    uint8_t i2c_err_streak_ = 0;
+
     struct TouchState {
         bool     pressed      = false;
         uint8_t  release_count = 0;
