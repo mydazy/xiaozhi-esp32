@@ -111,8 +111,14 @@ void McpServer::AddCommonTools() {
             auto& app = Application::GetInstance();
             app.Schedule([url = std::move(url), title = std::move(title)]() {
                 auto& app = Application::GetInstance();
-                if (app.GetDeviceState() == kDeviceStateSpeaking) {
+                // 关闭 AFE voice communication，避免 Core 1 CPU 争抢 → AFE ringbuffer 饥饿
+                auto state = app.GetDeviceState();
+                if (state == kDeviceStateSpeaking) {
                     app.AbortSpeaking(kAbortReasonNone);
+                }
+                if (state == kDeviceStateListening || state == kDeviceStateSpeaking ||
+                    state == kDeviceStateConnecting) {
+                    app.CloseAudioChannel();
                 }
                 app.GetAudioService().ResetDecoder();
 

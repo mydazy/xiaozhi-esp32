@@ -448,9 +448,16 @@ void RemoteCmd::OnMusicPlay(const cJSON* msg) {
 
     app_->Schedule([url = std::move(url), title = std::move(title)]() {
         auto& app = Application::GetInstance();
-        // 打断当前 TTS + 清空 opus 解码队列（避免与 MP3 PCM 串音）
-        if (app.GetDeviceState() == kDeviceStateSpeaking) {
+
+        // 关键：切回 idle，关闭 AFE voice communication + stop listening
+        // （否则 listening 模式下 AFE 持续采集 → Core 1 CPU 争抢 → AFE 饥饿刷屏 + modem 卡死）
+        auto state = app.GetDeviceState();
+        if (state == kDeviceStateSpeaking) {
             app.AbortSpeaking(kAbortReasonNone);
+        }
+        if (state == kDeviceStateListening || state == kDeviceStateSpeaking ||
+            state == kDeviceStateConnecting) {
+            app.CloseAudioChannel();  // 关协议通道 → 触发回 idle（会停 AFE voice processing）
         }
         app.GetAudioService().ResetDecoder();
         // 暂停直播伴侣
@@ -463,7 +470,6 @@ void RemoteCmd::OnMusicPlay(const cJSON* msg) {
             ESP_LOGW(TAG, "music_play 启动失败: %s", err.c_str());
             app.Alert("播放失败", err.c_str(), "", "");
         } else if (!title.empty()) {
-            // 成功：状态栏显示曲名，给用户反馈
             Board::GetInstance().GetDisplay()->ShowNotification(title.c_str(), 3000);
         }
     });

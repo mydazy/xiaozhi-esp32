@@ -140,10 +140,10 @@ bool MusicPlayer::Play(const std::string& url, const std::string& title, std::st
         return false;
     }
 
-    // 解码任务（Core 1，PSRAM 栈 8KB，避免与 Core 0 flash op 冲突）
+    // 解码任务（Core 0，P5 低于 wake_word/modem P6、AFE P8，避免抢 Core 1 AFE → AFE 饥饿刷屏）
     TaskHandle_t decode_task = nullptr;
-    ret = xTaskCreatePinnedToCoreWithCaps(
-        DecodeThunk, "mp3_dec", 8 * 1024, this, 6, &decode_task, 1, MALLOC_CAP_SPIRAM);
+    ret = xTaskCreatePinnedToCore(
+        DecodeThunk, "mp3_dec", 10 * 1024, this, 5, &decode_task, 0);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Play 失败: 解码任务创建失败");
         abort_.store(true, std::memory_order_release);  // 让下载任务尽快退出
@@ -234,16 +234,23 @@ void MusicPlayer::DownloadLoop() {
     }
 
     size_t total_len = http->GetBodyLength();
-    ESP_LOGI(TAG, "下载开始: %zu bytes", total_len);
+    ESP_LOGI(TAG, "下载开始: %u bytes", (unsigned)total_len);
 
-    // 栈上 2KB 读缓冲（栈在 PSRAM，任意用）
+    // HTTP 读缓冲：heap PSRAM（TLS 握手吃掉不少栈，别跟它抢）
     constexpr size_t kReadChunk = 2048;
-    char buf[kReadChunk];
+    char* buf = (char*)heap_caps_malloc(kReadChunk, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        ESP_LOGE(TAG, "下载缓冲分配失败");
+        AsyncAlert("播放失败", "PSRAM 内存不足");
+        http->Close();
+        download_done_.store(true, std::memory_order_release);
+        return;
+    }
     size_t total_read = 0;
 
     while (!abort_.load(std::memory_order_acquire) &&
            running_.load(std::memory_order_acquire)) {
-        int n = http->Read(buf, sizeof(buf));
+        int n = http->Read(buf, kReadChunk);   // 注意：buf 现在是指针，不能用 sizeof
         if (n < 0) {
             ESP_LOGW(TAG, "下载：Read 错误 %d", n);
             break;
@@ -268,7 +275,8 @@ void MusicPlayer::DownloadLoop() {
     }
 
     http->Close();
-    ESP_LOGI(TAG, "下载结束: 已读 %zu bytes", total_read);
+    heap_caps_free(buf);
+    ESP_LOGI(TAG, "下载结束: 已读 %u bytes", (unsigned)total_read);
     download_done_.store(true, std::memory_order_release);
 }
 
@@ -285,7 +293,7 @@ void MusicPlayer::DecodeThunk(void* arg) {
         self->ring_buf_ = nullptr;
     }
     self->running_.store(false, std::memory_order_release);
-    vTaskDeleteWithCaps(nullptr);
+    vTaskDelete(nullptr);  // 内部 RAM 栈用普通 vTaskDelete
 }
 
 void MusicPlayer::DecodeLoop() {
@@ -298,11 +306,21 @@ void MusicPlayer::DecodeLoop() {
         return;
     }
 
-    // 输入/输出缓冲：栈上分配（栈在 PSRAM）
-    constexpr size_t kInBufSize = 4096;
+    // 输入/输出缓冲：heap PSRAM
+    // - in_buf 8KB：MP3 帧最长 ~1.5KB，留 5 帧前瞻余量，应对部分帧跨包抖动
+    // - out_buf 按单帧 PCM 严格匹配，下游 codec 直接消费
+    constexpr size_t kInBufSize = 8192;
     constexpr size_t kOutBufSize = 2 * 1152 * sizeof(int16_t) + 512;  // 1 MP3 帧 = 1152 samples × 2ch
-    uint8_t in_buf[kInBufSize];
-    uint8_t out_buf[kOutBufSize];
+    uint8_t* in_buf  = (uint8_t*)heap_caps_malloc(kInBufSize,  MALLOC_CAP_SPIRAM);
+    uint8_t* out_buf = (uint8_t*)heap_caps_malloc(kOutBufSize, MALLOC_CAP_SPIRAM);
+    if (!in_buf || !out_buf) {
+        ESP_LOGE(TAG, "解码缓冲分配失败");
+        AsyncAlert("播放失败", "PSRAM 内存不足");
+        if (in_buf)  heap_caps_free(in_buf);
+        if (out_buf) heap_caps_free(out_buf);
+        esp_audio_dec_close(dec);
+        return;
+    }
     size_t in_len = 0;
 
     // 延迟初始化的重采样器（首帧 info 后才知道 src_rate）
@@ -452,5 +470,7 @@ void MusicPlayer::DecodeLoop() {
     // 清理
     if (resampler) esp_ae_rate_cvt_close(resampler);
     esp_audio_dec_close(dec);
+    heap_caps_free(in_buf);
+    heap_caps_free(out_buf);
     ESP_LOGI(TAG, "解码任务退出");
 }

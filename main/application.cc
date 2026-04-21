@@ -615,7 +615,6 @@ void Application::InitializeProtocol() {
             } else {
                 ESP_LOGW(TAG, "Alert command requires status, message and emotion");
             }
-#if CONFIG_RECEIVE_CUSTOM_MESSAGE
         } else if (strcmp(type->valuestring, "custom") == 0) {
             auto payload = cJSON_GetObjectItem(root, "payload");
             if (cJSON_IsObject(payload) && remote_cmd_) {
@@ -623,7 +622,6 @@ void Application::InitializeProtocol() {
             } else {
                 ESP_LOGW(TAG, "Invalid custom message or remote_cmd not ready");
             }
-#endif
         } else {
             ESP_LOGW(TAG, "Unknown message type: %s", type->valuestring);
         }

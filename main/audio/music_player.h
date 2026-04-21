@@ -78,8 +78,10 @@ private:
     std::string current_title_;
 
     // 环形缓冲（PSRAM）
+    // 128KB：按 128kbps MP3 折算约 8 秒缓冲，吸收 4G 弱网 / 网络抖动。
+    // PSRAM 顺序读写对 MP3 解码速度影响 < 5%，不是瓶颈。
     RingbufHandle_t ring_buf_ = nullptr;
-    static constexpr size_t kRingBufSize = 32 * 1024;
+    static constexpr size_t kRingBufSize = 128 * 1024;
     static constexpr int kHttpTimeoutMs = 15000;
 };
 

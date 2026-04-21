@@ -91,7 +91,9 @@ function(find_component_by_pattern PATTERN COMPONENT_VAR PATH_VAR)
 endfunction()
 
 # Set default BUILTIN_TEXT_FONT and BUILTIN_ICON_FONT
-set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
+# 改为完整版 font_puhui_20_4（6649 字符），basic 版仅 800 字缺失"打/断/休/眠/亮/退/分"等常用字
+# 导致控制中心等 UI 中文显示方框。app 分区 16m=4MB 富余，增量约 1MB 可接受。
+set(BUILTIN_TEXT_FONT font_puhui_20_4)
 set(BUILTIN_ICON_FONT font_awesome_20_4)
 
 set(EMOTE_RESOLUTION "284_240")
@@ -100,19 +102,19 @@ set(EMOTE_RESOLUTION "284_240")
 # Set default assets if the board uses partition table V2
 if(CONFIG_BOARD_TYPE_MYDAZY_P31)
     set(BOARD_TYPE "mydazy-p31")
-    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
+    set(BUILTIN_TEXT_FONT font_puhui_20_4)
     set(BUILTIN_ICON_FONT font_awesome_20_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
 elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_4G)
     set(BOARD_TYPE "mydazy-p30-4g")
-    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
+    set(BUILTIN_TEXT_FONT font_puhui_20_4)
     set(BUILTIN_ICON_FONT font_awesome_20_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
     # UI 资源（状态栏 PNG 图标 + maru 88/30 大字号时钟字体）→ assets 分区
     set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons")
 elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
     set(BOARD_TYPE "mydazy-p30-wifi")
-    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
+    set(BUILTIN_TEXT_FONT font_puhui_20_4)
     set(BUILTIN_ICON_FONT font_awesome_20_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
 endif()
