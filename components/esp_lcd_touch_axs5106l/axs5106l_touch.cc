@@ -249,17 +249,21 @@ void Axs5106lTouch::LvglReadCallback(lv_indev_t* indev, lv_indev_data_t* data) {
         }
         self->touch_.pressed = true;
         self->touch_.release_count = 0;
-        self->touch_.last_x = x;
+        // X 轴硬件死区补偿：raw X 范围 [9, 272] → 屏幕 [0, 283]
+        // V2907 固件升级后实测：左边死区 9px，右边死区 11px，Y 轴正常
+        uint16_t x_mapped = (x <= 9) ? 0 : (x >= 272) ? 283 :
+                            (uint16_t)((x - 9) * 283 / 263);
+        self->touch_.last_x = x_mapped;
         self->touch_.last_y = y;
-        data->point.x = x;
+        data->point.x = x_mapped;
         data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
-        self->RecognizeGesture(x, y, true);
+        self->RecognizeGesture(x_mapped, y, true);
 
 #if AXS5106L_TOUCH_DEBUG_OVERLAY
         if (self->debug_dot_) {
             lv_obj_remove_flag(self->debug_dot_, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_pos(self->debug_dot_, (int16_t)x - 6, (int16_t)y - 6);
+            lv_obj_set_pos(self->debug_dot_, (int16_t)x_mapped - 6, (int16_t)y - 6);
             lv_obj_move_foreground(self->debug_dot_);
         }
 #endif
