@@ -13,6 +13,8 @@
 #include "settings.h"
 #include "system_info.h"
 #include "system_reset.h"
+
+#include <atomic>
 #include "power_save_timer.h"
 #include "power_manager.h"
 #include "mcp_server.h"
@@ -80,6 +82,9 @@ private:
     // 长按录音状态跟踪
     volatile bool is_recording_for_test_ = false;
     volatile bool is_recording_for_send_ = false;
+
+    // 长按关机状态机：3s 警告 → 5s 执行；5s 前松开取消
+    std::atomic<bool> shutdown_armed_{false};
 
     // 欢迎音异步任务句柄
     volatile TaskHandle_t welcome_task_handle_ = nullptr;
@@ -430,6 +435,32 @@ private:
         SystemInfo::PrintHeapStats();
     }
 
+    // 长按 3 秒：提醒"再按 2 秒关机"，同时停止录音避免冲突
+    void HandleBootLongPress3s_ShutdownWarn() {
+        auto& app = Application::GetInstance();
+        if (is_recording_for_send_ || is_recording_for_test_) {
+            is_recording_for_send_ = false;
+            is_recording_for_test_ = false;
+            app.StopListening();
+        }
+        shutdown_armed_.store(true);
+        ESP_LOGI(TAG, "长按 3 秒：关机倒计时开始");
+        app.Alert("长按 5 秒关机", "继续按住...", "logo", Lang::Sounds::OGG_REBOOT);
+    }
+
+    // 长按 5 秒：真正关机
+    void HandleBootLongPress5s_ShutdownConfirm() {
+        if (!shutdown_armed_.load()) return;
+        shutdown_armed_.store(false);
+        ESP_LOGI(TAG, "长按 5 秒：执行关机");
+        auto& app = Application::GetInstance();
+        if (app.GetDeviceState() == kDeviceStateSpeaking) {
+            app.AbortSpeaking(kAbortReasonNone);
+        }
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        EnterDeepSleep(false);
+    }
+
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
@@ -535,7 +566,7 @@ private:
             app.Alert("恢复出厂设置", "10秒内双击确认", "logo", Lang::Sounds::OGG_FACTORY_RESET);
         }, 9);
 
-        // 长按按钮处理
+        // 长按多段：0.7s 录音、3s 关机提醒、5s 真正关机（与 P30-4G 对齐）
         boot_button_.OnLongPress([this]() {
             auto& app = Application::GetInstance();
             auto status = app.GetDeviceState();
@@ -550,10 +581,18 @@ private:
                 vTaskDelay(pdMS_TO_TICKS(100));
                 app.StartListening();
             }
-        });
+        }, 700);
+        boot_button_.OnLongPress([this]() { HandleBootLongPress3s_ShutdownWarn(); }, 3000);
+        boot_button_.OnLongPress([this]() { HandleBootLongPress5s_ShutdownConfirm(); }, 5000);
 
         boot_button_.OnPressUp([this]() {
             auto& app = Application::GetInstance();
+            // 关机倒计时未到 5 秒就松开 → 取消
+            if (shutdown_armed_.exchange(false)) {
+                ESP_LOGI(TAG, "关机倒计时取消");
+                app.PlaySound(Lang::Sounds::OGG_POPUP);
+                return;
+            }
             if (is_recording_for_test_) {
                 is_recording_for_test_ = false;
                 app.SetDeviceState(kDeviceStateAudioTesting);
@@ -585,6 +624,14 @@ private:
     esp_timer_handle_t status_timer_ = nullptr;
 
     void ReportStatus() {
+        // 仅在 idle / listening 上报（与 P30-4G / P31 一致）：
+        // speaking 时让位 TTS 带宽 + connecting/activating 瞬态无上报意义
+        auto state = Application::GetInstance().GetDeviceState();
+        if (state != kDeviceStateIdle && state != kDeviceStateListening) {
+            ESP_LOGD(TAG, "skip status report, state=%d (仅 idle/listening 上报)", (int)state);
+            return;
+        }
+
         int battery = power_manager_ ? power_manager_->GetBatteryLevel() : -1;
         bool charging = power_manager_ ? power_manager_->IsCharging() : false;
         size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
