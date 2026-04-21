@@ -338,6 +338,9 @@ void UiDisplay::SwitchToChatMode() {
         lv_obj_set_style_opa(emoji_box_, LV_OPA_COVER, 0);  // 关键：boot fade_out 把 opa=TRANSP
         lv_obj_move_foreground(emoji_box_);
     }
+    // bottom_bar_ 挂在 screen 上（与 container_ 同级 sibling），必须显式提顶否则
+    // 被 move_foreground(container_) 盖住 —— SetChatMessage 即使 remove HIDDEN 也看不见。
+    if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
 
     // chat 模式主动隐藏全局状态栏（信号 + 电池）—— 不依赖 z-order 巧合，语义明确且 UpdateGlobalStatusIcons 能早退省 CPU
     if (global_status_bar_)  lv_obj_add_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN);
