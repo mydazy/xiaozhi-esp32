@@ -197,6 +197,8 @@ bool WifiBoard::StartConfigMode(ConfigMode mode) {
     if (mode == ConfigMode::BLUFI) {
 #ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
         ESP_LOGI(TAG, "启动 BLUFI 配网，设备名: %s", device_name.c_str());
+        // 进入蓝牙配网音效提示（init 前播，让用户在 BLE 初始化期间就感知）
+        Application::GetInstance().PlaySound(Lang::Sounds::OGG_BLECONFIG);
         // ⚠️ BLE controller init 触发 flash read → 禁用 cache；此时 LVGL 若在渲染
         //    PSRAM framebuffer 会阻塞 IDLE1 导致 Task WDT。lvgl_port_lock 强制 LVGL
         //    暂停渲染，让它等锁而不是卡在 PSRAM。超时 1s 后仍继续（记录警告）。
@@ -231,6 +233,7 @@ bool WifiBoard::StartConfigMode(ConfigMode mode) {
     // AP 模式
 #ifdef CONFIG_USE_HOTSPOT_WIFI_PROVISIONING
     ESP_LOGI(TAG, "启动 AP 热点配网，SSID: %s", device_name.c_str());
+    Application::GetInstance().PlaySound(Lang::Sounds::OGG_WIFICONFIG);
     wifi_manager.StartConfigAp();
 
     // QR 载荷 = SSID（UiDisplay 内部会按 WiFi QR 标准包装 WIFI:T:nopass;S:...）
@@ -285,6 +288,15 @@ void WifiBoard::SwitchConfigMode() {
     ESP_LOGI(TAG, "===== 切换配网模式: %s -> %s =====",
              old_mode == ConfigMode::BLUFI ? "BLUFI" : "AP",
              new_mode == ConfigMode::BLUFI ? "BLUFI" : "AP");
+
+    // 过渡提示：状态栏短时通知，告知用户正在切换
+    // （HideWifiQrCode 在 StopConfigMode 里会先把 QR 清掉，屏幕短暂空白，
+    //  用 notification 填补视觉间隙，避免用户以为死机）
+    if (auto* display = GetDisplay()) {
+        display->ShowNotification(
+            new_mode == ConfigMode::BLUFI ? "切换到蓝牙配网..." : "切换到热点配网...",
+            2000);
+    }
 
     StopConfigMode();
     vTaskDelay(pdMS_TO_TICKS(300));  // 等 BLE/AP 资源彻底释放
