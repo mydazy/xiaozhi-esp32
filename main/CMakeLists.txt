@@ -31,9 +31,6 @@ set(SOURCES "audio/audio_codec.cc"
             "protocols/mqtt_protocol.cc"
             "protocols/websocket_protocol.cc"
             "protocols/websocket_joyai_protocol.cc"
-            "blufi/blufi.cc"
-            "blufi/blufi_init.c"
-            "blufi/blufi_security.c"
             "blufi/ibeacon.cc"
             "ota_http_download.cc"
             "mcp_server.cc"
@@ -61,7 +58,6 @@ list(APPEND SOURCES
     "boards/common/nt26_board.cc"
     "boards/common/dual_network_board.cc"
     "boards/common/adc_battery_monitor.cc"
-    "boards/common/afsk_demod.cc"
     "boards/common/axp2101.cc"
     "boards/common/backlight.cc"
     "boards/common/button.cc"
@@ -521,4 +517,20 @@ if ("${size}" AND "${offset}")
     endif()
 else()
     message(STATUS "Assets partition not found, using v1 partition table")
+endif()
+
+# ---------------------------------------------------------------------------
+# 避免符号冲突：emote_gfx 内嵌的 qrcodegen 与 LVGL 自带的 qrcodegen 重复定义
+# 本项目不使用 emote_gfx 的 QR widget（gfx_qrcode），直接用 lv_qrcode_create
+# 从 emote_gfx 组件的 target 源列表中排除 qrcode 相关源文件
+# ---------------------------------------------------------------------------
+idf_component_get_property(_emote_gfx_lib espressif2022__esp_emote_gfx COMPONENT_LIB)
+if(_emote_gfx_lib AND TARGET ${_emote_gfx_lib})
+    get_target_property(_emote_srcs ${_emote_gfx_lib} SOURCES)
+    if(_emote_srcs)
+        list(FILTER _emote_srcs EXCLUDE REGEX ".*/lib/qrcode/.*\\.c$")
+        list(FILTER _emote_srcs EXCLUDE REGEX ".*/widget/gfx_qrcode\\.c$")
+        set_property(TARGET ${_emote_gfx_lib} PROPERTY SOURCES "${_emote_srcs}")
+        message(STATUS "emote_gfx: 已排除内嵌 qrcode 源文件（避免与 LVGL QR 冲突）")
+    endif()
 endif()

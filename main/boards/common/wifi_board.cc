@@ -5,6 +5,7 @@
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
+#include <functional>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -16,9 +17,9 @@
 #include <wifi_manager.h>
 #include <wifi_station.h>
 #include <ssid_manager.h>
-#include "afsk_demod.h"
 #ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
 #include "blufi.h"
+#include <esp_lvgl_port.h>  // lvgl_port_lock: 保护 BLE flash-op × LVGL PSRAM buffer 死锁
 #endif
 
 static const char *TAG = "WifiBoard";
@@ -108,10 +109,10 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
         case NetworkEvent::Connected:
             // Stop timeout timer
             esp_timer_stop(connect_timer_);
-#ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
-            // make sure blufi resources has been released
-            Blufi::GetInstance().deinit();
-#endif
+            // 统一清理配网资源（BLUFI/AP 都走 StopConfigMode，幂等）
+            if (in_config_mode_) {
+                StopConfigMode();
+            }
             in_config_mode_ = false;
             ESP_LOGI(TAG, "Connected to WiFi: %s", data.c_str());
             break;
@@ -160,40 +161,147 @@ void WifiBoard::StartWifiConfigMode() {
     in_config_mode_ = true;
     // Transition to wifi configuring state
     Application::GetInstance().SetDeviceState(kDeviceStateWifiConfiguring);
-#ifdef CONFIG_USE_HOTSPOT_WIFI_PROVISIONING
-    auto& wifi_manager = WifiManager::GetInstance();
 
+    // 读取默认配网模式：Settings("wifi").blufi=1 走 BLUFI，=0 走 AP
+    // 未编译 BLUFI 支持时强制 AP；首次启动默认 BLUFI 优先（小程序主流程）
+    ConfigMode mode = ConfigMode::AP;
+#ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
+    {
+        Settings settings("wifi", false);
+        mode = settings.GetInt("blufi", 1) ? ConfigMode::BLUFI : ConfigMode::AP;
+    }
+#endif
+
+    if (!StartConfigMode(mode)) {
+        // BLUFI 失败已在 StartConfigMode 内部降级到 AP；这里兜底处理编译缺失等极端场景
+        ESP_LOGE(TAG, "StartConfigMode 失败，无可用配网模式");
+    }
+}
+
+// 双击切换配网模式：在 Application 主循环里延迟执行 SwitchConfigMode，
+// 避免在 LVGL 事件回调中直接调用（SwitchConfigMode 内有 vTaskDelay 300ms + flash op）。
+std::function<void()> WifiBoard::MakeSwitchCallback() {
+    return [this]() {
+        Application::GetInstance().Schedule([this]() {
+            SwitchConfigMode();
+        });
+    };
+}
+
+bool WifiBoard::StartConfigMode(ConfigMode mode) {
+    current_config_mode_ = mode;
+    auto& wifi_manager = WifiManager::GetInstance();
+    // AP SSID 作为通用设备识别名（如 "MyDazy-ABCD"），BLUFI 广播名、QR 载荷同步
+    std::string device_name = wifi_manager.GetApSsid();
+
+    if (mode == ConfigMode::BLUFI) {
+#ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
+        ESP_LOGI(TAG, "启动 BLUFI 配网，设备名: %s", device_name.c_str());
+        // ⚠️ BLE controller init 触发 flash read → 禁用 cache；此时 LVGL 若在渲染
+        //    PSRAM framebuffer 会阻塞 IDLE1 导致 Task WDT。lvgl_port_lock 强制 LVGL
+        //    暂停渲染，让它等锁而不是卡在 PSRAM。超时 1s 后仍继续（记录警告）。
+        bool lvgl_locked = lvgl_port_lock(1000);
+        if (!lvgl_locked) {
+            ESP_LOGW(TAG, "LVGL 锁超时，仍继续 BLUFI init（死锁风险）");
+        }
+        esp_err_t ret = Blufi::GetInstance().init();
+        if (lvgl_locked) lvgl_port_unlock();
+
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "BLUFI init 失败: %s，降级到 AP", esp_err_to_name(ret));
+            current_config_mode_ = ConfigMode::AP;
+            return StartConfigMode(ConfigMode::AP);  // 单次降级，AP 失败不再递归
+        }
+
+        // 展示配网 QR 页（设备名作为载荷，小程序扫码后 BLE 搜索同名设备）
+        if (auto* display = GetDisplay()) {
+            display->ShowWifiQrCode(device_name.c_str(), "双击切换配网方式",
+                                    "蓝牙配网", "热点配网",
+                                    /*active_left=*/true,
+                                    MakeSwitchCallback());
+        }
+        return true;
+#else
+        ESP_LOGW(TAG, "未编译 BLUFI 支持，降级到 AP");
+        current_config_mode_ = ConfigMode::AP;
+        // 继续走下方 AP 分支
+#endif
+    }
+
+    // AP 模式
+#ifdef CONFIG_USE_HOTSPOT_WIFI_PROVISIONING
+    ESP_LOGI(TAG, "启动 AP 热点配网，SSID: %s", device_name.c_str());
     wifi_manager.StartConfigAp();
 
-    // Show config prompt after a short delay
-    Application::GetInstance().Schedule([&wifi_manager]() {
-        std::string hint = Lang::Strings::CONNECT_TO_HOTSPOT;
-        hint += wifi_manager.GetApSsid();
-        hint += Lang::Strings::ACCESS_VIA_BROWSER;
-        hint += wifi_manager.GetApWebUrl();
-
-        Application::GetInstance().Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "gear", Lang::Sounds::OGG_WIFICONFIG);
+    // QR 载荷 = SSID（UiDisplay 内部会按 WiFi QR 标准包装 WIFI:T:nopass;S:...）
+    // hint 行显示 web 配网 URL，用户可手动输入
+    Application::GetInstance().Schedule([this, device_name]() {
+        if (auto* display = GetDisplay()) {
+            std::string hint = WifiManager::GetInstance().GetApWebUrl();
+            display->ShowWifiQrCode(device_name.c_str(), hint.c_str(),
+                                    "蓝牙配网", "热点配网",
+                                    /*active_left=*/false,
+                                    MakeSwitchCallback());
+        }
     });
-#elif CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
-    auto &blufi = Blufi::GetInstance();
-    // initialize esp-blufi protocol
-    blufi.init();
+    return true;
+#else
+    ESP_LOGE(TAG, "未编译 HOTSPOT 支持，无可用配网方式");
+    return false;
 #endif
-#if CONFIG_USE_ACOUSTIC_WIFI_PROVISIONING
-    // Start acoustic provisioning task
-    auto codec = Board::GetInstance().GetAudioCodec();
-    int channel = codec ? codec->input_channels() : 1;
-    ESP_LOGI(TAG, "Starting acoustic WiFi provisioning, channels: %d", channel);
+}
 
-    xTaskCreate([](void* arg) {
-        auto ch = reinterpret_cast<intptr_t>(arg);
-        auto& app = Application::GetInstance();
-        auto& wifi = WifiManager::GetInstance();
-        auto disp = Board::GetInstance().GetDisplay();
-        audio_wifi_config::ReceiveWifiCredentialsFromAudio(&app, &wifi, disp, ch);
-        vTaskDelete(NULL);
-    }, "acoustic_wifi", 4096, reinterpret_cast<void*>(channel), 2, NULL);
+void WifiBoard::StopConfigMode() {
+    // 先隐藏 QR 页（解除 LVGL 双击监听，避免 stop 过程中触发切换回调）
+    if (auto* display = GetDisplay()) {
+        display->HideWifiQrCode();
+    }
+
+    if (current_config_mode_ == ConfigMode::BLUFI) {
+#ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
+        ESP_LOGI(TAG, "停止 BLUFI 配网");
+        // 同 init：deinit 也涉及 BT controller flash op，LVGL 锁保护
+        bool lvgl_locked = lvgl_port_lock(1000);
+        Blufi::GetInstance().deinit();
+        if (lvgl_locked) lvgl_port_unlock();
 #endif
+    } else {
+#ifdef CONFIG_USE_HOTSPOT_WIFI_PROVISIONING
+        ESP_LOGI(TAG, "停止 AP 热点配网");
+        WifiManager::GetInstance().StopConfigAp();
+#endif
+    }
+}
+
+void WifiBoard::SwitchConfigMode() {
+    if (!in_config_mode_) {
+        ESP_LOGW(TAG, "非配网状态，忽略切换请求");
+        return;
+    }
+
+    ConfigMode old_mode = current_config_mode_;
+    ConfigMode new_mode = (old_mode == ConfigMode::BLUFI) ? ConfigMode::AP : ConfigMode::BLUFI;
+
+    ESP_LOGI(TAG, "===== 切换配网模式: %s -> %s =====",
+             old_mode == ConfigMode::BLUFI ? "BLUFI" : "AP",
+             new_mode == ConfigMode::BLUFI ? "BLUFI" : "AP");
+
+    StopConfigMode();
+    vTaskDelay(pdMS_TO_TICKS(300));  // 等 BLE/AP 资源彻底释放
+
+    // 先持久化，启动失败时再回滚（避免启动过程中用户重启导致状态丢失）
+    {
+        Settings settings("wifi", true);
+        settings.SetInt("blufi", new_mode == ConfigMode::BLUFI ? 1 : 0);
+    }
+
+    if (!StartConfigMode(new_mode)) {
+        ESP_LOGW(TAG, "切换到 %s 失败，回退", new_mode == ConfigMode::BLUFI ? "BLUFI" : "AP");
+        Settings settings("wifi", true);
+        settings.SetInt("blufi", old_mode == ConfigMode::BLUFI ? 1 : 0);
+        vTaskDelay(pdMS_TO_TICKS(300));
+        StartConfigMode(old_mode);
+    }
 }
 
 void WifiBoard::EnterWifiConfigMode() {

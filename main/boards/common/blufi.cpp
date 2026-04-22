@@ -227,8 +227,8 @@ esp_err_t Blufi::_host_and_cb_init() {
 #endif /* CONFIG_BT_BLUEDROID_ENABLED */
 
 #ifdef CONFIG_BT_NIMBLE_ENABLED
-// Stubs for NimBLE specific store functionality
-void ble_store_config_init();
+// NimBLE store_config 在 ESP-IDF C 代码内定义，需 extern "C" 避免 C++ name mangling
+extern "C" void ble_store_config_init(void);
 
 void Blufi::_nimble_on_reset(int reason) {
     ESP_LOGE(BLUFI_TAG, "NimBLE Resetting state; reason=%d", reason);
@@ -258,7 +258,8 @@ esp_err_t Blufi::_host_init() {
     ble_store_config_init();
     esp_blufi_btc_init();
 
-    esp_err_t err = esp_nimble_enable(_nimble_host_task);
+    // IDF 5.5 起 esp_nimble_enable 改为 void* 参数（C ABI 兼容），需显式 cast
+    esp_err_t err = esp_nimble_enable(reinterpret_cast<void*>(_nimble_host_task));
     if (err) {
         ESP_LOGE(BLUFI_TAG, "%s failed: %s", __func__, esp_err_to_name(err));
         return ESP_FAIL;
@@ -646,7 +647,11 @@ void Blufi::_handle_event(esp_blufi_cb_event_t event, esp_blufi_cb_param_t* para
     switch (event) {
         case ESP_BLUFI_EVENT_INIT_FINISH:
             ESP_LOGI(BLUFI_TAG, "BLUFI init finish");
+#ifdef CONFIG_BT_BLUEDROID_ENABLED
             esp_ble_gap_set_device_name(BLUFI_DEVICE_NAME);
+#elif defined(CONFIG_BT_NIMBLE_ENABLED)
+            ble_svc_gap_device_name_set(BLUFI_DEVICE_NAME);
+#endif
             esp_blufi_adv_start();
             break;
         case ESP_BLUFI_EVENT_DEINIT_FINISH:

@@ -14,6 +14,7 @@
 
 #include <string>
 #include <chrono>
+#include <functional>
 
 class Theme {
 public:
@@ -40,9 +41,17 @@ public:
     virtual Theme* GetTheme() { return current_theme_; }
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
-    virtual void SetupUI() { 
+    virtual void SetupUI() {
         setup_ui_called_ = true;
     }
+
+    // 配网 QR 页（仅支持显示二维码的 Display 实现会覆盖；其他 Display 空实现）
+    virtual void ShowWifiQrCode(const char* qr_content, const char* hint = nullptr,
+                                const char* left_label = nullptr,
+                                const char* right_label = nullptr,
+                                bool active_left = true,
+                                std::function<void()> on_double_click = nullptr) {}
+    virtual void HideWifiQrCode() {}
 
     inline int width() const { return width_; }
     inline int height() const { return height_; }
