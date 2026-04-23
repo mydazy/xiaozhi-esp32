@@ -1173,15 +1173,11 @@ void LcdDisplay::SetTheme(Theme* theme) {
     auto icon_font = lvgl_theme->icon_font()->font();
     auto large_icon_font = lvgl_theme->large_icon_font()->font();
 
-    if (text_font->line_height >= 40) {
-        lv_obj_set_style_text_font(mute_label_, large_icon_font, 0);
-        lv_obj_set_style_text_font(battery_label_, large_icon_font, 0);
-        lv_obj_set_style_text_font(network_label_, large_icon_font, 0);
-    } else {
-        lv_obj_set_style_text_font(mute_label_, icon_font, 0);
-        lv_obj_set_style_text_font(battery_label_, icon_font, 0);
-        lv_obj_set_style_text_font(network_label_, icon_font, 0);
-    }
+    // 子类可能 del 部分 label 并置 nullptr（例如 UiDisplay 用 PNG image 替代 network/battery），加 guard
+    auto chosen_icon_font = (text_font->line_height >= 40) ? large_icon_font : icon_font;
+    if (mute_label_)    lv_obj_set_style_text_font(mute_label_, chosen_icon_font, 0);
+    if (battery_label_) lv_obj_set_style_text_font(battery_label_, chosen_icon_font, 0);
+    if (network_label_) lv_obj_set_style_text_font(network_label_, chosen_icon_font, 0);
 
     // Set parent text color
     lv_obj_set_style_text_font(screen, text_font, 0);
@@ -1201,13 +1197,14 @@ void LcdDisplay::SetTheme(Theme* theme) {
         lv_obj_set_style_bg_color(top_bar_, lvgl_theme->background_color(), 0);
     }
     
-    // Update status bar elements
-    lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(mute_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
+    // Update status bar elements（同样对可空 label 加 guard）
+    auto text_color = lvgl_theme->text_color();
+    if (network_label_)      lv_obj_set_style_text_color(network_label_, text_color, 0);
+    if (status_label_)       lv_obj_set_style_text_color(status_label_, text_color, 0);
+    if (notification_label_) lv_obj_set_style_text_color(notification_label_, text_color, 0);
+    if (mute_label_)         lv_obj_set_style_text_color(mute_label_, text_color, 0);
+    if (battery_label_)      lv_obj_set_style_text_color(battery_label_, text_color, 0);
+    if (emoji_label_)        lv_obj_set_style_text_color(emoji_label_, text_color, 0);
 
     // If we have the chat message style, update all message bubbles
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE

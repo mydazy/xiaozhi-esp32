@@ -132,8 +132,8 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
         }
     }
 
-    // Update time
-    if (app.GetDeviceState() == kDeviceStateIdle) {
+    // Update time（子类可通过 ShouldShowTimeInStatusLabel() 禁用：有独立时钟控件时避免覆盖 status 文字）
+    if (ShouldShowTimeInStatusLabel() && app.GetDeviceState() == kDeviceStateIdle) {
         if (last_status_update_time_ + std::chrono::seconds(10) < std::chrono::system_clock::now()) {
             // Set status to clock "HH:MM"
             time_t now = time(NULL);
