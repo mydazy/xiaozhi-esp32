@@ -57,6 +57,10 @@ AudioService::~AudioService() {
     if (output_resampler_ != nullptr) {
         esp_ae_rate_cvt_close(output_resampler_);
     }
+    if (audio_power_timer_ != nullptr) {
+        esp_timer_stop(audio_power_timer_);
+        esp_timer_delete(audio_power_timer_);
+    }
 }
 
 void AudioService::Initialize(AudioCodec* codec) {
