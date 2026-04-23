@@ -1,39 +1,58 @@
 ## IDF Component Manager Manifest File
+##
+## 本仓库只支持 mydazy-p30-4g / mydazy-p30-wifi / mydazy-p31（ESP32-S3）。
+## LCD/触摸控制器走 components/ 下的 vendored 组件：
+##   esp_lcd_jd9853（JD9853 屏）、esp_lcd_touch_axs5106l（AXS5106L 触摸）、esp_nfc_ws1850s（P31 NFC）。
+## 下列依赖都经 Part 2.D.2 验证在主干代码中零引用（或仅在非 S3 条件分支中引用）：
+##   LCD 驱动（sh8601/co5300/ili9341/gc9a01/st77916/axs15231b/st7701/st7796/spd2010/nv3023/
+##             jd9365/st7703/ili9881c/ek79007）、
+##   触摸驱动（ft5x06/gt911/gt1151/cst9217/cst816s/st7123）、
+##   IO expander（tca9554/tca95xx/ch32v003、panel_io_additions）、
+##   LED/sh1106/sscma/servo_dog/cpp_bus/bmi270/otto-emoji、
+##   网络（uart-eth-modem/esp_hosted/esp_wifi_remote）、P4 专用板 ev_board
+##   — 已于 Cleanup-Batch-1 删除。
+## ⚠️ esp_image_effects 必须保留：它提供的 esp_imgfx_* API 被
+##   main/display/lvgl_display/jpg/image_to_jpeg.cpp（LVGL JPEG 编码）使用。
+## esp32-camera / esp_video / iot_usbh_rndis 暂留，将在 Cleanup-Batch-2 随源文件联动删除。
 dependencies:
-  waveshare/esp_lcd_sh8601: 1.0.2
-  espressif/esp_lcd_co5300: ^2.0.3
-  espressif/esp_lcd_ili9341: ==1.2.0
-  espressif/esp_lcd_gc9a01: ==2.0.1
-  espressif/esp_lcd_st77916: ^1.0.1
-  espressif/esp_lcd_axs15231b: ^1.0.0
-
-  espressif/esp_lcd_st7701:
-    version: ^1.1.4
-    rules:
-    - if: target in [esp32s3, esp32p4]
-  espressif/esp_lcd_st7796:
-    version: 1.3.5
-    rules:
-    - if: target in [esp32, esp32s2, esp32s3, esp32p4]
-  espressif/esp_lcd_spd2010: ==1.0.2
-  espressif/esp_io_expander_tca9554: ==2.0.0
-  waveshare/custom_io_expander_ch32v003: ^1.0.0
-  espressif/esp_lcd_panel_io_additions: ^1.0.1
-  78/esp_lcd_nv3023: ~1.0.0
+  # Network
   78/esp-wifi-connect: ~3.1.2
+  78/esp-ml307: ~3.6.5
+  # ⚠️ 78/uart-uhci 必须在 main 这里显式声明：
+  # 上游 78/esp-ml307 的 at_uart.h 里 #include <uart_uhci.h>，但它的
+  # CMakeLists.txt 把 78__uart-uhci 放在 PRIV_REQUIRES 而非 REQUIRES，
+  # 导致依赖 esp-ml307 的 main 组件看不到 uart-uhci 的 include dirs。
+  # 显式直接依赖可让 main 解析到头文件。
+  78/uart-uhci: ^0.2.1
+
+  # UI fonts / LVGL
+  78/xiaozhi-fonts: ~1.6.0
+  lvgl/lvgl: ~9.5.0
+  esp_lvgl_port: ~2.7.2
+
+  # Input
+  espressif/button: ~4.1.5
+
+  # Audio
   espressif/esp_audio_effects: ~1.2.1
   espressif/esp_audio_codec: ~2.4.1
-  78/esp-ml307: ~3.6.5
-  78/uart-eth-modem:
-    version: ~0.3.4
-    rules:
-    - if: target not in [esp32]
-  78/xiaozhi-fonts: ~1.6.0
-  espressif/led_strip: ~3.0.2
   espressif/esp_codec_dev: ~1.5.6
   espressif/esp-sr: ~2.3.0
-  espressif/button: ~4.1.5
-  espressif/knob: ^1.0.0
+
+  # Assets / emote / JPEG / battery（image_player/adc_battery_estimation/esp_new_jpeg 待 Batch-3 验证）
+  espressif2022/image_player: ^1.1.1
+  espressif2022/esp_emote_expression: ^0.1.0
+  espressif/esp_mmap_assets: ^1.3.2
+  espressif/adc_battery_estimation: ^0.2.1
+  espressif/esp_new_jpeg: ^0.6.1
+
+  # Image transform (esp_imgfx_*) — LVGL JPEG pipeline 依赖
+  espressif/esp_image_effects:
+    version: ^1.0.1
+    rules:
+    - if: target not in [esp32]
+
+  # Camera / Video / RNDIS：Batch-2 随源文件联动删除
   espressif/esp32-camera:
     version: ^2.1.6
     rules:
@@ -42,81 +61,7 @@ dependencies:
     version: ==1.3.1   # for compatibility. update version may need to modify this project code.
     rules:
     - if: target in [esp32p4, esp32s3]
-  
-  espressif/esp_image_effects:
-    version: ^1.0.1
-    rules:
-    - if: target not in [esp32]
-  espressif/esp_lcd_touch_ft5x06: ~1
-  espressif/esp_lcd_touch_gt911: ^1
-  espressif/esp_lcd_touch_gt1151: ^1
-  waveshare/esp_lcd_touch_cst9217: ^1.0.3
-  espressif/esp_lcd_touch_cst816s: ^1
-  lvgl/lvgl: ~9.5.0
-  esp_lvgl_port: ~2.7.2
-  espressif/esp_io_expander_tca95xx_16bit: ^2.0.0
-  espressif2022/image_player: ^1.1.1
-  espressif2022/esp_emote_expression: ^0.1.0
-  espressif/esp_mmap_assets: ^1.3.2
-  txp666/otto-emoji-gif-component:
-    version: ^1.1.1
-    rules:
-    - if: target in [esp32s3]
-  espressif/adc_battery_estimation: ^0.2.1
-  espressif/esp_new_jpeg: ^0.6.1
-
-  # SenseCAP Watcher Board
-  wvirgil123/sscma_client:
-    version: 1.0.2
-    rules:
-    - if: target in [esp32s3]
-
-  tny-robotics/sh1106-esp-idf: ^1.0.0
-  espressif/esp_lcd_jd9365:
-    version: '*'
-    rules:
-    - if: target in [esp32p4]
-  waveshare/esp_lcd_st7703:
-    version: '*'
-    rules:
-    - if: target in [esp32p4]
-  espressif/esp32_p4_function_ev_board:
-    version: ^5.0.3
-    rules:
-    - if: target in [esp32p4]
-  espressif/esp_lcd_ili9881c:
-    version: ^1.0.1
-    rules:
-    - if: target in [esp32p4]
-  espressif/esp_lcd_ek79007:
-    version: ^1.0.3
-    rules:
-    - if: target in [esp32p4]
-  espressif/esp_hosted:
-    version: 2.0.17
-    rules:
-    - if: target in [esp32h2, esp32p4]
-  espressif/esp_wifi_remote:
-    version: '*'
-    rules:
-    - if: target in [esp32p4]
-  espfriends/servo_dog_ctrl:
-    version: ^0.1.8
-    rules:
-    - if: target in [esp32c3]
-
-  llgok/cpp_bus_driver:
-    version: 1.1.0
-    rules:
-    - if: target in [esp32p4]
-
-  espressif/bmi270_sensor:
-    version: ^0.1.0
-    rules:
-    - if: target in [esp32s3, esp32c5]
-
-  espressif/esp_lcd_touch_st7123: ^1.0.0
-  espressif/iot_usbh_rndis: 
+  espressif/iot_usbh_rndis:
     version: ^0.3.1
     rules:
     - if: target in [esp32s3, esp32p4]

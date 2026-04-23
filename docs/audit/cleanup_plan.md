@@ -210,7 +210,7 @@
 | `espressif/esp_lcd_touch_st7123` | 否 | ✅ |
 | `espressif/esp32-camera` | **camera 要删** | ✅ |
 | `espressif/esp_video` | **video 要删** | ✅ |
-| `espressif/esp_image_effects` | 否 | ✅ |
+| `espressif/esp_image_effects` | **是** — 组件名对外头是 `esp_imgfx_*`（命名不一致），被 `main/display/lvgl_display/jpg/image_to_jpeg.cpp` 引用 | ❌ **必留** |
 | `espressif2022/image_player`（当前 CMakeLists 用过一次但依赖在 `esp_emote_expression`） | 需复核 | ❓ **需跑 build 验证** |
 | `espressif/led_strip` | 否（LED 文件已删） | ✅ |
 | `espressif/knob` | 否（knob 文件已删） | ✅ |
@@ -224,7 +224,7 @@
 | `espressif/iot_usbh_rndis` | 否（rndis_board 要删） | ✅ |
 | `txp666/otto-emoji-gif-component` | 否 | ✅ |
 | `espressif/esp_io_expander_tca95xx_16bit` | 否 | ✅ |
-| `78/uart-eth-modem` | 否（非 esp32，但 S3 条件下仍拉；无源调用） | ✅ |
+| `78/uart-eth-modem` | 否（源码零引用）— **但** 曾承担 transitive 载体，把 `78/uart-uhci` 拉进依赖图供 `78/esp-ml307` 的 `at_uart.h → #include <uart_uhci.h>` 使用。删掉后需**显式声明 `78/uart-uhci`** 补回（上游 esp-ml307 的 CMakeLists bug：uart-uhci 在 PRIV_REQUIRES 而非 REQUIRES） | ✅ 可删 **但需补 `78/uart-uhci`** |
 | `espressif/esp_lcd_jd9365` (p4 only) | 否 | ✅ |
 | `waveshare/esp_lcd_st7703` (p4 only) | 否 | ✅ |
 | `espressif/esp32_p4_function_ev_board` | 否 | ✅ |
