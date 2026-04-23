@@ -3,6 +3,7 @@
 #include <esp_log.h>
 #include <driver/i2c_master.h>
 #include <driver/i2s_tdm.h>
+#include "settings.h"
 
 #define TAG "BoxAudioCodec"
 
@@ -14,7 +15,8 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     input_channels_ = input_reference_ ? 2 : 1; // 输入通道数
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
-    input_gain_ = 24;
+    Settings settings("audio", false);
+    input_gain_ = settings.GetFloat("input_gain", 24.0f);
 
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
@@ -74,7 +76,7 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     input_dev_ = esp_codec_dev_new(&dev_cfg);
     assert(input_dev_ != NULL);
 
-    ESP_LOGI(TAG, "BoxAudioDevice initialized");
+    ESP_LOGI(TAG, "BoxAudioDevice initialized (MIC1基准=%.1fdB)", input_gain_);
 }
 
 BoxAudioCodec::~BoxAudioCodec() {
@@ -184,6 +186,19 @@ void BoxAudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_
 void BoxAudioCodec::SetOutputVolume(int volume) {
     ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, volume));
     AudioCodec::SetOutputVolume(volume);
+}
+
+void BoxAudioCodec::SetInputGain(float gain) {
+    // 持锁保护硬件操作（与 EnableInput / Read / Write 并发安全）
+    {
+        std::lock_guard<std::mutex> lock(data_if_mutex_);
+        if (input_dev_ != nullptr && input_enabled_) {
+            ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(
+                input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), gain));
+        }
+    }
+    // NVS 持久化在锁外（基类 SetInputGain 会调 nvs_commit，避免持锁期间 flash op）
+    AudioCodec::SetInputGain(gain);
 }
 
 void BoxAudioCodec::EnableInput(bool enable) {
