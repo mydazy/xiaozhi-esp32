@@ -4,6 +4,7 @@
 #include "display/display.h"
 #include "display/emote_display.h"
 #include "display/lcd_display.h"
+#include "display/ui_display.h"
 #include "esp_lcd_jd9853.h"
 #include "axs5106l_touch.h"
 #include "sc7a20h.h"
@@ -426,10 +427,10 @@ private:
         display_ = new emote::EmoteDisplay(panel_, panel_io_, DISPLAY_WIDTH, DISPLAY_HEIGHT);
         ESP_LOGI(TAG, "表情包显示模式已启用");
 #else
-        display_ = new SpiLcdDisplay(panel_io_, panel_,
-                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
-                                     DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
-        ESP_LOGI(TAG, "LVGL显示模式已启用");
+        display_ = new UiDisplay(panel_io_, panel_,
+                                 DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
+                                 DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        ESP_LOGI(TAG, "UiDisplay 已启用 (时钟 + 配网 + 激活 + 控制中心)");
 #endif
 
         SystemInfo::PrintHeapStats();
