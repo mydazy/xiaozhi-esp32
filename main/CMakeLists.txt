@@ -3,13 +3,9 @@ set(SOURCES "audio/audio_codec.cc"
             "audio/audio_service.cc"
             "audio/music_player.cc"
             "audio/demuxer/ogg_demuxer.cc"
-            "audio/codecs/no_audio_codec.cc"
             "audio/codecs/box_audio_codec.cc"
             "audio/codecs/es7111_audio_codec.cc"
             "audio/processors/audio_debugger.cc"
-            "led/single_led.cc"
-            "led/circular_strip.cc"
-            "led/gpio_led.cc"
             "display/display.cc"
             "display/lcd_display.cc"
             "display/oled_display.cc"
@@ -59,14 +55,12 @@ list(APPEND SOURCES
     "boards/common/board.cc"
     "boards/common/wifi_board.cc"
     "boards/common/ml307_board.cc"
-    "boards/common/nt26_board.cc"
     "boards/common/dual_network_board.cc"
     "boards/common/adc_battery_monitor.cc"
     "boards/common/axp2101.cc"
     "boards/common/backlight.cc"
     "boards/common/button.cc"
     "boards/common/i2c_device.cc"
-    "boards/common/knob.cc"
     "boards/common/power_save_timer.cc"
     "boards/common/press_to_talk_mcp_tool.cc"
     "boards/common/system_reset.cc"
@@ -141,8 +135,6 @@ endif()
 if(CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32P4)
     list(APPEND SOURCES "audio/wake_words/afe_wake_word.cc")
     list(APPEND SOURCES "audio/wake_words/custom_wake_word.cc")
-else()
-    list(APPEND SOURCES "audio/wake_words/esp_wake_word.cc")
 endif()
 
 # Auto Select Additional Sources
@@ -263,10 +255,8 @@ if(CONFIG_IDF_TARGET_ESP32)
     list(REMOVE_ITEM SOURCES "audio/codecs/box_audio_codec.cc"
                              "audio/codecs/es8388_audio_codec.cc"
                              "audio/codecs/es8389_audio_codec.cc"
-                             "led/gpio_led.cc"
                              "display/lvgl_display/jpg/image_to_jpeg.cpp"
                              "display/lvgl_display/jpg/jpeg_to_image.c"
-                             "boards/common/nt26_board.cc"
                              "boards/common/ml307_board.cc"
                              "boards/common/dual_network_board.cc"
                              )
