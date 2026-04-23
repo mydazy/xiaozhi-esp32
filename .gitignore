@@ -18,3 +18,4 @@ mmap_generate_*.h
 .clangd
 .idea/
 .claude/settings.local.json
+.claude/worktrees/
