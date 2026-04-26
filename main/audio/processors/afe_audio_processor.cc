@@ -58,7 +58,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
 
 #ifdef CONFIG_USE_DEVICE_AEC
     afe_config->aec_init = true;
-    afe_config->vad_init = false;
+    afe_config->vad_init = true;
 #else
     afe_config->aec_init = false;
     afe_config->vad_init = true;
