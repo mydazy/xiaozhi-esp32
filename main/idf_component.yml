@@ -131,6 +131,15 @@ dependencies:
     rules:
     - if: target in [esp32s3, esp32p4]
 
+  # ── mydazy custom panel + sensor drivers ────────────────────
+  mydazy/esp_sc7a20h: ^2.0.0
+  mydazy/esp_lcd_jd9853: ^2.0.0
+  mydazy/esp_mp3_player: ^0.1.0
+  mydazy/esp_lcd_touch_axs5106l:
+    version: ^2.0.0
+    rules:
+    - if: target in [esp32s3]   # LVGL input integration tested on ESP32-S3
+
   ## Required IDF version
   idf:
     version: '>=5.5.2'

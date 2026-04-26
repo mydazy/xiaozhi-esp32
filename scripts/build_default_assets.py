@@ -718,7 +718,15 @@ def get_emoji_collection_path(default_emoji_collection, xiaozhi_fonts_path, proj
     """
     if not default_emoji_collection:
         return None
-    
+
+    # Board-level absolute path: directly use it (e.g. main/boards/<board>/emoji/)
+    if os.path.isabs(default_emoji_collection):
+        if os.path.isdir(default_emoji_collection):
+            print(f"Using board-level emoji directory: {default_emoji_collection}")
+            return default_emoji_collection
+        print(f"Warning: Board-level emoji directory not found: {default_emoji_collection}")
+        return None
+
     # Special handling for otto-gif collection
     if default_emoji_collection == 'otto-gif':
         if project_root:

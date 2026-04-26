@@ -9,6 +9,8 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "audio/music_player.h"
+#include "remote_cmd.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -18,6 +20,16 @@
 #include <font_awesome.h>
 
 #define TAG "Application"
+
+namespace {
+// Lazy singleton for the custom-message router. Defined here (instead of as
+// an Application member) to keep application.h untouched — the class is
+// strictly an implementation detail of the custom-message dispatch path.
+RemoteCmd& GetRemoteCmd() {
+    static RemoteCmd instance(&Application::GetInstance());
+    return instance;
+}
+}  // namespace
 
 
 Application::Application() {
@@ -72,6 +84,10 @@ void Application::Initialize() {
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
     audio_service_.Start();
+
+    // Wire the streaming MP3 player adapter (component: mydazy/esp_mp3_player).
+    // No tasks are spawned until the first Play() call — zero idle cost.
+    MusicPlayer::GetInstance().Initialize(codec);
 
     AudioServiceCallbacks callbacks;
     callbacks.on_send_queue_available = [this]() {
@@ -594,9 +610,11 @@ void Application::InitializeProtocol() {
             auto payload = cJSON_GetObjectItem(root, "payload");
             ESP_LOGI(TAG, "Received custom message: %s", cJSON_PrintUnformatted(root));
             if (cJSON_IsObject(payload)) {
-                Schedule([this, display, payload_str = std::string(cJSON_PrintUnformatted(payload))]() {
-                    display->SetChatMessage("system", payload_str.c_str());
-                });
+                if (!GetRemoteCmd().Handle(payload)) {
+                    Schedule([this, display, payload_str = std::string(cJSON_PrintUnformatted(payload))]() {
+                        display->SetChatMessage("system", payload_str.c_str());
+                    });
+                }
             } else {
                 ESP_LOGW(TAG, "Invalid custom message format: missing payload");
             }
@@ -1068,6 +1086,14 @@ void Application::SendMcpMessage(const std::string& payload) {
     Schedule([this, payload = std::move(payload)]() {
         if (protocol_) {
             protocol_->SendMcpMessage(payload);
+        }
+    });
+}
+
+void Application::SendText(const std::string& text) {
+    Schedule([this, text = std::move(text)]() {
+        if (protocol_) {
+            protocol_->SendWakeWordDetected(text);
         }
     });
 }
