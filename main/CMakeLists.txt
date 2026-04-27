@@ -23,8 +23,12 @@ set(SOURCES "audio/audio_codec.cc"
             "display/lvgl_display/gif/gifdec.c"
             "display/lvgl_display/jpg/image_to_jpeg.cpp"
             "display/lvgl_display/jpg/jpeg_to_image.c"
-            # UiDisplay（p30-4g / p31 专用）：内联三页面 + 状态栏 + 开机动画 + 控制中心
+            # UiDisplay（p30-4g / p30-wifi / p31 专用）：内联三页面 + 状态栏 + 开机动画 + 控制中心
             "display/ui_display.cc"
+            # 开机 logo 由各板级目录提供 ui_img_start_logo_png.c（file(GLOB BOARD_SOURCES) 自动加入）
+            #   P30-4G  : SquareLine 80×83 解码后 C 数组
+            #   P30-WiFi: PNG 字节嵌入（main/assets/twemoji_64/logo3.png）+ LVGL lodepng 运行时解码
+            #   P31     : SquareLine 80×83 解码后 C 数组
             "display/ui/resources/ui_image_manager.cc"
             "display/ui/widgets/control_center.cc"
             "protocols/protocol.cc"
@@ -68,7 +72,6 @@ list(APPEND SOURCES
     "boards/common/system_reset.cc"
     "boards/common/ml307_gnss.cc"
     "boards/common/typec_headset.cc"
-    "boards/common/sc7a20h.cc"
 )
 list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/common)
 
@@ -111,6 +114,9 @@ elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
     set(BUILTIN_ICON_FONT font_awesome_20_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
+
+    # UI 资源（状态栏 PNG 图标 + maru 88/30 大字号时钟字体）→ assets 分区
+    set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons")
 endif()
 
 if(MANUFACTURER)
@@ -278,6 +284,16 @@ if(CONFIG_IDF_TARGET_ESP32S3)
     list(APPEND SOURCES "boards/common/esp32_camera.cc")
 endif()
 
+if(CONFIG_BOARD_TYPE_MYDAZY_P30_4G OR CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
+    # 远程 component manager 在 main/idf_component.yml 中以 mydazy/<name> 声明，
+    # IDF 在 build graph 中以 mydazy__<name> 注册，PRIV_REQUIRES 必须用注册名
+    list(APPEND MAIN_PRIV_REQUIRES_EXTRA
+        mydazy__esp_lcd_jd9853
+        mydazy__esp_lcd_touch_axs5106l
+        mydazy__esp_sc7a20h
+    )
+endif()
+
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
@@ -303,6 +319,7 @@ idf_component_register(SRCS ${SOURCES}
                         esp_lcd_jd9853
                         esp_lcd_touch_axs5106l
                         esp_nfc_ws1850s
+                        mydazy__esp_mp3_player
                     )
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME

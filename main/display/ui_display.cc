@@ -17,6 +17,7 @@
 
 #include "application.h"
 #include "audio_codec.h"
+#include "audio/music_player.h"
 #include "backlight.h"
 #include "board.h"
 #include "assets.h"
@@ -26,6 +27,9 @@
 #include <time.h>
 #include <font_awesome.h>
 #include <esp_log.h>
+
+// 同 lcd_display.cc / oled_display.cc 风格：让 BUILTIN_ICON_FONT 宏展开的符号在本文件可见
+LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 #include <cbin_font.h>
 
 // FontAwesome 网络图标 → PNG 资源映射。
@@ -74,7 +78,6 @@ UiDisplay::UiDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t 
 }
 
 UiDisplay::~UiDisplay() {
-    if (boot_timer_) { lv_timer_del(boot_timer_); boot_timer_ = nullptr; }
     if (clock_tick_) { lv_timer_del(clock_tick_); clock_tick_ = nullptr; }
 }
 
@@ -130,9 +133,10 @@ void UiDisplay::CreateGlobalStatusBar() {
 
     status_network_icon_ = lv_image_create(global_status_bar_);
     // 初始 src 按 board 类型自动区分（4G 板 → 4G 无信号图；WiFi 板 → WiFi 无信号图）
+    // 注：SetupUI 阶段 assets 分区还未挂载（UiImageManager.LoadAll 在 ActivationTask 才跑），
+    //     UI_IMG 此时返回 nullptr —— 没关系，UpdateGlobalStatusIcons 每秒重试，assets 就绪后自动显示。
     const char* init_fa = Board::GetInstance().GetNetworkStateIcon();
     if (auto* init = MapNetworkIconFa(init_fa)) lv_image_set_src(status_network_icon_, init);
-    cached_net_fa_ = init_fa;  // 同步 cache，避免下一秒 tick 时重复 set_src
     lv_obj_align(status_network_icon_, LV_ALIGN_LEFT_MID, 16, 0);
 
     status_battery_icon_ = lv_image_create(global_status_bar_);
@@ -158,8 +162,10 @@ void UiDisplay::UpdateGlobalStatusIcons() {
 
     auto& board = Board::GetInstance();
     const char* fa_icon = board.GetNetworkStateIcon();
-    if (fa_icon && fa_icon != cached_net_fa_) {
-        cached_net_fa_ = fa_icon;
+    // 不缓存 fa_icon 指针：CreateGlobalStatusBar 时 assets 未就绪，UI_IMG 返回 nullptr，
+    // 必须每秒重试直到 assets 加载完成才能显示。lv_image_set_src 内部对相同 src 短路，开销可忽略。
+    // （电池图标也是同样无缓存逻辑，二者对齐。）
+    if (fa_icon) {
         if (auto* net_img = MapNetworkIconFa(fa_icon)) {
             lv_image_set_src(status_network_icon_, net_img);
         }
@@ -296,6 +302,10 @@ void UiDisplay::SwitchToClockMode() {
     DisplayLockGuard lock(this);
     if (is_clock_mode_) return;
     if (!setup_ui_called_) return;
+    // P0 修复：MP3 播放期间 OnMusicPlay 流程会先 CloseAudioChannel → 触发 STATE_CHANGED(Idle)
+    // → HandleStateChangedEvent::kDeviceStateIdle → FinishBootAndShowClock → SwitchToClockMode，
+    // 会盖住刚切好的 Player UI。Player 模式下拒绝切时钟，由 SwitchOutPlayerMode 显式退出。
+    if (is_player_mode_) return;
 
     if (!clock_container_) CreateClockPage();
 
@@ -356,7 +366,7 @@ void UiDisplay::SwitchToChatMode() {
 }
 
 // ============================================================
-// 开机动画（Logo 渐入 → 3s → 渐出 → 切时钟）
+// 开机动画（Logo 渐入 → 持续显示 → Idle 时由状态机触发渐出 → 切时钟）
 // ============================================================
 
 static void boot_opa_cb(void* obj, int32_t v) {
@@ -385,34 +395,42 @@ void UiDisplay::StartBootAnimation() {
         lv_anim_set_exec_cb(&status_in, boot_opa_cb);
         lv_anim_start(&status_in);
     }
-
-    boot_timer_ = lv_timer_create(BootTimerCallback, 3000, this);
-    lv_timer_set_repeat_count(boot_timer_, 1);
 }
 
-void UiDisplay::BootTimerCallback(lv_timer_t* t) {
-    auto* self = static_cast<UiDisplay*>(lv_timer_get_user_data(t));
-    self->boot_timer_ = nullptr;
+void UiDisplay::FinishBootAndShowClock() {
+    DisplayLockGuard lock(this);
+    if (is_clock_mode_) return;          // 幂等：已切时钟，重复 Idle 事件忽略
+    if (!setup_ui_called_) return;
+    // 同 SwitchToClockMode：Player 模式下不切回时钟（OnMusicPlay 路径会触发 Idle 状态事件）
+    if (is_player_mode_) return;
 
-    if (self->emoji_box_) {
-        lv_anim_t fade_out;
-        lv_anim_init(&fade_out);
-        lv_anim_set_var(&fade_out, self->emoji_box_);
-        lv_anim_set_values(&fade_out, LV_OPA_COVER, LV_OPA_TRANSP);
-        lv_anim_set_time(&fade_out, 400);
-        lv_anim_set_exec_cb(&fade_out, boot_opa_cb);
-        lv_anim_set_user_data(&fade_out, self);
-        lv_anim_set_completed_cb(&fade_out, [](lv_anim_t* a) {
-            auto* d = static_cast<UiDisplay*>(lv_anim_get_user_data(a));
-            d->SwitchToClockMode();
-        });
-        lv_anim_start(&fade_out);
+    // 清理可能残留的开机引导覆盖层（激活码 / 配网 QR），避免切到时钟后仍被 overlay 遮挡。
+    // SwitchToClockMode 内会主动 move_foreground 这两个 overlay；不在此处清理则用户看不到时钟。
+    HideActivationPage();
+    HideWifiQrCode();
+
+    if (!emoji_box_) {
+        SwitchToClockMode();
+        return;
     }
 
-    if (self->status_bar_) {
+    lv_anim_t fade_out;
+    lv_anim_init(&fade_out);
+    lv_anim_set_var(&fade_out, emoji_box_);
+    lv_anim_set_values(&fade_out, LV_OPA_COVER, LV_OPA_TRANSP);
+    lv_anim_set_time(&fade_out, 400);
+    lv_anim_set_exec_cb(&fade_out, boot_opa_cb);
+    lv_anim_set_user_data(&fade_out, this);
+    lv_anim_set_completed_cb(&fade_out, [](lv_anim_t* a) {
+        auto* d = static_cast<UiDisplay*>(lv_anim_get_user_data(a));
+        d->SwitchToClockMode();
+    });
+    lv_anim_start(&fade_out);
+
+    if (status_bar_) {
         lv_anim_t status_out;
         lv_anim_init(&status_out);
-        lv_anim_set_var(&status_out, self->status_bar_);
+        lv_anim_set_var(&status_out, status_bar_);
         lv_anim_set_values(&status_out, LV_OPA_COVER, LV_OPA_TRANSP);
         lv_anim_set_time(&status_out, 400);
         lv_anim_set_exec_cb(&status_out, boot_opa_cb);
@@ -693,4 +711,197 @@ void UiDisplay::HideControlCenter() {
 
 bool UiDisplay::IsControlCenterVisible() const {
     return control_center_ && control_center_->IsVisible();
+}
+
+// ============================================================
+// 音乐播放器页（极简：曲名 + Play/Pause 圆按钮 + 时间 + 进度条）
+// 布局参考上游 xiaozhi-esp32-189 player_page，去掉 prev/next 简化版。
+// ============================================================
+
+void UiDisplay::FormatTime(int ms, char* buf, size_t buf_size) {
+    if (ms < 0) ms = 0;
+    int total_sec = ms / 1000;
+    int min = total_sec / 60;
+    int sec = total_sec % 60;
+    snprintf(buf, buf_size, "%d:%02d", min, sec);
+}
+
+void UiDisplay::CreatePlayerPage() {
+    if (player_container_) return;
+    auto* screen = lv_screen_active();
+    if (!screen) return;
+
+    using namespace ScreenConfig;
+
+    player_container_ = lv_obj_create(screen);
+    lv_obj_set_size(player_container_, WIDTH, HEIGHT);
+    lv_obj_align(player_container_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_remove_flag(player_container_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(player_container_, lv_color_hex(Colors::BG_PRIMARY), 0);
+    lv_obj_set_style_bg_opa(player_container_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(player_container_, 0, 0);
+    lv_obj_set_style_radius(player_container_, RADIUS, 0);
+    lv_obj_set_style_pad_all(player_container_, 0, 0);
+
+    // 曲名（标题栏下方，长文本截断省略）— 不指定字体，跟随 LVGL 默认/theme 字体
+    player_title_ = lv_label_create(player_container_);
+    lv_label_set_text(player_title_, "正在播放");
+    lv_obj_set_style_text_color(player_title_, lv_color_hex(Colors::TEXT_PRIMARY), 0);
+    lv_obj_set_width(player_title_, WIDTH - 48);
+    lv_obj_set_style_text_align(player_title_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(player_title_, LV_LABEL_LONG_DOT);
+    lv_obj_align(player_title_, LV_ALIGN_TOP_MID, 0, HEADER_HEIGHT + 16);
+
+    // Play/Pause 圆按钮（屏幕中央，64×64）
+    constexpr int PLAY_SIZE = 64;
+    constexpr int PLAY_CENTER_Y = 130;
+    player_btn_play_ = lv_button_create(player_container_);
+    lv_obj_set_size(player_btn_play_, PLAY_SIZE, PLAY_SIZE);
+    lv_obj_set_pos(player_btn_play_, WIDTH / 2 - PLAY_SIZE / 2, PLAY_CENTER_Y - PLAY_SIZE / 2);
+    lv_obj_set_style_bg_color(player_btn_play_, lv_color_hex(Colors::ACCENT_BLUE), 0);
+    lv_obj_set_style_bg_opa(player_btn_play_, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(player_btn_play_, PLAY_SIZE / 2, 0);
+    lv_obj_set_style_border_width(player_btn_play_, 0, 0);
+    lv_obj_set_style_shadow_width(player_btn_play_, 0, 0);
+    lv_obj_set_style_bg_opa(player_btn_play_, LV_OPA_70, LV_STATE_PRESSED);
+
+    player_play_icon_ = lv_label_create(player_btn_play_);
+    lv_label_set_text(player_play_icon_, FONT_AWESOME_PAUSE);  // 默认播放中 → 显示 Pause 图标
+    lv_obj_set_style_text_font(player_play_icon_, &BUILTIN_ICON_FONT, 0);
+    lv_obj_set_style_text_color(player_play_icon_, lv_color_hex(Colors::TEXT_PRIMARY), 0);
+    lv_obj_center(player_play_icon_);
+    lv_obj_add_event_cb(player_btn_play_, OnPlayerPlayPauseClicked, LV_EVENT_CLICKED, this);
+
+    // 时间标签（当前 | 总时长）
+    constexpr int TIME_Y = 192;
+    player_time_cur_ = lv_label_create(player_container_);
+    lv_label_set_text(player_time_cur_, "0:00");
+    lv_obj_set_style_text_font(player_time_cur_, &BUILTIN_TEXT_FONT, 0);
+    lv_obj_set_style_text_color(player_time_cur_, lv_color_hex(Colors::TEXT_SECONDARY), 0);
+    lv_obj_set_pos(player_time_cur_, 28, TIME_Y);
+
+    player_time_total_ = lv_label_create(player_container_);
+    lv_label_set_text(player_time_total_, "0:00");
+    lv_obj_set_style_text_font(player_time_total_, &BUILTIN_TEXT_FONT, 0);
+    lv_obj_set_style_text_color(player_time_total_, lv_color_hex(Colors::TEXT_SECONDARY), 0);
+    lv_obj_align(player_time_total_, LV_ALIGN_TOP_RIGHT, -28, TIME_Y);
+
+    // 进度条（lv_bar，仅显示）
+    constexpr int BAR_Y = TIME_Y + 26;
+    player_progress_ = lv_bar_create(player_container_);
+    lv_obj_set_size(player_progress_, WIDTH - 56, 6);
+    lv_obj_align(player_progress_, LV_ALIGN_TOP_MID, 0, BAR_Y);
+    lv_bar_set_range(player_progress_, 0, 1000);
+    lv_bar_set_value(player_progress_, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(player_progress_, lv_color_hex(0x333333), 0);
+    lv_obj_set_style_bg_color(player_progress_, lv_color_hex(Colors::ACCENT_BLUE), LV_PART_INDICATOR);
+    lv_obj_set_style_radius(player_progress_, 3, 0);
+    lv_obj_set_style_radius(player_progress_, 3, LV_PART_INDICATOR);
+
+    // 默认隐藏，SwitchToPlayerMode 时再显示
+    lv_obj_add_flag(player_container_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void UiDisplay::OnPlayerPlayPauseClicked(lv_event_t* e) {
+    auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
+    if (!self || !self->on_player_pause_toggle_) return;
+    // 关键：LVGL task 上下文 + DisplayLockGuard 已持，直接调 MusicPlayer::Pause →
+    // audio_codec data_if_mutex_ 与 LVGL 锁可能形成顺序倒置（watchdog reset）。
+    // 投到主任务 Schedule 执行，立即返回让 LVGL 释放锁。
+    auto cb = self->on_player_pause_toggle_;   // copy std::function 到 lambda capture
+    Application::GetInstance().Schedule([cb]() {
+        if (cb) cb();
+    });
+}
+
+// 200ms tick：直接从 MusicPlayer 拉进度/暂停状态，自动刷新 UI
+void UiDisplay::PlayerTickCb(lv_timer_t* t) {
+    auto* self = static_cast<UiDisplay*>(lv_timer_get_user_data(t));
+    if (!self || !self->is_player_mode_) return;
+    auto& mp = MusicPlayer::GetInstance();
+    self->UpdatePlayerProgress(mp.GetPositionMs(), mp.GetTotalDurationMs());
+    self->SetPlayerPaused(mp.IsPaused());
+}
+
+void UiDisplay::SwitchToPlayerMode(const char* title) {
+    DisplayLockGuard lock(this);
+    if (!setup_ui_called_) return;
+    if (!player_container_) CreatePlayerPage();
+    if (!player_container_) return;
+
+    if (player_title_) {
+        const char* t = (title && title[0]) ? title : "正在播放";
+        lv_label_set_text(player_title_, t);
+        lv_obj_invalidate(player_title_);
+        ESP_LOGI(TAG, "Player title: %s", t);
+    }
+    is_player_paused_ = false;
+    if (player_play_icon_) lv_label_set_text(player_play_icon_, FONT_AWESOME_PAUSE);
+    if (player_progress_)  lv_bar_set_value(player_progress_, 0, LV_ANIM_OFF);
+    if (player_time_cur_)  lv_label_set_text(player_time_cur_, "0:00");
+    if (player_time_total_) lv_label_set_text(player_time_total_, "0:00");
+
+    // 隐藏其他模式的 widget tree
+    if (clock_container_) lv_obj_add_flag(clock_container_, LV_OBJ_FLAG_HIDDEN);
+    if (content_)         lv_obj_add_flag(content_, LV_OBJ_FLAG_HIDDEN);
+    if (container_)       lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
+    if (status_bar_)      lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+    if (emoji_box_)       lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_remove_flag(player_container_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(player_container_);
+
+    // 全局状态栏保持显示（顶部 36px），与时钟模式一致
+    if (global_status_bar_) {
+        lv_obj_remove_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(global_status_bar_);
+    }
+    if (wifi_qr_overlay_)    lv_obj_move_foreground(wifi_qr_overlay_);
+    if (activation_overlay_) lv_obj_move_foreground(activation_overlay_);
+
+    is_player_mode_ = true;
+    is_clock_mode_  = false;   // 复用 clock 状态字段，与 SwitchToChatMode 保持互斥
+
+    // 启动 200ms 进度刷新 timer（懒创建）
+    if (!player_tick_) player_tick_ = lv_timer_create(PlayerTickCb, 200, this);
+    else               lv_timer_resume(player_tick_);
+
+    ESP_LOGI(TAG, "Switched to player mode: %s", title ? title : "");
+}
+
+void UiDisplay::SwitchOutPlayerMode() {
+    DisplayLockGuard lock(this);
+    if (!is_player_mode_) return;
+    if (player_container_) lv_obj_add_flag(player_container_, LV_OBJ_FLAG_HIDDEN);
+    if (player_tick_) lv_timer_pause(player_tick_);
+    is_player_mode_ = false;
+    // 退出时回时钟主屏（idle 状态）
+    SwitchToClockMode();
+    ESP_LOGI(TAG, "Switched out player mode");
+}
+
+void UiDisplay::UpdatePlayerProgress(int position_ms, int total_ms) {
+    DisplayLockGuard lock(this);
+    if (!is_player_mode_ || !player_progress_) return;
+
+    char buf[16];
+    if (player_time_cur_) {
+        FormatTime(position_ms, buf, sizeof(buf));
+        lv_label_set_text(player_time_cur_, buf);
+    }
+    if (player_time_total_) {
+        FormatTime(total_ms, buf, sizeof(buf));
+        lv_label_set_text(player_time_total_, buf);
+    }
+    int v = (total_ms > 0) ? (int)((int64_t)position_ms * 1000 / total_ms) : 0;
+    if (v < 0) v = 0; else if (v > 1000) v = 1000;
+    lv_bar_set_value(player_progress_, v, LV_ANIM_OFF);
+}
+
+void UiDisplay::SetPlayerPaused(bool paused) {
+    DisplayLockGuard lock(this);
+    if (!player_play_icon_) return;
+    if (is_player_paused_ == paused) return;
+    is_player_paused_ = paused;
+    lv_label_set_text(player_play_icon_, paused ? FONT_AWESOME_PLAY : FONT_AWESOME_PAUSE);
 }

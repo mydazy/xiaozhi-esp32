@@ -300,10 +300,10 @@ private:
                     auto& app = Application::GetInstance();
                     auto state = app.GetDeviceState();
 
-                    // MP3 播放中：单击 = 停音乐，不进入对话
+                    // Player 模式下：屏幕中央 LVGL 按钮独占处理 Pause/Resume，
+                    // gesture SingleClick 不再 toggle，避免双触发互相抵消（"按了没反应"）。
                     if (MusicPlayer::GetInstance().IsPlaying()) {
-                        ESP_LOGI(TAG, "单击停止 MP3 播放");
-                        MusicPlayer::GetInstance().Stop();
+                        ESP_LOGD(TAG, "Player 模式 SingleClick 由 LVGL 按钮处理，gesture 忽略");
                         break;
                     }
 
@@ -553,6 +553,16 @@ private:
             auto status = app.GetDeviceState();
             ESP_LOGI(TAG, "单击 button 状态： %u", status);
             waiting_factory_reset_confirm_ = false; // 重置确认状态
+
+            // MP3 播放期间：按键 = 先打断 MP3 + 退 Player UI，再走唤醒/对话流程
+            if (MusicPlayer::GetInstance().IsPlaying()) {
+                ESP_LOGI(TAG, "按键打断 MP3 → 唤醒对话");
+                MusicPlayer::GetInstance().Stop();
+                if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+                    ui->SwitchOutPlayerMode();
+                }
+            }
+
             if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
                 if (status == kDeviceStateIdle) {
                     app.PlaySound(Lang::Sounds::OGG_WAKEUP);
@@ -573,7 +583,7 @@ private:
             if (waiting_factory_reset_confirm_) {
                 // 检查是否超时（10秒超时）
                 uint64_t now = esp_timer_get_time();
-                if (now - factory_reset_request_time_ > 15000000) {  // 10秒 = 10000000微秒
+                if (now - factory_reset_request_time_ > 10000000) {  // 10秒 = 10000000微秒
                     ESP_LOGW(TAG, "恢复出厂设置确认超时，已自动取消");
                     waiting_factory_reset_confirm_ = false;
                     return;
@@ -586,9 +596,8 @@ private:
                 }
                 app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
                 vTaskDelay(pdMS_TO_TICKS(3000));
-                // 服务器解绑 + NVS 擦除 + otadata 擦除；app.Reboot() 内部会切 LDO 复位 LCD/音频
+                // NVS 全擦 + otadata 擦除 + 3 秒倒计时 esp_restart；LDO 复位由 ShutdownHandler 接管
                 SystemReset::DoFactoryReset();
-                app.Reboot();
                 return;
             }
 
@@ -1281,6 +1290,9 @@ public:
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
 
+        // 注册重启钩子：任何 esp_restart() 调用前自动断 LDO 复位 LCD/音频
+        esp_register_shutdown_handler(ShutdownHandler);
+
         InitializeGpio();           // 1. 先启用音频电源
         InitializeI2c();            // 2. 初始化I2C总线 (音频编解码器需要)
         PrepareTouchHardware();     // 3. 先完成共享复位线上的触摸硬件初始化
@@ -1311,8 +1323,8 @@ public:
         // 14. 定时状态上报（90 秒间隔）
         StartStatusTimer();
 
-        // 灯光控制
-        GetBacklight()->RestoreBrightness();
+        // 背光开启移至 Application::Initialize（SetupUI 之后），
+        // 避免 LVGL 首帧到达 GRAM 之前打开背光导致的开机白屏闪现。
 
         // 优化：音量初始化逻辑 - 开机检查并修正音量范围（50-100）
         Settings audio_settings("audio", true);  // 优化：直接以读写模式打开，避免重复打开
@@ -1496,66 +1508,20 @@ public:
         return &backlight;
     }
 
-    // 重启前硬件清理：切 AUDIO_PWR_EN_GPIO (P31=GPIO15) 让 LCD + 音频 CODEC 真正下电复位
-    // 否则 esp_restart() 只重置 CPU，LCD 保持上电 → 重启后黑屏
-    virtual void PrepareForReboot() override {
-        ESP_LOGI(TAG, "PrepareForReboot: 关 LDO 复位 LCD/音频");
-        auto* bl = GetBacklight();
-        if (bl) {
-            bl->SetBrightness(0);
-        }
+    // ESP-IDF 标准 shutdown hook：esp_restart() 调用前自动执行（OTA / 恢复出厂 / 双击确认等所有路径）。
+    // 切 AUDIO_PWR_EN_GPIO (P31=GPIO15) 让 LCD + 音频 CODEC 真正下电复位，避免重启后 LCD 黑屏。
+    // 用 esp_register_shutdown_handler 注册（构造函数中），不需要 base Board 虚函数。
+    // 注：背光关闭由 application.cc Reboot() 在 esp_restart 前完成；static 方法不能访问 instance 成员。
+    static void ShutdownHandler() {
         gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
-        rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
-        vTaskDelay(pdMS_TO_TICKS(500));
+        rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);    // 穿越 esp_restart() 保持 LOW
+        esp_rom_delay_us(500 * 1000);           // 等电容放电（shutdown 上下文用 ROM delay 更稳妥）
     }
 
     // 唤醒设备（内部方法，非虚函数）
     void WakeUp() {
         if (power_save_timer_) {
             power_save_timer_->WakeUp();
-        }
-    }
-
-    // 清理显示资源（重启前调用）
-    void CleanupDisplay() {
-        ESP_LOGI(TAG, "====== 清理显示资源（简化版）======");
-
-        // 1. 立即关闭背光，防止用户看到清理过程（避免白屏/雪花屏）
-        // 注意：这里先黑屏并不等于已经重启，真正重启要等 CleanupDisplay() 走完并回到 esp_restart()。
-        ESP_LOGI(TAG, "关闭背光（避免重启时闪屏）");
-        auto backlight = GetBacklight();
-        if (backlight) {
-            backlight->SetBrightness(0);  // 通过PWM关闭背光
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));  // 延长等待时间，确保PWM完全关闭
-
-        // 2. 删除触摸驱动。
-        // 先删 touch 再删 display，避免 touch cleanup 过程中还去访问已经销毁的 LVGL 对象。
-        if (touch_driver_) {
-            ESP_LOGI(TAG, "[cleanup] before touch cleanup");
-            touch_driver_->Cleanup();
-            ESP_LOGI(TAG, "[cleanup] after touch cleanup");
-            ESP_LOGI(TAG, "[cleanup] before delete touch");
-            delete touch_driver_;
-            ESP_LOGI(TAG, "[cleanup] after delete touch");
-            touch_driver_ = nullptr;
-        }
-
-        // 3. 关闭音频电源
-        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
-        rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
-
-        // 4. 删除显示对象（析构函数会统一清理 LVGL 和 LCD）
-        // 之前“黑屏但没真正重启”的卡点就在这里：背光已经关了，但 delete display_ 没有顺利返回。
-        // 关键：在删除前短暂延迟，确保主循环不再访问 UI
-        vTaskDelay(pdMS_TO_TICKS(100));
-
-        if (display_ != nullptr) {
-            ESP_LOGI(TAG, "[cleanup] before delete display");
-            delete display_;
-            display_ = nullptr;
-            ESP_LOGI(TAG, "[cleanup] after delete display");
-            ESP_LOGI(TAG, "显示资源清理完成");
         }
     }
 

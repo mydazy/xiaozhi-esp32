@@ -73,6 +73,15 @@ void Application::Initialize() {
     // Setup the display
     auto display = board.GetDisplay();
     display->SetupUI();
+
+    // 等 LVGL 任务完成首帧黑底刷新（避免 GRAM 默认白色透出），再点亮背光。
+    // 80ms 经验值：覆盖 LVGL 任务调度 + DMA flush 一帧（284x240 RGB565 < 30ms）。
+    // 同时 logo fade_in 在 SetupUI 已启动，背光与 logo 渐显同步，开机过渡平顺。
+    vTaskDelay(pdMS_TO_TICKS(80));
+    if (auto* backlight = board.GetBacklight()) {
+        backlight->RestoreBrightness();
+    }
+
     // Print board name/version info
     display->SetChatMessage("system", SystemInfo::GetUserAgent().c_str());
 
@@ -406,7 +415,8 @@ void Application::CheckAssetsVersion() {
     assets.Apply();
     UiImageManager::GetInstance().LoadAll();
     display->SetChatMessage("system", "");
-    display->SetEmotion("logo");
+    // 注：开机 logo 由 UiDisplay::SetupUI / StartBootAnimation 接管，持续显示到首次 Idle。
+    // 此处不再 SetEmotion("logo")（emoji_box 已被 SetupUI 切换为 logo image，且 chat 模式才对 emoji_label 生效）。
 }
 
 void Application::CheckNewVersion() {
@@ -815,8 +825,14 @@ void Application::HandleWakeWordDetectedEvent() {
         return;
     }
 
-    // 唤醒词检测 → 打断 MP3 播放（"小智" 优先级最高）
+    // 唤醒词检测 → 打断 MP3 播放（"小智" 优先级最高）+ 退 Player UI 进对话
+    bool was_playing = MusicPlayer::GetInstance().IsPlaying();
     MusicPlayer::GetInstance().Stop();
+    if (was_playing) {
+        if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+            ui->SwitchOutPlayerMode();
+        }
+    }
 
     auto state = GetDeviceState();
     auto wake_word = audio_service_.GetLastWakeWord();
@@ -912,7 +928,8 @@ void Application::HandleStateChangedEvent() {
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
-            if (lcd) lcd->SwitchToClockMode();   // idle 回时钟主屏
+            // 首次 Idle：logo fade_out 后切到时钟主屏；后续 Idle 由 SwitchToClockMode 内部幂等早退
+            if (lcd) lcd->FinishBootAndShowClock();
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -1066,8 +1083,6 @@ void Application::Reboot() {
     if (backlight) {
         backlight->SetBrightness(0);
     }
-    board.PrepareForReboot();
-
     esp_restart();
 }
 
@@ -1166,6 +1181,14 @@ bool Application::CanEnterSleepMode() {
     }
 
     if (!audio_service_.IsIdle()) {
+        return false;
+    }
+
+    // P0 修复：MP3 播放（含暂停态）期间禁止 deep sleep，避免 5 分钟自动关机杀掉播放
+    // OnMusicPlay 强制切 Idle + CloseAudioChannel + AudioService.ResetDecoder，使前 3 个判断
+    // 全部返回 true，PowerSaveTimer 误以为系统空闲。MusicPlayer 是并行存在的"模式"，
+    // 不在 DeviceStateMachine 内，必须显式判断。
+    if (MusicPlayer::GetInstance().IsPlaying()) {
         return false;
     }
 

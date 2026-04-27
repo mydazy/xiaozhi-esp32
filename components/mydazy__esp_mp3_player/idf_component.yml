@@ -1,0 +1,29 @@
+dependencies:
+  espressif/esp_audio_codec: ~2.4.1
+  espressif/esp_audio_effects: ~1.2.1
+  idf: '>=5.3'
+description: 'Streaming MP3 player for ESP32-S3: HTTP chunked download → MP3 decode
+  → resample → PCM out, fully PSRAM-resident, with abortable lifecycle. Audio output
+  and HTTP transport are injected via abstract interfaces, so the component is project-agnostic.'
+documentation: https://github.com/mydazy/esp_mp3_player#readme
+files:
+  exclude:
+  - test/**
+  - examples/**/build/**
+  - examples/**/managed_components/**
+  - .github/**
+issues: https://github.com/mydazy/esp_mp3_player/issues
+license: Apache-2.0
+maintainers:
+- mydazy <opensource@mydazy.com>
+repository: https://github.com/mydazy/esp_mp3_player.git
+tags:
+- audio
+- mp3
+- streaming
+- http
+- decoder
+- resampler
+- psram
+url: https://github.com/mydazy/esp_mp3_player
+version: 0.2.0

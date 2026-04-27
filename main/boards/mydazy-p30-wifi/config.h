@@ -27,7 +27,7 @@
 #define AUDIO_INPUT_REFERENCE    true    // 音频输入参考
 
 // ===== GPIO配置 =====
-#define AUDIO_PWR_EN_GPIO       GPIO_NUM_9     // 音频芯片电源控制（LDO总开关，LCD+音频共用）
+#define AUDIO_PWR_EN_GPIO       GPIO_NUM_9     // AUD_VDD-3.3V 总电源开关：音频芯片(ES8311/ES7210) + 4G模块(ML307R) + LCD 三者共用（高=供电，低=断电；拉低再拉高可硬复位三者）
 #define AUDIO_CODEC_PA_PIN      GPIO_NUM_10    // PA功放使能
 
 // I2S接口
@@ -61,7 +61,7 @@
 #define DISPLAY_SPI_MISO        GPIO_NUM_NC    // SPI数据输入（未使用，单向传输）
 #define DISPLAY_SPI_MOSI        GPIO_NUM_38    // SPI数据输出（MOSI到LCD）
 #define DISPLAY_SPI_SCLK        GPIO_NUM_47    // SPI时钟信号（SCLK）
-#define DISPLAY_LCD_RESET       GPIO_NUM_NC    // LCD复位信号（未使用，软件复位）
+#define DISPLAY_LCD_RESET       GPIO_NUM_NC    // LCD 独立复位脚未连接；硬复位通过 AUDIO_PWR_EN_GPIO(GPIO9) 共享电源断电实现
 #define DISPLAY_LCD_DC          GPIO_NUM_48    // LCD数据/命令选择（DC，高=数据，低=命令）
 #define DISPLAY_LCD_CS          GPIO_NUM_39    // LCD片选信号（CS，低电平有效）
 #define DISPLAY_LCD_TE          GPIO_NUM_40    // LCD撕裂效应信号（TE，预留未使用）
@@ -90,7 +90,7 @@
 // ============================================================
 // 电源管理配置
 // ============================================================
-#define POWER_MANAGER_GPIO  GPIO_NUM_21    // 充电状态检测（低电平=充电中，与 P30-4G 同款电路）
+#define POWER_MANAGER_GPIO  GPIO_NUM_21    // 充电状态检测（低电平=充电中，开漏+内部上拉）
 #define BATTERY_ADC_GPIO    GPIO_NUM_8     // 电池电压ADC检测（ADC1_CHANNEL_7）
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_7  // ADC通道（对应GPIO8）
 #define BATTERY_CAPACITY_MAH 1000          // 电池容量（mAh）

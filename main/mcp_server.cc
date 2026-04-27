@@ -13,6 +13,7 @@
 #include "application.h"
 #include "display.h"
 #include "oled_display.h"
+#include "display/ui_display.h"
 #include "board.h"
 #include "system_info.h"
 #include "settings.h"
@@ -126,6 +127,12 @@ void McpServer::AddCommonTools() {
                 if (!MusicPlayer::GetInstance().Play(url, title, &err)) {
                     ESP_LOGW(TAG, "MCP music.play 启动失败: %s", err.c_str());
                     app.Alert("播放失败", err.c_str(), "", "");
+                } else if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+                    ui->SwitchToPlayerMode(title.empty() ? "正在播放" : title.c_str());
+                    ui->OnPlayerPauseToggle([] {
+                        auto& mp = MusicPlayer::GetInstance();
+                        if (mp.IsPaused()) mp.Resume(); else mp.Pause();
+                    });
                 } else if (!title.empty()) {
                     Board::GetInstance().GetDisplay()->ShowNotification(title.c_str(), 3000);
                 }
@@ -142,6 +149,9 @@ void McpServer::AddCommonTools() {
             bool was_playing = MusicPlayer::GetInstance().IsPlaying();
             Application::GetInstance().Schedule([]() {
                 MusicPlayer::GetInstance().Stop();
+                if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+                    ui->SwitchOutPlayerMode();
+                }
             });
             return std::string(was_playing ? "{\"was_playing\":true}" : "{\"was_playing\":false}");
         });

@@ -4,6 +4,7 @@
 #include "audio/music_player.h"
 #include "board.h"
 #include "display.h"
+#include "display/ui_display.h"
 #include "device_state.h"
 #include "ota.h"
 #include "settings.h"
@@ -41,6 +42,10 @@ bool RemoteCmd::Handle(const cJSON* payload) {
         need_delete = true;
     } else if (cJSON_IsObject(message)) {
         msg = message;
+    } else if (cJSON_IsString(cJSON_GetObjectItem(payload, "type"))) {
+        // 顶层命令格式：{"type":"music_play","url":"...","title":"..."} 等
+        // 服务器直接下发命令，不走 {"type":"custom","payload":{"message":...}} 双层包装
+        msg = const_cast<cJSON*>(payload);
     }
 
     if (!msg) return false;
@@ -469,6 +474,13 @@ void RemoteCmd::OnMusicPlay(const cJSON* msg) {
         if (!MusicPlayer::GetInstance().Play(url, title, &err)) {
             ESP_LOGW(TAG, "music_play 启动失败: %s", err.c_str());
             app.Alert("播放失败", err.c_str(), "", "");
+        } else if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+            // 切到极简播放器页（曲名 + Play/Pause + 进度条），自动 200ms 刷新进度
+            ui->SwitchToPlayerMode(title.empty() ? "正在播放" : title.c_str());
+            ui->OnPlayerPauseToggle([] {
+                auto& mp = MusicPlayer::GetInstance();
+                if (mp.IsPaused()) mp.Resume(); else mp.Pause();
+            });
         } else if (!title.empty()) {
             Board::GetInstance().GetDisplay()->ShowNotification(title.c_str(), 3000);
         }
@@ -480,6 +492,9 @@ void RemoteCmd::OnMusicStop() {
     app_->Schedule([]() {
         bool was_playing = MusicPlayer::GetInstance().IsPlaying();
         MusicPlayer::GetInstance().Stop();
+        if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+            ui->SwitchOutPlayerMode();   // 退出播放页 → 回时钟
+        }
         if (was_playing) {
             Board::GetInstance().GetDisplay()->ShowNotification("已停止播放", 1500);
         }

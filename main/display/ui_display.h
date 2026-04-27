@@ -4,6 +4,7 @@
 #include "lcd_display.h"
 #include <lvgl.h>
 #include <memory>
+#include <functional>
 
 class ControlCenter;
 
@@ -19,7 +20,7 @@ class ControlCenter;
  *
  * 附带：
  *   ├─ 全局状态栏（clock/chat 共享，PNG 图标）
- *   ├─ 开机动画（logo 渐入 → 3s → 渐出 → 切时钟）
+ *   ├─ 开机动画（logo 渐入 → 持续显示 → Idle 时由状态机驱动 fade_out → 切时钟）
  *   └─ 控制中心（下拉手势触发，懒加载）
  */
 class UiDisplay : public SpiLcdDisplay {
@@ -33,12 +34,14 @@ public:
     void SetupUI() override;
     void UpdateStatusBar(bool update_all = false) override;
 
-    // ===== 配网 QR 页（蓝牙/热点切换），非虚，仅 UiDisplay 暴露 =====
+    // ===== 配网 QR 页（蓝牙/热点切换） =====
+    // override Display 基类 6 参数虚函数，缺第 6 参数会回退到基类空实现，UI 不显示。
     void ShowWifiQrCode(const char* qr_content, const char* hint = nullptr,
                         const char* left_label = nullptr,
                         const char* right_label = nullptr,
-                        bool active_left = true);
-    void HideWifiQrCode();
+                        bool active_left = true,
+                        std::function<void()> on_double_click = nullptr) override;
+    void HideWifiQrCode() override;
 
     // ===== 激活绑定页（URL QR + 6 位激活码） =====
     void ShowActivationPage(const char* bind_url, const char* activation_code);
@@ -48,6 +51,19 @@ public:
     void SwitchToClockMode();    // idle → 时钟主屏
     void SwitchToChatMode();     // 对话 → 聊天 UI
     bool IsClockMode() const { return is_clock_mode_; }
+
+    // ===== 音乐播放器页（极简：曲名 + Play/Pause + 进度条）=====
+    using PlayerPauseToggleCb = std::function<void()>;
+    void SwitchToPlayerMode(const char* title);
+    void SwitchOutPlayerMode();
+    void UpdatePlayerProgress(int position_ms, int total_ms);
+    void SetPlayerPaused(bool paused);
+    void OnPlayerPauseToggle(PlayerPauseToggleCb cb) { on_player_pause_toggle_ = std::move(cb); }
+    bool IsPlayerMode() const { return is_player_mode_; }
+
+    // 开机引导结束：logo fade_out → SwitchToClockMode（幂等）
+    // 仅由 Application::HandleStateChangedEvent(Idle) 调用，确保联网+激活完成才切时钟
+    void FinishBootAndShowClock();
 
     // ===== 控制中心 =====
     void ShowControlCenter();
@@ -59,7 +75,6 @@ private:
     lv_obj_t* global_status_bar_   = nullptr;
     lv_obj_t* status_network_icon_ = nullptr;
     lv_obj_t* status_battery_icon_ = nullptr;
-    const char* cached_net_fa_     = nullptr;
     bool cached_battery_charging_  = false;
 
     // 时钟主屏（内联实现，无独立页面类）
@@ -75,8 +90,25 @@ private:
     lv_obj_t* wifi_qr_overlay_   = nullptr;
     lv_obj_t* activation_overlay_ = nullptr;
 
-    // 开机动画
-    lv_timer_t* boot_timer_ = nullptr;
+    // 配网双击切换：lambda 来自 WifiBoard::MakeSwitchCallback，必须保活直到 HideWifiQrCode
+    std::function<void()> wifi_qr_double_click_cb_;
+    uint64_t              wifi_qr_last_click_us_ = 0;
+    static void OnWifiQrClicked(lv_event_t* e);
+
+    // 音乐播放器页（懒加载，首次 SwitchToPlayerMode 时构建）
+    lv_obj_t* player_container_  = nullptr;
+    lv_obj_t* player_title_      = nullptr;
+    lv_obj_t* player_btn_play_   = nullptr;
+    lv_obj_t* player_play_icon_  = nullptr;
+    lv_obj_t* player_progress_   = nullptr;     // lv_bar，仅显示不可拖
+    lv_obj_t* player_time_cur_   = nullptr;
+    lv_obj_t* player_time_total_ = nullptr;
+    lv_timer_t* player_tick_     = nullptr;     // 200ms 自动刷新进度
+    bool is_player_mode_         = false;
+    bool is_player_paused_       = false;
+    PlayerPauseToggleCb on_player_pause_toggle_;
+
+    // 开机动画：logo 持续显示，结束时机由状态机驱动（FinishBootAndShowClock）
 
     // 控制中心（懒加载）
     std::unique_ptr<ControlCenter> control_center_;
@@ -97,8 +129,13 @@ private:
     void LoadPuhuiCommonFont();     // puhui_common 补字字体加载 + 注入 BUILTIN_TEXT_FONT.fallback
     static void ClockTickCb(lv_timer_t* t);
 
+    // 音乐播放器页内部方法
+    void CreatePlayerPage();
+    static void OnPlayerPlayPauseClicked(lv_event_t* e);
+    static void PlayerTickCb(lv_timer_t* t);
+    static void FormatTime(int ms, char* buf, size_t buf_size);
+
     void StartBootAnimation();
-    static void BootTimerCallback(lv_timer_t* t);
 
     void EnsureControlCenter();
 };

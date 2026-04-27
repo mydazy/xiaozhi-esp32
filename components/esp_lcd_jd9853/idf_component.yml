@@ -1,4 +1,0 @@
-version: 1.0.0
-description: ESP-IDF LCD driver for JD9853 (Jadard) - 1.83" 240x284 IPS display
-dependencies:
-  idf: ">=5.0"

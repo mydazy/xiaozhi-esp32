@@ -9,13 +9,14 @@
 #include "axs5106l_touch.h"
 #include "sc7a20h.h"
 #include "application.h"
+#include "audio/music_player.h"
 #include "button.h"
 #include "config.h"
 #include "settings.h"
 #include "system_info.h"
 #include "system_reset.h"
-
-#include <atomic>
+#include "network_interface.h"
+#include "http.h"
 #include "power_save_timer.h"
 #include "power_manager.h"
 #include "mcp_server.h"
@@ -46,7 +47,19 @@
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
 
+#include <atomic>
+
 #define TAG "MyDazyP30_WifiBoard"
+
+namespace {
+// 小工具：处于 Speaking 时先 Abort，避免状态冲突
+inline void AbortIfSpeaking() {
+    auto& app = Application::GetInstance();
+    if (app.GetDeviceState() == kDeviceStateSpeaking) {
+        app.AbortSpeaking(kAbortReasonNone);
+    }
+}
+}  // namespace
 
 class MyDazyP30_WifiBoard : public WifiBoard {
 private:
@@ -55,8 +68,8 @@ private:
     Button volume_up_button_;
     Button volume_down_button_;
 
-    // SC7A20H 三轴加速度传感器
-    Sc7a20h* sc7a20h_sensor_ = nullptr;
+    // SC7A20H 三轴加速度传感器（mydazy/esp_sc7a20h component）
+    sc7a20h_handle_t sc7a20h_sensor_ = nullptr;
     bool sc7a20h_initialized_ = false;
 
     // 显示
@@ -64,35 +77,41 @@ private:
     PowerManager* power_manager_ = nullptr;
     PowerSaveTimer* power_save_timer_ = nullptr;
 
-    // 触摸屏
-    Axs5106lTouch* touch_driver_ = nullptr;
+    // 触摸屏（mydazy/esp_lcd_touch_axs5106l component）
+    axs5106l_touch_handle_t touch_driver_ = nullptr;
 
     // 音频编解码器
     BoxAudioCodec* audio_codec_ = nullptr;
 
     bool first_boot_ = false;
     bool is_alarm_clock_ = false;
-    time_t start_time_;
 
-    // 音量调节任务
+    // 音量调节任务（多核共享，用 atomic）
     TaskHandle_t vol_up_task_ = nullptr;
     TaskHandle_t vol_down_task_ = nullptr;
-    volatile bool vol_up_running_ = false;
-    volatile bool vol_down_running_ = false;
+    std::atomic<bool> vol_up_running_{false};
+    std::atomic<bool> vol_down_running_{false};
 
-    // 长按录音状态跟踪
-    volatile bool is_recording_for_test_ = false;
-    volatile bool is_recording_for_send_ = false;
+    // 长按录音状态跟踪（按键线程 vs 主循环）
+    std::atomic<bool> is_recording_for_test_{false};
+    std::atomic<bool> is_recording_for_send_{false};
 
-    // 长按关机状态机：3s 警告 → 5s 执行；5s 前松开取消
+    // 关机三段长按状态（3秒提醒、5秒执行、PressUp 取消）
     std::atomic<bool> shutdown_armed_{false};
 
     // 欢迎音异步任务句柄
-    volatile TaskHandle_t welcome_task_handle_ = nullptr;
+    std::atomic<TaskHandle_t> welcome_task_handle_{nullptr};
 
     // 恢复出厂设置确认状态
-    volatile bool waiting_factory_reset_confirm_ = false;
+    std::atomic<bool> waiting_factory_reset_confirm_{false};
     uint64_t factory_reset_request_time_ = 0;
+
+    // 状态定时上报
+    esp_timer_handle_t status_timer_ = nullptr;
+
+    // ========================================================
+    // 硬件初始化
+    // ========================================================
 
     void InitializeI2c() {
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -123,6 +142,67 @@ private:
         ESP_ERROR_CHECK(spi_bus_initialize(DISPLAY_SPI_HOST, &buscfg, SPI_DMA_DISABLED));
     }
 
+    void HandleWakeupCause() {
+        esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+        esp_reset_reason_t reset_reason = esp_reset_reason();
+        // 诊断日志：同时打印 wakeup_cause + reset_reason，可区分
+        ESP_LOGI(TAG, "Boot diag: wakeup_cause=%d, reset_reason=%d", (int)wakeup_reason, (int)reset_reason);
+
+        switch (wakeup_reason) {
+            case ESP_SLEEP_WAKEUP_EXT0:
+                ESP_LOGI(TAG, "从开机键唤醒");
+                first_boot_ = true;
+                // 按 BOOT 键唤醒时，要求持续按住 2 秒才真正开机（防止口袋误触）
+                if (!CheckBootHoldOnWakeup()) {
+                    ESP_LOGI(TAG, "开机长按未达 2 秒，立即回深睡");
+                    EnterDeepSleep(true);  // 不会返回
+                }
+                break;
+            case ESP_SLEEP_WAKEUP_EXT1:
+                ESP_LOGI(TAG, "从陀螺仪唤醒 (ext1_status=0x%llx)", esp_sleep_get_ext1_wakeup_status());
+                first_boot_ = true;
+                break;
+            case ESP_SLEEP_WAKEUP_TIMER:
+                ESP_LOGI(TAG, "从定时器唤醒");
+                is_alarm_clock_ = true;
+                break;
+            default:
+                ESP_LOGI(TAG, "首次启动或复位 (wakeup=%d, reset=%d)", (int)wakeup_reason, (int)reset_reason);
+                first_boot_ = true;
+                break;
+        }
+    }
+
+    // 开机长按 2 秒检测：返回 true=按够 2 秒可开机，false=未到 2 秒应回深睡
+    bool CheckBootHoldOnWakeup() {
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&io_conf);
+
+        if (gpio_get_level(BOOT_BUTTON_GPIO) != 0) {
+            // 唤醒瞬间已经松开（按一下就放）→ 不开机
+            return false;
+        }
+
+        const int kHoldRequiredMs = 2000;
+        const int kStepMs = 50;
+        int elapsed = 0;
+        while (elapsed < kHoldRequiredMs) {
+            vTaskDelay(pdMS_TO_TICKS(kStepMs));
+            if (gpio_get_level(BOOT_BUTTON_GPIO) != 0) {
+                return false;  // 中途松开 → 不开机
+            }
+            elapsed += kStepMs;
+        }
+        ESP_LOGI(TAG, "开机长按 2 秒确认，准备启动");
+        return true;
+    }
+
     void InitializeGpio() {
         // 先关闭背光，防止重启后显示随机GRAM数据
         gpio_reset_pin(DISPLAY_BACKLIGHT);
@@ -134,7 +214,8 @@ private:
         gpio_set_direction(AUDIO_CODEC_PA_PIN, GPIO_MODE_OUTPUT);
         gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
 
-        // 配置音频电源GPIO为输出模式
+        // P1-4 修复：先 gpio_config(OUTPUT) + 立刻 set_level(0) 锁住低电平，再 hold_dis
+        // 避免 hold_dis 释放后到 gpio_set_level 之间 GPIO 浮动 → LDO 接通毛刺 → LCD GRAM 闪烁
         gpio_config_t output_conf = {
             .pin_bit_mask = (1ULL << AUDIO_PWR_EN_GPIO),
             .mode = GPIO_MODE_OUTPUT,
@@ -143,19 +224,18 @@ private:
             .intr_type = GPIO_INTR_DISABLE,
         };
         gpio_config(&output_conf);
-        rtc_gpio_hold_dis(AUDIO_PWR_EN_GPIO);
+        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);    // 先锁低
+        rtc_gpio_hold_dis(AUDIO_PWR_EN_GPIO);    // 再释放 RTC hold（无浮动窗口）
 
         // 软启动音频电源
-        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
         vTaskDelay(pdMS_TO_TICKS(10));
         gpio_set_level(AUDIO_PWR_EN_GPIO, 1);
         ESP_LOGI(TAG, "音频电源已启用 (GPIO%d)", AUDIO_PWR_EN_GPIO);
 
         // 音频芯片上电稳定时间 200ms（ES8311/ES7210 datasheet 建议）
         vTaskDelay(pdMS_TO_TICKS(200));
-        ESP_LOGI(TAG, "音频电源稳定，I2C通信就绪");
 
-        // 配置TE输入GPIO
+        // 配置TE输入GPIO（当前未启用 VSYNC，硬件预留）
         gpio_config_t input_conf = {
             .pin_bit_mask = (1ULL << DISPLAY_LCD_TE),
             .mode = GPIO_MODE_INPUT,
@@ -165,122 +245,96 @@ private:
         };
         gpio_config(&input_conf);
 
-        esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-        switch (wakeup_reason) {
-            case ESP_SLEEP_WAKEUP_EXT0:
-                ESP_LOGI(TAG, "从开机键唤醒");
-                first_boot_ = true;
-                break;
-            case ESP_SLEEP_WAKEUP_EXT1:
-                ESP_LOGI(TAG, "从陀螺仪唤醒");
-                first_boot_ = true;
-                break;
-            case ESP_SLEEP_WAKEUP_TIMER:
-                ESP_LOGI(TAG, "从定时器唤醒");
-                is_alarm_clock_ = true;
-                break;
-            default:
-                ESP_LOGI(TAG, "首次启动或复位 (原因=%u)", wakeup_reason);
-                first_boot_ = true;
-                break;
-        }
+        HandleWakeupCause();
     }
 
     void InitializeSc7a20h() {
-        sc7a20h_sensor_ = new Sc7a20h(i2c_bus_, 0x19);
-
-        if (sc7a20h_sensor_->Initialize()) {
-            ESP_LOGI(TAG, "SC7A20H传感器初始化成功");
-            sc7a20h_sensor_->SetMotionDetection(true);
+        sc7a20h_config_t cfg = SC7A20H_DEFAULT_CONFIG();
+        cfg.i2c_addr = 0x19;
+        if (sc7a20h_create_with_motion_detection(i2c_bus_, &cfg, NULL, &sc7a20h_sensor_) == ESP_OK) {
+            ESP_LOGI(TAG, "SC7A20H传感器初始化成功（运动检测+防抖已启用）");
             sc7a20h_initialized_ = true;
         } else {
             ESP_LOGE(TAG, "SC7A20H传感器初始化失败");
-            delete sc7a20h_sensor_;
             sc7a20h_sensor_ = nullptr;
             sc7a20h_initialized_ = false;
         }
     }
 
     void PrepareTouchHardware() {
-        touch_driver_ = new Axs5106lTouch(
-            i2c_bus_,
-            TOUCH_RST_NUM,
-            TOUCH_INT_NUM,
-            DISPLAY_WIDTH,
-            DISPLAY_HEIGHT,
-            TOUCH_SWAP_XY,
-            TOUCH_MIRROR_X,
-            TOUCH_MIRROR_Y
-        );
+        axs5106l_touch_config_t cfg = AXS5106L_TOUCH_DEFAULT_CONFIG(
+            i2c_bus_, TOUCH_RST_NUM, TOUCH_INT_NUM, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        cfg.swap_xy  = TOUCH_SWAP_XY;
+        cfg.mirror_x = TOUCH_MIRROR_X;
+        cfg.mirror_y = TOUCH_MIRROR_Y;
 
-        if (!touch_driver_->InitializeHardware()) {
+        if (axs5106l_touch_new(&cfg, &touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏硬件初始化失败");
-            delete touch_driver_;
             touch_driver_ = nullptr;
+        }
+    }
+
+    // C 回调蹦床：把 void* user_ctx 还原为 board 实例
+    static void OnTouchWake(void *ctx) {
+        static_cast<MyDazyP30_WifiBoard*>(ctx)->WakeUp();
+    }
+
+    static void OnTouchGesture(axs5106l_gesture_t g, int16_t /*x*/, int16_t /*y*/, void *ctx) {
+        auto* self = static_cast<MyDazyP30_WifiBoard*>(ctx);
+        self->WakeUp();
+        if (g == AXS5106L_GESTURE_SINGLE_CLICK) {
+            self->HandleTouchSingleClick();
         }
     }
 
     void InitializeTouch() {
         if (touch_driver_ == nullptr) return;
 
-        if (!touch_driver_->InitializeInput()) {
+        if (axs5106l_touch_attach_lvgl(touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏输入初始化失败");
-            delete touch_driver_;
+            axs5106l_touch_del(touch_driver_);
             touch_driver_ = nullptr;
             return;
         }
 
-        touch_driver_->SetWakeCallback([this]() {
-            WakeUp();
-        });
-
-        touch_driver_->SetGestureCallback([this](TouchGesture gesture, int16_t x, int16_t y) {
-            WakeUp();
-
-            switch (gesture) {
-                case TouchGesture::SingleClick: {
-                    Settings settings("status", false);
-                    int touch_interrupt = settings.GetInt("touchInterrupt", 1);
-                    if (!touch_interrupt) break;
-
-                    auto& app = Application::GetInstance();
-                    auto state = app.GetDeviceState();
-
-                    if (state == kDeviceStateIdle) {
-                        ESP_LOGI(TAG, "单击唤醒对话");
-                        app.PlaySound(Lang::Sounds::OGG_WAKEUP);
-                        vTaskDelay(pdMS_TO_TICKS(800));
-                        app.ToggleChatState();
-                    } else if (state == kDeviceStateSpeaking) {
-                        ESP_LOGI(TAG, "单击打断TTS");
-                        app.AbortSpeaking(kAbortReasonNone);
-                    }
-                    break;
-                }
-                default:
-                    break;
-            }
-        });
+        axs5106l_touch_set_wake_callback(touch_driver_, &MyDazyP30_WifiBoard::OnTouchWake, this);
+        axs5106l_touch_set_gesture_callback(touch_driver_, &MyDazyP30_WifiBoard::OnTouchGesture, this);
 
         ESP_LOGI(TAG, "触摸屏初始化完成");
     }
 
+    void HandleTouchSingleClick() {
+        Settings settings("status", false);
+        int touch_interrupt = settings.GetInt("touchInterrupt", 1);
+        if (!touch_interrupt) return;
+
+        auto& app = Application::GetInstance();
+        auto state = app.GetDeviceState();
+
+        // Player 模式下：屏幕中央 LVGL 按钮独占处理 Pause/Resume，
+        // gesture SingleClick 不再 toggle，避免双触发互相抵消（"按了没反应"）。
+        if (MusicPlayer::GetInstance().IsPlaying()) {
+            ESP_LOGD(TAG, "Player 模式 SingleClick 由 LVGL 按钮处理，gesture 忽略");
+            return;
+        }
+
+        if (state == kDeviceStateIdle) {
+            ESP_LOGI(TAG, "单击唤醒对话");
+            app.PlaySound(Lang::Sounds::OGG_WAKEUP);
+            vTaskDelay(pdMS_TO_TICKS(800));
+            app.ToggleChatState();
+        } else if (state == kDeviceStateSpeaking) {
+            ESP_LOGI(TAG, "单击打断TTS");
+            app.AbortSpeaking(kAbortReasonNone);
+        }
+    }
+
     void InitializePowerManager() {
         power_manager_ = new PowerManager(POWER_MANAGER_GPIO);
-        power_manager_->OnChargingStatusChanged([this](bool is_charging) {
-            Settings settings("status", false);
-            int deep_sleep_enabled = settings.GetInt("deepSleep", 1);
-            if (deep_sleep_enabled) {
-                power_save_timer_->SetEnabled(true);
-            } else {
-                power_save_timer_->SetEnabled(false);
-            }
-        });
 
         power_manager_->OnLowBatteryStatusChanged([this](bool is_low_battery) {
             if (is_low_battery) {
-                auto& app = Application::GetInstance();
-                app.Alert("电量不足", "请充电", "", Lang::Sounds::OGG_CHARGE);
+                Application::GetInstance().Alert("电量不足", "请充电", "", Lang::Sounds::OGG_CHARGE);
             }
         });
         vTaskDelay(pdMS_TO_TICKS(200));
@@ -312,30 +366,23 @@ private:
             ESP_LOGI(TAG, "退出省电模式");
             GetBacklight()->RestoreBrightness();
         });
-
-        power_save_timer_->OnShutdownRequest([this]() {
-            Settings settings("status", false);
-            int deep_sleep_enabled = settings.GetInt("deepSleep", 1);
+        power_save_timer_->OnShutdownRequest([this, deep_sleep_enabled]() {
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
                 EnterDeepSleep(true);
             }
         });
 
-        if (deep_sleep_enabled) {
-            power_save_timer_->SetEnabled(true);
-        } else {
-            power_save_timer_->SetEnabled(false);
-        }
+        power_save_timer_->SetEnabled(deep_sleep_enabled != 0);
     }
 
-    void EnterDeepSleep(bool enable_gyro_wakeup = true) {
-        ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
+    // ========================================================
+    // 深度睡眠（拆分子步骤，保证每个函数 ≤ 50 行）
+    // ========================================================
 
-        // 先关闭触摸屏
+    void ShutdownTouchAndAudioForSleep() {
         if (touch_driver_) {
-            touch_driver_->Cleanup();
-            delete touch_driver_;
+            axs5106l_touch_del(touch_driver_);
             touch_driver_ = nullptr;
             vTaskDelay(pdMS_TO_TICKS(100));
         }
@@ -343,76 +390,107 @@ private:
         ESP_LOGI(TAG, "关闭音频电源");
         gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
         rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
+    }
 
-        // 按键唤醒
+    void ConfigureDeepSleepWakeupSources(bool enable_gyro_wakeup) {
+        // 等用户松开 BOOT 键（带 5 秒兜底，避免硬件按死时永远卡住）。
+        // 不等的话：esp_deep_sleep_start 进入瞬间 ext0 条件已满足 → 硬件立即唤醒 →
+        // CheckBootHoldOnWakeup 看到仍按住 → 误判为新一次开机长按 → 关机失败。
+        const int kReleaseWaitMaxMs = 5000;
+        const int kStepMs = 50;
+        int waited_ms = 0;
+        while (gpio_get_level(BOOT_BUTTON_GPIO) == 0 && waited_ms < kReleaseWaitMaxMs) {
+            vTaskDelay(pdMS_TO_TICKS(kStepMs));
+            waited_ms += kStepMs;
+        }
+        if (waited_ms > 0) {
+            ESP_LOGI(TAG, "等待 BOOT 键释放 %dms（关机前必须松开，避免立即唤醒）", waited_ms);
+        }
+
+        // 按键唤醒（低电平 = 按下）
         ESP_ERROR_CHECK(esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0));
         ESP_ERROR_CHECK(rtc_gpio_pullup_en(BOOT_BUTTON_GPIO));
         ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(BOOT_BUTTON_GPIO));
 
         vTaskDelay(pdMS_TO_TICKS(200));
 
-        // 陀螺仪唤醒
-        if (enable_gyro_wakeup) {
-            Settings settings("status", false);
-            int32_t pickup_wake = settings.GetInt("pickupWake", 1);
-            if (pickup_wake && sc7a20h_initialized_) {
-                ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io((1ULL << SC7A20H_GPIO_INT1), ESP_EXT1_WAKEUP_ANY_LOW));
-                ESP_ERROR_CHECK(rtc_gpio_pullup_en(SC7A20H_GPIO_INT1));
-                ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(SC7A20H_GPIO_INT1));
-            }
+        if (!enable_gyro_wakeup) return;
+        Settings settings("status", false);
+        int32_t pickup_wake = settings.GetInt("pickupWake", 1);
+        if (pickup_wake && sc7a20h_initialized_) {
+            ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io(
+                (1ULL << SC7A20H_GPIO_INT1), ESP_EXT1_WAKEUP_ANY_LOW));
+            ESP_ERROR_CHECK(rtc_gpio_pullup_en(SC7A20H_GPIO_INT1));
+            ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(SC7A20H_GPIO_INT1));
         }
+    }
 
-        // 关闭 WiFi
-        WifiManager::GetInstance().StopStation();
-
-        if (power_save_timer_) {
-            power_save_timer_->SetEnabled(false);
+    void ResetAllGpiosForSleep() {
+        constexpr gpio_num_t kGpiosToReset[] = {
+            AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS,
+            AUDIO_I2S_GPIO_DIN,  AUDIO_I2S_GPIO_DOUT, AUDIO_CODEC_I2C_SDA_PIN,
+            AUDIO_CODEC_I2C_SCL_PIN, AUDIO_CODEC_PA_PIN,
+            DISPLAY_SPI_MOSI, DISPLAY_SPI_SCLK, DISPLAY_LCD_DC, DISPLAY_LCD_CS,
+            DISPLAY_BACKLIGHT, TOUCH_RST_NUM, TOUCH_INT_NUM,
+        };
+        uint64_t pin_mask = 0;
+        for (gpio_num_t pin : kGpiosToReset) {
+            gpio_reset_pin(pin);
+            pin_mask |= (1ULL << pin);
         }
-
-        gpio_set_level(DISPLAY_BACKLIGHT, 0);
-
-        // 重置音频GPIO
-        gpio_reset_pin(AUDIO_I2S_GPIO_MCLK);
-        gpio_reset_pin(AUDIO_I2S_GPIO_BCLK);
-        gpio_reset_pin(AUDIO_I2S_GPIO_WS);
-        gpio_reset_pin(AUDIO_I2S_GPIO_DIN);
-        gpio_reset_pin(AUDIO_I2S_GPIO_DOUT);
-        gpio_reset_pin(AUDIO_CODEC_I2C_SDA_PIN);
-        gpio_reset_pin(AUDIO_CODEC_I2C_SCL_PIN);
-        gpio_reset_pin(AUDIO_CODEC_PA_PIN);
-
-        // 显示GPIO
-        gpio_reset_pin(DISPLAY_SPI_MOSI);
-        gpio_reset_pin(DISPLAY_SPI_SCLK);
-        gpio_reset_pin(DISPLAY_LCD_DC);
-        gpio_reset_pin(DISPLAY_LCD_CS);
-        gpio_reset_pin(DISPLAY_BACKLIGHT);
-
-        // 触摸屏GPIO
-        gpio_reset_pin(TOUCH_RST_NUM);
-        gpio_reset_pin(TOUCH_INT_NUM);
 
         // 配置GPIO为输入模式降低功耗
         gpio_config_t input_conf = {
-            .pin_bit_mask = (1ULL << AUDIO_I2S_GPIO_MCLK) | (1ULL << AUDIO_I2S_GPIO_BCLK) |
-                            (1ULL << AUDIO_I2S_GPIO_WS) | (1ULL << AUDIO_I2S_GPIO_DIN) |
-                            (1ULL << AUDIO_I2S_GPIO_DOUT) | (1ULL << AUDIO_CODEC_I2C_SDA_PIN) |
-                            (1ULL << AUDIO_CODEC_I2C_SCL_PIN) | (1ULL << AUDIO_CODEC_PA_PIN) |
-                            (1ULL << DISPLAY_SPI_MOSI) | (1ULL << DISPLAY_SPI_SCLK) |
-                            (1ULL << DISPLAY_LCD_DC) | (1ULL << DISPLAY_LCD_CS) |
-                            (1ULL << DISPLAY_BACKLIGHT) | (1ULL << TOUCH_RST_NUM) |
-                            (1ULL << TOUCH_INT_NUM),
+            .pin_bit_mask = pin_mask,
             .mode = GPIO_MODE_INPUT,
             .pull_up_en = GPIO_PULLUP_DISABLE,
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
             .intr_type = GPIO_INTR_DISABLE
         };
         gpio_config(&input_conf);
+    }
+
+    void EnterDeepSleep(bool enable_gyro_wakeup = true) {
+        ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
+
+        // P0-2 修复：sc7a20h 必须在 LDO 断电前完成"latched INT + 清当前 INT_SRC"配置
+        // 否则 INT1 可能持续 LOW（之前 motion 残留），ext1_wakeup ANY_LOW 进 deep sleep 立即被自己唤醒
+        if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
+            Settings settings("status", false);
+            int32_t pickup_wake = settings.GetInt("pickupWake", 1);
+            if (pickup_wake) {
+                esp_err_t r = sc7a20h_config_deep_sleep_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
+                if (r != ESP_OK) {
+                    ESP_LOGW(TAG, "sc7a20h_config_deep_sleep_wakeup failed: %s", esp_err_to_name(r));
+                }
+            }
+        }
+
+        ShutdownTouchAndAudioForSleep();
+        ConfigureDeepSleepWakeupSources(enable_gyro_wakeup);
+
+        // P30-WiFi 纯 WiFi 板，深睡前停 STA（StopStation 注释为 Non-blocking）
+        WifiManager::GetInstance().StopStation();
+        // P0-3 修复：StopStation 是异步的，立刻 deep sleep 会让 STA 没下线 →
+        // AP 端要等 keepalive 超时清，且 RF 处于不一致状态。给 wifi event loop 足够时间走完
+        // STA_STOP 事件链（典型 ~150-300ms），再断电源。
+        vTaskDelay(pdMS_TO_TICKS(300));
+
+        if (power_save_timer_) {
+            power_save_timer_->SetEnabled(false);
+        }
+        gpio_set_level(DISPLAY_BACKLIGHT, 0);
+
+        ResetAllGpiosForSleep();
 
         ESP_LOGI(TAG, "准备进入深度睡眠");
         vTaskDelay(pdMS_TO_TICKS(200));
         esp_deep_sleep_start();
     }
+
+    // ========================================================
+    // 显示
+    // ========================================================
 
     void InitializeDisplay() {
         esp_lcd_panel_io_handle_t panel_io_ = nullptr;
@@ -436,14 +514,154 @@ private:
         SystemInfo::PrintHeapStats();
     }
 
+    // ========================================================
+    // 按键处理（单独方法，InitializeButtons 仅做注册）
+    // ========================================================
+
+    void HandleBootClick() {
+        auto& app = Application::GetInstance();
+        auto status = app.GetDeviceState();
+        ESP_LOGI(TAG, "单击 button 状态: %u", status);
+        waiting_factory_reset_confirm_.store(false);
+
+        // MP3 播放期间：按键 = 先打断 MP3 + 退 Player UI，再走唤醒/对话流程
+        if (MusicPlayer::GetInstance().IsPlaying()) {
+            ESP_LOGI(TAG, "按键打断 MP3 → 唤醒对话");
+            MusicPlayer::GetInstance().Stop();
+            if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+                ui->SwitchOutPlayerMode();
+            }
+        }
+
+        if (status != kDeviceStateIdle && status != kDeviceStateListening && status != kDeviceStateSpeaking) {
+            return;
+        }
+        if (status == kDeviceStateIdle) {
+            app.PlaySound(Lang::Sounds::OGG_WAKEUP);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+        } else if (status == kDeviceStateListening) {
+            app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
+        }
+        app.ToggleChatState();
+    }
+
+    void HandleBootDoubleClick() {
+        auto& app = Application::GetInstance();
+        auto status = app.GetDeviceState();
+
+        if (waiting_factory_reset_confirm_.load()) {
+            uint64_t now = esp_timer_get_time();
+            // 10 秒确认窗口（与 9 连击 Alert 文案"10秒内双击确认"对齐）
+            if (now - factory_reset_request_time_ > 10000000) {
+                waiting_factory_reset_confirm_.store(false);
+                return;
+            }
+            waiting_factory_reset_confirm_.store(false);
+            AbortIfSpeaking();
+            app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            // mydazy 业务：先通知服务器解绑（失败不阻塞本地擦除）
+            RequestServerUnbind();
+            // 通用恢复出厂：NVS 全擦 + otadata 擦除 + 3 秒倒计时 esp_restart；LDO 复位由 ShutdownHandler 接管
+            SystemReset::DoFactoryReset();
+            return;
+        }
+
+#if CONFIG_USE_DEVICE_AEC
+        if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
+            AbortIfSpeaking();
+            app.SetDeviceState(kDeviceStateIdle);
+            app.SetAecMode(app.GetAecMode() == kAecOff ? kAecOnDeviceSide : kAecOff);
+            WakeUp();
+        }
+#endif
+    }
+
+    void HandleBootMultiClick3_EnterWifiConfig() {
+        auto& app = Application::GetInstance();
+        if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
+            // 已在配网态：再次三击作为"取消配网"无意义，给个提示音
+            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "已在配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
+            return;
+        }
+        AbortIfSpeaking();
+        app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "开始配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        app.Schedule([this]() {
+            EnterWifiConfigMode();   // WifiBoard 自身方法
+        });
+    }
+
+    void HandleBootMultiClick4_PowerOff() {
+        auto& app = Application::GetInstance();
+        AbortIfSpeaking();
+        app.Alert("连按4次关机", "拜拜^-^", "", Lang::Sounds::OGG_SHUTDOWN);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        EnterDeepSleep(false);
+    }
+
+    void HandleBootMultiClick6_AudioTest() {
+        auto& app = Application::GetInstance();
+        AbortIfSpeaking();
+        app.SetDeviceState(kDeviceStateWifiConfiguring);
+        app.StartListening();
+        app.Alert("音频测试", "", "", Lang::Sounds::OGG_AUDIO_TEST);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        app.SetDeviceState(kDeviceStateAudioTesting);
+        app.StopListening();
+    }
+
+    void HandleBootMultiClick9_FactoryReset() {
+        auto& app = Application::GetInstance();
+        AbortIfSpeaking();
+        waiting_factory_reset_confirm_.store(true);
+        factory_reset_request_time_ = esp_timer_get_time();
+        app.Alert("恢复出厂设置", "10秒内双击确认", "logo", Lang::Sounds::OGG_FACTORY_RESET);
+    }
+
+    void HandleBootLongPress() {
+        auto& app = Application::GetInstance();
+        auto status = app.GetDeviceState();
+        if (status == kDeviceStateIdle || status == kDeviceStateSpeaking || status == kDeviceStateListening) {
+            if (status != kDeviceStateListening) {
+                app.StartListening();
+            }
+            is_recording_for_send_.store(true);
+        } else if (status == kDeviceStateStarting || status == kDeviceStateActivating || status == kDeviceStateWifiConfiguring) {
+            is_recording_for_test_.store(true);
+            app.SetDeviceState(kDeviceStateWifiConfiguring);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            app.StartListening();
+        }
+    }
+
+    void HandleBootPressUp() {
+        auto& app = Application::GetInstance();
+        // 关机倒计时未到 5 秒就松开 → 取消
+        if (shutdown_armed_.exchange(false)) {
+            ESP_LOGI(TAG, "关机倒计时取消");
+            app.PlaySound(Lang::Sounds::OGG_POPUP);
+            return;
+        }
+        if (is_recording_for_test_.exchange(false)) {
+            app.SetDeviceState(kDeviceStateAudioTesting);
+            app.StopListening();
+        } else if (is_recording_for_send_.exchange(false)) {
+            app.StopListening();
+            vTaskDelay(pdMS_TO_TICKS(100));
+            app.PlaySound(Lang::Sounds::OGG_POPUP);
+        }
+    }
+
     // 长按 3 秒：提醒"再按 2 秒关机"，同时停止录音避免冲突
     void HandleBootLongPress3s_ShutdownWarn() {
         auto& app = Application::GetInstance();
-        if (is_recording_for_send_ || is_recording_for_test_) {
-            is_recording_for_send_ = false;
-            is_recording_for_test_ = false;
+
+        // 停掉可能的录音（不发送）
+        if (is_recording_for_send_.exchange(false) || is_recording_for_test_.exchange(false)) {
             app.StopListening();
         }
+
         shutdown_armed_.store(true);
         ESP_LOGI(TAG, "长按 3 秒：关机倒计时开始");
         app.Alert("长按 5 秒关机", "继续按住...", "logo", Lang::Sounds::OGG_REBOOT);
@@ -454,179 +672,44 @@ private:
         if (!shutdown_armed_.load()) return;
         shutdown_armed_.store(false);
         ESP_LOGI(TAG, "长按 5 秒：执行关机");
-        auto& app = Application::GetInstance();
-        if (app.GetDeviceState() == kDeviceStateSpeaking) {
-            app.AbortSpeaking(kAbortReasonNone);
-        }
+        AbortIfSpeaking();
         vTaskDelay(pdMS_TO_TICKS(2000));
         EnterDeepSleep(false);
     }
 
     void InitializeButtons() {
-        boot_button_.OnClick([this]() {
-            auto& app = Application::GetInstance();
-            auto status = app.GetDeviceState();
-            ESP_LOGI(TAG, "单击 button 状态: %u", status);
-            waiting_factory_reset_confirm_ = false;
-            if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
-                if (status == kDeviceStateIdle) {
-                    app.PlaySound(Lang::Sounds::OGG_WAKEUP);
-                    vTaskDelay(pdMS_TO_TICKS(1500));
-                } else if (status == kDeviceStateListening) {
-                    app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
-                }
-                app.ToggleChatState();
-            }
-        });
-
-        boot_button_.OnDoubleClick([this]() {
-            auto& app = Application::GetInstance();
-            auto status = app.GetDeviceState();
-
-            if (waiting_factory_reset_confirm_) {
-                uint64_t now = esp_timer_get_time();
-                if (now - factory_reset_request_time_ > 15000000) {
-                    waiting_factory_reset_confirm_ = false;
-                    return;
-                }
-                waiting_factory_reset_confirm_ = false;
-                if (status == kDeviceStateSpeaking) {
-                    app.AbortSpeaking(kAbortReasonNone);
-                }
-                app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
-                vTaskDelay(pdMS_TO_TICKS(3000));
-                // 服务器解绑 + NVS 擦除 + otadata 擦除；app.Reboot() 内部会切 LDO 复位 LCD/音频
-                SystemReset::DoFactoryReset();
-                app.Reboot();
-                return;
-            }
-
-            #if CONFIG_USE_DEVICE_AEC
-            if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
-                if (status == kDeviceStateSpeaking) {
-                    app.AbortSpeaking(kAbortReasonNone);
-                }
-                app.SetDeviceState(kDeviceStateIdle);
-                if (app.GetAecMode() == kAecOff) {
-                    app.SetAecMode(kAecOnDeviceSide);
-                } else {
-                    app.SetAecMode(kAecOff);
-                }
-                WakeUp();
-            }
-            #endif
-        });
-
-        // 连按3次进入/退出配网模式（WiFi 版本无 4G 切换）
-        boot_button_.OnMultipleClick([this]() {
-            auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateSpeaking) {
-                app.AbortSpeaking(kAbortReasonNone);
-            }
-            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "开始配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
-            vTaskDelay(pdMS_TO_TICKS(1500));
-            app.Schedule([this]() {
-                EnterWifiConfigMode();
-            });
-        }, 3);
-
-        // 连按4次关机
-        boot_button_.OnMultipleClick([this]() {
-            auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateSpeaking) {
-                app.AbortSpeaking(kAbortReasonNone);
-            }
-            app.Alert("连按4次关机", "拜拜^-^", "", Lang::Sounds::OGG_SHUTDOWN);
-            vTaskDelay(pdMS_TO_TICKS(3000));
-            EnterDeepSleep(false);
-        }, 4);
-
-        // 连按6次：音频测试模式
-        boot_button_.OnMultipleClick([this]() {
-            auto& app = Application::GetInstance();
-            auto status = app.GetDeviceState();
-            if (status == kDeviceStateSpeaking) {
-                app.AbortSpeaking(kAbortReasonNone);
-            }
-            app.SetDeviceState(kDeviceStateWifiConfiguring);
-            app.StartListening();
-            app.Alert("音频测试", "", "", Lang::Sounds::OGG_AUDIO_TEST);
-            vTaskDelay(pdMS_TO_TICKS(3000));
-            app.SetDeviceState(kDeviceStateAudioTesting);
-            app.StopListening();
-        }, 6);
-
-        // 连按9次：恢复出厂设置确认
-        boot_button_.OnMultipleClick([this]() {
-            auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateSpeaking) {
-                app.AbortSpeaking(kAbortReasonNone);
-            }
-            waiting_factory_reset_confirm_ = true;
-            factory_reset_request_time_ = esp_timer_get_time();
-            app.Alert("恢复出厂设置", "10秒内双击确认", "logo", Lang::Sounds::OGG_FACTORY_RESET);
-        }, 9);
-
-        // 长按多段：0.7s 录音、3s 关机提醒、5s 真正关机（与 P30-4G 对齐）
-        boot_button_.OnLongPress([this]() {
-            auto& app = Application::GetInstance();
-            auto status = app.GetDeviceState();
-            if (status == kDeviceStateIdle || status == kDeviceStateSpeaking || status == kDeviceStateListening) {
-                if (status != kDeviceStateListening) {
-                    app.StartListening();
-                }
-                is_recording_for_send_ = true;
-            } else if (status == kDeviceStateStarting || status == kDeviceStateActivating || status == kDeviceStateWifiConfiguring) {
-                is_recording_for_test_ = true;
-                app.SetDeviceState(kDeviceStateWifiConfiguring);
-                vTaskDelay(pdMS_TO_TICKS(100));
-                app.StartListening();
-            }
-        }, 700);
+        boot_button_.OnClick([this]() { HandleBootClick(); });
+        boot_button_.OnDoubleClick([this]() { HandleBootDoubleClick(); });
+        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick3_EnterWifiConfig(); }, 3);
+        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick4_PowerOff(); }, 4);
+        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick6_AudioTest(); }, 6);
+        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick9_FactoryReset(); }, 9);
+        // 长按多段：0.7s 录音、3s 关机提醒、5s 真正关机
+        boot_button_.OnLongPress([this]() { HandleBootLongPress(); }, 700);
         boot_button_.OnLongPress([this]() { HandleBootLongPress3s_ShutdownWarn(); }, 3000);
         boot_button_.OnLongPress([this]() { HandleBootLongPress5s_ShutdownConfirm(); }, 5000);
+        boot_button_.OnPressUp([this]() { HandleBootPressUp(); });
 
-        boot_button_.OnPressUp([this]() {
-            auto& app = Application::GetInstance();
-            // 关机倒计时未到 5 秒就松开 → 取消
-            if (shutdown_armed_.exchange(false)) {
-                ESP_LOGI(TAG, "关机倒计时取消");
-                app.PlaySound(Lang::Sounds::OGG_POPUP);
-                return;
-            }
-            if (is_recording_for_test_) {
-                is_recording_for_test_ = false;
-                app.SetDeviceState(kDeviceStateAudioTesting);
-                app.StopListening();
-            } else if (is_recording_for_send_) {
-                is_recording_for_send_ = false;
-                app.StopListening();
-                vTaskDelay(pdMS_TO_TICKS(100));
-                app.PlaySound(Lang::Sounds::OGG_POPUP);
-            }
-        });
-
-        // 音量按钮
         volume_up_button_.OnClick([this]() { AdjustVolume(+10); });
         volume_down_button_.OnClick([this]() { AdjustVolume(-10); });
 
         volume_up_button_.OnLongPress([this]() {
             StartVolumeTask(+5, &vol_up_task_, &vol_up_running_);
         });
-        volume_up_button_.OnPressUp([this]() { vol_up_running_ = false; });
+        volume_up_button_.OnPressUp([this]() { vol_up_running_.store(false); });
 
         volume_down_button_.OnLongPress([this]() {
             StartVolumeTask(-5, &vol_down_task_, &vol_down_running_);
         });
-        volume_down_button_.OnPressUp([this]() { vol_down_running_ = false; });
+        volume_down_button_.OnPressUp([this]() { vol_down_running_.store(false); });
     }
 
-    // 状态定时上报定时器
-    esp_timer_handle_t status_timer_ = nullptr;
+    // ========================================================
+    // 状态上报
+    // ========================================================
 
     void ReportStatus() {
-        // 仅在 idle / listening 上报（与 P30-4G / P31 一致）：
-        // speaking 时让位 TTS 带宽 + connecting/activating 瞬态无上报意义
+        // 仅在 idle / listening 时上报；瞬态/Speaking 跳过
         auto state = Application::GetInstance().GetDeviceState();
         if (state != kDeviceStateIdle && state != kDeviceStateListening) {
             ESP_LOGD(TAG, "skip status report, state=%d (仅 idle/listening 上报)", (int)state);
@@ -637,7 +720,7 @@ private:
         bool charging = power_manager_ ? power_manager_->IsCharging() : false;
         size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
 
-        // WiFi 版本只上报 WiFi 信号强度
+        // WiFi RSSI（连接时获取信号强度）
         int rssi = 0;
         wifi_ap_record_t ap_info;
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
@@ -652,7 +735,7 @@ private:
 
             cJSON* net = cJSON_CreateObject();
             cJSON_AddStringToObject(net, "type", "wifi");
-            if (rssi < 0) cJSON_AddNumberToObject(net, "rssi", rssi);
+            if (rssi != 0) cJSON_AddNumberToObject(net, "rssi", rssi);
             cJSON_AddItemToObject(p, "network", net);
 
             cJSON_AddNumberToObject(p, "free_heap", (double)free_heap);
@@ -673,53 +756,122 @@ private:
         esp_timer_start_periodic(status_timer_, 90 * 1000000ULL);
     }
 
-    void AdjustVolume(int delta) {
-        auto codec = GetAudioCodec();
-        if (codec) {
-            int volume = codec->output_volume() + delta;
-            if (volume > 100) volume = 100;
-            if (volume < 0) volume = 0;
-            codec->SetOutputVolume(volume);
-            char volume_text[64];
-            snprintf(volume_text, sizeof(volume_text), "%s %d", Lang::Strings::VOLUME, volume);
-            GetDisplay()->SetStatus(volume_text);
-            WakeUp();
-        }
+    // ========================================================
+    // 音量
+    // ========================================================
+
+    // 应用一次音量增量；clamp 到 [0,100] 并刷新状态栏 + 唤醒省电定时器
+    void ApplyVolumeDelta(int delta) {
+        auto* codec = GetAudioCodec();
+        if (!codec) return;
+        int v = codec->output_volume() + delta;
+        if (v > 100) v = 100;
+        if (v < 0) v = 0;
+        codec->SetOutputVolume(v);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%s %d", Lang::Strings::VOLUME, v);
+        GetDisplay()->SetStatus(buf);
+        WakeUp();
     }
 
-    void StartVolumeTask(int delta, TaskHandle_t* task_handle, volatile bool* running) {
-        if (*task_handle != NULL) return;
-        *running = true;
-        xTaskCreatePinnedToCore([](void* arg) {
-            auto [delta, running, task_handle] = *static_cast<std::tuple<int, volatile bool*, TaskHandle_t*>*>(arg);
-            auto* params = static_cast<std::tuple<int, volatile bool*, TaskHandle_t*>*>(arg);
-            delete params;
+    void AdjustVolume(int delta) { ApplyVolumeDelta(delta); }
 
-            while (*running) {
-                auto codec = Board::GetInstance().GetAudioCodec();
-                if (codec) {
-                    int v = codec->output_volume() + delta;
-                    if (v > 100) v = 100;
-                    if (v < 0) v = 0;
-                    codec->SetOutputVolume(v);
-                    char volume_text[64];
-                    snprintf(volume_text, sizeof(volume_text), "%s %d", Lang::Strings::VOLUME, v);
-                    Board::GetInstance().GetDisplay()->SetStatus(volume_text);
-                    static_cast<MyDazyP30_WifiBoard&>(Board::GetInstance()).WakeUp();
-                }
+    struct VolumeTaskCtx {
+        int delta;
+        std::atomic<bool>* running;
+        TaskHandle_t* task_handle;
+    };
+
+    void StartVolumeTask(int delta, TaskHandle_t* task_handle, std::atomic<bool>* running) {
+        if (*task_handle != nullptr) return;
+        running->store(true);
+
+        auto* ctx = new VolumeTaskCtx{delta, running, task_handle};
+        xTaskCreatePinnedToCore([](void* arg) {
+            auto* ctx = static_cast<VolumeTaskCtx*>(arg);
+            auto& board = static_cast<MyDazyP30_WifiBoard&>(Board::GetInstance());
+            while (ctx->running->load()) {
+                board.ApplyVolumeDelta(ctx->delta);
                 vTaskDelay(pdMS_TO_TICKS(200));
             }
-
-            *task_handle = NULL;
+            *(ctx->task_handle) = nullptr;
+            delete ctx;
             vTaskDelete(NULL);
-        }, "vol_adjust", 2048, new std::tuple<int, volatile bool*, TaskHandle_t*>(delta, running, task_handle), 5, task_handle, 1);
+        }, "vol_adjust", 2048, ctx, 5, task_handle, 1);
+    }
+
+    // ========================================================
+    // 初始化业务逻辑
+    // ========================================================
+
+    void ApplyDefaultSettings() {
+        // 音量范围修正（50-100）
+        Settings audio_settings("audio", true);
+        int DEFAULT_VOLUME = 80;
+        int original_volume = audio_settings.GetInt("output_volume", DEFAULT_VOLUME);
+        if (original_volume < 50) {
+            audio_settings.SetInt("output_volume", DEFAULT_VOLUME);
+            ESP_LOGI(TAG, "检测到音量%d小于50，自动调整为%d", original_volume, DEFAULT_VOLUME);
+        }
+        // 默认使用蓝牙配网
+        Settings wifi_settings("wifi", true);
+        wifi_settings.SetInt("blufi", 1);
+    }
+
+    static void WelcomeTaskEntry(void* arg) {
+        auto* self = static_cast<MyDazyP30_WifiBoard*>(arg);
+        auto& app = Application::GetInstance();
+        vTaskDelay(pdMS_TO_TICKS(1500));
+
+        if (app.GetDeviceState() != kDeviceStateWifiConfiguring) {
+            Settings audio_settings("audio", false);
+            if (self->first_boot_ && audio_settings.GetInt("playWelcome", 1)) {
+                app.PlaySound(Lang::Sounds::OGG_WELCOME);
+                vTaskDelay(pdMS_TO_TICKS(3000));
+                if (app.GetDeviceState() == kDeviceStateIdle) {
+                    app.ToggleChatState();
+                }
+            }
+        }
+        vTaskDelete(NULL);
+    }
+
+    void StartWelcomeTask() {
+        if (!first_boot_) return;
+        xTaskCreatePinnedToCore(&MyDazyP30_WifiBoard::WelcomeTaskEntry,
+                                "welcome_init", 3072, this, 3, nullptr, 1);
+    }
+
+    // ========================================================
+    // MCP 工具注册（板专属能力）— 通用工具由 McpServer::AddCommonTools 自动注册
+    // 详见 docs/mcp-usage.md / docs/custom-board_zh.md
+    // ========================================================
+    void InitializeTools() {
+        auto& mcp = McpServer::GetInstance();
+
+        // AEC 开关（公开）：动态开/关 device-side AEC（声学回声消除）。
+        mcp.AddTool("self.audio.set_aec",
+            "Enable or disable on-device AEC (Acoustic Echo Cancellation). "
+            "When enabled, AEC removes speaker echo from the microphone input. "
+            "Disable it to capture raw microphone audio (e.g. for recording).",
+            PropertyList({
+                Property("enable", kPropertyTypeBoolean)
+            }),
+            [](const PropertyList& props) -> ReturnValue {
+                bool enable = props["enable"].value<bool>();
+                Application::GetInstance().GetAudioService().EnableDeviceAec(enable);
+                return true;
+            });
     }
 
 public:
     MyDazyP30_WifiBoard() :
-        boot_button_(BOOT_BUTTON_GPIO, false, 1500, 400),
+        boot_button_(BOOT_BUTTON_GPIO, false, 800, 400),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
+
+        // 注册重启钩子：任何 esp_restart() 调用前自动断 LDO 复位 LCD（OTA 升级 / 出厂复位 / 网络切换 / 双击恢复出厂等所有路径）
+        esp_register_shutdown_handler(ShutdownHandler);
 
         InitializeGpio();
         InitializeI2c();
@@ -731,79 +883,21 @@ public:
         InitializePowerManager();
         InitializePowerSaveTimer();
         InitializeButtons();
-
-        // 定时状态上报（90 秒间隔）
         StartStatusTimer();
 
-        // 初始化音频编解码器
         GetAudioCodec();
+        // 背光开启移至 Application::Initialize（SetupUI 之后），
+        // 避免 LVGL 首帧到达 GRAM 之前打开背光导致的开机白屏闪现。
 
-        // 灯光控制
-        GetBacklight()->RestoreBrightness();
+        ApplyDefaultSettings();
 
-        // 音量初始化：开机检查并修正音量范围（50-100）
-        Settings audio_settings("audio", true);
-        int DEFAULT_VOLUME = 80;
-        int original_volume = audio_settings.GetInt("output_volume", DEFAULT_VOLUME);
-        if (original_volume < 50) {
-            audio_settings.SetInt("output_volume", DEFAULT_VOLUME);
-            ESP_LOGI(TAG, "检测到音量%d小于50，自动调整为%d", original_volume, DEFAULT_VOLUME);
-        }
+        ESP_LOGI(TAG, "MyDazy P30 WiFi 初始化完成 (ES8311+ES7210, 纯WiFi、电源管理、触摸屏)");
 
-        // WiFi配网模式初始化：确保默认使用蓝牙配网
-        Settings wifi_settings("wifi", true);
-        wifi_settings.SetInt("blufi", 1);
-
-        ESP_LOGI(TAG, "MyDazy P30 WiFi 初始化完成 (ES8311+ES7210, 纯WiFi, 电源管理, 触摸屏)");
-
-        // 首次开机欢迎音
-        if (first_boot_) {
-            TaskHandle_t temp_handle = nullptr;
-            xTaskCreatePinnedToCore([](void* arg) {
-                auto self = static_cast<MyDazyP30_WifiBoard*>(arg);
-                auto& app = Application::GetInstance();
-                vTaskDelay(pdMS_TO_TICKS(1500));
-
-                if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
-                    self->welcome_task_handle_ = nullptr;
-                    vTaskDelete(NULL);
-                    return;
-                }
-
-                Settings audio_settings("audio", false);
-                int enabled = audio_settings.GetInt("playWelcome", 1);
-                if (self->first_boot_ && enabled) {
-                    app.PlaySound(Lang::Sounds::OGG_WELCOME);
-                    vTaskDelay(pdMS_TO_TICKS(3000));
-                    if (app.GetDeviceState() == kDeviceStateIdle) {
-                        app.ToggleChatState();
-                    }
-                }
-
-                self->welcome_task_handle_ = nullptr;
-                vTaskDelete(NULL);
-            }, "welcome_init", 3072, this, 3, &temp_handle, 1);
-            welcome_task_handle_ = temp_handle;
-        }
+        StartWelcomeTask();
     }
 
-    ~MyDazyP30_WifiBoard() {
-        if (status_timer_) {
-            esp_timer_stop(status_timer_);
-            esp_timer_delete(status_timer_);
-            status_timer_ = nullptr;
-        }
-        vol_up_running_ = false;
-        vol_down_running_ = false;
-        if (vol_up_task_) { vTaskDelete(vol_up_task_); vol_up_task_ = NULL; }
-        if (vol_down_task_) { vTaskDelete(vol_down_task_); vol_down_task_ = NULL; }
-
-        if (sc7a20h_sensor_) { delete sc7a20h_sensor_; sc7a20h_sensor_ = nullptr; }
-        if (audio_codec_) { delete audio_codec_; audio_codec_ = nullptr; }
-        if (power_manager_) { delete power_manager_; power_manager_ = nullptr; }
-        if (power_save_timer_) { delete power_save_timer_; power_save_timer_ = nullptr; }
-        if (display_) { delete display_; display_ = nullptr; }
-    }
+    // Board 实例由 DECLARE_BOARD 单例持有，进程生命周期 = 设备运行周期
+    // → 不写析构（与上游 70+ board 一致）。下电流程由 ShutdownHandler 接管。
 
     virtual AudioCodec* GetAudioCodec() override {
         if (audio_codec_ == nullptr) {
@@ -822,10 +916,6 @@ public:
                 AUDIO_INPUT_REFERENCE);
         }
         return audio_codec_;
-    }
-
-    i2c_master_bus_handle_t GetI2cBus() {
-        return i2c_bus_;
     }
 
     virtual void SetPowerSaveLevel(PowerSaveLevel level) override {
@@ -859,50 +949,57 @@ public:
         return &backlight;
     }
 
-    // 重启前硬件清理：切 AUDIO_PWR_EN_GPIO (GPIO9) 让 LCD + 音频 CODEC 真正下电复位
-    virtual void PrepareForReboot() override {
-        ESP_LOGI(TAG, "PrepareForReboot: 关 LDO 复位 LCD/音频");
-        if (audio_codec_) {
-            audio_codec_->EnableOutput(false);
-        }
-        auto* bl = GetBacklight();
-        if (bl) {
-            bl->SetBrightness(0);
-        }
-        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
-        rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-
     void WakeUp() {
         if (power_save_timer_) {
             power_save_timer_->WakeUp();
         }
     }
 
-    void CleanupDisplay() {
-        auto backlight = GetBacklight();
-        if (backlight) {
-            backlight->SetBrightness(0);
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));
-
-        if (touch_driver_) {
-            touch_driver_->Cleanup();
-            delete touch_driver_;
-            touch_driver_ = nullptr;
-        }
-
+    // ESP-IDF 标准 shutdown hook：esp_restart() 调用前自动执行（OTA 升级后/恢复出厂/SwitchNetworkType 等所有路径）。
+    // 切 AUDIO_PWR_EN_GPIO=GPIO9 让 LCD (JD9853) + 音频 + 4G 完整电源复位，避免重启后 LCD GRAM 残留导致黑屏/花屏。
+    // 用 esp_register_shutdown_handler 注册，**完全无需修改 base Board 类或 application.cc/system_reset.cc**。
+    // 注：static 方法不能访问 instance 成员（如 audio_codec_）；功放下电由 LDO 切断后硬件自然完成。
+    static void ShutdownHandler() {
         gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
-        rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
-
-        vTaskDelay(pdMS_TO_TICKS(100));
-
-        if (display_ != nullptr) {
-            delete display_;
-            display_ = nullptr;
-        }
+        rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);    // 穿越 esp_restart() 保持 LOW
+        esp_rom_delay_us(500 * 1000);           // 等 22uF 电容放电（shutdown 上下文用 ROM delay 更稳妥）
     }
+
+    // 通知服务器解绑设备：mydazy 业务，仅在 9 连击双击确认时使用。失败不阻塞本地擦除。
+    static bool RequestServerUnbind() {
+        std::string url = CONFIG_OTA_URL;
+        if (url.find("mydazy") == std::string::npos) {
+            ESP_LOGI("P30_WIFI", "Not mydazy server, skip unbind request");
+            return false;
+        }
+        url += "/reset";
+
+        auto network = Board::GetInstance().GetNetwork();
+        if (!network) {
+            ESP_LOGW("P30_WIFI", "Network not available, skip server unbind");
+            return false;
+        }
+        auto http = network->CreateHttp(0);
+        if (!http) {
+            ESP_LOGW("P30_WIFI", "Failed to create HTTP client");
+            return false;
+        }
+        http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
+        http->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
+        http->SetHeader("User-Agent", SystemInfo::GetUserAgent().c_str());
+        http->SetTimeout(5000);
+
+        if (!http->Open("GET", url)) {
+            ESP_LOGW("P30_WIFI", "Failed to connect to server for unbind");
+            return false;
+        }
+        int status_code = http->GetStatusCode();
+        std::string response = http->ReadAll();
+        http->Close();
+        ESP_LOGI("P30_WIFI", "Server unbind response: code=%d, body=%s", status_code, response.c_str());
+        return status_code == 200 || status_code == 204;
+    }
+
 };
 
 DECLARE_BOARD(MyDazyP30_WifiBoard);

@@ -7,7 +7,7 @@
 
 // MyDazy UI硬件能力定义（编译时确定，运行时可检测更新）
 #define MYDAZY_HAS_TOUCH       1    // 触摸屏支持
-#define MYDAZY_HAS_4G_CAPABLE  1    // 4G模块支持（可能存在）
+#define MYDAZY_HAS_4G_CAPABLE  1    // 4G模块支持
 #define MYDAZY_HAS_ACCELEROMETER 1  // 加速度计支持
 #define MYDAZY_HAS_BATTERY     1    // 电池支持
 
@@ -27,7 +27,7 @@
 #define AUDIO_INPUT_REFERENCE    true    // 音频输入参考
 
 // ===== GPIO配置 =====
-#define AUDIO_PWR_EN_GPIO       GPIO_NUM_9     // 音频芯片电源控制
+#define AUDIO_PWR_EN_GPIO       GPIO_NUM_9     // AUD_VDD-3.3V 总电源开关：音频芯片(ES8311/ES7210) + 4G模块(ML307R) + LCD 三者共用（高=供电，低=断电；拉低再拉高可硬复位三者）
 #define AUDIO_CODEC_PA_PIN      GPIO_NUM_10    // PA功放使能
 
 // I2S接口
@@ -61,7 +61,7 @@
 #define DISPLAY_SPI_MISO        GPIO_NUM_NC    // SPI数据输入（未使用，单向传输）
 #define DISPLAY_SPI_MOSI        GPIO_NUM_38    // SPI数据输出（MOSI到LCD）
 #define DISPLAY_SPI_SCLK        GPIO_NUM_47    // SPI时钟信号（SCLK）
-#define DISPLAY_LCD_RESET       GPIO_NUM_NC    // LCD复位信号（未使用，软件复位）
+#define DISPLAY_LCD_RESET       GPIO_NUM_NC    // LCD 独立复位脚未连接；硬复位通过 AUDIO_PWR_EN_GPIO(GPIO9) 共享电源断电实现
 #define DISPLAY_LCD_DC          GPIO_NUM_48    // LCD数据/命令选择（DC，高=数据，低=命令）
 #define DISPLAY_LCD_CS          GPIO_NUM_39    // LCD片选信号（CS，低电平有效）
 #define DISPLAY_LCD_TE          GPIO_NUM_40    // LCD撕裂效应信号（TE，预留未使用）
@@ -82,9 +82,9 @@
 #define TOUCH_RST_NUM      GPIO_NUM_4          // 触摸屏复位引脚
 #define TOUCH_INT_NUM      GPIO_NUM_5          // 触摸屏中断引脚（触摸时触发）
 #define TOUCH_I2C_SPEED_HZ (400 * 1000)        // 触摸屏I2C速率（400kHz，官方推荐速率）
-#define TOUCH_SWAP_XY      false               // chip V2905 固件已内部 rotation，host 不再旋转
-#define TOUCH_MIRROR_X     false               // 同上
-#define TOUCH_MIRROR_Y     false               // 同上
+#define TOUCH_SWAP_XY      false               // 触摸坐标交换
+#define TOUCH_MIRROR_X     false               // 触摸X轴镜像
+#define TOUCH_MIRROR_Y     false               // 触摸Y轴镜像
 // 注意：触摸屏与音频编解码器共用I2C总线（GPIO11/GPIO12，外部10kΩ上拉）
 
 // ============================================================
@@ -93,8 +93,8 @@
 #define ML307_IS_EXIST   1                     // ML307模块存在标志
 #define ML307_RX_PIN     GPIO_NUM_1            // ML307 UART接收引脚（ESP32 TX -> ML307 RX）
 #define ML307_TX_PIN     GPIO_NUM_2            // ML307 UART发送引脚（ESP32 RX <- ML307 TX）
-#define ML307R_PWR_GPIO  GPIO_NUM_NC           // ML307 电源控制（未连接，模块常供电）
-#define ML307_RST_GPIO   GPIO_NUM_NC           // ML307 复位引脚（未连接，软件复位）
+#define ML307R_PWR_GPIO  GPIO_NUM_NC           // ML307 独立电源控制未连接；实际电源由 AUDIO_PWR_EN_GPIO(GPIO9) 与音频芯片共享，断电即重置
+#define ML307_RST_GPIO   GPIO_NUM_NC           // ML307 复位引脚未连接；硬复位通过 AUDIO_PWR_EN_GPIO(GPIO9) 断电实现
 // 注意：ML307模块无DTR引脚，深度睡眠后无法通过UART自动唤醒，依赖模块自身电源管理
 
 // ============================================================

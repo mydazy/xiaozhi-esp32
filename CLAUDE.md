@@ -17,7 +17,7 @@
 | 芯片 | ESP32-S3（PSRAM 8MB，Flash 16MB） |
 | RTOS | FreeRTOS（ESP-IDF 5.4+ 自带） |
 | 构建 | ESP-IDF + CMake（`idf.py build`） |
-| 显示 | LVGL（触屏，1.69" 圆屏 / 方屏多 SKU） |
+| 显示 | LVGL（触屏，1.83" 圆角矩形屏 284×240 / 方屏多 SKU） |
 | 网络 | WiFi + 4G（Cat.1 模组，ML307 系列）+ BLE 5.0 |
 | 音频 | I2S 麦克风 + 扬声器，流式 TTS/STT |
 | 协议 | MQTT + WebSocket（与后端实时双向） |
@@ -173,10 +173,11 @@ if (ret != ESP_OK) {
 - 不确定时，`xTaskGetCurrentTaskHandle()` 和 `lvgl_task_handle` 比较
 - `lv_async_call` 是跨任务安全的唯一通路
 
-### 4.5 圆屏适配
-- 圆屏区域裁剪：禁止假设 rectangle full，必须考虑 safe area
-- 字体选择：避免文本穿越圆角被裁
-- 滚动效果需要 mask gradient
+### 4.5 圆角矩形屏适配
+- 屏幕形态：1.83" 圆角矩形屏 284×240，4 角圆弧半径 25px
+- 布局策略：矩形布局可用全屏，仅需避让 4 角圆弧内的小三角区
+- 字体/图标：不需要 safe area / mask gradient；仅需保证内容不深入圆角弧线区
+- 状态栏图标位置：距屏边 ≥ 16px 即可避开圆角弧（参考 UiDisplay::CreateGlobalStatusBar）
 
 ---
 

@@ -23,7 +23,8 @@
                 "CONFIG_MBEDTLS_DHM_C=y",
                 "CONFIG_SPIRAM=y",
                 "CONFIG_SPIRAM_MODE_OCT=y",
-                "CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y"
+                "CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y",
+                "CONFIG_EMOTE_DEF_LABEL_Y_OFFSET=45"
             ]
         }
     ]
