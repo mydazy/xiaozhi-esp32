@@ -20,7 +20,7 @@
 |---|---|
 | MCU | ESP32-S3R8 (8 MB Octal PSRAM, 16 MB flash `BY25Q128`) |
 | Display | 1.83" custom TFT `HQR180009BH` with **R = 25 px** rounded corners, JD9853 driver, **284×240** landscape (rotated from native 240×284) |
-| Touch | AXS5106L capacitive (firmware `V2905`), I²C `0x63`, hardware INT |
+| Touch | AXS5106L capacitive (firmware `V2907`), I²C `0x63`, hardware INT, full-edge coordinates after driver dead-zone compensation |
 | **Audio** | **ES8311 mono DAC** + **ES7210 4-ch ADC** (2 mics + 2 reference-loop) + NS4150B 8.5 W class-D PA, **on-device AEC** |
 | Network | Wi-Fi 4 + BLE 5.0 + ML307R Cat.1 4G (DualNetworkBoard auto-failover) |
 | Sensor | SC7A20H 3-axis accelerometer (motion / shake / pickup wake) |
@@ -519,7 +519,7 @@ Lambda captures (`[this](...){...}`) become **static trampolines + `this` user-c
 | 🔴 P0 | ML307R has **no `RESET-N`** line | `AT+CFUN=4 → 1`, fall back to GPIO9 cycle |
 | 🔴 P0 | Octal PSRAM occupies GPIO 33–37 | Don't repurpose them as GPIO |
 | 🟡 P1 | I²C bus shared by 4 slaves — 4G RF can corrupt traffic | Driver retries 3× with 5/10/20 ms back-off |
-| 🟡 P1 | Touch FW `V2905` has hard-coded edge suppression | UI tap targets ≥ 25 px from edge |
+| 🟡 P1 | Touch FW `V2907` raw range is X∈[9..272] (driver linearly stretches to 0..283, 1.076×), Y is 1:1. Edges fully reachable; X precision near edges loses ~7% due to dead-zone clamp | Keep tap targets ≥ 25 px from edge **only** to clear the panel's R=25 rounded corners (visual, not touch) |
 | 🟡 P1 | Tasks running on Core 0 during NVS / OTA writes need **internal-RAM stacks** | See `HARDWARE.md` "PSRAM stack double-exception trap" |
 | 🟢 P2 | LCD `TE` is wired (GPIO40) but VSYNC software not enabled | Possible future upgrade for tear-free rendering |
 | 🟢 P2 | BOOT key on a strap pin — long-press at power-up enters download mode | RC delay on next rev |
@@ -530,7 +530,7 @@ Lambda captures (`[this](...){...}`) become **static trampolines + `this` user-c
 
 | Symptom | First check |
 |---|---|
-| Touch dead | I²C corrupted by 4G RF — driver auto-retries; if still dead, `axs5106l: fw V2905` in boot log |
+| Touch dead | I²C corrupted by 4G RF — driver auto-retries; if still dead, `axs5106l: fw V2907` in boot log (older fw shipped V2905 with smaller raw range) |
 | LCD glitches | shared LDO — only recoverable with reboot. Issue soft restart (`Ctrl-T R` in monitor); `ShutdownHandler` will cycle GPIO9 |
 | 4G stuck "no service" | `AT+CFUN=4 → 1`; check antenna mating (A2/A3 IPEX) and SIM seating (USIM1) |
 | Battery reads ~0% | Verify 1 MΩ : 1 MΩ divider; boot log should say `PowerManager: Calibration Success` |
@@ -566,7 +566,7 @@ License: MIT (matches project root). Schematic and the three `mydazy/*` driver c
 |---|---|
 | 主控 | ESP32-S3R8（8 MB Octal PSRAM、16 MB Flash） |
 | 显示 | 1.83" 定制 TFT，**R=25 px 圆角**，JD9853 驱动，284×240 横屏 |
-| 触控 | AXS5106L（固件 `V2905`），I²C `0x63` |
+| 触控 | AXS5106L（固件 `V2907`），I²C `0x63`，驱动死区补偿后坐标可达全屏边缘 |
 | **音频** | **ES8311 单声 DAC** + **ES7210 4 通道 ADC**（**双麦 + 双声道回采**）+ NS4150B 8.5 W 功放，**设备端 AEC** |
 | 网络 | Wi-Fi 4 + BLE 5.0 + ML307R Cat.1 4G（双网卡自动切换） |
 | 传感器 | SC7A20H 三轴加速度（运动/晃动/拿起唤醒） |
@@ -752,7 +752,7 @@ cp -r main/boards/mydazy-p30-4g main/boards/mybrand-x1
 | 🔴 P0 | ML307R 无 RESET-N | `AT+CFUN=4 → 1`，兜底 GPIO9 断电 |
 | 🔴 P0 | Octal PSRAM 占 GPIO 33–37 | 不当普通 GPIO 用 |
 | 🟡 P1 | I²C 4 设备共线，4G RF 干扰 | 驱动层 3 次重试 + 退避 |
-| 🟡 P1 | 触摸固件边缘抑制 | UI 距边 ≥ 25 px |
+| 🟡 P1 | 触摸固件 V2907 的 raw 范围 X∈[9..272]（驱动线性拉伸到 0..283，1.076×），Y 为 1:1。边缘均可触达，但 X 接近边缘 ~7% 精度损失（死区夹边） | UI 距边 ≥ 25 px **仅是**为了避开屏幕 R=25 圆角（视觉问题，非触摸问题） |
 | 🟡 P1 | NVS/OTA 写入期 PSRAM 栈崩溃 | 见 HARDWARE.md "PSRAM 栈双异常陷阱" |
 
 ## 9. 参考链接

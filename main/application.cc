@@ -12,6 +12,7 @@
 #include "audio/music_player.h"
 #include "remote_cmd.h"
 
+#include <atomic>
 #include <cstring>
 #include <esp_log.h>
 #include <cJSON.h>
@@ -141,6 +142,13 @@ void Application::Initialize() {
                 msg += data;
                 display->ShowNotification(msg.c_str(), 30000);
                 xEventGroupSetBits(event_group_, MAIN_EVENT_NETWORK_CONNECTED);
+                static std::atomic<bool> backlight_restored{false};
+                bool expected = false;
+                if (backlight_restored.compare_exchange_strong(expected, true)) {
+                    if (auto* bl = Board::GetInstance().GetBacklight()) {
+                        bl->RestoreBrightness();
+                    }
+                }
                 break;
             }
             case NetworkEvent::Disconnected:
@@ -170,6 +178,8 @@ void Application::Initialize() {
                 break;
         }
     });
+
+    vTaskDelay(pdMS_TO_TICKS(1500));
 
     // Start network asynchronously
     board.StartNetwork();

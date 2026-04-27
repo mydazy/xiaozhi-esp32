@@ -752,7 +752,7 @@ public:
         InitializeTools();
 
         GetAudioCodec();
-        GetBacklight()->RestoreBrightness();
+        GetBacklight()->SetBrightness(20);
 
         ApplyDefaultSettings();
 

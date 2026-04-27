@@ -134,7 +134,7 @@ dependencies:
   # ── mydazy custom panel + sensor drivers ────────────────────
   mydazy/esp_sc7a20h: ^2.0.0
   mydazy/esp_lcd_jd9853: ^2.0.0
-  mydazy/esp_mp3_player: ^0.1.0
+  mydazy/esp_mp3_player: ^0.2.0
   mydazy/esp_lcd_touch_axs5106l:
     version: ^2.0.0
     rules:
