@@ -26,14 +26,6 @@ public:
     virtual bool SnapshotToJpeg(std::string& jpeg_data, int quality = 80);
 
 protected:
-    // 子类可 override 返回 false 以禁用父类每 10s 往 status_label_ 写 HH:MM 的行为
-    // 适用场景：子类有独立时钟控件（例如 UiDisplay 的 clock_time_label_），避免 chat 模式下
-    // "聆听中"等用户状态被时间覆盖
-    virtual bool ShouldShowTimeInStatusLabel() const { return true; }
-
-public:
-
-protected:
     esp_pm_lock_handle_t pm_lock_ = nullptr;
     lv_display_t *display_ = nullptr;
 

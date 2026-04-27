@@ -46,7 +46,7 @@
 #include <esp_wifi.h>
 #include <nvs_flash.h>
 #include <esp_vfs.h>
-#include <wifi_manager.h>
+#include "wifi_station.h"
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <driver/rtc_io.h>
@@ -422,7 +422,13 @@ private:
 //            ESP_LOGI(TAG, "设置定时器唤醒: %d秒", intervalue);
 //        }
 
-        // 2. 先关闭触摸屏，避免I2C错误
+        // 1. 先停音频服务（关闭 I2S DMA），避免 xfer 期间被切断电源损坏 DAC/ADC 状态
+        // 必须在断 AUDIO_PWR_EN 之前；P30-4G/WiFi 走 Application 层有此保护，P31 板级路径需自己补
+        ESP_LOGI(TAG, "[1/8] 停止音频服务 (I2S DMA)");
+        Application::GetInstance().GetAudioService().Stop();
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        // 2. 关闭触摸屏，避免I2C错误
         if (touch_driver_) {
             touch_driver_->Cleanup();
             delete touch_driver_;
@@ -430,7 +436,7 @@ private:
             vTaskDelay(pdMS_TO_TICKS(100)); // 等待触摸屏完全关闭
         }
 
-        ESP_LOGI(TAG, "关闭音频电源");
+        ESP_LOGI(TAG, "[2/8] 关闭音频电源");
         gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
         rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
 
@@ -459,7 +465,7 @@ private:
 
         // 5. 处理WiFi连接（WiFi版本固定断开WiFi）
         if (GetNetworkType() == NetworkType::WIFI) {
-            WifiManager::GetInstance().StopStation();
+            WifiStation::GetInstance().Stop();
         }
 
         // 6. 停止电源管理定时器

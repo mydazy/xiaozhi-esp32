@@ -74,14 +74,7 @@ void Blufi::ReleaseStaticMem() {
 bool Blufi::InitializeController() {
   ESP_LOGI(TAG, "【阶段1/2】初始化 BLE 控制器");
 
-  // 防御：若 BT 静态 RAM 已被永久释放，不能再 init，必须先走 Application::Reboot
-  // 注意：不可直接调 esp_restart —— P30 硬件要求先停音频服务 + 关背光 + PrepareForReboot
-  //       （断 LDO 前若 I2S DMA 还在写已断电 codec 会 I2C 阻塞 TWDT；不关背光重启瞬间显随机 GRAM）
   if (static_mem_released_) {
-    ESP_LOGE(TAG, "BT 静态 RAM 已释放，无法启动 BLE；走 Application::Reboot 重启以恢复 BT 能力");
-    // 关键：设 force_ap=1，让 reboot 后 WifiBoard ctor 直接进配网模式，
-    // 不再 SmartConnect → 不会再次释放 BT；
-    // 否则会"释放 BT → 进配网失败 → reboot → 联网 → 释放 BT"的循环。
     Settings settings("wifi", true);
     settings.SetInt("force_ap", 1);
     Application::GetInstance().Reboot();  // 内部安全序列 + esp_restart，不返回

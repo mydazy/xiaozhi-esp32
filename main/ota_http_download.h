@@ -9,7 +9,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define MAX_FILE_SIZE (1024 * 1024) // 500KB最大文件限制
+// 单文件下载上限 512KB，缓冲区强制位于 PSRAM（不占用内部 RAM 红线 60KB）
+#define MAX_FILE_SIZE (512 * 1024)
 
 // OTA专用的HTTP下载器，参考ota.cc的下载方案，重点优化文件替换
 // 使用单例模式复用1MB缓冲区，避免频繁分配导致内存碎片

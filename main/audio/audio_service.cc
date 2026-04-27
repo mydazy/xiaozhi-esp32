@@ -31,6 +31,8 @@
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
 #include "wake_words/afe_wake_word.h"
 #include "wake_words/custom_wake_word.h"
+#else
+#include "wake_words/esp_wake_word.h"
 #endif
 
 #define TAG "AudioService"
@@ -54,10 +56,6 @@ AudioService::~AudioService() {
     }
     if (output_resampler_ != nullptr) {
         esp_ae_rate_cvt_close(output_resampler_);
-    }
-    if (audio_power_timer_ != nullptr) {
-        esp_timer_stop(audio_power_timer_);
-        esp_timer_delete(audio_power_timer_);
     }
 }
 
@@ -161,11 +159,13 @@ void AudioService::Start() {
 #endif
 
     /* Start the opus codec task */
-    xTaskCreate([](void* arg) {
+    // 持续循环 + 高负载编解码 → 按宪法 §3.1 P7 + Core0
+    // 栈 24KB 必须内部 RAM（PSRAM 栈在 flash op 期间会 Double Exception）
+    xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->OpusCodecTask();
         vTaskDelete(NULL);
-    }, "opus_codec", 2048 * 12, this, 2, &opus_codec_task_handle_);
+    }, "opus_codec", 2048 * 12, this, 7, &opus_codec_task_handle_, 0);
 }
 
 void AudioService::Stop() {
@@ -707,6 +707,12 @@ void AudioService::SetModelsList(srmodel_list_t* models_list) {
         wake_word_ = std::make_unique<CustomWakeWord>();
     } else if (esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr) {
         wake_word_ = std::make_unique<AfeWakeWord>();
+    } else {
+        wake_word_ = nullptr;
+    }
+#else
+    if (esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr) {
+        wake_word_ = std::make_unique<EspWakeWord>();
     } else {
         wake_word_ = nullptr;
     }

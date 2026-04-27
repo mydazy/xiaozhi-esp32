@@ -17,12 +17,19 @@
 
 LvglDisplay::LvglDisplay() {
     // Notification timer
+    // esp_timer 回调运行在系统 timer 任务，禁止裸调 LVGL API
+    // 必须 lv_async_call hop 到 LVGL 任务，async cb 内已持 LVGL lock 无需 DisplayLockGuard
     esp_timer_create_args_t notification_timer_args = {
         .callback = [](void *arg) {
-            LvglDisplay *display = static_cast<LvglDisplay*>(arg);
-            DisplayLockGuard lock(display);
-            lv_obj_add_flag(display->notification_label_, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(display->status_label_, LV_OBJ_FLAG_HIDDEN);
+            lv_async_call([](void *a) {
+                LvglDisplay *display = static_cast<LvglDisplay*>(a);
+                if (display->notification_label_ != nullptr) {
+                    lv_obj_add_flag(display->notification_label_, LV_OBJ_FLAG_HIDDEN);
+                }
+                if (display->status_label_ != nullptr) {
+                    lv_obj_remove_flag(display->status_label_, LV_OBJ_FLAG_HIDDEN);
+                }
+            }, arg);
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
@@ -132,8 +139,8 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
         }
     }
 
-    // Update time（子类可通过 ShouldShowTimeInStatusLabel() 禁用：有独立时钟控件时避免覆盖 status 文字）
-    if (ShouldShowTimeInStatusLabel() && app.GetDeviceState() == kDeviceStateIdle) {
+    // Update time
+    if (app.GetDeviceState() == kDeviceStateIdle) {
         if (last_status_update_time_ + std::chrono::seconds(10) < std::chrono::system_clock::now()) {
             // Set status to clock "HH:MM"
             time_t now = time(NULL);

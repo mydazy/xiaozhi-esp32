@@ -185,8 +185,9 @@ void Application::Initialize() {
 }
 
 void Application::Run() {
-    // Set the priority of the main task to 10
-    vTaskPrioritySet(nullptr, 10);
+    // 主循环按项目宪法 §3.1 定为 P3：高于 P1 后台/P2 网络 I/O，低于 P5 LVGL / P7 opus / P10 audio_output
+    // 原 P10 与 audio_output 同级，导致音频输出被主循环抢占 → 优先级反转
+    vTaskPrioritySet(nullptr, 3);
 
     const EventBits_t ALL_EVENTS = 
         MAIN_EVENT_SCHEDULE |

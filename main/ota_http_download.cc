@@ -1,9 +1,11 @@
 #include "ota_http_download.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include <sys/stat.h>
 #include <sys/unistd.h>
 #include <errno.h>
 #include <cstring>
+#include <cstdlib>
 #include "mbedtls/md5.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -18,18 +20,28 @@ OtaHttpDownload& OtaHttpDownload::GetInstance() {
 }
 
 OtaHttpDownload::OtaHttpDownload() {
-    // 创建文件缓冲区 - 只在首次创建单例时分配
-    file_buffer_ = (uint8_t*)malloc(MAX_FILE_SIZE);
-    if(!file_buffer_) {
-        ESP_LOGE(TAG, "Failed to allocate file buffer!");
+    // OTA 下载缓冲 512KB，必须强制 PSRAM：
+    //  - 内部 RAM 红线 60KB 不能被吃掉
+    //  - 单例永久持有，启动期一次性分配
+    //  - PSRAM 不可用时直接 abort，防后续 nullptr 解引用
+    file_buffer_ = (uint8_t*)heap_caps_malloc(MAX_FILE_SIZE,
+                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!file_buffer_) {
+        ESP_LOGE(TAG, "FATAL: failed to allocate %d-byte OTA buffer in PSRAM",
+                 MAX_FILE_SIZE);
+        abort();
     }
     downloading_ = false;
     total_size_ = 0;
-    ESP_LOGI(TAG, "OtaHttpDownload singleton initialized, buffer: %p", file_buffer_);
+    ESP_LOGI(TAG, "OtaHttpDownload initialized, buffer: %p (PSRAM, %d bytes)",
+             file_buffer_, MAX_FILE_SIZE);
 }
 
 OtaHttpDownload::~OtaHttpDownload() {
-    if(file_buffer_) free(file_buffer_);
+    if (file_buffer_) {
+        heap_caps_free(file_buffer_);
+        file_buffer_ = nullptr;
+    }
     ESP_LOGI(TAG, "OtaHttpDownload destroyed");
 }
 

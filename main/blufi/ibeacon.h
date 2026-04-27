@@ -31,7 +31,6 @@ public:
     static IBeacon& GetInstance();
 
     bool Start();
-    void StartDeferred(uint32_t timeout_ms = 30000);
     void Stop();
     void OnDetected(IBeaconCallback callback);
 

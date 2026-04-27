@@ -39,7 +39,7 @@
 #include <esp_wifi.h>
 #include <nvs_flash.h>
 #include <esp_vfs.h>
-#include <wifi_manager.h>
+#include "wifi_station.h"
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <driver/rtc_io.h>
@@ -470,7 +470,7 @@ private:
         ConfigureDeepSleepWakeupSources(enable_gyro_wakeup);
 
         // P30-WiFi 纯 WiFi 板，深睡前停 STA（StopStation 注释为 Non-blocking）
-        WifiManager::GetInstance().StopStation();
+        WifiStation::GetInstance().Stop();
         // P0-3 修复：StopStation 是异步的，立刻 deep sleep 会让 STA 没下线 →
         // AP 端要等 keepalive 超时清，且 RF 处于不一致状态。给 wifi event loop 足够时间走完
         // STA_STOP 事件链（典型 ~150-300ms），再断电源。
@@ -567,6 +567,20 @@ private:
             return;
         }
 
+        // 配网态双击：BLUFI ↔ AP 切换（提示音由 SwitchConfigMode 内部 PlaySound）
+        // CAS 防 button task 在 SwitchConfigMode 执行期间二次触发 → BLE 重复初始化 panic
+        if (status == kDeviceStateWifiConfiguring) {
+            static std::atomic_flag switching = ATOMIC_FLAG_INIT;
+            if (!switching.test_and_set()) {
+                xTaskCreate([](void*) {
+                    static_cast<WifiBoard&>(Board::GetInstance()).SwitchConfigMode();
+                    switching.clear();
+                    vTaskDelete(nullptr);
+                }, "config_switch", 4096, nullptr, 3, nullptr);
+            }
+            return;
+        }
+
 #if CONFIG_USE_DEVICE_AEC
         if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
             AbortIfSpeaking();
@@ -580,16 +594,24 @@ private:
     void HandleBootMultiClick3_EnterWifiConfig() {
         auto& app = Application::GetInstance();
         if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
-            // 已在配网态：再次三击作为"取消配网"无意义，给个提示音
-            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "已在配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
+            // 已在配网态：再次三击 = 退出配网，重启回到正常联网流程
+            // 设 force_ap=0 显式取消 reboot 后再次进配网
+            Settings settings("wifi", true);
+            settings.SetInt("force_ap", 0);
+            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "退出配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            app.Reboot();
             return;
         }
+        // 三击进配网：走 ResetWifiConfiguration（设 force_ap=1 + reboot），
+        // 而不是直接 EnterWifiConfigMode —— 因为已联网设备 BT 静态 RAM 已被
+        // SmartConnect 路径上的 Blufi::ReleaseStaticMem 永久释放，本次启动不能再启动 BT。
+        // reboot 后 WifiBoard ctor 读 force_ap=1 → wifi_config_mode_=true →
+        // StartNetwork 直接走 EnterWifiConfigMode（此时 BT RAM 还在，BLUFI 可正常启动）。
         AbortIfSpeaking();
-        app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "开始配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
+        app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "进入配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
         vTaskDelay(pdMS_TO_TICKS(1500));
-        app.Schedule([this]() {
-            EnterWifiConfigMode();   // WifiBoard 自身方法
-        });
+        ResetWifiConfiguration();  // 内部：设 force_ap=1 + skip_welcome=1 + Reboot
     }
 
     void HandleBootMultiClick4_PowerOff() {
@@ -955,12 +977,11 @@ public:
         }
     }
 
-    // ESP-IDF 标准 shutdown hook：esp_restart() 调用前自动执行（OTA 升级后/恢复出厂/SwitchNetworkType 等所有路径）。
-    // 切 AUDIO_PWR_EN_GPIO=GPIO9 让 LCD (JD9853) + 音频 + 4G 完整电源复位，避免重启后 LCD GRAM 残留导致黑屏/花屏。
-    // 用 esp_register_shutdown_handler 注册，**完全无需修改 base Board 类或 application.cc/system_reset.cc**。
-    // 注：static 方法不能访问 instance 成员（如 audio_codec_）；功放下电由 LDO 切断后硬件自然完成。
     static void ShutdownHandler() {
-        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
+        // 先静音功放：避免直接断 LDO 导致音圈因瞬态电压释放产生 POP
+        gpio_set_level(AUDIO_CODEC_PA_PIN, 0);
+        esp_rom_delay_us(20 * 1000);            // 20ms 让功放进入静音
+        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);   // 断 LDO 总开关（LCD + audio + ext）
         rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);    // 穿越 esp_restart() 保持 LOW
         esp_rom_delay_us(500 * 1000);           // 等 22uF 电容放电（shutdown 上下文用 ROM delay 更稳妥）
     }

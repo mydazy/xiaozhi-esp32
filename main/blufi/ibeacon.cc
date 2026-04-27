@@ -4,8 +4,6 @@
 #include <cmath>
 
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 #ifdef CONFIG_BT_NIMBLE_ENABLED
 #include "host/ble_hs.h"
@@ -67,39 +65,6 @@ bool IBeacon::Start() {
     initialized_ = true;
     ESP_LOGI(TAG, "Started (省电: 1280ms/11.25ms, ~3-5mA)");
     return true;
-}
-
-void IBeacon::StartDeferred(uint32_t timeout_ms) {
-#ifndef CONFIG_BT_NIMBLE_ENABLED
-    ESP_LOGE(TAG, "NimBLE not enabled");
-    return;
-#endif
-
-    struct DeferredArgs {
-        IBeacon* self;
-        uint32_t timeout_ms;
-    };
-    auto* args = new DeferredArgs{this, timeout_ms};
-
-    xTaskCreatePinnedToCore([](void* arg) {
-        auto* a = static_cast<DeferredArgs*>(arg);
-        uint32_t waited = 0;
-
-        while (waited < a->timeout_ms) {
-            if (ble_hs_synced()) break;
-            vTaskDelay(pdMS_TO_TICKS(500));
-            waited += 500;
-        }
-
-        if (!ble_hs_synced()) {
-            ESP_LOGW(TAG, "BLE not synced after %lums, skip iBeacon", (unsigned long)a->timeout_ms);
-        } else if (a->self->Start()) {
-            ESP_LOGI(TAG, "Deferred start OK (waited %lums)", (unsigned long)waited);
-        }
-
-        delete a;
-        vTaskDelete(NULL);
-    }, "ibeacon_def", 3072, args, 1, NULL, 0);
 }
 
 void IBeacon::Stop() {

@@ -579,13 +579,10 @@ void WifiAp::SmartConfigEventHandler(void *arg, esp_event_base_t event_base,
         // SmartConfig 不经过验证，直接保存凭证
         SsidManager::GetInstance().AddSsid(ssid, password);
 
-        // 3s 后重启，先执行 PrepareForReboot 避免 LCD 残影
-        // v1.9.68-rc4 2026-04-21 P0 修复：tskNO_AFFINITY → Core 1（避 Core 0 NVS flash 死锁）
-        xTaskCreatePinnedToCoreWithCaps([](void *ctx) {
+        xTaskCreatePinnedToCore([](void *ctx) {
             vTaskDelay(pdMS_TO_TICKS(3000));
-            Board::GetInstance().PrepareForReboot();
             esp_restart();
-        }, "restart", 4096, NULL, 5, NULL, 1, MALLOC_CAP_SPIRAM);
+        }, "restart", 4096, NULL, 5, NULL, 1);
         break;
     }
     case SC_EVENT_SEND_ACK_DONE:

@@ -259,8 +259,6 @@
 
 原理图揭示：ML307R 的 `VDD_EXT` 通过 **VT3(AO3401 PMOS) + VT4(SK2302AAT NMOS) 级联开关**，与 LCD/音频的 `AUD_VDD-3.3V` **共用 GPIO9（AUDPWR-EN）** 控制。
 
-- **隐式电源控制**：断 GPIO9 = 同时断 LCD+音频+4G（已验证于 `PrepareForReboot()`）
-- **代价过大**：想重启 4G 必须同时复位 LCD 和音频，用户体验断音 + 黑屏
 - **GPIO6 = MAIN_DTR 被浪费**：硬件连接但软件完全未使用
   - 正确用法：
     - `DTR 拉低` → 唤醒 ML307R
@@ -277,8 +275,6 @@
 **2. LCD 复位引脚未连接（已通过电源控制补救）**
 - 软件已实现"电源级硬件复位"方案（`mydazy_p30_board.cc:1235-1244`, `1295-1299`）
   - LCD 和音频共用 LDO（GPIO9 AUDIO_PWR_EN）
-  - `PrepareForReboot()` 断 LDO + `rtc_gpio_hold_en()` 保持 LOW 穿越 `esp_restart()` + 等电容放电 500ms
-  - 重启后 LDO 再上电 = **JD9853 完整硬件复位**
 - **残余问题**：
   - LCD 复位 = 音频同时断电，只能在 `esp_restart()` 前做，**运行期间不能做**
   - 如果 LCD 运行中异常（花屏/撕裂/总线挂死），只能整机重启才能恢复

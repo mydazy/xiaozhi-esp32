@@ -85,17 +85,12 @@ void UiImageManager::LoadAll() {
         if (dsc) {
             images_[name] = dsc;
             success++;
-            ESP_LOGI(TAG, "  [%d] 加载 key='%s' dsc=%p", i, name, dsc);
         } else {
             ESP_LOGW(TAG, "图片解析失败: %s", name);
         }
     }
 
-    ESP_LOGI(TAG, "图片加载完成: %d/%d, map size=%zu", success, IMAGE_COUNT, images_.size());
-    // 诊断：verify "icon_battery.bin" 是否在 map 里
-    auto it = images_.find("icon_battery.bin");
-    ESP_LOGI(TAG, "  诊断: images_.find(\"icon_battery.bin\") = %s",
-             it == images_.end() ? "NOT FOUND" : "FOUND");
+    ESP_LOGI(TAG, "图片加载完成: %d/%d", success, IMAGE_COUNT);
 }
 
 const lv_image_dsc_t* UiImageManager::Get(const char* name) const {

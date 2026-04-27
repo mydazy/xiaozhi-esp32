@@ -292,9 +292,24 @@ void ControlCenter::UpdateNetworkIcon() {
 
     const char* icon_file = nullptr;
 
-    // 控制中心仅用于 WiFi/4G 模式切换，不承担实时信号强度显示
-    icon_file = (network_mode_ == 0) ? IMG_FILE_SIGNAL_WIFI_2   // WiFi 满格
-                                     : IMG_FILE_SIGNAL_4G_4;    // 4G 满格
+    if (network_mode_ == 0) {
+        // WiFi 模式：0-3 级信号
+        switch (signal_level_) {
+            case 3:  icon_file = IMG_FILE_SIGNAL_WIFI; break;    // 满格
+            case 2:  icon_file = IMG_FILE_SIGNAL_WIFI_2; break;  // 2格
+            case 1:  icon_file = IMG_FILE_SIGNAL_WIFI_1; break;  // 1格
+            default: icon_file = IMG_FILE_SIGNAL_WIFI_0; break;  // 无信号
+        }
+    } else {
+        // 4G 模式：0-4 级信号
+        switch (signal_level_) {
+            case 4:  icon_file = IMG_FILE_SIGNAL_4G_4; break;  // 满格
+            case 3:  icon_file = IMG_FILE_SIGNAL_4G_3; break;  // 3格
+            case 2:  icon_file = IMG_FILE_SIGNAL_4G_2; break;  // 2格
+            case 1:  icon_file = IMG_FILE_SIGNAL_4G_1; break;  // 1格
+            default: icon_file = IMG_FILE_SIGNAL_4G; break;    // 无信号
+        }
+    }
 
     const lv_image_dsc_t* icon_dsc = UI_IMG(icon_file);
     if (icon_dsc) {

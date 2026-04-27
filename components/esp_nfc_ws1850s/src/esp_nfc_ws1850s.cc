@@ -144,10 +144,10 @@ esp_err_t NfcWs1850s::StartDetection(uint32_t interval_ms) {
     if (detect_running_.load()) return ESP_ERR_INVALID_STATE;
     detect_running_.store(true);
 
-    // PSRAM 栈，P1 优先级，Core0
-    BaseType_t ret = xTaskCreatePinnedToCoreWithCaps(
-        DetectTaskFunc, "nfc_detect", 4096, this, 1, &detect_task_, 0,
-        MALLOC_CAP_SPIRAM);
+    // 内部 RAM 栈，P1 优先级，Core0
+    // PSRAM 栈不可用：持续循环 + Core0 在 NVS/OTA 期间 cache 禁用会触发 Double Exception
+    BaseType_t ret = xTaskCreatePinnedToCore(
+        DetectTaskFunc, "nfc_detect", 4096, this, 1, &detect_task_, 0);
 
     if (ret != pdPASS) {
         detect_running_.store(false);
