@@ -453,8 +453,6 @@ private:
     void EnterDeepSleep(bool enable_gyro_wakeup = true) {
         ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
 
-        // P0-2 修复：sc7a20h 必须在 LDO 断电前完成"latched INT + 清当前 INT_SRC"配置
-        // 否则 INT1 可能持续 LOW（之前 motion 残留），ext1_wakeup ANY_LOW 进 deep sleep 立即被自己唤醒
         if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
             Settings settings("status", false);
             int32_t pickup_wake = settings.GetInt("pickupWake", 1);
@@ -469,10 +467,7 @@ private:
         ShutdownTouchAndAudioForSleep();
         ConfigureDeepSleepWakeupSources(enable_gyro_wakeup);
 
-        // P30-WiFi 纯 WiFi 板，深睡前停 STA（StopStation 注释为 Non-blocking）
         WifiStation::GetInstance().Stop();
-        // P0-3 修复：StopStation 是异步的，立刻 deep sleep 会让 STA 没下线 →
-        // AP 端要等 keepalive 超时清，且 RF 处于不一致状态。给 wifi event loop 足够时间走完
         // STA_STOP 事件链（典型 ~150-300ms），再断电源。
         vTaskDelay(pdMS_TO_TICKS(300));
 
@@ -568,7 +563,6 @@ private:
         }
 
         // 配网态双击：BLUFI ↔ AP 切换（提示音由 SwitchConfigMode 内部 PlaySound）
-        // CAS 防 button task 在 SwitchConfigMode 执行期间二次触发 → BLE 重复初始化 panic
         if (status == kDeviceStateWifiConfiguring) {
             static std::atomic_flag switching = ATOMIC_FLAG_INIT;
             if (!switching.test_and_set()) {

@@ -216,7 +216,8 @@ private:
         gpio_set_direction(AUDIO_CODEC_PA_PIN, GPIO_MODE_OUTPUT);
         gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
 
-        // 配置音频电源GPIO为输出模式（LDO 总开关，控制 LCD+音频+4G VDD_EXT）
+        // P1-4 修复：先 gpio_config(OUTPUT) + 立刻 set_level(0) 锁住低电平，再 hold_dis
+        // 避免 hold_dis 释放后到 gpio_set_level 之间 GPIO 浮动 → LDO 接通毛刺 → LCD GRAM 闪烁
         gpio_config_t output_conf = {
             .pin_bit_mask = (1ULL << AUDIO_PWR_EN_GPIO),
             .mode = GPIO_MODE_OUTPUT,
@@ -225,10 +226,10 @@ private:
             .intr_type = GPIO_INTR_DISABLE,
         };
         gpio_config(&output_conf);
-        rtc_gpio_hold_dis(AUDIO_PWR_EN_GPIO);
+        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);    // 先锁低
+        rtc_gpio_hold_dis(AUDIO_PWR_EN_GPIO);    // 再释放 RTC hold（无浮动窗口）
 
         // 软启动音频电源
-        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
         vTaskDelay(pdMS_TO_TICKS(10));
         gpio_set_level(AUDIO_PWR_EN_GPIO, 1);
         ESP_LOGI(TAG, "音频电源已启用 (GPIO%d)", AUDIO_PWR_EN_GPIO);
@@ -454,6 +455,17 @@ private:
     void EnterDeepSleep(bool enable_gyro_wakeup = true) {
         ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
 
+        if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
+            Settings settings("status", false);
+            int32_t pickup_wake = settings.GetInt("pickupWake", 1);
+            if (pickup_wake) {
+                esp_err_t r = sc7a20h_config_deep_sleep_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
+                if (r != ESP_OK) {
+                    ESP_LOGW(TAG, "sc7a20h_config_deep_sleep_wakeup failed: %s", esp_err_to_name(r));
+                }
+            }
+        }
+
         ShutdownTouchAndAudioForSleep();
         ConfigureDeepSleepWakeupSources(enable_gyro_wakeup);
 
@@ -515,7 +527,6 @@ private:
             if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
                 ui->SwitchOutPlayerMode();
             }
-            // 退出 Player 后状态保持 Idle，下面走 ToggleChatState 唤醒对话
         }
 
         if (status != kDeviceStateIdle && status != kDeviceStateListening && status != kDeviceStateSpeaking) {
@@ -549,6 +560,19 @@ private:
             RequestServerUnbind();
             // 通用恢复出厂：NVS 全擦 + otadata 擦除 + 3 秒倒计时 esp_restart；LDO 复位由 ShutdownHandler 接管
             SystemReset::DoFactoryReset();
+            return;
+        }
+
+        // 配网态双击：BLUFI ↔ AP 切换（提示音由 SwitchConfigMode 内部 PlaySound）
+        if (status == kDeviceStateWifiConfiguring) {
+            static std::atomic_flag switching = ATOMIC_FLAG_INIT;
+            if (!switching.test_and_set()) {
+                xTaskCreate([](void*) {
+                    static_cast<WifiBoard&>(Board::GetInstance()).SwitchConfigMode();
+                    switching.clear();
+                    vTaskDelete(nullptr);
+                }, "config_switch", 4096, nullptr, 3, nullptr);
+            }
             return;
         }
 
@@ -700,9 +724,7 @@ private:
     // ========================================================
 
     void ReportStatus() {
-        // 仅在 idle / listening 时上报：
-        //   - speaking：TTS 正在从云端下行音频，4G 带宽需让位，避免 HTTPS POST 挤占造成音频卡顿
-        //   - connecting / activating / wifi-configuring 等瞬态：状态不稳定，上报意义不大
+        // 仅在 idle / listening 时上报；瞬态/Speaking 跳过
         auto state = Application::GetInstance().GetDeviceState();
         if (state != kDeviceStateIdle && state != kDeviceStateListening) {
             ESP_LOGD(TAG, "skip status report, state=%d (仅 idle/listening 上报)", (int)state);
@@ -954,12 +976,11 @@ public:
         }
     }
 
-    // ESP-IDF 标准 shutdown hook：esp_restart() 调用前自动执行（OTA 升级后/恢复出厂/SwitchNetworkType 等所有路径）。
-    // 切 AUDIO_PWR_EN_GPIO=GPIO9 让 LCD (JD9853) + 音频 + 4G 完整电源复位，避免重启后 LCD GRAM 残留导致黑屏/花屏。
-    // 用 esp_register_shutdown_handler 注册，**完全无需修改 base Board 类或 application.cc/system_reset.cc**。
-    // 注：static 方法不能访问 instance 成员（如 audio_codec_）；功放下电由 LDO 切断后硬件自然完成。
     static void ShutdownHandler() {
-        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
+        // 先静音功放：避免直接断 LDO 导致音圈因瞬态电压释放产生 POP
+        gpio_set_level(AUDIO_CODEC_PA_PIN, 0);
+        esp_rom_delay_us(20 * 1000);            // 20ms 让功放进入静音
+        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);   // 断 LDO 总开关（LCD + audio + ext）
         rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);    // 穿越 esp_restart() 保持 LOW
         esp_rom_delay_us(500 * 1000);           // 等 22uF 电容放电（shutdown 上下文用 ROM delay 更稳妥）
     }
