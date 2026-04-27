@@ -281,6 +281,18 @@ void WifiBoard::SwitchConfigMode() {
         ESP_LOGW(TAG, "非配网状态，忽略切换请求");
         return;
     }
+    // 切换互斥：上一次切换还在跑（vTaskDelay 300ms + flash op + BLE/AP init 耗时 1~3s），
+    // 期间用户再双击会再次 Schedule，旧逻辑会顺序执行第二次切换，导致状态机被反复推翻。
+    bool expected = false;
+    if (!switching_config_mode_.compare_exchange_strong(expected, true)) {
+        ESP_LOGW(TAG, "正在切换配网模式中，忽略重复请求");
+        return;
+    }
+    // RAII 释放互斥标志，所有出口路径都安全
+    struct SwitchGuard {
+        std::atomic<bool>& flag;
+        ~SwitchGuard() { flag.store(false); }
+    } guard{switching_config_mode_};
 
     ConfigMode old_mode = current_config_mode_;
     ConfigMode new_mode = (old_mode == ConfigMode::BLUFI) ? ConfigMode::AP : ConfigMode::BLUFI;

@@ -5,6 +5,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <esp_timer.h>
+#include <atomic>
 #include <functional>
 
 class WifiBoard : public Board {
@@ -19,6 +20,8 @@ protected:
     esp_timer_handle_t connect_timer_ = nullptr;
     bool in_config_mode_ = false;
     ConfigMode current_config_mode_ = ConfigMode::AP;
+    // 切换互斥：双击事件 schedule 到主任务执行 SwitchConfigMode 期间忽略再次双击
+    std::atomic<bool> switching_config_mode_{false};
     NetworkEventCallback network_event_callback_ = nullptr;
 
     virtual std::string GetBoardJson() override;

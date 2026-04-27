@@ -137,22 +137,37 @@ esp_err_t Blufi::init() {
 esp_err_t Blufi::deinit() {
     esp_err_t ret = ESP_OK;
 
-    if (inited_) {
-        if (m_deinited) {
-            return ESP_OK;
-        }
-        m_deinited = true;
-        ret = _host_deinit();
-        if (ret) {
-            ESP_LOGE(BLUFI_TAG, "Host deinit failed: %s", esp_err_to_name(ret));
-        }
-#if CONFIG_BT_CONTROLLER_ENABLED || !CONFIG_BT_NIMBLE_ENABLED
-        ret = _controller_deinit();
-        if (ret) {
-            ESP_LOGE(BLUFI_TAG, "Controller deinit failed: %s", esp_err_to_name(ret));
-        }
-#endif
+    if (!inited_) {
+        return ESP_OK;
     }
+    if (m_deinited) {
+        return ESP_OK;
+    }
+    m_deinited = true;
+
+    ret = _host_deinit();
+    if (ret) {
+        ESP_LOGE(BLUFI_TAG, "Host deinit failed: %s", esp_err_to_name(ret));
+    }
+#if CONFIG_BT_CONTROLLER_ENABLED || !CONFIG_BT_NIMBLE_ENABLED
+    esp_err_t ctrl_ret = _controller_deinit();
+    if (ctrl_ret) {
+        ESP_LOGE(BLUFI_TAG, "Controller deinit failed: %s", esp_err_to_name(ctrl_ret));
+        if (ret == ESP_OK) ret = ctrl_ret;
+    }
+#endif
+    // 强行切换配网模式不会经过 BLE_DISCONNECT，m_sec 可能滞留 → 主动释放避免泄漏
+    if (m_sec) {
+        _security_deinit();
+    }
+    // 完整重置状态，让下次 init() 从干净 BluFi 状态启动；
+    // 否则 BLUFI→AP→BLUFI 切换后 m_provisioned/m_ble_is_connected 会污染状态机
+    inited_              = false;
+    m_provisioned        = false;
+    m_ble_is_connected   = false;
+    m_sta_connected      = false;
+    m_sta_got_ip         = false;
+    m_sta_is_connecting  = false;
     return ret;
 }
 
@@ -268,14 +283,27 @@ esp_err_t Blufi::_host_init() {
 }
 
 esp_err_t Blufi::_host_deinit(void) {
-    esp_err_t ret = nimble_port_stop();
-    if (ret == ESP_OK) {
-        esp_nimble_deinit();
-    }
+    // 顺序对齐 ESP-IDF 官方 examples/bluetooth/blufi/main/blufi_init.c:esp_blufi_host_deinit
+    // 旧顺序（先 esp_nimble_deinit 再 esp_blufi_gatt_svr_deinit）会让 GATT 持有的 mbuf
+    //   在 NimBLE mbuf pool 已销毁后才释放 → ble_npl_hw_enter_critical 解引用 NULL → panic
+    // 触发场景：双击切换 / BLE 断开后异步 deinit / OTA 切到非 BluFi 模式
+    ESP_LOGI(BLUFI_TAG, "host_deinit: gatt_svr_deinit");
     esp_blufi_gatt_svr_deinit();
-    ret = esp_blufi_profile_deinit();
+
+    ESP_LOGI(BLUFI_TAG, "host_deinit: nimble_port_stop");
+    esp_err_t ret = nimble_port_stop();
+    if (ret != ESP_OK) {
+        ESP_LOGE(BLUFI_TAG, "nimble_port_stop failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(BLUFI_TAG, "host_deinit: esp_nimble_deinit");
+    esp_nimble_deinit();
+
+    ESP_LOGI(BLUFI_TAG, "host_deinit: profile/btc_deinit");
+    esp_blufi_profile_deinit();
     esp_blufi_btc_deinit();
-    return ret;
+    return ESP_OK;
 }
 
 esp_err_t Blufi::_gap_register_callback(void) { return ESP_OK; }
