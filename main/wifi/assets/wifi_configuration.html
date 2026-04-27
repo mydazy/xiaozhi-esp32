@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WiFi 配置</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #FDF8F3; color: #333; min-height: 100vh;
+            padding: 16px 16px 140px;
+        }
+        .tabs {
+            display: flex;
+            background: #fff;
+            border-radius: 20px;
+            padding: 4px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+            margin-bottom: 12px;
+        }
+        .tab {
+            flex: 1;
+            padding: 10px 12px;
+            border: none;
+            background: transparent;
+            font-size: 14px;
+            font-weight: 500;
+            color: #999;
+            cursor: pointer;
+            border-radius: 16px;
+            transition: all 0.2s;
+        }
+        .tab.active {
+            background: #5B7BEE;
+            color: #fff;
+        }
+        .section-title {
+            padding: 8px 0;
+            font-size: 13px;
+            color: #888;
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .wifi-list { list-style: none; }
+        .wifi-item {
+            display: flex;
+            align-items: center;
+            background: #fff;
+            border-radius: 16px;
+            padding: 14px 16px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: transform 0.15s;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+        }
+        .wifi-item:active { transform: scale(0.98); }
+        .wifi-icon {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+        }
+        .wifi-info { flex: 1; min-width: 0; }
+        .wifi-name {
+            font-weight: 500;
+            font-size: 15px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 2px;
+        }
+        .wifi-detail { font-size: 12px; }
+        .wifi-arrow { color: #ccc; font-size: 18px; }
+        .signal-excellent { color: #34C759; }
+        .signal-good { color: #FF9500; }
+        .signal-fair, .signal-weak { color: #8E8E93; }
+        .saved-item {
+            display: flex;
+            align-items: center;
+            background: #fff;
+            border-radius: 16px;
+            padding: 14px 16px;
+            margin-bottom: 10px;
+        }
+        .saved-name { font-weight: 500; font-size: 15px; flex: 1; cursor: pointer; }
+        .saved-actions button {
+            background: none;
+            border: none;
+            font-size: 16px;
+            padding: 4px 8px;
+            cursor: pointer;
+            color: #888;
+        }
+        .empty { text-align: center; color: #888; padding: 30px 20px; }
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 12px 16px 80px;
+            background: linear-gradient(transparent, #FDF8F3 30%);
+        }
+        .btn-refresh {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #6B8AFE, #5B7BEE);
+            color: #fff;
+            border: none;
+            border-radius: 25px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(91,123,238,0.3);
+        }
+        .btn-refresh:disabled { background: #ccc; box-shadow: none; }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.show { display: flex; }
+        .modal-content {
+            background: #fff;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 320px;
+            padding: 24px;
+            animation: slideUp 0.2s ease;
+        }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } }
+        .modal h3 {
+            font-size: 18px;
+            margin-bottom: 8px;
+            word-break: break-all;
+        }
+        .modal p { font-size: 13px; color: #888; margin-bottom: 16px; }
+        .modal input {
+            width: 100%;
+            padding: 14px;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 15px;
+            margin-bottom: 16px;
+            background: #f9f9f9;
+        }
+        .modal input:focus { outline: none; border-color: #5B7BEE; background: #fff; }
+        .modal-btns { display: flex; gap: 10px; }
+        .modal-btns button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .btn-cancel { background: #f0f0f0; color: #666; }
+        .btn-connect { background: #5B7BEE; color: #fff; }
+        .btn-connect:disabled { background: #ccc; }
+        .loading { display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .spinner {
+            width: 16px; height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error { color: #FF3B30; font-size: 13px; margin-bottom: 12px; text-align: center; }
+        .scanning { text-align: center; color: #888; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div class="tabs">
+        <button class="tab active" data-tab="scan">扫描网络</button>
+        <button class="tab" data-tab="saved">已保存</button>
+    </div>
+
+    <div id="scan-panel" class="tab-panel active">
+        <div class="section-title" id="network-count">搜索中...</div>
+        <ul class="wifi-list" id="wifi-list"></ul>
+    </div>
+    <div id="saved-panel" class="tab-panel">
+        <div class="section-title">已保存的网络</div>
+        <ul class="wifi-list" id="saved-list"></ul>
+    </div>
+
+    <div class="footer">
+        <button class="btn-refresh" id="btn-refresh" onclick="refresh()">重新扫描</button>
+    </div>
+
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <h3 id="modal-ssid"></h3>
+            <p>请输入 WiFi 密码</p>
+            <div class="error" id="modal-error"></div>
+            <input type="password" id="modal-password" placeholder="密码（无密码留空）">
+            <div class="modal-btns">
+                <button class="btn-cancel" onclick="closeModal()">取消</button>
+                <button class="btn-connect" id="btn-connect" onclick="connect()">连接</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentSsid = '';
+
+        // Tab 切换
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.onclick = () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab + '-panel').classList.add('active');
+            };
+        });
+
+        // WiFi 信号图标
+        function signalIcon(rssi) {
+            let color = rssi >= -50 ? '#34C759' : rssi >= -65 ? '#FF9500' : '#8E8E93';
+            return `<svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <path d="M5 12.55a11 11 0 0 1 14.08 0" stroke="${color}" stroke-width="2" stroke-linecap="round" opacity="${rssi >= -80 ? 1 : 0.3}"/>
+                <path d="M1.42 9a16 16 0 0 1 21.16 0" stroke="${color}" stroke-width="2" stroke-linecap="round" opacity="${rssi >= -70 ? 1 : 0.3}"/>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0" stroke="${color}" stroke-width="2" stroke-linecap="round" opacity="${rssi >= -60 ? 1 : 0.3}"/>
+                <circle cx="12" cy="20" r="1.5" fill="${color}"/>
+            </svg>`;
+        }
+
+        function signalText(rssi) {
+            if (rssi >= -50) return '<span class="signal-excellent">信号极佳</span>';
+            if (rssi >= -65) return '<span class="signal-good">信号良好</span>';
+            return '<span class="signal-fair">信号一般</span>';
+        }
+
+        // 加载 WiFi 列表
+        function loadWifiList() {
+            const list = document.getElementById('wifi-list');
+            const countEl = document.getElementById('network-count');
+
+            fetch('/scan').then(r => r.json()).then(data => {
+                if (!data.aps || !data.aps.length) {
+                    countEl.textContent = '未发现网络';
+                    list.innerHTML = '<li class="empty">未发现 WiFi 网络</li>';
+                    return;
+                }
+                countEl.textContent = `发现 ${data.aps.length} 个网络`;
+                list.innerHTML = data.aps.map(ap => `
+                    <li class="wifi-item" onclick="openModal('${ap.ssid.replace(/'/g, "\\'")}')">
+                        <div class="wifi-icon">${signalIcon(ap.rssi)}</div>
+                        <div class="wifi-info">
+                            <div class="wifi-name">${ap.ssid}</div>
+                            <div class="wifi-detail">${signalText(ap.rssi)} ${ap.rssi}dBm</div>
+                        </div>
+                        <div class="wifi-arrow">›</div>
+                    </li>
+                `).join('');
+            }).catch(() => {
+                countEl.textContent = '加载失败';
+                list.innerHTML = '<li class="empty">加载失败，请重试</li>';
+            });
+        }
+
+        // 加载已保存列表
+        function loadSavedList() {
+            fetch('/saved/list').then(r => r.json()).then(data => {
+                const list = document.getElementById('saved-list');
+                if (!data || !data.length) {
+                    list.innerHTML = '<li class="empty">暂无保存的网络</li>';
+                    return;
+                }
+                list.innerHTML = data.map((name, i) => `
+                    <li class="saved-item">
+                        <span class="saved-name" onclick="openModal('${name.replace(/'/g, "\\'")}')">${name}${i === 0 ? '<span style="color:#22C55E;font-size:12px;margin-left:8px">✓ 默认</span>' : ''}</span>
+                        <span class="saved-actions">
+                            ${i > 0 ? `<button onclick="event.stopPropagation(); setDefault(${i})" title="设为默认">⬆️</button>` : ''}
+                            <button onclick="event.stopPropagation(); ${i === 0 ? 'deleteDefault()' : `deleteSaved(${i})`}" title="删除" style="color:#FF3B30;font-size:18px">✕</button>
+                        </span>
+                    </li>
+                `).join('');
+            }).catch(() => {});
+        }
+
+        // 刷新
+        function refresh() {
+            const btn = document.getElementById('btn-refresh');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"><span class="spinner"></span>扫描中</span>';
+            loadWifiList();
+            loadSavedList();
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = '重新扫描';
+            }, 3000);
+        }
+
+        // 打开密码弹窗
+        function openModal(ssid) {
+            currentSsid = ssid;
+            document.getElementById('modal-ssid').textContent = ssid;
+            document.getElementById('modal-password').value = '';
+            document.getElementById('modal-error').textContent = '';
+            document.getElementById('btn-connect').disabled = false;
+            document.getElementById('btn-connect').textContent = '连接';
+            document.getElementById('modal').classList.add('show');
+            setTimeout(() => document.getElementById('modal-password').focus(), 100);
+        }
+
+        function closeModal() {
+            document.getElementById('modal').classList.remove('show');
+        }
+
+        // 连接
+        async function connect() {
+            const btn = document.getElementById('btn-connect');
+            const password = document.getElementById('modal-password').value;
+            const error = document.getElementById('modal-error');
+
+            btn.disabled = true;
+            error.textContent = '';
+            btn.innerHTML = '<span class="loading"><span class="spinner"></span>保存配置中</span>';
+
+            try {
+                // 1. 提交凭证
+                const res = await fetch('/submit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid: currentSsid, password })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    // 2. 立即跳转到状态页面
+                    window.location.href = '/done.html?ssid=' + encodeURIComponent(currentSsid);
+                } else {
+                    // 根据错误信息提供更友好的提示
+                    let errorMsg = '保存失败';
+                    const errLower = (data.error || '').toLowerCase();
+                    if (errLower.includes('password') || errLower.includes('auth')) {
+                        errorMsg = '❌ 密码格式错误';
+                    } else if (data.error) {
+                        errorMsg = '❌ ' + data.error;
+                    }
+                    throw new Error(errorMsg);
+                }
+            } catch (e) {
+                error.textContent = e.message || '❌ 保存失败，请重试';
+                btn.disabled = false;
+                btn.textContent = '重试';
+            }
+        }
+
+        // 已保存操作
+        function setDefault(index) {
+            fetch('/saved/set_default?index=' + index);
+            setTimeout(() => loadSavedList(), 300);
+        }
+
+        function deleteDefault() {
+            if (confirm('⚠️ 删除默认网络\n\n删除后设备可能无法联网，需要重新配网。\n\n确定要删除吗？')) {
+                fetch('/saved/delete?index=0');
+                setTimeout(() => loadSavedList(), 300);
+            }
+        }
+
+        function deleteSaved(index) {
+            if (confirm('确定删除这个网络吗？')) {
+                fetch('/saved/delete?index=' + index);
+                setTimeout(() => loadSavedList(), 300);
+            }
+        }
+
+        // 初始化
+        loadWifiList();
+        loadSavedList();
+
+        // Enter 键连接
+        document.getElementById('modal-password').addEventListener('keydown', e => {
+            if (e.key === 'Enter') connect();
+        });
+
+        // 点击遮罩关闭
+        document.getElementById('modal').addEventListener('click', e => {
+            if (e.target.id === 'modal') closeModal();
+        });
+    </script>
+</body>
+</html>

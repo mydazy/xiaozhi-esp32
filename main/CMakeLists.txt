@@ -3,9 +3,13 @@ set(SOURCES "audio/audio_codec.cc"
             "audio/audio_service.cc"
             "audio/music_player.cc"
             "audio/demuxer/ogg_demuxer.cc"
+            "audio/codecs/no_audio_codec.cc"
             "audio/codecs/box_audio_codec.cc"
             "audio/codecs/es7111_audio_codec.cc"
             "audio/processors/audio_debugger.cc"
+            "led/single_led.cc"
+            "led/circular_strip.cc"
+            "led/gpio_led.cc"
             "display/display.cc"
             "display/lcd_display.cc"
             "display/oled_display.cc"
@@ -31,7 +35,15 @@ set(SOURCES "audio/audio_codec.cc"
             "protocols/mqtt_protocol.cc"
             "protocols/websocket_protocol.cc"
             "protocols/websocket_joyai_protocol.cc"
+            "blufi/blufi.cc"
+            "blufi/blufi_init.c"
+            "blufi/blufi_security.c"
             "blufi/ibeacon.cc"
+            "wifi/wifi_station.cc"
+            "wifi/wifi_ap.cc"
+            "wifi/dns_server.cc"
+            "wifi/ssid_manager.cc"
+            "wifi/wifi_csi.cc"
             "ota_http_download.cc"
             "mcp_server.cc"
             "system_info.cc"
@@ -48,16 +60,16 @@ set(SOURCES "audio/audio_codec.cc"
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg"
     "display/ui" "display/ui/core" "display/ui/theme" "display/ui/resources" "display/ui/widgets"
-    "audio" "audio/demuxer" "protocols" "blufi")
+    "audio" "audio/demuxer" "protocols" "blufi" "wifi")
 
 # Add board common files
+# 注：本仓库（P30-4G / P30-WiFi / P31）实际使用的通用文件
+# 已剔除 nt26_board / adc_battery_monitor / axp2101 / knob —— 这些类没有任何 board 实例化
 list(APPEND SOURCES
     "boards/common/board.cc"
     "boards/common/wifi_board.cc"
     "boards/common/ml307_board.cc"
     "boards/common/dual_network_board.cc"
-    "boards/common/adc_battery_monitor.cc"
-    "boards/common/axp2101.cc"
     "boards/common/backlight.cc"
     "boards/common/button.cc"
     "boards/common/i2c_device.cc"
@@ -135,12 +147,11 @@ endif()
 if(CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32P4)
     list(APPEND SOURCES "audio/wake_words/afe_wake_word.cc")
     list(APPEND SOURCES "audio/wake_words/custom_wake_word.cc")
+else()
+    list(APPEND SOURCES "audio/wake_words/esp_wake_word.cc")
 endif()
 
-# Auto Select Additional Sources
-if (CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING)
-    list(APPEND SOURCES "boards/common/blufi.cpp")
-endif ()
+# BluFi 已迁移到独立模块 main/blufi/，无需在 board common 注册
 # Select language directory according to Kconfig
 if(CONFIG_LANGUAGE_ZH_CN)
     set(LANG_DIR "zh-CN")
@@ -255,6 +266,7 @@ if(CONFIG_IDF_TARGET_ESP32)
     list(REMOVE_ITEM SOURCES "audio/codecs/box_audio_codec.cc"
                              "audio/codecs/es8388_audio_codec.cc"
                              "audio/codecs/es8389_audio_codec.cc"
+                             "led/gpio_led.cc"
                              "display/lvgl_display/jpg/image_to_jpeg.cpp"
                              "display/lvgl_display/jpg/jpeg_to_image.c"
                              "boards/common/ml307_board.cc"
@@ -262,17 +274,9 @@ if(CONFIG_IDF_TARGET_ESP32)
                              )
 endif()
 
-# Include EspVideo if target is ESP32S3 or ESP32P4
-if(CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32P4)
-    list(APPEND SOURCES "boards/common/esp_video.cc"
-                        "boards/common/rndis_board.cc"
-                        )
-endif()
-
-# Include Esp32Camera if target is ESP32S3
-if(CONFIG_IDF_TARGET_ESP32S3)
-    list(APPEND SOURCES "boards/common/esp32_camera.cc")
-endif()
+# 注：本仓库已删除 esp_video / rndis_board / esp32_camera / nt26_board，
+# 对应的 esp32-camera / esp_video / iot_usbh_rndis / uart-eth-modem 远程组件依赖也已从
+# idf_component.yml 中移除。如未来 board 复用，需同时恢复源文件 + 远程依赖。
 
 if(CONFIG_BOARD_TYPE_MYDAZY_P30_4G OR CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
     # 远程 component manager 在 main/idf_component.yml 中以 mydazy/<name> 声明，
@@ -284,8 +288,14 @@ if(CONFIG_BOARD_TYPE_MYDAZY_P30_4G OR CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
     )
 endif()
 
+set(WIFI_CONFIG_HTML
+    ${CMAKE_CURRENT_SOURCE_DIR}/wifi/assets/wifi_configuration.html
+    ${CMAKE_CURRENT_SOURCE_DIR}/wifi/assets/wifi_configuration_done.html
+)
+
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
+                    EMBED_TXTFILES ${WIFI_CONFIG_HTML}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES
@@ -306,10 +316,20 @@ idf_component_register(SRCS ${SOURCES}
                         efuse
                         bt
                         fatfs
+                        # main/wifi、main/blufi 自维护后补全的 IDF 组件依赖
+                        nvs_flash
+                        esp_wifi
+                        esp_event
+                        esp_http_server
+                        mbedtls
                         esp_lcd_jd9853
                         esp_lcd_touch_axs5106l
                         esp_nfc_ws1850s
                         mydazy__esp_mp3_player
+                        # esp-ml307 的 PUBLIC include at_uart.h 引用 uart_uhci.h，
+                        # 而 esp-ml307 本身只把 uart-uhci 列在 idf_component.yml 而非 CMake REQUIRES，
+                        # 所以这里必须由 main 显式 PRIV_REQUIRES 才能让头文件路径可见。
+                        78__uart-uhci
                     )
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME

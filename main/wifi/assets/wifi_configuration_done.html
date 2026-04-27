@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>配网状态</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #FDF8F3;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            text-align: center;
+            color: #333;
+            max-width: 400px;
+            width: 100%;
+        }
+        .icon {
+            width: 100px;
+            height: 100px;
+            margin: 0 auto 24px;
+        }
+        .spinner {
+            width: 100px;
+            height: 100px;
+            border: 4px solid rgba(91,123,238,0.1);
+            border-top-color: #5B7BEE;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .checkmark {
+            width: 100px;
+            height: 100px;
+            animation: scaleIn 0.4s ease;
+        }
+        @keyframes scaleIn {
+            from { transform: scale(0); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .checkmark circle { fill: rgba(34, 197, 94, 0.15); }
+        .checkmark path {
+            stroke: #22C55E;
+            stroke-width: 3;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            stroke-dasharray: 50;
+            stroke-dashoffset: 50;
+            animation: drawCheck 0.5s ease 0.3s forwards;
+        }
+        @keyframes drawCheck {
+            to { stroke-dashoffset: 0; }
+        }
+        .error-icon {
+            font-size: 80px;
+            animation: scaleIn 0.4s ease;
+        }
+        h1 { font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+        .status-text { font-size: 15px; color: #666; margin-bottom: 24px; }
+        .status-success { color: #22C55E; }
+        .status-error { color: #FF3B30; }
+        .info {
+            background: rgba(91, 123, 238, 0.05);
+            border-radius: 16px;
+            padding: 20px;
+            text-align: left;
+            margin-bottom: 20px;
+        }
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+        .info-item:last-child { border-bottom: none; }
+        .info-item .label { color: #888; font-size: 14px; }
+        .info-item .value { color: #333; font-weight: 500; font-size: 14px; }
+        .step-list {
+            list-style: none;
+            text-align: left;
+            margin: 24px 0;
+        }
+        .step-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            margin-bottom: 8px;
+            background: #fff;
+            border-radius: 12px;
+        }
+        .step-icon {
+            width: 24px;
+            height: 24px;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        .step-icon.loading {
+            border: 2px solid rgba(91,123,238,0.2);
+            border-top-color: #5B7BEE;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        .step-icon.success {
+            color: #22C55E;
+            font-size: 20px;
+        }
+        .step-icon.error {
+            color: #FF3B30;
+            font-size: 20px;
+        }
+        .step-text { flex: 1; font-size: 14px; color: #333; }
+        .step-status { font-size: 13px; color: #888; }
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #6B8AFE, #5B7BEE);
+            color: #fff;
+        }
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #666;
+        }
+        .hint { font-size: 13px; color: #999; margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon" id="icon">
+            <div class="spinner"></div>
+        </div>
+        <h1 id="title">正在连接</h1>
+        <p class="status-text" id="status-text">请稍候...</p>
+
+        <ul class="step-list" id="step-list">
+            <li class="step-item">
+                <div class="step-icon loading" id="step1-icon"></div>
+                <span class="step-text">验证凭证</span>
+                <span class="step-status" id="step1-status">进行中</span>
+            </li>
+            <li class="step-item">
+                <div class="step-icon" id="step2-icon"></div>
+                <span class="step-text">连接网络</span>
+                <span class="step-status" id="step2-status">等待中</span>
+            </li>
+            <li class="step-item">
+                <div class="step-icon" id="step3-icon"></div>
+                <span class="step-text">获取IP地址</span>
+                <span class="step-status" id="step3-status">等待中</span>
+            </li>
+        </ul>
+
+        <div class="info" id="info" style="display:none;">
+            <div class="info-item">
+                <span class="label">网络名称</span>
+                <span class="value" id="ssid">-</span>
+            </div>
+            <div class="info-item">
+                <span class="label">IP 地址</span>
+                <span class="value" id="ip">-</span>
+            </div>
+            <div class="info-item">
+                <span class="label">信号强度</span>
+                <span class="value" id="rssi">-</span>
+            </div>
+        </div>
+
+        <div id="actions" style="display:none;">
+            <button class="btn btn-primary" onclick="finishConfig()">完成配网</button>
+            <button class="btn btn-secondary" onclick="goBack()">返回配网</button>
+        </div>
+
+        <p class="hint" id="hint">正在验证网络连接...</p>
+    </div>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const targetSsid = params.get('ssid') || '未知';
+
+        let currentStep = 1;
+        let checkCount = 0;
+        let maxChecks = 60; // 最多检查60次 (60秒)
+        let checkInterval = null;
+
+        // 更新步骤状态
+        function updateStep(step, status) {
+            const icon = document.getElementById(`step${step}-icon`);
+            const statusText = document.getElementById(`step${step}-status`);
+
+            icon.className = 'step-icon';
+            if (status === 'loading') {
+                icon.classList.add('loading');
+                statusText.textContent = '进行中';
+            } else if (status === 'success') {
+                icon.classList.add('success');
+                icon.textContent = '✓';
+                statusText.textContent = '完成';
+            } else if (status === 'error') {
+                icon.classList.add('error');
+                icon.textContent = '✕';
+                statusText.textContent = '失败';
+            } else {
+                statusText.textContent = '等待中';
+            }
+        }
+
+        // 检查连接状态
+        async function checkStatus() {
+            checkCount++;
+
+            try {
+                const res = await fetch('/status');
+                const data = await res.json();
+
+                if (data.ssid && data.ssid === decodeURIComponent(targetSsid)) {
+                    // 步骤2: 已连接到网络
+                    if (currentStep === 1) {
+                        updateStep(1, 'success');
+                        updateStep(2, 'loading');
+                        currentStep = 2;
+                    }
+
+                    if (data.ip && data.ip !== '0.0.0.0') {
+                        // 步骤3: 已获取IP
+                        if (currentStep === 2) {
+                            updateStep(2, 'success');
+                            updateStep(3, 'loading');
+                            currentStep = 3;
+                        }
+
+                        // 全部成功
+                        clearInterval(checkInterval);
+                        updateStep(3, 'success');
+                        showSuccess(data);
+                    }
+                } else if (checkCount >= maxChecks) {
+                    // 超时
+                    clearInterval(checkInterval);
+                    showError('连接超时，请检查密码是否正确或信号强度');
+                }
+            } catch (e) {
+                if (checkCount >= maxChecks) {
+                    clearInterval(checkInterval);
+                    showError('无法获取状态，请检查设备连接');
+                }
+            }
+        }
+
+        // 显示成功
+        function showSuccess(data) {
+            document.getElementById('icon').innerHTML = `
+                <svg class="checkmark" viewBox="0 0 52 52">
+                    <circle cx="26" cy="26" r="25"/>
+                    <path fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
+                </svg>
+            `;
+            document.getElementById('title').textContent = '配网成功';
+            document.getElementById('title').classList.add('status-success');
+            document.getElementById('status-text').textContent = 'WiFi Connected Successfully';
+            document.getElementById('step-list').style.display = 'none';
+
+            // 显示连接信息
+            document.getElementById('ssid').textContent = data.ssid || targetSsid;
+            document.getElementById('ip').textContent = data.ip || '未知';
+
+            if (data.rssi) {
+                const rssiVal = parseInt(data.rssi);
+                let signalText = '优秀', signalColor = '#22C55E';
+                if (rssiVal < -65) { signalText = '良好'; signalColor = '#FF9500'; }
+                if (rssiVal < -75) { signalText = '一般'; signalColor = '#8E8E93'; }
+                document.getElementById('rssi').innerHTML =
+                    `<span style="color:${signalColor}">${signalText} (${data.rssi}dBm)</span>`;
+            }
+            document.getElementById('info').style.display = 'block';
+
+            // 显示操作按钮
+            document.getElementById('actions').style.display = 'block';
+            document.getElementById('hint').textContent = '配网完成，请选择操作';
+        }
+
+        // 显示错误
+        function showError(message) {
+            document.getElementById('icon').innerHTML = '<div class="error-icon">⚠️</div>';
+            document.getElementById('title').textContent = '配网失败';
+            document.getElementById('title').classList.add('status-error');
+            document.getElementById('status-text').textContent = message;
+
+            updateStep(currentStep, 'error');
+
+            document.getElementById('actions').innerHTML = `
+                <button class="btn btn-primary" onclick="goBack()">重新配网</button>
+            `;
+            document.getElementById('actions').style.display = 'block';
+            document.getElementById('hint').textContent = '请检查WiFi密码和信号强度';
+        }
+
+        // 完成配网
+        function finishConfig() {
+            document.getElementById('hint').textContent = '正在关闭配网模式...';
+            fetch('/reboot', { method: 'POST' })
+                .then(() => {
+                    document.getElementById('hint').textContent = '配网模式已关闭，页面即将关闭';
+                    setTimeout(() => {
+                        window.close();
+                    }, 2000);
+                })
+                .catch(() => {
+                    document.getElementById('hint').textContent = '设备已切换到工作模式，可以关闭此页面';
+                });
+        }
+
+        // 返回配网页面
+        function goBack() {
+            window.location.href = '/';
+        }
+
+        // 启动状态检查
+        checkInterval = setInterval(checkStatus, 1000);
+        checkStatus(); // 立即执行一次
+    </script>
+</body>
+</html>

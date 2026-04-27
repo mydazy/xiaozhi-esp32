@@ -1,80 +1,54 @@
 ## IDF Component Manager Manifest File
 ##
-## 本仓库只支持 mydazy-p30-4g / mydazy-p30-wifi / mydazy-p31（ESP32-S3）。
-## LCD/触摸控制器走 components/ 下的 vendored 组件：
-##   esp_lcd_jd9853（JD9853 屏）、esp_lcd_touch_axs5106l（AXS5106L 触摸）、esp_nfc_ws1850s（P31 NFC）。
-## 下列依赖都经 Part 2.D.2 验证在主干代码中零引用（或仅在非 S3 条件分支中引用）：
-##   LCD 驱动（sh8601/co5300/ili9341/gc9a01/st77916/axs15231b/st7701/st7796/spd2010/nv3023/
-##             jd9365/st7703/ili9881c/ek79007）、
-##   触摸驱动（ft5x06/gt911/gt1151/cst9217/cst816s/st7123）、
-##   IO expander（tca9554/tca95xx/ch32v003、panel_io_additions）、
-##   LED/sh1106/sscma/servo_dog/cpp_bus/bmi270/otto-emoji、
-##   网络（uart-eth-modem/esp_hosted/esp_wifi_remote）、P4 专用板 ev_board
-##   — 已于 Cleanup-Batch-1 删除。
-## ⚠️ esp_image_effects 必须保留：它提供的 esp_imgfx_* API 被
-##   main/display/lvgl_display/jpg/image_to_jpeg.cpp（LVGL JPEG 编码）使用。
-## esp32-camera / esp_video / iot_usbh_rndis 暂留，将在 Cleanup-Batch-2 随源文件联动删除。
+## 仅声明本仓库（mydazy-p30-4g / mydazy-p30-wifi / mydazy-p31）真正使用的组件。
+## 历史上从 xiaozhi-esp32 上游继承的多 SKU 屏幕/触摸/IO-Expander/相机/视频/USB-RNDIS
+## 等远程依赖均已剔除——本仓库不会引入这些 board，组件留着只会拖累 component manager
+## 解析、占编译时长和 managed_components 磁盘空间。
+##
+## 如果未来要新加一块 board 用到新驱动，请在此处显式重新声明。
+
 dependencies:
-  # Network
-  78/esp-wifi-connect: ~3.1.2
-  78/esp-ml307: ~3.6.5
-  # ⚠️ 78/uart-uhci 必须在 main 这里显式声明：
-  # 上游 78/esp-ml307 的 at_uart.h 里 #include <uart_uhci.h>，但它的
-  # CMakeLists.txt 把 78__uart-uhci 放在 PRIV_REQUIRES 而非 REQUIRES，
-  # 导致依赖 esp-ml307 的 main 组件看不到 uart-uhci 的 include dirs。
-  # 显式直接依赖可让 main 解析到头文件。
-  78/uart-uhci: ^0.2.1
-
-  # UI fonts / LVGL
-  78/xiaozhi-fonts: ~1.6.0
-  lvgl/lvgl: ~9.5.0
-  esp_lvgl_port: ~2.7.2
-
-  # Input
-  espressif/button: ~4.1.5
-
-  # Audio
-  espressif/esp_audio_effects: ~1.2.1
-  espressif/esp_audio_codec: ~2.4.1
-  espressif/esp_codec_dev: ~1.5.6
-  espressif/esp-sr: ~2.3.0
-
-  # Assets / emote / JPEG / battery（image_player/adc_battery_estimation/esp_new_jpeg 待 Batch-3 验证）
-  espressif2022/image_player: ^1.1.1
-  espressif2022/esp_emote_expression: ^0.1.0
-  espressif/esp_mmap_assets: ^1.3.2
-  espressif/adc_battery_estimation: ^0.2.1
-  espressif/esp_new_jpeg: ^0.6.1
-
-  # Image transform (esp_imgfx_*) — LVGL JPEG pipeline 依赖
-  espressif/esp_image_effects:
-    version: ^1.0.1
-    rules:
-    - if: target not in [esp32]
-
-  # Camera / Video / RNDIS：Batch-2 随源文件联动删除
-  espressif/esp32-camera:
-    version: ^2.1.6
-    rules:
-    - if: target in [esp32s3]
-  espressif/esp_video:
-    version: ==1.3.1   # for compatibility. update version may need to modify this project code.
-    rules:
-    - if: target in [esp32p4, esp32s3]
-  espressif/iot_usbh_rndis:
-    version: ^0.3.1
-    rules:
-    - if: target in [esp32s3, esp32p4]
-
-  # ── mydazy custom panel + sensor drivers ────────────────────
-  mydazy/esp_sc7a20h: ^2.0.0
+  # ── LCD 面板（本仓库仅用 JD9853 SPI 屏） ─────────────────────
   mydazy/esp_lcd_jd9853: ^2.0.0
-  # mydazy/esp_mp3_player: ^0.2.0  ← 已 fork 到 components/mydazy__esp_mp3_player，本地维护 Pause/Resume/Position
+
+  # ── 触摸 IC（本仓库仅用 AXS5106L） ───────────────────────────
   mydazy/esp_lcd_touch_axs5106l:
     version: ^2.0.0
     rules:
-    - if: target in [esp32s3]   # LVGL input integration tested on ESP32-S3
+      - if: target in [esp32s3]   # LVGL input integration tested on ESP32-S3
 
-  ## Required IDF version
+  # ── 传感器（SC7A20H 三轴加速度计：拾取唤醒 / 运动检测） ─────
+  mydazy/esp_sc7a20h: ^2.0.0
+
+  # ── 音频链路 ────────────────────────────────────────────────
+  espressif/esp_codec_dev: ~1.5.6           # box_audio_codec / es7111_audio_codec
+  espressif/esp_audio_codec: ~2.4.1         # opus enc/dec（audio_service.h）
+  espressif/esp_audio_effects: ~1.2.1       # esp_ae_rate_cvt 重采样
+  espressif/esp-sr: ~2.3.0                  # AFE 唤醒词 + 降噪
+
+  # ── 网络 / 4G modem ─────────────────────────────────────────
+  78/esp-ml307: ~3.6.5                      # P30-4G / P31 双网络板
+  # 小智自维护 main/wifi/ 已替代 78/esp-wifi-connect
+
+  # ── UI / LVGL ───────────────────────────────────────────────
+  lvgl/lvgl: ~9.5.0
+  esp_lvgl_port: ~2.7.2
+  78/xiaozhi-fonts: ~1.6.0                  # font_puhui_basic / font_awesome
+  espressif/esp_mmap_assets: ^1.3.2         # assets 分区运行时映射
+  espressif2022/esp_emote_expression: ^0.1.0  # CONFIG_USE_EMOTE_MESSAGE_STYLE
+
+  # ── 图像 / JPEG 处理（LvglDisplay::SnapshotToJpeg → MCP 截图工具） ──
+  espressif/esp_image_effects:
+    version: ^1.0.1
+    rules:
+      - if: target not in [esp32]           # esp_imgfx_color_convert (RGB565↔RGB888)
+
+  # ── 输入设备（按键） ────────────────────────────────────────
+  espressif/button: ~4.1.5                  # iot_button (boards/common/button.cc)
+
+  # ── LED ─────────────────────────────────────────────────────
+  espressif/led_strip: ~3.0.2               # led/single_led.cc / circular_strip.cc
+
+  # ── Required IDF version ────────────────────────────────────
   idf:
     version: '>=5.5.2'
