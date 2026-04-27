@@ -603,11 +603,6 @@ private:
             app.Reboot();
             return;
         }
-        // 三击进配网：走 ResetWifiConfiguration（设 force_ap=1 + reboot），
-        // 而不是直接 EnterWifiConfigMode —— 因为已联网设备 BT 静态 RAM 已被
-        // SmartConnect 路径上的 Blufi::ReleaseStaticMem 永久释放，本次启动不能再启动 BT。
-        // reboot 后 WifiBoard ctor 读 force_ap=1 → wifi_config_mode_=true →
-        // StartNetwork 直接走 EnterWifiConfigMode（此时 BT RAM 还在，BLUFI 可正常启动）。
         AbortIfSpeaking();
         app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "进入配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
         vTaskDelay(pdMS_TO_TICKS(1500));

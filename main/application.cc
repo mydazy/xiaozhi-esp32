@@ -719,7 +719,7 @@ void Application::HandleToggleChatEvent() {
     MusicPlayer::GetInstance().Stop();
 
     auto state = GetDeviceState();
-    
+
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;
@@ -776,7 +776,7 @@ void Application::HandleStartListeningEvent() {
     MusicPlayer::GetInstance().Stop();
 
     auto state = GetDeviceState();
-    
+
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;

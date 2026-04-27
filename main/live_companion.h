@@ -103,7 +103,7 @@ private:
     int resume_delay_ms_ = 5000;  // 打断后恢复延时，默认 5 秒
     std::string script_name_;
     std::string pending_url_;
-    std::string last_script_json_;  // 保存最后的脚本内容，用于 CSI 唤醒后自动恢复
+    std::string last_script_json_;  // 保存最后的脚本内容，用于唤醒后自动恢复
 
     // 延时定时器
     esp_timer_handle_t delay_timer_ = nullptr;

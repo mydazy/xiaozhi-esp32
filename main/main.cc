@@ -14,8 +14,6 @@
 extern "C" void app_main(void)
 {
     // Initialize the default event loop
-    // 之前 78/esp-wifi-connect 内部代调；迁移到 main/wifi/ 自维护后必须显式 init，
-    // 否则 esp_wifi_set_default_wifi_sta_handlers 返回 ESP_ERR_INVALID_STATE
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     // Initialize NVS flash for WiFi configuration

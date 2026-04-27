@@ -152,9 +152,8 @@ bool Blufi::Start(const std::string &device_name) {
         [](const std::vector<wifi_ap_record_t> &) { Blufi::OnScanDone(); });
   }
 
-#ifdef CONFIG_BT_NIMBLE_ENABLED
-  ble_svc_gap_device_name_set(device_name_.c_str());
-#endif
+  // 设备名 set 移到 INIT_FINISH 回调（NimBLE 主机栈 init 会重置 GAP service buffer，
+  // 在 host_init 之前 set 会被覆盖 → 广播打出乱码）
 
   // 初始化主机栈和回调（控制器已在 InitializeController() 中初始化）
   static esp_blufi_callbacks_t callbacks = {
@@ -445,6 +444,10 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
     ESP_LOGI(TAG, "[1/8] Blufi初始化完成");
     // ⭐ 关键修复：在profile真正初始化完成后才设置状态
     self.initialized_ = true;
+#ifdef CONFIG_BT_NIMBLE_ENABLED
+    // NimBLE 主机栈已就绪（GAP service buffer 已分配），此时 set 才生效
+    ble_svc_gap_device_name_set(self.device_name_.c_str());
+#endif
     self.advertising_ = self.StartAdvertising();
     if (!self.advertising_) {
       ESP_LOGW(TAG, "[1/8] 广播启动失败，advertising_=false");

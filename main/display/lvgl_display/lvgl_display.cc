@@ -17,8 +17,6 @@
 
 LvglDisplay::LvglDisplay() {
     // Notification timer
-    // esp_timer 回调运行在系统 timer 任务，禁止裸调 LVGL API
-    // 必须 lv_async_call hop 到 LVGL 任务，async cb 内已持 LVGL lock 无需 DisplayLockGuard
     esp_timer_create_args_t notification_timer_args = {
         .callback = [](void *arg) {
             lv_async_call([](void *a) {

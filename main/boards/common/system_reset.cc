@@ -52,16 +52,6 @@ void SystemReset::ResetNvsFlash() {
 
 void SystemReset::ResetToFactory() {
     ESP_LOGI(TAG, "Resetting to factory");
-
-    // ⚠️ 故意不擦 otadata 分区。
-    //
-    // 当前 partitions/v2/16m.csv 是 ota_0 + ota_1 结构（无 factory 分区），
-    // sdkconfig 启用了 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE。
-    // 擦 otadata 后 bootloader 判断当前 image 未验证 → 拒绝启动 → 黑屏死循环。
-    //
-    // "恢复出厂"对用户的语义 = 清 wifi 凭据 / 偏好 / 配网状态（已由 ResetNvsFlash 完成）。
-    // 固件版本本身保留，无需切分区，避免擦 otadata 引入的引导风险。
-
     // Reboot in 3 seconds
     RestartInSeconds(3);
 }

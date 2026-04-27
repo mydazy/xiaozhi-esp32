@@ -545,15 +545,6 @@ void UiDisplay::ShowWifiQrCode(const char* qr_content, const char* hint,
     lv_qrcode_update(qr, qr_data, strlen(qr_data));
     lv_obj_align(qr, LV_ALIGN_CENTER, 0, -15);
 
-    const char* sub_text = is_blufi ? "扫码蓝牙配网" :
-                           is_url   ? "扫码绑定设备" : "扫码连接热点";
-    lv_obj_t* sub = lv_label_create(wifi_qr_overlay_);
-    lv_label_set_text(sub, sub_text);
-    lv_obj_set_style_text_font(sub, &BUILTIN_TEXT_FONT, 0);
-    lv_obj_set_style_text_color(sub, lv_color_hex(0x666666), 0);
-    lv_obj_set_style_text_align(sub, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(sub, kCenterW);
-    lv_obj_align_to(sub, qr, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
 #else
     lv_obj_t* fallback = lv_label_create(wifi_qr_overlay_);
     lv_obj_set_style_text_font(fallback, &BUILTIN_TEXT_FONT, 0);

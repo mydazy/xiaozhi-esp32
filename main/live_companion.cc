@@ -88,7 +88,7 @@ void LiveCompanion::StartWithScript(const std::string& json_str) {
         return;
     }
 
-    // 保存脚本内容，用于 CSI 唤醒后自动恢复
+    // 保存脚本内容，用于唤醒后自动恢复
     last_script_json_ = json_str;
 
     // 先停止当前播放

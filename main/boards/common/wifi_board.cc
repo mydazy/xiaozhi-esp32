@@ -20,7 +20,6 @@
 #include "wifi_ap.h"
 #include "ssid_manager.h"
 #include "blufi/blufi.h"
-#include "wifi_csi.h"
 
 static const char *TAG = "WifiBoard";
 
@@ -28,109 +27,6 @@ static const char *TAG = "WifiBoard";
 static constexpr int MAX_SCAN_RETRY = 2;        // 最大扫描重试次数
 static constexpr int SCAN_WAIT_MS = 3000;       // 单次扫描等待时间
 static constexpr int CONNECT_TIMEOUT_MS = 10000; // 连接超时
-
-// ============ WiFi CSI 接近检测 ============
-
-static constexpr int64_t kCsiGreetCooldownMs = 60000;
-static constexpr int64_t kCsiLeaveConfirmMs = 30000;
-
-static struct {
-    bool greeted = false;
-    int64_t last_greet_ms = 0;
-    int64_t leave_start_ms = 0;
-} csi_session;
-
-static bool IsCsiGreetMode() {
-    Settings settings("status", false);
-    int deep_sleep = settings.GetInt("deepSleep", 1);
-    auto& board = Board::GetInstance();
-    int level = 0; bool charging = false, discharging = false;
-    board.GetBatteryLevel(level, charging, discharging);
-    return (deep_sleep == 0) && charging;
-}
-
-static bool ShouldEnableCsi() {
-    // 首先检查 NVS 总开关（默认关闭）
-    auto& csi = WifiCsi::GetInstance();
-    if (!csi.IsEnabled()) return false;
-
-    Settings settings("status", false);
-    // CSI 总开关（默认关闭，可通过 MCP 或设置开启）
-    if (!settings.GetBool("csiEnabled", false)) return false;
-    int deep_sleep = settings.GetInt("deepSleep", 1);
-    if (deep_sleep == 0) return true;
-    auto& board = Board::GetInstance();
-    int level = 0; bool charging = false, discharging = false;
-    board.GetBatteryLevel(level, charging, discharging);
-    return charging;
-}
-
-static void StartWifiCsi() {
-    if (!ShouldEnableCsi()) {
-        auto& csi = WifiCsi::GetInstance();
-        if (!csi.IsEnabled()) {
-            ESP_LOGI(TAG, "CSI 未启用（需远程命令开启）");
-        } else {
-            ESP_LOGI(TAG, "CSI 关闭（休眠+未充电，省电模式）");
-        }
-        return;
-    }
-    ESP_LOGI(TAG, "启动 WiFi CSI 接近检测（%s）",
-             IsCsiGreetMode() ? "主动迎宾" : "感应待命");
-
-    auto& csi = WifiCsi::GetInstance();
-    csi.OnZoneChange([](const CsiEvent& event) {
-        auto& app = Application::GetInstance();
-        int64_t now = esp_timer_get_time() / 1000;
-
-        if (event.zone >= kCsiZoneMedium && event.previous_zone <= kCsiZoneFar) {
-            csi_session.leave_start_ms = 0;
-            // Board::GetInstance().ResetPowerSaveTimer();  // 当前 Board 未提供，CSI 唤醒后由用户操作自然刷新
-
-            if (IsCsiGreetMode()) {
-                if (!csi_session.greeted) {
-                    bool cooled = (now - csi_session.last_greet_ms) > kCsiGreetCooldownMs;
-                    if (cooled && app.GetDeviceState() == kDeviceStateIdle) {
-                        csi_session.greeted = true;
-                        csi_session.last_greet_ms = now;
-                        ESP_LOGI(TAG, "CSI: 主动迎宾 → 打招呼");
-                        app.Schedule([]() {
-                            Application::GetInstance().WakeWordInvoke("你好，介绍一下自己");
-                        });
-                    }
-                }
-            } else {
-                if (app.GetDeviceState() == kDeviceStateIdle) {
-                    ESP_LOGI(TAG, "CSI: 感应待命 → 亮屏");
-                    app.Schedule([]() {
-                        auto display = Board::GetInstance().GetDisplay();
-                        if (display) {
-                            display->SetEmotion("happy");
-                        }
-                    });
-                }
-            }
-        }
-
-        if (event.zone >= kCsiZoneMedium) {
-            csi_session.leave_start_ms = 0;
-            // Board::GetInstance().ResetPowerSaveTimer();  // 当前 Board 未提供，CSI 唤醒后由用户操作自然刷新
-        }
-
-        if (event.zone == kCsiZoneNone) {
-            if (csi_session.leave_start_ms == 0) {
-                csi_session.leave_start_ms = now;
-            }
-            if ((now - csi_session.leave_start_ms) > kCsiLeaveConfirmMs) {
-                if (csi_session.greeted) {
-                    ESP_LOGI(TAG, "CSI: 人已离开，会话重置");
-                    csi_session.greeted = false;
-                }
-            }
-        }
-    });
-    csi.Start();
-}
 
 WifiBoard::WifiBoard() {
     Settings settings("wifi", true);
@@ -186,7 +82,6 @@ bool WifiBoard::SmartConnect() {
         // 等待扫描完成 + 连接（最多 SCAN_WAIT_MS）
         if (wifi_station.WaitForConnected(SCAN_WAIT_MS)) {
             ESP_LOGI(TAG, "WiFi连接成功: %s", wifi_station.GetSsid().c_str());
-            StartWifiCsi();
             return true;
         }
 
@@ -201,7 +96,6 @@ bool WifiBoard::SmartConnect() {
         ESP_LOGI(TAG, "找到 %d 个匹配热点，等待连接...", (int)matched.size());
         if (wifi_station.WaitForConnected(CONNECT_TIMEOUT_MS)) {
             ESP_LOGI(TAG, "WiFi连接成功: %s", wifi_station.GetSsid().c_str());
-            StartWifiCsi();
             return true;
         }
     }

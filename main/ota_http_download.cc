@@ -20,10 +20,6 @@ OtaHttpDownload& OtaHttpDownload::GetInstance() {
 }
 
 OtaHttpDownload::OtaHttpDownload() {
-    // OTA 下载缓冲 512KB，必须强制 PSRAM：
-    //  - 内部 RAM 红线 60KB 不能被吃掉
-    //  - 单例永久持有，启动期一次性分配
-    //  - PSRAM 不可用时直接 abort，防后续 nullptr 解引用
     file_buffer_ = (uint8_t*)heap_caps_malloc(MAX_FILE_SIZE,
                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!file_buffer_) {

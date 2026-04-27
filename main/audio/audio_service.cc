@@ -159,8 +159,6 @@ void AudioService::Start() {
 #endif
 
     /* Start the opus codec task */
-    // 持续循环 + 高负载编解码 → 按宪法 §3.1 P7 + Core0
-    // 栈 24KB 必须内部 RAM（PSRAM 栈在 flash op 期间会 Double Exception）
     xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->OpusCodecTask();
