@@ -177,6 +177,8 @@ void Application::Initialize() {
         }
     });
 
+    vTaskDelay(pdMS_TO_TICKS(1500));
+
     // Start network asynchronously
     board.StartNetwork();
 
@@ -185,9 +187,8 @@ void Application::Initialize() {
 }
 
 void Application::Run() {
-    // 主循环按项目宪法 §3.1 定为 P3：高于 P1 后台/P2 网络 I/O，低于 P5 LVGL / P7 opus / P10 audio_output
-    // 原 P10 与 audio_output 同级，导致音频输出被主循环抢占 → 优先级反转
-    vTaskPrioritySet(nullptr, 3);
+    // Set the priority of the main task to 10
+    vTaskPrioritySet(nullptr, 10);
 
     const EventBits_t ALL_EVENTS = 
         MAIN_EVENT_SCHEDULE |
@@ -718,7 +719,7 @@ void Application::HandleToggleChatEvent() {
     MusicPlayer::GetInstance().Stop();
 
     auto state = GetDeviceState();
-
+    
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;
@@ -775,7 +776,7 @@ void Application::HandleStartListeningEvent() {
     MusicPlayer::GetInstance().Stop();
 
     auto state = GetDeviceState();
-
+    
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;
@@ -1077,13 +1078,6 @@ void Application::Reboot() {
     audio_service_.Stop();
 
     vTaskDelay(pdMS_TO_TICKS(1000));
-
-    // 关背光避免重启时残留 GRAM 花屏；再切 LDO 让 LCD/音频 CODEC 真正下电复位
-    auto& board = Board::GetInstance();
-    auto* backlight = board.GetBacklight();
-    if (backlight) {
-        backlight->SetBrightness(0);
-    }
     esp_restart();
 }
 
@@ -1186,9 +1180,6 @@ bool Application::CanEnterSleepMode() {
     }
 
     // P0 修复：MP3 播放（含暂停态）期间禁止 deep sleep，避免 5 分钟自动关机杀掉播放
-    // OnMusicPlay 强制切 Idle + CloseAudioChannel + AudioService.ResetDecoder，使前 3 个判断
-    // 全部返回 true，PowerSaveTimer 误以为系统空闲。MusicPlayer 是并行存在的"模式"，
-    // 不在 DeviceStateMachine 内，必须显式判断。
     if (MusicPlayer::GetInstance().IsPlaying()) {
         return false;
     }

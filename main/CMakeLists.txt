@@ -151,7 +151,6 @@ else()
     list(APPEND SOURCES "audio/wake_words/esp_wake_word.cc")
 endif()
 
-# BluFi 已迁移到独立模块 main/blufi/，无需在 board common 注册
 # Select language directory according to Kconfig
 if(CONFIG_LANGUAGE_ZH_CN)
     set(LANG_DIR "zh-CN")
