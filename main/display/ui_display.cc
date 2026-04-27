@@ -27,6 +27,7 @@
 #include <time.h>
 #include <font_awesome.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 
 // 同 lcd_display.cc / oled_display.cc 风格：让 BUILTIN_ICON_FONT 宏展开的符号在本文件可见
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
@@ -582,6 +583,28 @@ void UiDisplay::HideWifiQrCode() {
         lv_obj_del(wifi_qr_overlay_);
         wifi_qr_overlay_ = nullptr;
         ESP_LOGI(TAG, "隐藏配网 QR");
+    }
+    // 释放 lambda（捕获的外部对象生命周期独立于 UiDisplay）
+    wifi_qr_double_click_cb_ = nullptr;
+    wifi_qr_last_click_us_   = 0;
+}
+
+// LVGL 事件回调：用上次 click 时间戳判定 < 500ms 双击
+void UiDisplay::OnWifiQrClicked(lv_event_t* e) {
+    auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
+    if (!self || !self->wifi_qr_double_click_cb_) return;
+
+    const uint64_t now  = esp_timer_get_time();
+    const uint64_t last = self->wifi_qr_last_click_us_;
+    constexpr uint64_t kDoubleClickWindowUs = 500 * 1000;
+
+    if (last != 0 && (now - last) < kDoubleClickWindowUs) {
+        // 命中双击：先拷贝 cb 再调，防止 cb 内部 HideWifiQrCode 把自己析构
+        auto cb = self->wifi_qr_double_click_cb_;
+        self->wifi_qr_last_click_us_ = 0;
+        cb();
+    } else {
+        self->wifi_qr_last_click_us_ = now;
     }
 }
 
