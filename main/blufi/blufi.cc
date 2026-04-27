@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "application.h"
+#include "settings.h"
 #include "esp_blufi.h"
 #include "esp_bt.h"
 #include "esp_heap_caps.h"
@@ -78,6 +79,11 @@ bool Blufi::InitializeController() {
   //       （断 LDO 前若 I2S DMA 还在写已断电 codec 会 I2C 阻塞 TWDT；不关背光重启瞬间显随机 GRAM）
   if (static_mem_released_) {
     ESP_LOGE(TAG, "BT 静态 RAM 已释放，无法启动 BLE；走 Application::Reboot 重启以恢复 BT 能力");
+    // 关键：设 force_ap=1，让 reboot 后 WifiBoard ctor 直接进配网模式，
+    // 不再 SmartConnect → 不会再次释放 BT；
+    // 否则会"释放 BT → 进配网失败 → reboot → 联网 → 释放 BT"的循环。
+    Settings settings("wifi", true);
+    settings.SetInt("force_ap", 1);
     Application::GetInstance().Reboot();  // 内部安全序列 + esp_restart，不返回
     return false;  // 理论上到不了这里
   }

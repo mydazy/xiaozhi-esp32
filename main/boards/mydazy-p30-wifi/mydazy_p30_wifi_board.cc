@@ -580,16 +580,24 @@ private:
     void HandleBootMultiClick3_EnterWifiConfig() {
         auto& app = Application::GetInstance();
         if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
-            // 已在配网态：再次三击作为"取消配网"无意义，给个提示音
-            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "已在配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
+            // 已在配网态：再次三击 = 退出配网，重启回到正常联网流程
+            // 设 force_ap=0 显式取消 reboot 后再次进配网
+            Settings settings("wifi", true);
+            settings.SetInt("force_ap", 0);
+            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "退出配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            app.Reboot();
             return;
         }
+        // 三击进配网：走 ResetWifiConfiguration（设 force_ap=1 + reboot），
+        // 而不是直接 EnterWifiConfigMode —— 因为已联网设备 BT 静态 RAM 已被
+        // SmartConnect 路径上的 Blufi::ReleaseStaticMem 永久释放，本次启动不能再启动 BT。
+        // reboot 后 WifiBoard ctor 读 force_ap=1 → wifi_config_mode_=true →
+        // StartNetwork 直接走 EnterWifiConfigMode（此时 BT RAM 还在，BLUFI 可正常启动）。
         AbortIfSpeaking();
-        app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "开始配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
+        app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "进入配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
         vTaskDelay(pdMS_TO_TICKS(1500));
-        app.Schedule([this]() {
-            EnterWifiConfigMode();   // WifiBoard 自身方法
-        });
+        ResetWifiConfiguration();  // 内部：设 force_ap=1 + skip_welcome=1 + Reboot
     }
 
     void HandleBootMultiClick4_PowerOff() {
@@ -955,12 +963,11 @@ public:
         }
     }
 
-    // ESP-IDF 标准 shutdown hook：esp_restart() 调用前自动执行（OTA 升级后/恢复出厂/SwitchNetworkType 等所有路径）。
-    // 切 AUDIO_PWR_EN_GPIO=GPIO9 让 LCD (JD9853) + 音频 + 4G 完整电源复位，避免重启后 LCD GRAM 残留导致黑屏/花屏。
-    // 用 esp_register_shutdown_handler 注册，**完全无需修改 base Board 类或 application.cc/system_reset.cc**。
-    // 注：static 方法不能访问 instance 成员（如 audio_codec_）；功放下电由 LDO 切断后硬件自然完成。
     static void ShutdownHandler() {
-        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
+        // 先静音功放：避免直接断 LDO 导致音圈因瞬态电压释放产生 POP
+        gpio_set_level(AUDIO_CODEC_PA_PIN, 0);
+        esp_rom_delay_us(20 * 1000);            // 20ms 让功放进入静音
+        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);   // 断 LDO 总开关（LCD + audio + ext）
         rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);    // 穿越 esp_restart() 保持 LOW
         esp_rom_delay_us(500 * 1000);           // 等 22uF 电容放电（shutdown 上下文用 ROM delay 更稳妥）
     }
