@@ -46,7 +46,7 @@
 #include <esp_wifi.h>
 #include <nvs_flash.h>
 #include <esp_vfs.h>
-#include <wifi_manager.h>
+#include "wifi_station.h"
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <driver/rtc_io.h>
@@ -459,7 +459,7 @@ private:
 
         // 5. 处理WiFi连接（WiFi版本固定断开WiFi）
         if (GetNetworkType() == NetworkType::WIFI) {
-            WifiManager::GetInstance().StopStation();
+            WifiStation::GetInstance().Stop();
         }
 
         // 6. 停止电源管理定时器

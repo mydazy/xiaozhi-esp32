@@ -2,47 +2,142 @@
 
 #include "display.h"
 #include "application.h"
+#include "power_manager.h"
+#include "live_companion.h"
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
-#include <functional>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_network.h>
 #include <esp_log.h>
-#include <utility>
+#include <esp_lvgl_port.h>
+#include <algorithm>
 
 #include <font_awesome.h>
-#include <wifi_manager.h>
-#include <wifi_station.h>
-#include <ssid_manager.h>
-#ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
-#include "blufi.h"
-#include <esp_lvgl_port.h>  // lvgl_port_lock: 保护 BLE flash-op × LVGL PSRAM buffer 死锁
-#endif
+#include "wifi_station.h"
+#include "wifi_ap.h"
+#include "ssid_manager.h"
+#include "blufi/blufi.h"
+#include "wifi_csi.h"
 
 static const char *TAG = "WifiBoard";
 
-// Connection timeout in seconds
-static constexpr int CONNECT_TIMEOUT_SEC = 60;
+// 智能联网参数
+static constexpr int MAX_SCAN_RETRY = 2;        // 最大扫描重试次数
+static constexpr int SCAN_WAIT_MS = 3000;       // 单次扫描等待时间
+static constexpr int CONNECT_TIMEOUT_MS = 10000; // 连接超时
 
-WifiBoard::WifiBoard() {
-    // Create connection timeout timer
-    esp_timer_create_args_t timer_args = {
-        .callback = OnWifiConnectTimeout,
-        .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name = "wifi_connect_timer",
-        .skip_unhandled_events = true
-    };
-    esp_timer_create(&timer_args, &connect_timer_);
+// ============ WiFi CSI 接近检测 ============
+
+static constexpr int64_t kCsiGreetCooldownMs = 60000;
+static constexpr int64_t kCsiLeaveConfirmMs = 30000;
+
+static struct {
+    bool greeted = false;
+    int64_t last_greet_ms = 0;
+    int64_t leave_start_ms = 0;
+} csi_session;
+
+static bool IsCsiGreetMode() {
+    Settings settings("status", false);
+    int deep_sleep = settings.GetInt("deepSleep", 1);
+    auto& board = Board::GetInstance();
+    int level = 0; bool charging = false, discharging = false;
+    board.GetBatteryLevel(level, charging, discharging);
+    return (deep_sleep == 0) && charging;
 }
 
-WifiBoard::~WifiBoard() {
-    if (connect_timer_) {
-        esp_timer_stop(connect_timer_);
-        esp_timer_delete(connect_timer_);
+static bool ShouldEnableCsi() {
+    // 首先检查 NVS 总开关（默认关闭）
+    auto& csi = WifiCsi::GetInstance();
+    if (!csi.IsEnabled()) return false;
+
+    Settings settings("status", false);
+    // CSI 总开关（默认关闭，可通过 MCP 或设置开启）
+    if (!settings.GetBool("csiEnabled", false)) return false;
+    int deep_sleep = settings.GetInt("deepSleep", 1);
+    if (deep_sleep == 0) return true;
+    auto& board = Board::GetInstance();
+    int level = 0; bool charging = false, discharging = false;
+    board.GetBatteryLevel(level, charging, discharging);
+    return charging;
+}
+
+static void StartWifiCsi() {
+    if (!ShouldEnableCsi()) {
+        auto& csi = WifiCsi::GetInstance();
+        if (!csi.IsEnabled()) {
+            ESP_LOGI(TAG, "CSI 未启用（需远程命令开启）");
+        } else {
+            ESP_LOGI(TAG, "CSI 关闭（休眠+未充电，省电模式）");
+        }
+        return;
+    }
+    ESP_LOGI(TAG, "启动 WiFi CSI 接近检测（%s）",
+             IsCsiGreetMode() ? "主动迎宾" : "感应待命");
+
+    auto& csi = WifiCsi::GetInstance();
+    csi.OnZoneChange([](const CsiEvent& event) {
+        auto& app = Application::GetInstance();
+        int64_t now = esp_timer_get_time() / 1000;
+
+        if (event.zone >= kCsiZoneMedium && event.previous_zone <= kCsiZoneFar) {
+            csi_session.leave_start_ms = 0;
+            // Board::GetInstance().ResetPowerSaveTimer();  // 当前 Board 未提供，CSI 唤醒后由用户操作自然刷新
+
+            if (IsCsiGreetMode()) {
+                if (!csi_session.greeted) {
+                    bool cooled = (now - csi_session.last_greet_ms) > kCsiGreetCooldownMs;
+                    if (cooled && app.GetDeviceState() == kDeviceStateIdle) {
+                        csi_session.greeted = true;
+                        csi_session.last_greet_ms = now;
+                        ESP_LOGI(TAG, "CSI: 主动迎宾 → 打招呼");
+                        app.Schedule([]() {
+                            Application::GetInstance().WakeWordInvoke("你好，介绍一下自己");
+                        });
+                    }
+                }
+            } else {
+                if (app.GetDeviceState() == kDeviceStateIdle) {
+                    ESP_LOGI(TAG, "CSI: 感应待命 → 亮屏");
+                    app.Schedule([]() {
+                        auto display = Board::GetInstance().GetDisplay();
+                        if (display) {
+                            display->SetEmotion("happy");
+                        }
+                    });
+                }
+            }
+        }
+
+        if (event.zone >= kCsiZoneMedium) {
+            csi_session.leave_start_ms = 0;
+            // Board::GetInstance().ResetPowerSaveTimer();  // 当前 Board 未提供，CSI 唤醒后由用户操作自然刷新
+        }
+
+        if (event.zone == kCsiZoneNone) {
+            if (csi_session.leave_start_ms == 0) {
+                csi_session.leave_start_ms = now;
+            }
+            if ((now - csi_session.leave_start_ms) > kCsiLeaveConfirmMs) {
+                if (csi_session.greeted) {
+                    ESP_LOGI(TAG, "CSI: 人已离开，会话重置");
+                    csi_session.greeted = false;
+                }
+            }
+        }
+    });
+    csi.Start();
+}
+
+WifiBoard::WifiBoard() {
+    Settings settings("wifi", true);
+    wifi_config_mode_ = settings.GetInt("force_ap") == 1;
+    if (wifi_config_mode_) {
+        ESP_LOGI(TAG, "force_ap is set, reset to 0");
+        settings.SetInt("force_ap", 0);
     }
 }
 
@@ -50,328 +145,431 @@ std::string WifiBoard::GetBoardType() {
     return "wifi";
 }
 
-void WifiBoard::StartNetwork() {
-    auto& wifi_manager = WifiManager::GetInstance();
+// 获取设备显示名称（品牌名-MAC后4位）
+static std::string GetDeviceShowName() {
+    std::string mac = SystemInfo::GetMacAddress();
+    std::string suffix = mac.substr(mac.length() - 5);
+    suffix.erase(std::remove(suffix.begin(), suffix.end(), ':'), suffix.end());
+    std::transform(suffix.begin(), suffix.end(), suffix.begin(), ::toupper);
 
-    // Initialize WiFi manager
-    WifiManagerConfig config;
-    config.ssid_prefix = "Xiaozhi";
-    config.language = Lang::CODE;
-    wifi_manager.Initialize(config);
+    auto& board = Board::GetInstance();
+    return board.GetBrandName() + "-" + suffix;
+}
 
-    // Set unified event callback - forward to NetworkEvent with SSID data
-    wifi_manager.SetEventCallback([this](WifiEvent event, const std::string& data) {
-        switch (event) {
-            case WifiEvent::Scanning:
-                OnNetworkEvent(NetworkEvent::Scanning);
-                break;
-            case WifiEvent::Connecting:
-                OnNetworkEvent(NetworkEvent::Connecting, data);
-                break;
-            case WifiEvent::Connected:
-                OnNetworkEvent(NetworkEvent::Connected, data);
-                break;
-            case WifiEvent::Disconnected:
-                OnNetworkEvent(NetworkEvent::Disconnected);
-                break;
-            case WifiEvent::ConfigModeEnter:
-                OnNetworkEvent(NetworkEvent::WifiConfigModeEnter);
-                break;
-            case WifiEvent::ConfigModeExit:
-                OnNetworkEvent(NetworkEvent::WifiConfigModeExit);
-                break;
-        }
+// ============ 智能联网 ============
+
+bool WifiBoard::SmartConnect() {
+    auto& wifi_station = WifiStation::GetInstance();
+    auto display = Board::GetInstance().GetDisplay();
+
+    // 设置连接回调
+    wifi_station.OnScanBegin([display]() {
+        display->ShowNotification(Lang::Strings::SCANNING_WIFI, 10000);
+    });
+    wifi_station.OnConnect([display](const std::string& ssid) {
+        std::string msg = std::string(Lang::Strings::CONNECT_TO) + ssid + "...";
+        display->ShowNotification(msg.c_str(), 15000);
+    });
+    wifi_station.OnConnected([display](const std::string& ssid) {
+        std::string msg = std::string(Lang::Strings::CONNECTED_TO) + ssid;
+        display->ShowNotification(msg.c_str(), 3000);
     });
 
-    // Try to connect or enter config mode
-    TryWifiConnect();
-}
+    // 启动 WiFi（会自动扫描并尝试连接）
+    ESP_LOGI(TAG, "启动智能联网...");
+    wifi_station.Start();
 
-void WifiBoard::TryWifiConnect() {
-    auto& ssid_manager = SsidManager::GetInstance();
-    bool have_ssid = !ssid_manager.GetSsidList().empty();
+    // 等待连接成功（最多重试 MAX_SCAN_RETRY 次）
+    for (int retry = 0; retry < MAX_SCAN_RETRY; retry++) {
+        ESP_LOGI(TAG, "等待WiFi连接 (尝试 %d/%d)", retry + 1, MAX_SCAN_RETRY);
 
-    if (have_ssid) {
-        // Start connection attempt with timeout
-        ESP_LOGI(TAG, "Starting WiFi connection attempt");
-        esp_timer_start_once(connect_timer_, CONNECT_TIMEOUT_SEC * 1000000ULL);
-        WifiManager::GetInstance().StartStation();
-    } else {
-        // No SSID configured, enter config mode
-        // Wait for the board version to be shown
-        vTaskDelay(pdMS_TO_TICKS(1500));
-        StartWifiConfigMode();
-    }
-}
+        // 等待扫描完成 + 连接（最多 SCAN_WAIT_MS）
+        if (wifi_station.WaitForConnected(SCAN_WAIT_MS)) {
+            ESP_LOGI(TAG, "WiFi连接成功: %s", wifi_station.GetSsid().c_str());
+            StartWifiCsi();
+            return true;
+        }
 
-void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
-    switch (event) {
-        case NetworkEvent::Connected:
-            // Stop timeout timer
-            esp_timer_stop(connect_timer_);
-            // 统一清理配网资源（BLUFI/AP 都走 StopConfigMode，幂等）
-            if (in_config_mode_) {
-                StopConfigMode();
-            }
-            in_config_mode_ = false;
-            ESP_LOGI(TAG, "Connected to WiFi: %s", data.c_str());
-            break;
-        case NetworkEvent::Scanning:
-            ESP_LOGI(TAG, "WiFi scanning");
-            break;
-        case NetworkEvent::Connecting:
-            ESP_LOGI(TAG, "WiFi connecting to %s", data.c_str());
-            break;
-        case NetworkEvent::Disconnected:
-            ESP_LOGW(TAG, "WiFi disconnected");
-            break;
-        case NetworkEvent::WifiConfigModeEnter:
-            ESP_LOGI(TAG, "WiFi config mode entered");
-            in_config_mode_ = true;
-            break;
-        case NetworkEvent::WifiConfigModeExit:
-            ESP_LOGI(TAG, "WiFi config mode exited");
-            in_config_mode_ = false;
-            // Try to connect with the new credentials
-            TryWifiConnect();
-            break;
-        default:
-            break;
+        // 检查是否有匹配的热点
+        auto matched = wifi_station.GetMatchedAccessPoints(false);  // 使用缓存
+        if (matched.empty()) {
+            ESP_LOGW(TAG, "未找到匹配热点，立即重新扫描...");
+            wifi_station.TriggerScan();
+            continue;  // 直接进入下一次循环
+        }
+
+        ESP_LOGI(TAG, "找到 %d 个匹配热点，等待连接...", (int)matched.size());
+        if (wifi_station.WaitForConnected(CONNECT_TIMEOUT_MS)) {
+            ESP_LOGI(TAG, "WiFi连接成功: %s", wifi_station.GetSsid().c_str());
+            StartWifiCsi();
+            return true;
+        }
     }
 
-    // Notify external callback if set
-    if (network_event_callback_) {
-        network_event_callback_(event, data);
+    ESP_LOGW(TAG, "多次尝试连接失败");
+    wifi_station.Stop();
+    return false;
+}
+
+// ============ 配网模式 ============
+
+// 统一凭证验证器
+static auto credential_validator = [](const std::string& ssid, const std::string& password, std::string& error) {
+    auto result = WifiStation::GetInstance().TryConnectAndSave(ssid, password, 10000);
+    if (!result.success) {
+        error = "Connection failed";
+        return false;
     }
-}
+    return true;
+};
 
-void WifiBoard::SetNetworkEventCallback(NetworkEventCallback callback) {
-    network_event_callback_ = std::move(callback);
-}
+bool WifiBoard::StartConfigMode(ConfigMode mode, bool is_switch) {
+    std::string show_name = GetDeviceShowName();
+    bool success = false;
 
-void WifiBoard::OnWifiConnectTimeout(void* arg) {
-    auto* board = static_cast<WifiBoard*>(arg);
-    ESP_LOGW(TAG, "WiFi connection timeout, entering config mode");
-
-    WifiManager::GetInstance().StopStation();
-    board->StartWifiConfigMode();
-}
-
-void WifiBoard::StartWifiConfigMode() {
-    in_config_mode_ = true;
-    // Transition to wifi configuring state
-    Application::GetInstance().SetDeviceState(kDeviceStateWifiConfiguring);
-
-    // 读取默认配网模式：Settings("wifi").blufi=1 走 BLUFI，=0 走 AP
-    // 未编译 BLUFI 支持时强制 AP；首次启动默认 BLUFI 优先（小程序主流程）
-    ConfigMode mode = ConfigMode::AP;
-#ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
-    {
-        Settings settings("wifi", false);
-        mode = settings.GetInt("blufi", 1) ? ConfigMode::BLUFI : ConfigMode::AP;
-    }
-#endif
-
-    if (!StartConfigMode(mode)) {
-        // BLUFI 失败已在 StartConfigMode 内部降级到 AP；这里兜底处理编译缺失等极端场景
-        ESP_LOGE(TAG, "StartConfigMode 失败，无可用配网模式");
-    }
-}
-
-// 双击切换配网模式：在 Application 主循环里延迟执行 SwitchConfigMode，
-// 避免在 LVGL 事件回调中直接调用（SwitchConfigMode 内有 vTaskDelay 300ms + flash op）。
-std::function<void()> WifiBoard::MakeSwitchCallback() {
-    return [this]() {
-        Application::GetInstance().Schedule([this]() {
-            SwitchConfigMode();
-        });
-    };
-}
-
-bool WifiBoard::StartConfigMode(ConfigMode mode) {
-    current_config_mode_ = mode;
-    auto& wifi_manager = WifiManager::GetInstance();
-    // AP SSID 作为通用设备识别名（如 "MyDazy-ABCD"），BLUFI 广播名、QR 载荷同步
-    std::string device_name = wifi_manager.GetApSsid();
-
+    ESP_LOGI(TAG, "启动%s配网: %s", mode == ConfigMode::BLUFI ? "蓝牙" : "热点", show_name.c_str());
     if (mode == ConfigMode::BLUFI) {
-#ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
-        ESP_LOGI(TAG, "启动 BLUFI 配网，设备名: %s", device_name.c_str());
-        // 进入蓝牙配网音效提示（init 前播，让用户在 BLE 初始化期间就感知）
-        Application::GetInstance().PlaySound(Lang::Sounds::OGG_BLECONFIG);
-        // ⚠️ BLE controller init 触发 flash read → 禁用 cache；此时 LVGL 若在渲染
-        //    PSRAM framebuffer 会阻塞 IDLE1 导致 Task WDT。lvgl_port_lock 强制 LVGL
-        //    暂停渲染，让它等锁而不是卡在 PSRAM。超时 1s 后仍继续（记录警告）。
+        Application::GetInstance().Alert(Lang::Strings::WIFI_CONFIG_MODE, "", "", Lang::Sounds::OGG_BLECONFIG);
+
+        auto& blufi = Blufi::GetInstance();
+        blufi.SetCredentialValidator(credential_validator);
+        // 注意：捕获 this 而不是依赖 Board::GetInstance()
+        // DualNetworkBoard 场景下 Board::GetInstance() 返回的不是 WifiBoard
+        blufi.OnConfigSuccess([this]() {
+            std::string data = Board::GetInstance().GetBoardJson();
+            Blufi::GetInstance().SendData(data.c_str(), data.length());
+            this->OnConfigSuccess();
+        });
+
         bool lvgl_locked = lvgl_port_lock(1000);
         if (!lvgl_locked) {
-            ESP_LOGW(TAG, "LVGL 锁超时，仍继续 BLUFI init（死锁风险）");
+            ESP_LOGW(TAG, "LVGL 锁超时，仍继续 Blufi 启动（有死锁风险）");
         }
-        esp_err_t ret = Blufi::GetInstance().init();
+        success = blufi.Start(show_name);
         if (lvgl_locked) lvgl_port_unlock();
+    } else {
+        Application::GetInstance().Alert(Lang::Strings::WIFI_CONFIG_MODE, "", "", Lang::Sounds::OGG_WIFICONFIG);
 
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "BLUFI init 失败: %s，降级到 AP", esp_err_to_name(ret));
-            current_config_mode_ = ConfigMode::AP;
-            return StartConfigMode(ConfigMode::AP);  // 单次降级，AP 失败不再递归
-        }
-
-        // 展示配网 QR 页（设备名作为载荷，小程序扫码后 BLE 搜索同名设备）
-        if (auto* display = GetDisplay()) {
-            display->ShowWifiQrCode(device_name.c_str(), "双击切换配网方式",
-                                    "蓝牙配网", "热点配网",
-                                    /*active_left=*/true,
-                                    MakeSwitchCallback());
-        }
-        return true;
-#else
-        ESP_LOGW(TAG, "未编译 BLUFI 支持，降级到 AP");
-        current_config_mode_ = ConfigMode::AP;
-        // 继续走下方 AP 分支
-#endif
+        auto& wifi_ap = WifiAp::GetInstance();
+        wifi_ap.SetCredentialValidator(credential_validator);
+        wifi_ap.OnConfigSuccess([this]() {
+            this->OnConfigSuccess();
+        });
+        show_name = "Ai-" + show_name;
+        wifi_ap.Start(show_name, Lang::CODE);
+        success = true;
     }
 
-    // AP 模式
-#ifdef CONFIG_USE_HOTSPOT_WIFI_PROVISIONING
-    ESP_LOGI(TAG, "启动 AP 热点配网，SSID: %s", device_name.c_str());
-    Application::GetInstance().PlaySound(Lang::Sounds::OGG_WIFICONFIG);
-    wifi_manager.StartConfigAp();
+    if (success) {
+        current_config_mode_ = mode;
+        config_initialized_ = true;
 
-    // QR 载荷 = SSID（UiDisplay 内部会按 WiFi QR 标准包装 WIFI:T:nopass;S:...）
-    // hint 行显示 web 配网 URL，用户可手动输入
-    Application::GetInstance().Schedule([this, device_name]() {
-        if (auto* display = GetDisplay()) {
-            std::string hint = WifiManager::GetInstance().GetApWebUrl();
-            display->ShowWifiQrCode(device_name.c_str(), hint.c_str(),
-                                    "蓝牙配网", "热点配网",
-                                    /*active_left=*/false,
-                                    MakeSwitchCallback());
+        // 显示配网 UI 页面
+        auto display = Board::GetInstance().GetDisplay();
+        if (display) {
+            if (mode == ConfigMode::BLUFI) {
+                // 蓝牙配网：显示配网页面（含 network.png 图片）
+                std::string hint = "微信扫码配网：" + show_name;
+                display->ShowWifiQrCode("blufi", hint.c_str(),
+                    "蓝牙配网", "热点配网", true);
+            } else {
+                // 热点配网：生成 WiFi QR 码
+                display->ShowWifiQrCode(show_name.c_str(),
+                    ("连接热点: " + show_name).c_str(),
+                    "蓝牙配网", "热点配网", false);
+            }
         }
-    });
-    return true;
-#else
-    ESP_LOGE(TAG, "未编译 HOTSPOT 支持，无可用配网方式");
-    return false;
-#endif
+    }
+
+    return success;
 }
 
 void WifiBoard::StopConfigMode() {
-    // 先隐藏 QR 页（解除 LVGL 双击监听，避免 stop 过程中触发切换回调）
-    if (auto* display = GetDisplay()) {
-        display->HideWifiQrCode();
+    if (!config_initialized_) return;
+
+    ESP_LOGI(TAG, "停止配网模式");
+
+    if (current_config_mode_ == ConfigMode::AP) {
+        WifiAp::GetInstance().Stop();
+    } else {
+        Blufi::GetInstance().Stop();
     }
 
-    if (current_config_mode_ == ConfigMode::BLUFI) {
-#ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
-        ESP_LOGI(TAG, "停止 BLUFI 配网");
-        // 同 init：deinit 也涉及 BT controller flash op，LVGL 锁保护
-        bool lvgl_locked = lvgl_port_lock(1000);
-        Blufi::GetInstance().deinit();
-        if (lvgl_locked) lvgl_port_unlock();
-#endif
-    } else {
-#ifdef CONFIG_USE_HOTSPOT_WIFI_PROVISIONING
-        ESP_LOGI(TAG, "停止 AP 热点配网");
-        WifiManager::GetInstance().StopConfigAp();
-#endif
-    }
+    config_initialized_ = false;
+    vTaskDelay(pdMS_TO_TICKS(300));
 }
 
 void WifiBoard::SwitchConfigMode() {
-    if (!in_config_mode_) {
-        ESP_LOGW(TAG, "非配网状态，忽略切换请求");
+    auto& app = Application::GetInstance();
+    if (app.GetDeviceState() != kDeviceStateWifiConfiguring) {
+        ESP_LOGW(TAG, "非配网状态，无法切换");
         return;
     }
-    // 切换互斥：上一次切换还在跑（vTaskDelay 300ms + flash op + BLE/AP init 耗时 1~3s），
-    // 期间用户再双击会再次 Schedule，旧逻辑会顺序执行第二次切换，导致状态机被反复推翻。
-    bool expected = false;
-    if (!switching_config_mode_.compare_exchange_strong(expected, true)) {
-        ESP_LOGW(TAG, "正在切换配网模式中，忽略重复请求");
-        return;
-    }
-    // RAII 释放互斥标志，所有出口路径都安全
-    struct SwitchGuard {
-        std::atomic<bool>& flag;
-        ~SwitchGuard() { flag.store(false); }
-    } guard{switching_config_mode_};
 
+    ConfigMode new_mode = (current_config_mode_ == ConfigMode::BLUFI) ? ConfigMode::AP : ConfigMode::BLUFI;
     ConfigMode old_mode = current_config_mode_;
-    ConfigMode new_mode = (old_mode == ConfigMode::BLUFI) ? ConfigMode::AP : ConfigMode::BLUFI;
 
     ESP_LOGI(TAG, "===== 切换配网模式: %s -> %s =====",
-             old_mode == ConfigMode::BLUFI ? "BLUFI" : "AP",
-             new_mode == ConfigMode::BLUFI ? "BLUFI" : "AP");
+        old_mode == ConfigMode::BLUFI ? "蓝牙" : "热点",
+        new_mode == ConfigMode::BLUFI ? "蓝牙" : "热点");
 
-    // 过渡提示：状态栏短时通知，告知用户正在切换
-    // （HideWifiQrCode 在 StopConfigMode 里会先把 QR 清掉，屏幕短暂空白，
-    //  用 notification 填补视觉间隙，避免用户以为死机）
-    if (auto* display = GetDisplay()) {
-        display->ShowNotification(
-            new_mode == ConfigMode::BLUFI ? "切换到蓝牙配网..." : "切换到热点配网...",
-            2000);
-    }
-
+    // 1. 停止当前配网模式
+    ESP_LOGI(TAG, "[1/4] 停止当前配网...");
     StopConfigMode();
-    vTaskDelay(pdMS_TO_TICKS(300));  // 等 BLE/AP 资源彻底释放
 
-    // 先持久化，启动失败时再回滚（避免启动过程中用户重启导致状态丢失）
-    {
-        Settings settings("wifi", true);
-        settings.SetInt("blufi", new_mode == ConfigMode::BLUFI ? 1 : 0);
+    auto& wifi = WifiStation::GetInstance();
+
+    // 2. 切换到蓝牙前，先初始化 BLE 控制器和切换 WiFi 模式
+    if (new_mode == ConfigMode::BLUFI) {
+        // 只播音效，不调 Alert（Alert 会在非 LVGL 线程获取 display 锁超时）
+        Application::GetInstance().PlaySound(Lang::Sounds::OGG_BLE_CONFIG);
+
+        // 2.1 初始化 BLE 控制器（如果未初始化）
+        auto& blufi = Blufi::GetInstance();
+        if (!blufi.IsControllerInitialized()) {
+            ESP_LOGI(TAG, "[2/5] 初始化 BLE 控制器");
+            // ⚠️ 关键：BLE 控制器初始化涉及 flash read（加载 firmware）→ 禁用 cache
+            // 期间 LVGL 若在渲染，访问 PSRAM buffer 会阻塞 10+ 秒 → taskLVGL 持锁饿死 IDLE1 → Task WDT
+            // 修复：lvgl_port_lock 强制 LVGL 暂停渲染，让它在等锁而不是在 PSRAM 阻塞
+            bool lvgl_locked = lvgl_port_lock(1000);  // 1s 获取锁
+            if (!lvgl_locked) {
+                ESP_LOGW(TAG, "LVGL 锁超时，仍继续 BLE 初始化（有死锁风险）");
+            }
+            bool ok = blufi.InitializeController();
+            if (lvgl_locked) lvgl_port_unlock();
+
+            if (!ok) {
+                ESP_LOGE(TAG, "BLE 控制器初始化失败，无法切换到 Blufi");
+                new_mode = ConfigMode::AP;  // 降级到 AP 模式
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(200));
+                ESP_LOGI(TAG, "✅ BLE 控制器就绪");
+            }
+        }
+
+        // 2.2 切换 WiFi 到 STA 模式（避免 APSTA 与蓝牙冲突）
+        if (new_mode == ConfigMode::BLUFI && wifi.GetMode() == WifiMode::APSTA) {
+            ESP_LOGI(TAG, "[3/5] WiFi切换到STA模式");
+            wifi.SetMode(WifiMode::STA);
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+    } else {
+        Application::GetInstance().PlaySound(Lang::Sounds::OGG_WIFI_CONFIG);
+
+        // 切换到AP模式：确保WiFi已初始化（BLUFI模式下WiFi可能未启动）
+        if (!wifi.IsInitialized()) {
+            ESP_LOGI(TAG, "[2/5] 初始化 WiFi（从蓝牙切换）");
+            wifi.SetScanOnlyMode(true);
+            // 同理：WiFi 初始化涉及 phy_init flash 读取 → 禁用 cache → LVGL 阻塞
+            bool lvgl_locked = lvgl_port_lock(1000);
+            if (!lvgl_locked) {
+                ESP_LOGW(TAG, "LVGL 锁超时，仍继续 WiFi 初始化");
+            }
+            wifi.Start();
+            if (lvgl_locked) lvgl_port_unlock();
+            vTaskDelay(pdMS_TO_TICKS(500));
+            if (!wifi.IsInitialized()) {
+                ESP_LOGE(TAG, "WiFi 初始化失败，无法切换到 AP 模式");
+                // 回退到蓝牙模式
+                new_mode = old_mode;
+            }
+        } else {
+            ESP_LOGI(TAG, "[2/5] WiFi已就绪");
+        }
     }
 
-    if (!StartConfigMode(new_mode)) {
-        ESP_LOGW(TAG, "切换到 %s 失败，回退", new_mode == ConfigMode::BLUFI ? "BLUFI" : "AP");
-        Settings settings("wifi", true);
+    // 3. 保存配网模式设置
+    ESP_LOGI(TAG, "[4/5] 保存配网设置");
+    Settings settings("wifi", true);
+    settings.SetInt("blufi", new_mode == ConfigMode::BLUFI ? 1 : 0);
+
+    // 4. 启动新配网模式
+    ESP_LOGI(TAG, "[5/5] 启动%s配网", new_mode == ConfigMode::BLUFI ? "Blufi" : "AP");
+    if (!StartConfigMode(new_mode, true)) {
+        ESP_LOGW(TAG, "切换失败，回退到%s", old_mode == ConfigMode::BLUFI ? "Blufi" : "AP");
         settings.SetInt("blufi", old_mode == ConfigMode::BLUFI ? 1 : 0);
         vTaskDelay(pdMS_TO_TICKS(300));
-        StartConfigMode(old_mode);
+        StartConfigMode(old_mode, true);
     }
+
+    ESP_LOGI(TAG, "配网切换完成");
 }
 
 void WifiBoard::EnterWifiConfigMode() {
-    ESP_LOGI(TAG, "EnterWifiConfigMode called");
-    GetDisplay()->ShowNotification(Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
+    auto& app = Application::GetInstance();
+    app.SetDeviceState(kDeviceStateWifiConfiguring);
+
+    Settings settings("wifi", true);
+    ConfigMode mode = settings.GetInt("blufi", 1) ? ConfigMode::BLUFI : ConfigMode::AP;
+
+    // 【架构优化】BLUFI模式：BLE先广播 → WiFi延迟到BLE连接后
+    // AP模式：WiFi先初始化 → 启动AP热点
+
+    if (mode == ConfigMode::BLUFI) {
+        // BLUFI模式：仅初始化BLE，WiFi延迟到BLE_CONNECT回调中
+        ESP_LOGI(TAG, "【1/2】初始化 BLE 控制器");
+        auto& blufi = Blufi::GetInstance();
+        if (!blufi.IsControllerInitialized()) {
+            // ⚠️ 锁 LVGL 避免 BLE firmware flash 加载期间 PSRAM 访问死锁（同 SwitchConfigMode）
+            bool lvgl_locked = lvgl_port_lock(1000);
+            bool ok = blufi.InitializeController();
+            if (lvgl_locked) lvgl_port_unlock();
+
+            if (!ok) {
+                ESP_LOGE(TAG, "BLE 控制器初始化失败，切换到 AP 模式");
+                mode = ConfigMode::AP;
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(200));
+            }
+        }
+
+        if (mode == ConfigMode::BLUFI) {
+            // 立即启动BLE广播，手机可以快速发现设备
+            ESP_LOGI(TAG, "【2/2】启动 Blufi 广播（WiFi将在手机连接后初始化）");
+            if (!StartConfigMode(mode)) {
+                ESP_LOGW(TAG, "Blufi启动失败，切换到AP");
+                mode = ConfigMode::AP;
+            }
+        }
+    }
+
+    if (mode == ConfigMode::AP) {
+        // AP模式：需要先初始化WiFi
+        ESP_LOGI(TAG, "【1/2】初始化 WiFi");
+        auto& wifi = WifiStation::GetInstance();
+        wifi.SetScanOnlyMode(true);
+        if (!wifi.IsInitialized()) {
+            wifi.Start();
+            vTaskDelay(pdMS_TO_TICKS(500));
+            if (!wifi.IsInitialized()) {
+                ESP_LOGE(TAG, "WiFi 初始化失败，无法进入配网模式");
+                app.Alert("WiFi 错误", "初始化失败", "", "");
+                return;
+            }
+        }
+        ESP_LOGI(TAG, "【2/2】启动 AP 配网");
+        StartConfigMode(ConfigMode::AP);
+    }
+
+    // 【P1改进】添加配网超时机制（10分钟）
+    const int CONFIG_TIMEOUT_SECONDS = 600;  // 10 分钟
+    int elapsed_seconds = 0;
+
+    // 等待配网完成或超时
+    while (wifi_config_mode_ && elapsed_seconds < CONFIG_TIMEOUT_SECONDS) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        elapsed_seconds++;
+
+        // 每分钟打印一次进度
+        if (elapsed_seconds % 60 == 0) {
+            ESP_LOGI(TAG, "配网进行中... (%d/%d 分钟)",
+                     elapsed_seconds / 60, CONFIG_TIMEOUT_SECONDS / 60);
+        }
+    }
+
+    if (wifi_config_mode_) {
+        ESP_LOGW(TAG, "配网超时（%d 分钟），退出配网模式", CONFIG_TIMEOUT_SECONDS / 60);
+        StopConfigMode();
+        wifi_config_mode_ = false;
+        auto& wifi = WifiStation::GetInstance();
+        wifi.SetScanOnlyMode(false);
+        if (wifi.IsInitialized()) {
+            wifi.SetMode(WifiMode::STA);
+        }
+        app.Alert("配网超时", "请重试", "", "");
+
+        // 配网超时，进入深度休眠（避免无WiFi连接下继续启动流程）
+        ESP_LOGW(TAG, "配网超时，3秒后进入深度休眠");
+        vTaskDelay(pdMS_TO_TICKS(3000));  // 等待提示音播放
+        Board::GetInstance().EnterDeepSleep(true);
+        // 不会执行到这里（EnterDeepSleep 内部调用 esp_deep_sleep_start）
+    } else {
+        ESP_LOGI(TAG, "配网完成");
+    }
+}
+
+// ============ 网络启动 ============
+
+void WifiBoard::StartNetwork() {
+    // 强制进入配网模式
+    if (wifi_config_mode_) {
+        EnterWifiConfigMode();
+        return;
+    }
+
+    // 无凭证直接进入配网
+    auto& ssid_manager = SsidManager::GetInstance();
+    if (ssid_manager.GetSsidList().empty()) {
+        ESP_LOGI(TAG, "无WiFi凭证，进入配网");
+        wifi_config_mode_ = true;
+        EnterWifiConfigMode();
+        return;
+    }
+
+    // 智能联网（扫描+匹配+重试）
+    if (!SmartConnect()) {
+        ESP_LOGW(TAG, "智能联网失败，进入配网");
+        wifi_config_mode_ = true;
+        EnterWifiConfigMode();
+    } else {
+        // WiFi 连通，本次启动肯定不再进配网 → 释放 BT 静态 .bss/.data 约 30-50KB 内部 RAM
+        // （BT 从未 init，直接 release；若后续用户触发进配网会先 esp_restart，安全）
+        Blufi::ReleaseStaticMem();
+    }
+}
+
+// ============ 配网成功 ============
+
+void WifiBoard::OnConfigSuccess() {
+    // 防重入：SwitchConfigMode 或多次回调可能同时触发
+    if (!config_initialized_) {
+        ESP_LOGW(TAG, "配网已停止，忽略重复回调");
+        return;
+    }
+
+    ESP_LOGI(TAG, "===== 配网成功 =====");
 
     auto& app = Application::GetInstance();
-    auto state = app.GetDeviceState();
+    auto& wifi = WifiStation::GetInstance();
 
-    if (state == kDeviceStateSpeaking || state == kDeviceStateListening || state == kDeviceStateIdle) {
-        // Reset protocol (close audio channel, reset protocol)
-        Application::GetInstance().ResetProtocol();
-
-        xTaskCreate([](void* arg) {
-            auto* board = static_cast<WifiBoard*>(arg);
-
-            // Wait for 1 second to allow speaking to finish gracefully
-            vTaskDelay(pdMS_TO_TICKS(1000));
-
-            // Stop any ongoing connection attempt
-            esp_timer_stop(board->connect_timer_);
-            WifiManager::GetInstance().StopStation();
-
-            // Enter config mode
-            board->StartWifiConfigMode();
-
-            vTaskDelete(NULL);
-        }, "wifi_cfg_delay", 4096, this, 2, NULL);
-        return;
+    // 检查连接状态
+    if (!wifi.IsConnected()) {
+        ESP_LOGW(TAG, "WiFi未连接");
+    } else {
+        ESP_LOGI(TAG, "已连接: %s (%s)", wifi.GetSsid().c_str(), wifi.GetIpAddress().c_str());
     }
 
-    if (state != kDeviceStateStarting) {
-        ESP_LOGE(TAG, "EnterWifiConfigMode called but device state is not starting or speaking, device state: %d", state);
-        return;
-    }
+    app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "", "", Lang::Sounds::OGG_SUCCESS);
 
-    // Stop any ongoing connection attempt
-    esp_timer_stop(connect_timer_);
-    WifiManager::GetInstance().StopStation();
+    xTaskCreate([](void* arg) {
+        auto* self = static_cast<WifiBoard*>(arg);
 
-    StartWifiConfigMode();
+        // 1. 等待提示音 + BLE数据发送完成
+        vTaskDelay(pdMS_TO_TICKS(2000));
+
+        // 2. 停止配网服务（BLE 主机栈 + 控制器清理，内部幂等）
+        ESP_LOGI(TAG, "停止配网服务");
+        self->StopConfigMode();
+
+        // 3. 额外等待让 BLE 资源彻底释放
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // 4. 重启设备
+        //    原因：配网期间 BLE + WiFi + 提示音等模块已占用大量 RAM，继续走
+        //    SetDeviceState(idle) → OTA → MQTT 流程时内部 RAM 会跌到 ~57KB，
+        //    触达 60KB 红线；NVS flash op 禁用 cache 时 PSRAM 栈任务
+        //    （opus_codec/cdc_console/audio_detection）会 Double exception
+        //    (SP=0x60100000)。重启后 WiFi 凭证已保存，走正常 SmartConnect
+        //    流程，RAM 干净不会崩溃。
+        ESP_LOGI(TAG, "===== 配网成功，重启设备以释放资源 =====");
+        self->wifi_config_mode_ = false;
+        Application::GetInstance().Reboot();  // 内部 esp_restart() 不返回
+
+        vTaskDelete(NULL);
+    }, "config_done", 8192, this, 5, NULL);
 }
 
-bool WifiBoard::IsInWifiConfigMode() const {
-    return WifiManager::GetInstance().IsConfigMode();
-}
+// ============ 其他方法 ============
 
 NetworkInterface* WifiBoard::GetNetwork() {
     static EspNetwork network;
@@ -379,77 +577,84 @@ NetworkInterface* WifiBoard::GetNetwork() {
 }
 
 const char* WifiBoard::GetNetworkStateIcon() {
-    auto& wifi = WifiManager::GetInstance();
-
-    if (wifi.IsConfigMode()) {
+    if (wifi_config_mode_) {
         return FONT_AWESOME_WIFI;
     }
-    if (!wifi.IsConnected()) {
+
+    auto& wifi_station = WifiStation::GetInstance();
+    if (!wifi_station.IsConnected()) {
         return FONT_AWESOME_WIFI_SLASH;
     }
 
-    int rssi = wifi.GetRssi();
-    if (rssi >= -65) {
-        return FONT_AWESOME_WIFI;
-    } else if (rssi >= -75) {
-        return FONT_AWESOME_WIFI_FAIR;
-    }
+    int8_t rssi = wifi_station.GetRssi();
+    if (rssi >= -60) return FONT_AWESOME_WIFI;
+    if (rssi >= -70) return FONT_AWESOME_WIFI_FAIR;
     return FONT_AWESOME_WIFI_WEAK;
 }
 
 std::string WifiBoard::GetBoardJson() {
-    auto& wifi = WifiManager::GetInstance();
+    auto& wifi_station = WifiStation::GetInstance();
     std::string json = R"({"type":")" + std::string(BOARD_TYPE) + R"(",)";
     json += R"("name":")" + std::string(BOARD_NAME) + R"(",)";
 
-    if (!wifi.IsConfigMode()) {
-        json += R"("ssid":")" + wifi.GetSsid() + R"(",)";
-        json += R"("rssi":)" + std::to_string(wifi.GetRssi()) + R"(,)";
-        json += R"("channel":)" + std::to_string(wifi.GetChannel()) + R"(,)";
-        json += R"("ip":")" + wifi.GetIpAddress() + R"(",)";
+    if (!wifi_config_mode_) {
+        json += R"("ssid":")" + wifi_station.GetSsid() + R"(",)";
+        json += R"("rssi":)" + std::to_string(wifi_station.GetRssi()) + R"(,)";
+        json += R"("channel":)" + std::to_string(wifi_station.GetChannel()) + R"(,)";
+        json += R"("ip":")" + wifi_station.GetIpAddress() + R"(",)";
     }
 
-    json += R"("mac":")" + SystemInfo::GetMacAddress() + R"("})";
+    json += R"("mac":")" + SystemInfo::GetMacAddress() + R"(")";
+
+    // 声学校准 acoustic JSON：当前 AudioCodec 未提供 calibration 接口，留待后续接入
+    // （189 提供 is_calibrated/mic_sensitivity 等字段，本仓库 codec 抽象层尚未同步）
+
+    json += R"(})";
     return json;
 }
 
 void WifiBoard::SetPowerSaveLevel(PowerSaveLevel level) {
-    WifiPowerSaveLevel wifi_level;
-    switch (level) {
-        case PowerSaveLevel::LOW_POWER:
-            wifi_level = WifiPowerSaveLevel::LOW_POWER;
-            break;
-        case PowerSaveLevel::BALANCED:
-            wifi_level = WifiPowerSaveLevel::BALANCED;
-            break;
-        case PowerSaveLevel::PERFORMANCE:
-        default:
-            wifi_level = WifiPowerSaveLevel::PERFORMANCE;
-            break;
+    // PERFORMANCE=禁用 PS / 其他档位=启用 PS（细粒度由 board 子类覆写）
+    WifiStation::GetInstance().SetPowerSaveMode(level != PowerSaveLevel::PERFORMANCE);
+}
+
+void WifiBoard::ResetWifiConfiguration() {
+    {
+        Settings settings("wifi", true);
+        settings.SetInt("force_ap", 1);
     }
-    WifiManager::GetInstance().SetPowerSaveLevel(wifi_level);
+    {
+        Settings boot_settings("boot", true);
+        boot_settings.SetInt("skip_welcome", 1);
+    }
+
+    ESP_LOGI(TAG, "%s", Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    Application::GetInstance().Reboot();
 }
 
 std::string WifiBoard::GetDeviceStatusJson() {
     auto& board = Board::GetInstance();
     auto root = cJSON_CreateObject();
 
-    // Audio speaker
-    auto audio_speaker = cJSON_CreateObject();
-    if (auto codec = board.GetAudioCodec()) {
-        cJSON_AddNumberToObject(audio_speaker, "volume", codec->output_volume());
+    // Audio
+    auto audio = cJSON_CreateObject();
+    auto codec = board.GetAudioCodec();
+    if (codec) {
+        cJSON_AddNumberToObject(audio, "volume", codec->output_volume());
     }
-    cJSON_AddItemToObject(root, "audio_speaker", audio_speaker);
+    cJSON_AddItemToObject(root, "audio_speaker", audio);
 
-    // Screen
+    // Screen brightness
+    auto backlight = board.GetBacklight();
     auto screen = cJSON_CreateObject();
-    if (auto backlight = board.GetBacklight()) {
+    if (backlight) {
         cJSON_AddNumberToObject(screen, "brightness", backlight->brightness());
     }
-    if (auto display = board.GetDisplay(); display && display->height() > 64) {
-        if (auto theme = display->GetTheme()) {
-            cJSON_AddStringToObject(screen, "theme", theme->name().c_str());
-        }
+    auto display = board.GetDisplay();
+    if (display && display->height() > 64) {
+        cJSON_AddStringToObject(screen, "theme",
+            display->GetTheme() ? display->GetTheme()->name().c_str() : "");
     }
     cJSON_AddItemToObject(root, "screen", screen);
 
@@ -464,16 +669,15 @@ std::string WifiBoard::GetDeviceStatusJson() {
     }
 
     // Network
-    auto& wifi = WifiManager::GetInstance();
+    auto& wifi = WifiStation::GetInstance();
     auto network = cJSON_CreateObject();
     cJSON_AddStringToObject(network, "type", "wifi");
     cJSON_AddStringToObject(network, "ssid", wifi.GetSsid().c_str());
     int rssi = wifi.GetRssi();
-    const char* signal = rssi >= -60 ? "strong" : (rssi >= -70 ? "medium" : "weak");
-    cJSON_AddStringToObject(network, "signal", signal);
+    cJSON_AddStringToObject(network, "signal", rssi >= -60 ? "strong" : (rssi >= -70 ? "medium" : "weak"));
     cJSON_AddItemToObject(root, "network", network);
 
-    // Chip temperature
+    // Chip
     float temp = 0.0f;
     if (board.GetTemperature(temp)) {
         auto chip = cJSON_CreateObject();

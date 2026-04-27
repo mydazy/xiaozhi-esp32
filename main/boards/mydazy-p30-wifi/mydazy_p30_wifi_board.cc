@@ -39,7 +39,7 @@
 #include <esp_wifi.h>
 #include <nvs_flash.h>
 #include <esp_vfs.h>
-#include <wifi_manager.h>
+#include "wifi_station.h"
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <driver/rtc_io.h>
@@ -470,7 +470,7 @@ private:
         ConfigureDeepSleepWakeupSources(enable_gyro_wakeup);
 
         // P30-WiFi 纯 WiFi 板，深睡前停 STA（StopStation 注释为 Non-blocking）
-        WifiManager::GetInstance().StopStation();
+        WifiStation::GetInstance().Stop();
         // P0-3 修复：StopStation 是异步的，立刻 deep sleep 会让 STA 没下线 →
         // AP 端要等 keepalive 超时清，且 RF 处于不一致状态。给 wifi event loop 足够时间走完
         // STA_STOP 事件链（典型 ~150-300ms），再断电源。

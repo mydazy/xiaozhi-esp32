@@ -82,6 +82,12 @@ public:
     virtual void SetPowerSaveLevel(PowerSaveLevel level) = 0;
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
+    // 重启前钩子（关音频、停网络等），AP 配网完成后 wifi_ap.cc 会调
+    virtual void PrepareForReboot() {}
+    // 设备品牌名（QR/AP SSID 前缀），子类可覆盖
+    virtual std::string GetBrandName() { return "MyDazy"; }
+    // 深度睡眠入口；非休眠板子可不实现（兜底为空，不会进 sleep）
+    virtual void EnterDeepSleep(bool enable_gyro_wakeup = true) { (void)enable_gyro_wakeup; }
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

@@ -35,7 +35,15 @@ set(SOURCES "audio/audio_codec.cc"
             "protocols/mqtt_protocol.cc"
             "protocols/websocket_protocol.cc"
             "protocols/websocket_joyai_protocol.cc"
+            "blufi/blufi.cc"
+            "blufi/blufi_init.c"
+            "blufi/blufi_security.c"
             "blufi/ibeacon.cc"
+            "wifi/wifi_station.cc"
+            "wifi/wifi_ap.cc"
+            "wifi/dns_server.cc"
+            "wifi/ssid_manager.cc"
+            "wifi/wifi_csi.cc"
             "ota_http_download.cc"
             "mcp_server.cc"
             "system_info.cc"
@@ -52,7 +60,7 @@ set(SOURCES "audio/audio_codec.cc"
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg"
     "display/ui" "display/ui/core" "display/ui/theme" "display/ui/resources" "display/ui/widgets"
-    "audio" "audio/demuxer" "protocols" "blufi")
+    "audio" "audio/demuxer" "protocols" "blufi" "wifi")
 
 # Add board common files
 list(APPEND SOURCES
@@ -145,10 +153,7 @@ else()
     list(APPEND SOURCES "audio/wake_words/esp_wake_word.cc")
 endif()
 
-# Auto Select Additional Sources
-if (CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING)
-    list(APPEND SOURCES "boards/common/blufi.cpp")
-endif ()
+# BluFi 已迁移到独立模块 main/blufi/，无需在 board common 注册
 # Select language directory according to Kconfig
 if(CONFIG_LANGUAGE_ZH_CN)
     set(LANG_DIR "zh-CN")
@@ -294,8 +299,14 @@ if(CONFIG_BOARD_TYPE_MYDAZY_P30_4G OR CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
     )
 endif()
 
+set(WIFI_CONFIG_HTML
+    ${CMAKE_CURRENT_SOURCE_DIR}/wifi/assets/wifi_configuration.html
+    ${CMAKE_CURRENT_SOURCE_DIR}/wifi/assets/wifi_configuration_done.html
+)
+
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
+                    EMBED_TXTFILES ${WIFI_CONFIG_HTML}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES
@@ -316,6 +327,12 @@ idf_component_register(SRCS ${SOURCES}
                         efuse
                         bt
                         fatfs
+                        # main/wifi、main/blufi 自维护后补全的 IDF 组件依赖
+                        nvs_flash
+                        esp_wifi
+                        esp_event
+                        esp_http_server
+                        mbedtls
                         esp_lcd_jd9853
                         esp_lcd_touch_axs5106l
                         esp_nfc_ws1850s
