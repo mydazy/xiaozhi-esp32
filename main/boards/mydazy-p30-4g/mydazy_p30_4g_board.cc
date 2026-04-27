@@ -567,11 +567,17 @@ private:
         if (status == kDeviceStateWifiConfiguring) {
             static std::atomic_flag switching = ATOMIC_FLAG_INIT;
             if (!switching.test_and_set()) {
-                xTaskCreate([](void*) {
-                    static_cast<WifiBoard&>(Board::GetInstance()).SwitchConfigMode();
+                xTaskCreate([](void* arg) {
+                    auto* self = static_cast<MyDazyP30_4GBoard*>(arg);
+                    auto* wifi = dynamic_cast<WifiBoard*>(&self->GetCurrentBoard());
+                    if (wifi != nullptr) {
+                        wifi->SwitchConfigMode();
+                    } else {
+                        ESP_LOGW(TAG, "SwitchConfigMode skip: current board is not WifiBoard");
+                    }
                     switching.clear();
                     vTaskDelete(nullptr);
-                }, "config_switch", 4096, nullptr, 3, nullptr);
+                }, "config_switch", 4096, this, 3, nullptr);
             }
             return;
         }
