@@ -15,6 +15,7 @@ protected:
     ConfigMode current_config_mode_ = ConfigMode::BLUFI;
     bool config_initialized_ = false;
     int switch_count_ = 0;  // 切换计数器
+    NetworkEventCallback network_event_callback_;  // application 注册的事件管道
     bool SmartConnect();
     bool StartConfigMode(ConfigMode mode, bool is_switch = false);
     bool CheckResources();
@@ -25,6 +26,9 @@ public:
     virtual void EnterWifiConfigMode();  // 长按按键 / WiFi 连接超时触发
     virtual std::string GetBoardType() override;
     virtual void StartNetwork() override;
+    virtual void SetNetworkEventCallback(NetworkEventCallback callback) override {
+        network_event_callback_ = std::move(callback);
+    }
     virtual NetworkInterface* GetNetwork() override;
     virtual const char* GetNetworkStateIcon() override;
     virtual void SetPowerSaveLevel(PowerSaveLevel level) override;

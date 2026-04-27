@@ -82,6 +82,9 @@ bool WifiBoard::SmartConnect() {
         // 等待扫描完成 + 连接（最多 SCAN_WAIT_MS）
         if (wifi_station.WaitForConnected(SCAN_WAIT_MS)) {
             ESP_LOGI(TAG, "WiFi连接成功: %s", wifi_station.GetSsid().c_str());
+            if (network_event_callback_) {
+                network_event_callback_(NetworkEvent::Connected, wifi_station.GetSsid());
+            }
             return true;
         }
 
@@ -96,6 +99,9 @@ bool WifiBoard::SmartConnect() {
         ESP_LOGI(TAG, "找到 %d 个匹配热点，等待连接...", (int)matched.size());
         if (wifi_station.WaitForConnected(CONNECT_TIMEOUT_MS)) {
             ESP_LOGI(TAG, "WiFi连接成功: %s", wifi_station.GetSsid().c_str());
+            if (network_event_callback_) {
+                network_event_callback_(NetworkEvent::Connected, wifi_station.GetSsid());
+            }
             return true;
         }
     }
