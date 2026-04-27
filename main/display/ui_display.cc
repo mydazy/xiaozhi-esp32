@@ -444,7 +444,8 @@ void UiDisplay::FinishBootAndShowClock() {
 
 void UiDisplay::ShowWifiQrCode(const char* qr_content, const char* hint,
                                 const char* left_label, const char* right_label,
-                                bool active_left) {
+                                bool active_left,
+                                std::function<void()> on_double_click) {
     DisplayLockGuard lock(this);
     HideWifiQrCode();
 
@@ -453,11 +454,21 @@ void UiDisplay::ShowWifiQrCode(const char* qr_content, const char* hint,
 
     bool is_blufi = active_left;
 
+    // 保活双击 callback；LVGL click 事件会查 wifi_qr_double_click_cb_ 是否设
+    wifi_qr_double_click_cb_ = std::move(on_double_click);
+    wifi_qr_last_click_us_   = 0;
+
     wifi_qr_overlay_ = lv_obj_create(screen);
     lv_obj_set_size(wifi_qr_overlay_, LV_HOR_RES, LV_VER_RES);
     lv_obj_align(wifi_qr_overlay_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_remove_flag(wifi_qr_overlay_, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(wifi_qr_overlay_, LV_OBJ_FLAG_CLICKABLE);
+    // 双击切换需要 CLICKABLE：手动用上次 click 时间戳 < 500ms 判定双击
+    if (wifi_qr_double_click_cb_) {
+        lv_obj_add_flag(wifi_qr_overlay_, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(wifi_qr_overlay_, OnWifiQrClicked, LV_EVENT_CLICKED, this);
+    } else {
+        lv_obj_remove_flag(wifi_qr_overlay_, LV_OBJ_FLAG_CLICKABLE);
+    }
     lv_obj_set_style_bg_color(wifi_qr_overlay_, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(wifi_qr_overlay_, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(wifi_qr_overlay_, 0, 0);
