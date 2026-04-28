@@ -13,11 +13,13 @@
 
 namespace {
 constexpr int kEs7210SlotCount = 4;
-constexpr int kPrimaryMicSlot = 0;
-constexpr int kSecondaryMicSlot = 2;
+constexpr int kPrimaryMicSlot   = 0;   // MIC1（板载主麦）
+constexpr int kSecondaryMicSlot = 2;   // MIC3（板载副麦）
+constexpr int kHeadsetMicSlot   = 3;   // MIC4（Type-C 耳机麦，经 USB_SW/MIC_SELECT 路由）
 constexpr uint32_t kEs7210ActiveMicMask =
     ESP_CODEC_DEV_MAKE_CHANNEL_MASK(kPrimaryMicSlot) |
-    ESP_CODEC_DEV_MAKE_CHANNEL_MASK(kSecondaryMicSlot);
+    ESP_CODEC_DEV_MAKE_CHANNEL_MASK(kSecondaryMicSlot) |
+    ESP_CODEC_DEV_MAKE_CHANNEL_MASK(kHeadsetMicSlot);
 }  // namespace
 
 Es7111AudioCodec::Es7111AudioCodec(
@@ -158,12 +160,19 @@ void Es7111AudioCodec::SetHeadsetMode(bool headset) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (headset == headset_mode_) return;
     headset_mode_ = headset;
-    ESP_LOGI(TAG, "Headset mode %s (output gain %s)", headset ? "ON" : "OFF",
-             headset ? "2x" : "1x");
+    // 耳机插入时 PA 由 TypecHeadset 关闭；拔出时若输出已开则恢复 PA=1
+    if (pa_pin_ != GPIO_NUM_NC && !headset && output_enabled_) {
+        gpio_set_level(pa_pin_, 1);
+    }
+    ESP_LOGI(TAG, "Headset mode %s → mic slot=%d (PA=%s)",
+             headset ? "ON" : "OFF",
+             headset ? kHeadsetMicSlot : kPrimaryMicSlot,
+             (headset || !output_enabled_) ? "off" : "on");
 }
 
 void Es7111AudioCodec::SetOutputVolume(int volume) {
-    if (pa_pin_ != GPIO_NUM_NC) {
+    // 耳机模式下 PA 由 TypecHeadset 管理，不能被 volume 复位
+    if (pa_pin_ != GPIO_NUM_NC && !headset_mode_) {
         gpio_set_level(pa_pin_, volume > 0 ? 1 : 0);
     }
     AudioCodec::SetOutputVolume(volume);
@@ -213,11 +222,15 @@ void Es7111AudioCodec::EnableOutput(bool enable) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (enable == output_enabled_) return;
 
-    if (pa_pin_ != GPIO_NUM_NC) {
+    // 耳机模式下 PA 必须保持 OFF；第二次对话 EnableOutput 不能把 PA 踩亮
+    if (pa_pin_ != GPIO_NUM_NC && !headset_mode_) {
         gpio_set_level(pa_pin_, enable ? 1 : 0);
     }
     AudioCodec::EnableOutput(enable);
-    ESP_LOGI(TAG, "Output %s (PA=%d)", enable ? "enabled" : "disabled", enable ? 1 : 0);
+    ESP_LOGI(TAG, "Output %s (PA=%d headset=%d)",
+             enable ? "enabled" : "disabled",
+             (headset_mode_ ? 0 : (enable ? 1 : 0)),
+             headset_mode_ ? 1 : 0);
 }
 
 int Es7111AudioCodec::Read(int16_t* dest, int samples) {
@@ -241,7 +254,7 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
 
     if (input_reference_ && ref_ringbuf_) {
         // 软件回采 AEC 模式：
-        //   channel 0 = MIC1 + MIC3 混合（双麦信噪比更好）
+        //   channel 0 = 麦克风信号（耳机模式用 MIC4/slot3，否则 MIC1+MIC3 混合）
         //   channel 1 = TX 回采参考（从环形缓冲区读取）
         size_t ref_bytes_needed = frames * sizeof(int16_t);
         size_t ref_bytes_got = 0;
@@ -251,10 +264,15 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
         int ref_frames = ref_data ? (int)(ref_bytes_got / sizeof(int16_t)) : 0;
 
         for (int f = 0; f < frames; f++) {
-            // Channel 0: 双麦混合
-            int32_t mixed = ((int32_t)tdm_buf_[f * kEs7210SlotCount + kPrimaryMicSlot]
-                           + (int32_t)tdm_buf_[f * kEs7210SlotCount + kSecondaryMicSlot]) / 2;
-            dest[f * 2] = (int16_t)mixed;
+            int16_t mic;
+            if (headset_mode_) {
+                mic = tdm_buf_[f * kEs7210SlotCount + kHeadsetMicSlot];
+            } else {
+                int32_t mixed = ((int32_t)tdm_buf_[f * kEs7210SlotCount + kPrimaryMicSlot]
+                               + (int32_t)tdm_buf_[f * kEs7210SlotCount + kSecondaryMicSlot]) / 2;
+                mic = (int16_t)mixed;
+            }
+            dest[f * 2] = mic;
             // Channel 1: TX 回采参考（不足部分填 0 = 静音）
             dest[f * 2 + 1] = (f < ref_frames) ? ref_data[f] : 0;
         }
@@ -263,11 +281,15 @@ int Es7111AudioCodec::Read(int16_t* dest, int samples) {
             vRingbufferReturnItem(ref_ringbuf_, ref_data);
         }
     } else {
-        // 无 AEC 回退：单声道混合
+        // 无 AEC 回退：耳机模式用 MIC4/slot3，否则双麦混合
         for (int f = 0; f < frames; f++) {
-            int32_t mixed = ((int32_t)tdm_buf_[f * kEs7210SlotCount + kPrimaryMicSlot]
-                           + (int32_t)tdm_buf_[f * kEs7210SlotCount + kSecondaryMicSlot]) / 2;
-            dest[f] = (int16_t)mixed;
+            if (headset_mode_) {
+                dest[f] = tdm_buf_[f * kEs7210SlotCount + kHeadsetMicSlot];
+            } else {
+                int32_t mixed = ((int32_t)tdm_buf_[f * kEs7210SlotCount + kPrimaryMicSlot]
+                               + (int32_t)tdm_buf_[f * kEs7210SlotCount + kSecondaryMicSlot]) / 2;
+                dest[f] = (int16_t)mixed;
+            }
         }
     }
     return samples;

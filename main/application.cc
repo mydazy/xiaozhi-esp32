@@ -417,8 +417,7 @@ void Application::CheckAssetsVersion() {
     assets.Apply();
     UiImageManager::GetInstance().LoadAll();
     display->SetChatMessage("system", "");
-    // 注：开机 logo 由 UiDisplay::SetupUI / StartBootAnimation 接管，持续显示到首次 Idle。
-    // 此处不再 SetEmotion("logo")（emoji_box 已被 SetupUI 切换为 logo image，且 chat 模式才对 emoji_label 生效）。
+    display->SetEmotion("logo");
 }
 
 void Application::CheckNewVersion() {
@@ -1078,6 +1077,15 @@ void Application::Reboot() {
     audio_service_.Stop();
 
     vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // 关背光避免重启时残留 GRAM 花屏；再切 LDO 让 LCD/音频 CODEC 真正下电复位
+    auto& board = Board::GetInstance();
+    auto* backlight = board.GetBacklight();
+    if (backlight) {
+        backlight->SetBrightness(0);
+    }
+    board.PrepareForReboot();
+
     esp_restart();
 }
 

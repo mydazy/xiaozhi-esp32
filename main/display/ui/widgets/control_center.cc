@@ -88,7 +88,7 @@ void ControlCenter::CreateUI() {
 
         // 信号图标（图片控件，统一白色）
         network_icon_ = lv_image_create(network_btn_);
-        const lv_image_dsc_t* wifi_icon = UI_IMG(IMG_FILE_SIGNAL_WIFI);
+        const lv_image_dsc_t* wifi_icon = &ui_img_icon_signal_wifi_png;
         if (wifi_icon) {
             lv_image_set_src(network_icon_, wifi_icon);
         }
@@ -114,16 +114,16 @@ void ControlCenter::CreateUI() {
     lv_obj_add_event_cb(sleep_btn_, OnSleepClicked, LV_EVENT_CLICKED, this);
 
     // 第二行：退出、音量、亮度
-    CreateGridButton(0, 1, start_x, start_y, LV_SYMBOL_CLOSE, "退出",
-                     &exit_btn_, &exit_icon_, &exit_label_, true);  // 大图标
+    CreateGridButton(0, 1, start_x, start_y, "关", "退出",
+                     &exit_btn_, &exit_icon_, &exit_label_, false, true);  // 中文"关"字
     lv_obj_set_style_bg_color(exit_btn_, CC_BTN_EXIT_COLOR, 0);
     lv_obj_add_event_cb(exit_btn_, OnExitClicked, LV_EVENT_CLICKED, this);
 
-    CreateGridButton(1, 1, start_x, start_y, "70", "音量",
+    CreateGridButton(1, 1, start_x, start_y, "70%", "音量",
                      &volume_btn_, &volume_icon_, &volume_label_, false, true);  // 中文文字
     lv_obj_add_event_cb(volume_btn_, OnVolumeClicked, LV_EVENT_CLICKED, this);
 
-    CreateGridButton(2, 1, start_x, start_y, "80", "亮度",
+    CreateGridButton(2, 1, start_x, start_y, "80%", "亮度",
                      &brightness_btn_, &brightness_icon_, &brightness_label_, false, true);  // 中文文字
     lv_obj_add_event_cb(brightness_btn_, OnBrightnessClicked, LV_EVENT_CLICKED, this);
 
@@ -290,44 +290,25 @@ void ControlCenter::UpdateButtonStyle(lv_obj_t* btn, bool active) {
 void ControlCenter::UpdateNetworkIcon() {
     if (!network_icon_) return;
 
-    const char* icon_file = nullptr;
-
-    if (network_mode_ == 0) {
-        // WiFi 模式：0-3 级信号
-        switch (signal_level_) {
-            case 3:  icon_file = IMG_FILE_SIGNAL_WIFI; break;    // 满格
-            case 2:  icon_file = IMG_FILE_SIGNAL_WIFI_2; break;  // 2格
-            case 1:  icon_file = IMG_FILE_SIGNAL_WIFI_1; break;  // 1格
-            default: icon_file = IMG_FILE_SIGNAL_WIFI_0; break;  // 无信号
-        }
-    } else {
-        // 4G 模式：0-4 级信号
-        switch (signal_level_) {
-            case 4:  icon_file = IMG_FILE_SIGNAL_4G_4; break;  // 满格
-            case 3:  icon_file = IMG_FILE_SIGNAL_4G_3; break;  // 3格
-            case 2:  icon_file = IMG_FILE_SIGNAL_4G_2; break;  // 2格
-            case 1:  icon_file = IMG_FILE_SIGNAL_4G_1; break;  // 1格
-            default: icon_file = IMG_FILE_SIGNAL_4G; break;    // 无信号
-        }
-    }
-
-    const lv_image_dsc_t* icon_dsc = UI_IMG(icon_file);
-    if (icon_dsc) {
-        lv_image_set_src(network_icon_, icon_dsc);
-    }
+    // 控制中心"切换"按钮只表达"当前是哪种联网方式"，不反映信号强度
+    // 用编译内置的满格 PNG（同主时钟状态栏那套），避免 assets 分区依赖
+    const lv_image_dsc_t* icon_dsc = (network_mode_ == 0)
+                                       ? &ui_img_icon_signal_wifi_png
+                                       : &ui_img_icon_signal_4g_4_png;
+    lv_image_set_src(network_icon_, icon_dsc);
 }
 
 void ControlCenter::UpdateVolumeLabel() {
     // 更新按钮中间的数值显示
     char buf[8];
-    snprintf(buf, sizeof(buf), "%d", current_volume_);
+    snprintf(buf, sizeof(buf), "%d%%", current_volume_);
     lv_label_set_text(volume_icon_, buf);
 }
 
 void ControlCenter::UpdateBrightnessLabel() {
     // 更新按钮中间的数值显示
     char buf[16];
-    snprintf(buf, sizeof(buf), "%d", current_brightness_);
+    snprintf(buf, sizeof(buf), "%d%%", current_brightness_);
     lv_label_set_text(brightness_icon_, buf);
 }
 

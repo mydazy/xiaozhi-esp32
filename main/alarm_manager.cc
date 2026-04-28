@@ -1,0 +1,699 @@
+#include "alarm_manager.h"
+#include "settings.h"
+#include "mcp_server.h"
+
+#include <esp_log.h>
+#include <esp_sleep.h>
+#include <sys/time.h>
+#include <cstring>
+#include <climits>
+#include <cJSON.h>
+
+#define TAG "AlarmMgr"
+
+static const char* NVS_NS = "alarms";
+static bool s_time_synced = false;
+static bool s_timer_wakeup = false;  // Timer 唤醒标志（仅此场景允许 RTC fallback）
+
+AlarmManager& AlarmManager::GetInstance() {
+    static AlarmManager instance;
+    return instance;
+}
+
+AlarmManager::AlarmManager() {
+    for (int i = 0; i < 8; i++) alarms_[i].id = i;
+
+    // P0-2: 先初始化 NVS 异步队列和 worker task, 后续 LoadAlarms
+    // 触发 CreateDefaultAlarms 时的 SaveAlarmLocked 才能 enqueue 成功
+    // 队列深度 16: 8 slot × 2 op type, 冗余 2 倍应对快速连续点击
+    nvs_queue_ = xQueueCreate(16, sizeof(AlarmNvsOp));
+    if (nvs_queue_) {
+        nvs_worker_running_.store(true);
+        xTaskCreatePinnedToCore(NvsWorkerTask, "alarm_nvs", 3584, this,
+                                2 /* 低优, 不抢实时路径 */,
+                                &nvs_worker_task_, 0 /* Core 0 */);
+    } else {
+        ESP_LOGE(TAG, "创建 NVS 队列失败, 闹钟持久化将退化为同步写");
+    }
+
+    LoadAlarms();
+}
+
+// ============================================================================
+// NVS 持久化（内部方法，调用者已持锁或在构造函数中）
+// ============================================================================
+
+void AlarmManager::LoadAlarms() {
+    if (loaded_) return;
+
+    Settings settings(NVS_NS, false);
+
+    for (int i = 0; i < 8; i++) {
+        char key[16];
+        snprintf(key, sizeof(key), "alarm_%d", i);
+
+        int32_t data = settings.GetInt(key, -1);
+        if (data < 0) continue;
+
+        slot_occupied_ |= (1 << i);
+        alarms_[i].enabled     = (data >> 24) & 0x01;
+        alarms_[i].hour        = (data >> 16) & 0x1F;
+        alarms_[i].minute      = (data >>  8) & 0x3F;
+        alarms_[i].repeat_days = data & 0x7F;
+
+        snprintf(key, sizeof(key), "msg_%d", i);
+        alarms_[i].message = settings.GetString(key, "");
+
+        if (alarms_[i].enabled) {
+            ESP_LOGI(TAG, "加载闹钟 %d: %02d:%02d repeat=0x%02X",
+                     i, alarms_[i].hour, alarms_[i].minute, alarms_[i].repeat_days);
+        }
+    }
+
+    loaded_ = true;
+
+    if (slot_occupied_ == 0) {
+        CreateDefaultAlarms();
+    }
+
+    ESP_LOGI(TAG, "闹钟加载完成，占用: 0x%02X", slot_occupied_);
+}
+
+void AlarmManager::CreateDefaultAlarms() {
+    ESP_LOGI(TAG, "首次使用，创建示例闹钟");
+
+    AlarmConfig a;
+    a.id = 0; a.enabled = false; a.hour = 7;  a.minute = 0;
+    a.repeat_days = 0x3E; a.message = "早安，新的一天开始了";
+    SaveAlarmLocked(a);
+
+    a.id = 1; a.enabled = false; a.hour = 12; a.minute = 30;
+    a.repeat_days = 0x3E; a.message = "该休息一下了";
+    SaveAlarmLocked(a);
+
+    a.id = 2; a.enabled = false; a.hour = 18; a.minute = 0;
+    a.repeat_days = 0x3E; a.message = "下班时间到，辛苦了";
+    SaveAlarmLocked(a);
+}
+
+// P0-2: 持业务锁调用，只改内存 + enqueue，不在此函数内做 NVS 写
+// 真正的 NVS 写由 NvsWorkerTask 消费队列时执行 (DoNvsSaveIn)
+bool AlarmManager::SaveAlarmLocked(const AlarmConfig& alarm) {
+    if (alarm.id >= 8) return false;
+
+    // 1. 同步更新内存 (调用者已持 mutex_)
+    alarms_[alarm.id] = alarm;
+    slot_occupied_ |= (1 << alarm.id);
+
+    ESP_LOGI(TAG, "保存闹钟 %d: %02d:%02d en=%d repeat=0x%02X",
+             alarm.id, alarm.hour, alarm.minute, alarm.enabled, alarm.repeat_days);
+
+    // 2. 异步 enqueue NVS 写
+    if (nvs_queue_ == nullptr) {
+        // 降级: 队列创建失败时同步写 (罕见, 仅 boot 失败场景)
+        Settings settings(NVS_NS, true);
+        DoNvsSaveIn(settings, alarm);
+        return true;
+    }
+    AlarmNvsOp op{AlarmNvsOpType::Save, alarm};
+    nvs_pending_.fetch_add(1, std::memory_order_acq_rel);
+    if (xQueueSend(nvs_queue_, &op, 0) != pdTRUE) {
+        nvs_pending_.fetch_sub(1, std::memory_order_acq_rel);
+        ESP_LOGE(TAG, "NVS 队列满, 闹钟 %d 写入丢失", alarm.id);
+        return false;
+    }
+    return true;
+}
+
+// P0-2: 持业务锁调用，只改内存 + enqueue
+void AlarmManager::RemoveAlarmLocked(uint8_t id) {
+    if (id >= 8) return;
+
+    // 1. 同步更新内存
+    alarms_[id] = AlarmConfig();
+    alarms_[id].id = id;
+    slot_occupied_ &= ~(1 << id);
+
+    ESP_LOGI(TAG, "删除闹钟 %d", id);
+
+    // 2. 异步 enqueue NVS 删除
+    if (nvs_queue_ == nullptr) {
+        Settings settings(NVS_NS, true);
+        DoNvsRemoveIn(settings, id);
+        return;
+    }
+    AlarmNvsOp op{AlarmNvsOpType::Remove, {}};
+    op.alarm.id = id;
+    nvs_pending_.fetch_add(1, std::memory_order_acq_rel);
+    // 队列满时丢弃 remove 影响小 (内存已清, 下次启动 LoadAlarms 读回 NVS 残留
+    // 是退化问题不是安全问题, 下次 Save 会自然覆盖)
+    if (xQueueSend(nvs_queue_, &op, 0) != pdTRUE) {
+        nvs_pending_.fetch_sub(1, std::memory_order_acq_rel);
+    }
+}
+
+int AlarmManager::FindFreeSlotLocked() const {
+    for (int i = 0; i < 8; i++) {
+        if (!IsSlotOccupied(i)) return i;
+    }
+    return -1;
+}
+
+// ============================================================================
+// 公开 CRUD（线程安全）
+// ============================================================================
+
+bool AlarmManager::AddAlarm(const AlarmConfig& alarm) {
+    if (alarm.id >= 8 || alarm.hour > 23 || alarm.minute > 59) {
+        ESP_LOGW(TAG, "无效闹钟: id=%d %02d:%02d", alarm.id, alarm.hour, alarm.minute);
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    return SaveAlarmLocked(alarm);
+}
+
+bool AlarmManager::UpdateAlarm(const AlarmConfig& alarm) {
+    return AddAlarm(alarm);
+}
+
+bool AlarmManager::DeleteAlarm(uint8_t id) {
+    if (id >= 8) return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!IsSlotOccupied(id)) return false;
+    RemoveAlarmLocked(id);
+    return true;
+}
+
+bool AlarmManager::GetAlarm(uint8_t id, AlarmConfig& out) const {
+    if (id >= 8) return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!IsSlotOccupied(id)) return false;
+    out = alarms_[id];
+    return true;
+}
+
+void AlarmManager::ClearAllAlarms() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (int i = 0; i < 8; i++) {
+        if (IsSlotOccupied(i)) RemoveAlarmLocked(i);
+    }
+    ESP_LOGI(TAG, "已清除所有闹钟");
+}
+
+int AlarmManager::AddAlarmAuto(uint8_t hour, uint8_t minute, uint8_t repeat_days,
+                               const std::string& message) {
+    if (hour > 23 || minute > 59) return -1;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    int id = FindFreeSlotLocked();
+    if (id < 0) return -1;
+
+    AlarmConfig a;
+    a.id          = static_cast<uint8_t>(id);
+    a.enabled     = true;
+    a.hour        = hour;
+    a.minute      = minute;
+    a.repeat_days = repeat_days;
+    a.message     = message;
+
+    return SaveAlarmLocked(a) ? id : -1;
+}
+
+bool AlarmManager::SetAlarmEnabled(uint8_t id, bool enabled) {
+    if (id >= 8) return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!IsSlotOccupied(id)) return false;
+    alarms_[id].enabled = enabled;
+    return SaveAlarmLocked(alarms_[id]);
+}
+
+// ============================================================================
+// 触发检查（CLOCK_TICK 每秒调用）
+// ============================================================================
+
+void AlarmManager::CheckAndTrigger() {
+    time_t now;
+    time(&now);
+    struct tm ti;
+    localtime_r(&now, &ti);
+
+    int hour   = ti.tm_hour;
+    int minute = ti.tm_min;
+    int wday   = ti.tm_wday;
+
+    // 未校时：仅 Timer 唤醒（闹钟深睡唤醒）时才用 RTC fallback
+    // 正常启动联网前 RTC 时间不可靠，不检查
+    if (!s_time_synced) {
+        if (!s_timer_wakeup || ti.tm_year + 1900 < 2024) return;
+    }
+
+    // 防重：距上次触发不足 60 秒则跳过（防 NTP 回拨重复触发）
+    if (last_trigger_time_ > 0 && (now - last_trigger_time_) < 60 &&
+        (now - last_trigger_time_) >= 0) {
+        return;
+    }
+
+    // 持锁收集触发闹钟，不调回调（避免死锁）
+    AlarmConfig triggered[8];
+    int count = 0;
+    std::function<void(const AlarmConfig&)> cb;
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        for (int i = 0; i < 8; i++) {
+            if (!IsSlotOccupied(i) || !alarms_[i].enabled) continue;
+            if (alarms_[i].hour != hour || alarms_[i].minute != minute) continue;
+
+            // 检查周几（repeat_days=0 表示一次性，任何日期都触发）
+            if (alarms_[i].repeat_days != 0 &&
+                !(alarms_[i].repeat_days & (1 << wday))) continue;
+
+            ESP_LOGI(TAG, "闹钟 %d 触发: %02d:%02d「%s」",
+                     i, hour, minute, alarms_[i].message.c_str());
+            triggered[count++] = alarms_[i];
+
+            // 一次性闹钟：触发后直接删除
+            if (alarms_[i].repeat_days == 0) {
+                RemoveAlarmLocked(i);
+                ESP_LOGI(TAG, "一次性闹钟 %d 已自动删除", i);
+            }
+        }
+
+        if (count > 0) {
+            last_trigger_time_ = now;
+            last_triggered_ = triggered[count - 1];  // 记录最近触发的
+            has_triggered_ = true;
+        }
+
+        cb = alarm_callback_;
+    }
+
+    // 锁外回调（回调可能调用 Application::Schedule/PlaySound）
+    for (int i = 0; i < count; i++) {
+        if (cb) cb(triggered[i]);
+    }
+}
+
+void AlarmManager::SetAlarmCallback(std::function<void(const AlarmConfig&)> cb) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    alarm_callback_ = cb;
+}
+
+// ============================================================================
+// 时间计算（调用者已持锁）
+// ============================================================================
+
+int AlarmManager::CalcSecondsUntil(const AlarmConfig& alarm) const {
+    if (!alarm.enabled) return INT_MAX;
+
+    time_t now;
+    time(&now);
+    struct tm ti;
+    localtime_r(&now, &ti);
+
+    int now_sec   = ti.tm_hour * 3600 + ti.tm_min * 60 + ti.tm_sec;
+    int alarm_sec = alarm.hour * 3600 + alarm.minute * 60;
+
+    // 一次性闹钟：今天剩余或明天
+    if (alarm.repeat_days == 0) {
+        int diff = alarm_sec - now_sec;
+        return (diff > 0) ? diff : diff + 86400;
+    }
+
+    // 重复闹钟：找最近匹配日（最多看 7 天）
+    for (int offset = 0; offset < 7; offset++) {
+        int check_wday = (ti.tm_wday + offset) % 7;
+        if (!(alarm.repeat_days & (1 << check_wday))) continue;
+
+        int diff = offset * 86400 + alarm_sec - now_sec;
+        if (diff > 0) return diff;
+    }
+
+    return INT_MAX;
+}
+
+// ============================================================================
+// 深睡唤醒
+// ============================================================================
+
+esp_err_t AlarmManager::ConfigureTimerWakeup() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    int min_sec = INT_MAX;
+    for (int i = 0; i < 8; i++) {
+        if (!IsSlotOccupied(i) || !alarms_[i].enabled) continue;
+        int s = CalcSecondsUntil(alarms_[i]);
+        if (s < min_sec) min_sec = s;
+    }
+
+    if (min_sec == INT_MAX) {
+        ESP_LOGI(TAG, "无启用闹钟，跳过定时唤醒");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // ========================================================================
+    // 分段睡眠策略（ESP32 无外部 RTC 晶振，内部 RC 漂移约 5%）
+    //
+    // 闹钟距今      提前量     实际睡眠       说明
+    // ─────────────────────────────────────────────────────
+    // < 35min       0s         立即唤醒       闹钟快到了
+    // 35min~4h      30min      min_sec-1800   留足联网+NTP 校时
+    // > 4h          分段 2h    7200s          每 2h 唤醒校时再继续睡
+    // ========================================================================
+
+    constexpr int ADVANCE_SHORT_SEC = 1800;   // 短睡提前 30 分钟
+    constexpr int SEGMENT_INTERVAL  = 7200;   // 分段间隔 2 小时
+    constexpr int SEGMENT_THRESHOLD = 14400;  // > 4 小时启用分段
+
+    int sleep_sec;
+
+    if (min_sec <= ADVANCE_SHORT_SEC) {
+        // 闹钟不足 30 分钟，立即唤醒
+        sleep_sec = 0;
+        ESP_LOGI(TAG, "闹钟 %d 秒后到达，立即唤醒", min_sec);
+    } else if (min_sec <= SEGMENT_THRESHOLD) {
+        // 4 小时内：提前 30 分钟唤醒（覆盖 ~12 分钟漂移 + 18 分钟联网校时）
+        sleep_sec = min_sec - ADVANCE_SHORT_SEC;
+        ESP_LOGI(TAG, "闹钟 %d 秒后，提前 %d 秒唤醒，睡 %d 秒",
+                 min_sec, ADVANCE_SHORT_SEC, sleep_sec);
+    } else {
+        // > 4 小时：分段睡眠，先睡 2 小时，唤醒后系统会自动联网校时再重新深睡
+        sleep_sec = SEGMENT_INTERVAL;
+        ESP_LOGI(TAG, "闹钟 %d 秒后（>4h），分段睡眠 %d 秒（每 2h 唤醒校时）",
+                 min_sec, sleep_sec);
+    }
+
+    if (sleep_sec == 0) {
+        // 不睡了，直接返回，让系统保持运行等待闹钟触发
+        ESP_LOGI(TAG, "闹钟临近，跳过深睡");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t ret = esp_sleep_enable_timer_wakeup((uint64_t)sleep_sec * 1000000ULL);
+    ESP_LOGI(TAG, "定时唤醒已配置: %d 秒后 (%s)", sleep_sec, esp_err_to_name(ret));
+    return ret;
+}
+
+int AlarmManager::GetSecondsToNextAlarm() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    int min_sec = INT_MAX;
+    for (int i = 0; i < 8; i++) {
+        if (!IsSlotOccupied(i) || !alarms_[i].enabled) continue;
+        int s = CalcSecondsUntil(alarms_[i]);
+        if (s < min_sec) min_sec = s;
+    }
+    return (min_sec == INT_MAX) ? -1 : min_sec;
+}
+
+// ============================================================================
+// MCP 语音控制
+// ============================================================================
+
+void AlarmManager::RegisterMcpTools() {
+    auto& mcp = McpServer::GetInstance();
+
+    mcp.AddTool("self.alarm.add",
+        "设置闹钟或提醒事件。message=提醒内容(如'起床''吃药''开会')，"
+        "hour=小时(0-23), minute=分钟(0-59), "
+        "repeat_days=重复掩码(0=仅一次,0x7F=每天,0x3E=工作日)。"
+        "重要：如果用户没说提醒什么，必须先询问'要提醒你什么事呢？'再调用。"
+        "示例：'提醒我3点开会' → message='开会',hour=15,minute=0,repeat_days=0。",
+        PropertyList({
+            Property("message", kPropertyTypeString),
+            Property("hour", kPropertyTypeInteger, 0, 23),
+            Property("minute", kPropertyTypeInteger, 0, 59),
+            Property("repeat_days", kPropertyTypeInteger, 0, 127)
+        }),
+        [this](const PropertyList& props) -> ReturnValue {
+            int id = AddAlarmAuto(
+                static_cast<uint8_t>(props["hour"].value<int>()),
+                static_cast<uint8_t>(props["minute"].value<int>()),
+                static_cast<uint8_t>(props["repeat_days"].value<int>()),
+                props["message"].value<std::string>());
+
+            if (id < 0) return std::string("添加失败，已达上限(8个)");
+
+            char msg[128];
+            snprintf(msg, sizeof(msg), "已设置提醒[%d]「%s」%02d:%02d",
+                     id, props["message"].value<std::string>().c_str(),
+                     props["hour"].value<int>(), props["minute"].value<int>());
+            return std::string(msg);
+        });
+
+    mcp.AddTool("self.alarm.remove",
+        "删除闹钟。id=闹钟ID(0-7)",
+        PropertyList({ Property("id", kPropertyTypeInteger, 0, 7) }),
+        [this](const PropertyList& props) -> ReturnValue {
+            return DeleteAlarm(props["id"].value<int>())
+                ? std::string("已删除") : std::string("闹钟不存在");
+        });
+
+    mcp.AddTool("self.alarm.list",
+        "查询闹钟列表。返回JSON含 just_triggered(刚触发的闹钟)和 alarms(全部)。"
+        "当用户唤醒词是'闹钟响了'时，必须调用此工具，根据 just_triggered.message "
+        "的内容用简短温馨的语气提醒用户。如 message='吃药' → '该吃药啦'。",
+        PropertyList(),
+        [this](const PropertyList&) -> ReturnValue {
+            std::lock_guard<std::mutex> lock(mutex_);
+            return BuildJsonLocked();
+        });
+
+    mcp.AddTool("self.alarm.set_enabled",
+        "启用/禁用闹钟。id=闹钟ID(0-7), enabled=是否启用",
+        PropertyList({
+            Property("id", kPropertyTypeInteger, 0, 7),
+            Property("enabled", kPropertyTypeBoolean)
+        }),
+        [this](const PropertyList& props) -> ReturnValue {
+            bool en = props["enabled"].value<bool>();
+            return SetAlarmEnabled(props["id"].value<int>(), en)
+                ? (en ? std::string("已启用") : std::string("已禁用"))
+                : std::string("操作失败");
+        });
+
+    mcp.AddTool("self.alarm.clear",
+        "清除所有闹钟",
+        PropertyList(),
+        [this](const PropertyList&) -> ReturnValue {
+            ClearAllAlarms();
+            return std::string("已清除所有闹钟");
+        });
+
+    ESP_LOGI(TAG, "MCP 闹钟工具已注册");
+}
+
+std::string AlarmManager::BuildJsonLocked() const {
+    cJSON* root = cJSON_CreateObject();
+    if (!root) return "{}";
+
+    cJSON* arr = cJSON_CreateArray();
+    int count = 0;
+
+    for (int i = 0; i < 8; i++) {
+        if (!IsSlotOccupied(i)) continue;
+
+        cJSON* item = cJSON_CreateObject();
+        cJSON_AddNumberToObject(item, "id", i);
+
+        char ts[8];
+        snprintf(ts, sizeof(ts), "%02d:%02d", alarms_[i].hour, alarms_[i].minute);
+        cJSON_AddStringToObject(item, "time", ts);
+        cJSON_AddBoolToObject(item, "enabled", alarms_[i].enabled);
+        cJSON_AddNumberToObject(item, "repeat_days", alarms_[i].repeat_days);
+        if (!alarms_[i].message.empty()) {
+            cJSON_AddStringToObject(item, "message", alarms_[i].message.c_str());
+        }
+        cJSON_AddItemToArray(arr, item);
+        count++;
+    }
+
+    cJSON_AddItemToObject(root, "alarms", arr);
+    cJSON_AddNumberToObject(root, "count", count);
+
+    // 最近触发的闹钟（AI 用来判断提醒内容）
+    if (has_triggered_) {
+        cJSON* trig = cJSON_CreateObject();
+        char ts[8];
+        snprintf(ts, sizeof(ts), "%02d:%02d", last_triggered_.hour, last_triggered_.minute);
+        cJSON_AddStringToObject(trig, "time", ts);
+        cJSON_AddStringToObject(trig, "message",
+            last_triggered_.message.empty() ? "闹钟" : last_triggered_.message.c_str());
+        cJSON_AddItemToObject(root, "just_triggered", trig);
+        has_triggered_ = false;  // 读一次后清除
+    }
+
+    // 下一个闹钟倒计时
+    int min_sec = INT_MAX;
+    for (int i = 0; i < 8; i++) {
+        if (!IsSlotOccupied(i) || !alarms_[i].enabled) continue;
+        int s = CalcSecondsUntil(alarms_[i]);
+        if (s < min_sec) min_sec = s;
+    }
+    if (min_sec != INT_MAX) {
+        char ns[16];
+        snprintf(ns, sizeof(ns), "%02d:%02d:%02d",
+                 min_sec / 3600, (min_sec % 3600) / 60, min_sec % 60);
+        cJSON_AddStringToObject(root, "next_alarm_in", ns);
+    } else {
+        cJSON_AddStringToObject(root, "next_alarm_in", "none");
+    }
+
+    char* str = cJSON_PrintUnformatted(root);
+    std::string result = str ? str : "{}";
+    if (str) cJSON_free(str);
+    cJSON_Delete(root);
+    return result;
+}
+
+// ============================================================================
+// 时间服务
+// ============================================================================
+
+void AlarmManager::MarkTimeSynced() {
+    if (s_time_synced) return;
+    s_time_synced = true;
+    ESP_LOGI(TAG, "时间已校准，闹钟检查已启用");
+}
+
+void AlarmManager::MarkTimerWakeup() {
+    s_timer_wakeup = true;
+    ESP_LOGI(TAG, "Timer 唤醒标记，允许 RTC fallback");
+}
+
+bool AlarmManager::IsTimeSynced() {
+    return s_time_synced;
+}
+
+std::string AlarmManager::GetTimeString() {
+    if (!s_time_synced) return "--:--:--";
+    time_t now; time(&now);
+    struct tm ti; localtime_r(&now, &ti);
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", ti.tm_hour, ti.tm_min, ti.tm_sec);
+    return buf;
+}
+
+std::string AlarmManager::GetDateString() {
+    if (!s_time_synced) return "----/--/--";
+    time_t now; time(&now);
+    struct tm ti; localtime_r(&now, &ti);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d", ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday);
+    return buf;
+}
+
+int AlarmManager::GetWeekday() {
+    if (!s_time_synced) return -1;
+    time_t now; time(&now);
+    struct tm ti; localtime_r(&now, &ti);
+    return ti.tm_wday;
+}
+
+// ============================================================================
+// P0-2: 异步 NVS worker (单例生命周期, 不退出)
+// ============================================================================
+
+// v1.9.68: 接受外部 Settings&，复用一次 open/commit 周期（批量合并提交）
+void AlarmManager::DoNvsSaveIn(Settings& settings, const AlarmConfig& alarm) {
+    int32_t data = ((alarm.enabled ? 1 : 0) << 24) |
+                   ((alarm.hour   & 0x1F)   << 16) |
+                   ((alarm.minute & 0x3F)   <<  8) |
+                   (alarm.repeat_days & 0x7F);
+
+    char key[16];
+    snprintf(key, sizeof(key), "alarm_%d", alarm.id);
+    settings.SetInt(key, data);
+
+    snprintf(key, sizeof(key), "msg_%d", alarm.id);
+    if (!alarm.message.empty()) {
+        settings.SetString(key, alarm.message);
+    } else {
+        settings.EraseKey(key);
+    }
+}
+
+void AlarmManager::DoNvsRemoveIn(Settings& settings, uint8_t id) {
+    if (id >= 8) return;
+    char key[16];
+    snprintf(key, sizeof(key), "alarm_%d", id);  settings.EraseKey(key);
+    snprintf(key, sizeof(key), "msg_%d", id);    settings.EraseKey(key);
+    snprintf(key, sizeof(key), "snd_%d", id);    settings.EraseKey(key);
+    snprintf(key, sizeof(key), "ai_%d", id);     settings.EraseKey(key);
+}
+
+// v1.9.68 批量 drain + 合并 + 单次 commit：
+// 用户连点 8 次开关 → 1 次 flash_op + 1 次 lvgl_port_lock，代替 8 次。
+// 合并规则：同一 id 后到的 op 覆盖先到的；Remove 覆盖 Save；Save 覆盖 Remove。
+void AlarmManager::NvsWorkerTask(void* arg) {
+    AlarmManager* self = static_cast<AlarmManager*>(arg);
+    AlarmNvsOp op;
+    while (self->nvs_worker_running_.load()) {
+        // 5s 超时避免 portMAX_DELAY 裸用
+        if (xQueueReceive(self->nvs_queue_, &op, pdMS_TO_TICKS(5000)) != pdTRUE) {
+            continue;
+        }
+
+        // 200ms 连击窗口：让用户连点的后续 op 堆进队列一次性合并
+        vTaskDelay(pdMS_TO_TICKS(200));
+
+        // 按 id 索引合并（0=无操作, 1=save, 2=remove）
+        uint8_t action[8] = {0};
+        AlarmConfig snapshot[8] = {};
+
+        auto apply = [&](const AlarmNvsOp& o) {
+            uint8_t id = o.alarm.id;
+            if (id >= 8) return;
+            if (o.type == AlarmNvsOpType::Save) {
+                action[id] = 1;
+                snapshot[id] = o.alarm;
+            } else {  // Remove
+                action[id] = 2;
+            }
+        };
+        apply(op);
+        uint32_t drained = 1;
+        while (xQueueReceive(self->nvs_queue_, &op, 0) == pdTRUE) {
+            apply(op);
+            drained++;
+        }
+
+        // 单次 Settings 作用域 → 析构时 1 次 lvgl_port_lock + 1 次 nvs_commit
+        {
+            Settings settings(NVS_NS, true);
+            for (uint8_t id = 0; id < 8; id++) {
+                if (action[id] == 1) {
+                    self->DoNvsSaveIn(settings, snapshot[id]);
+                } else if (action[id] == 2) {
+                    self->DoNvsRemoveIn(settings, id);
+                }
+            }
+        }
+        ESP_LOGI(TAG, "NVS flush: %u ops 合并为 1 次 commit", (unsigned)drained);
+
+        // pending 清零（FlushNvs 轮询退出）
+        uint32_t prev = self->nvs_pending_.load(std::memory_order_acquire);
+        if (prev >= drained) {
+            self->nvs_pending_.fetch_sub(drained, std::memory_order_acq_rel);
+        } else {
+            self->nvs_pending_.store(0, std::memory_order_release);
+        }
+    }
+    vTaskDelete(nullptr);
+}
+
+// v1.9.68 兜底：阻塞等 worker drain 完所有排队写（OTA/关机/深睡前调用）
+bool AlarmManager::FlushNvs(uint32_t timeout_ms) {
+    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+    while (nvs_pending_.load(std::memory_order_acquire) > 0) {
+        if ((int32_t)(deadline - xTaskGetTickCount()) <= 0) {
+            ESP_LOGW(TAG, "FlushNvs 超时 %ums，仍有 %u pending",
+                     (unsigned)timeout_ms,
+                     (unsigned)nvs_pending_.load(std::memory_order_acquire));
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    return true;
+}

@@ -300,15 +300,33 @@ private:
                     auto& app = Application::GetInstance();
                     auto state = app.GetDeviceState();
 
-                    // Player 模式下：屏幕中央 LVGL 按钮独占处理 Pause/Resume，
-                    // gesture SingleClick 不再 toggle，避免双触发互相抵消（"按了没反应"）。
+                    // MP3 播放中：单击 = 停音乐，不进入对话
                     if (MusicPlayer::GetInstance().IsPlaying()) {
-                        ESP_LOGD(TAG, "Player 模式 SingleClick 由 LVGL 按钮处理，gesture 忽略");
+                        ESP_LOGI(TAG, "单击停止 MP3 播放");
+                        MusicPlayer::GetInstance().Stop();
                         break;
                     }
 
                     if (state == kDeviceStateIdle) {
-                        // 空闲状态：单击唤醒并开始对话
+                        // 空闲状态：
+                        //  - 时钟页可见 → 进入主菜单（4 宫格）
+                        //  - 菜单已在 → 点到图标由按钮吞掉；点空白由菜单容器自回退
+                        //  - 其它场景 → 原单击唤醒对话路径兜底
+                        auto* lcd = dynamic_cast<UiDisplay*>(GetDisplay());
+                        if (lcd && lcd->IsBrainInfoVisible()) {
+                            // 关于页：空白单击不处理，只能走左上 "<" 返回
+                            break;
+                        }
+                        if (lcd && lcd->IsMenuVisible()) {
+                            // 已在菜单页：图标/空白由 LVGL 事件处理，这里不再兜底
+                            break;
+                        }
+                        if (lcd && lcd->IsClockMode()) {
+                            ESP_LOGI(TAG, "单击时钟 → 主菜单");
+                            lcd->ShowMenu();
+                            break;
+                        }
+                        // 其它 idle 场景（例如配网/激活 overlay）维持原对话唤醒逻辑
                         ESP_LOGI(TAG, "单击唤醒对话");
                         app.PlaySound(Lang::Sounds::OGG_WAKEUP);
                         vTaskDelay(pdMS_TO_TICKS(800));
@@ -322,12 +340,23 @@ private:
                 }
                 case TouchGesture::SwipeDown:
                     if (auto* lcd = dynamic_cast<UiDisplay*>(GetDisplay())) {
+                        // 关于页不响应下滑，控制中心必须走右上角 "∨"
+                        if (lcd->IsBrainInfoVisible()) break;
                         if (!lcd->IsControlCenterVisible()) lcd->ShowControlCenter();
                     }
                     break;
                 case TouchGesture::SwipeUp:
                     if (auto* lcd = dynamic_cast<UiDisplay*>(GetDisplay())) {
-                        if (lcd->IsControlCenterVisible()) lcd->HideControlCenter();
+                        // 优先级：控制中心 > 菜单。控制中心可见先关它，再次上滑才回时钟
+                        // 关于页不响应上滑，必须走左上角 "<" 返回
+                        if (lcd->IsBrainInfoVisible()) {
+                            break;
+                        }
+                        if (lcd->IsControlCenterVisible()) {
+                            lcd->HideControlCenter();
+                        } else if (lcd->IsMenuVisible()) {
+                            lcd->HideMenu();
+                        }
                     }
                     break;
                 default:
@@ -604,6 +633,7 @@ private:
                 vTaskDelay(pdMS_TO_TICKS(3000));
                 // NVS 全擦 + otadata 擦除 + 3 秒倒计时 esp_restart；LDO 复位由 ShutdownHandler 接管
                 SystemReset::DoFactoryReset();
+                app.Reboot();
                 return;
             }
 

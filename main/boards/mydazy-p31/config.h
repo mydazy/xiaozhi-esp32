@@ -13,7 +13,7 @@
 // 音频配置（ES7111 DAC + ES7210 ADC，共享 I2S duplex 总线）
 #define AUDIO_INPUT_SAMPLE_RATE  24000   // 硬件采样率 (Hz)
 #define AUDIO_OUTPUT_SAMPLE_RATE 24000   // 硬件采样率 (Hz)
-#define AUDIO_INPUT_REFERENCE    false   // 关闭 AEC 测试（排查断续问题）
+#define AUDIO_INPUT_REFERENCE    true    // 启用 AEC（软件回采参考，消除扬声器自激）
 
 // 双麦克风物理配置
 #define AUDIO_MIC_SPACING_MM     14
