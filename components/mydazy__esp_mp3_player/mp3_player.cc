@@ -325,7 +325,11 @@ void Mp3Player::DownloadLoop() {
         }
         int n = http->Read(buf, kReadChunk);
         if (n < 0) {
-            ESP_LOGW(TAG, "Download: Read error %d", n);
+            // W5 修（2026-04-29）· 弱网/网络断不能静默 break（会被下游误判为正常 EOS）
+            // 必须 EmitError 让 UI 退出 Player 模式 + Alert 用户 + 强制 abort 让 Decode/Output 立刻退出
+            ESP_LOGW(TAG, "Download: Read error %d (network broken or timeout)", n);
+            EmitError("网络中断", "音乐流读取失败");
+            abort_.store(true, std::memory_order_release);
             break;
         }
         if (n == 0) break;  // EOF
