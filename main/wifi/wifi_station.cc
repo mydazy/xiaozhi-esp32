@@ -466,6 +466,13 @@ void WifiStation::StartConnect() {
         on_connect_(ssid_);
     }
 
+    // 🔴 IDF 5.5 兼容（IDFGH-16870）：esp_wifi_set_config 在 "sta is connecting"
+    // 状态会返回 ESP_OK 但配置不生效（5.4 容忍，5.5 静默失效）。SmartConnect 重试
+    // 路径中前一次连接尝试可能未结束，必须先显式 disconnect 并等驱动状态同步。
+    esp_wifi_disconnect();
+    xEventGroupClearBits(event_group_, WIFI_EVENT_CONNECTED | WIFI_EVENT_DISCONNECTED | WIFI_EVENT_GOT_IP);
+    vTaskDelay(pdMS_TO_TICKS(200));
+
     wifi_config_t wifi_config;
     bzero(&wifi_config, sizeof(wifi_config));
     strncpy((char *)wifi_config.sta.ssid, ap_record.ssid.c_str(), sizeof(wifi_config.sta.ssid) - 1);
@@ -476,6 +483,11 @@ void WifiStation::StartConnect() {
     wifi_config.sta.channel = ap_record.channel;
     memcpy(wifi_config.sta.bssid, ap_record.bssid, 6);
     wifi_config.sta.bssid_set = true;
+    // 🟢 IDF 5.5：WPA2/WPA3 混合兼容 + SAE-H2E（部分新路由器强制 H2E）
+    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;  // 最低接受 WPA2，向上自动适配 WPA3
+    wifi_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;          // 同时支持 H2E 和 Hunting-and-Pecking
+    wifi_config.sta.pmf_cfg.capable = true;                   // PMF 可选（WPA3 强制时自动启用）
+    wifi_config.sta.pmf_cfg.required = false;
     esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_set_config failed: %s", esp_err_to_name(err));
@@ -881,8 +893,15 @@ WifiConnectResult WifiStation::TryConnect(const std::string& ssid, const std::st
     // 停止扫描
     esp_wifi_scan_stop();
 
+    // 🔴 IDF 5.5 兼容（IDFGH-16870）：先显式 disconnect 让驱动退出 "sta is connecting" 态，
+    // 否则下面 esp_wifi_set_config 会返回 ESP_OK 但配置不生效（验证器永远 timeout 失败）。
+    esp_wifi_disconnect();
+
     // 清除之前的连接状态
     xEventGroupClearBits(event_group_, WIFI_EVENT_CONNECTED | WIFI_EVENT_DISCONNECTED | WIFI_EVENT_GOT_IP);
+
+    // 等驱动状态同步（实测 IDF 5.5 至少 100ms，给 200ms 预留）
+    vTaskDelay(pdMS_TO_TICKS(200));
 
     // 配置 WiFi 连接
     wifi_config_t wifi_config = {};
@@ -890,6 +909,11 @@ WifiConnectResult WifiStation::TryConnect(const std::string& ssid, const std::st
     strncpy((char*)wifi_config.sta.password, password.c_str(), sizeof(wifi_config.sta.password) - 1);
     wifi_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
     wifi_config.sta.failure_retry_cnt = 1;  // 只尝试一次
+    // 🟢 IDF 5.5：WPA2/WPA3 混合兼容 + SAE-H2E（部分新路由器强制 H2E）
+    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    wifi_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    wifi_config.sta.pmf_cfg.capable = true;
+    wifi_config.sta.pmf_cfg.required = false;
 
     esp_err_t ret = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     if (ret != ESP_OK) {
