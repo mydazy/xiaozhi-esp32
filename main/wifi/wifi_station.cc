@@ -731,7 +731,19 @@ bool WifiStation::InitWifiDriver(WifiMode mode, const std::string& ap_ssid) {
         return false;
     }
 
-    // 创建 STA 网络接口
+    // 🔴 ESP-IDF 5.5 严格化：必须先 esp_wifi_init() 再 esp_netif_create_default_wifi_sta()。
+    // 后者内部会调 esp_wifi_set_default_wifi_sta_handlers()，要求 wifi 驱动已 init，
+    // 否则报 ESP_ERR_INVALID_STATE (0x103) → ESP_ERROR_CHECK abort。
+    // IDF 5.4 容忍顺序颠倒，5.5 不容忍 —— 升级回归。
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    cfg.nvs_enable = false;
+    esp_err_t init_ret = esp_wifi_init(&cfg);
+    if (init_ret != ESP_OK && init_ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "esp_wifi_init failed: %s", esp_err_to_name(init_ret));
+        return false;
+    }
+
+    // 创建 STA 网络接口（必须在 esp_wifi_init 之后）
     station_netif_ = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (station_netif_ == nullptr) {
         station_netif_ = esp_netif_create_default_wifi_sta();
@@ -747,11 +759,6 @@ bool WifiStation::InitWifiDriver(WifiMode mode, const std::string& ap_ssid) {
         ConfigureApInterface(ap_ssid);
     }
 #endif
-
-    // 初始化 WiFi 驱动
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    cfg.nvs_enable = false;
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
     // 注册事件处理器
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
