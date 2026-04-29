@@ -235,6 +235,21 @@ void AtUart::ReceiveTask() {
     }
 }
 
+// HTTP Binary Receive Mode 引用计数（Patch B · 2026-04-29 修引用计数语义）
+// 多 Ml307Http 实例并发时（如 MP3 下载 + OTA 上报），原单 bool 会被后退者关掉前进者，
+void AtUart::SetHttpBinaryMode(bool enabled) {
+    if (enabled) {
+        http_binary_mode_count_.fetch_add(1, std::memory_order_acq_rel);
+    } else {
+        int prev = http_binary_mode_count_.fetch_sub(1, std::memory_order_acq_rel);
+        if (prev <= 0) {
+            // 防御：不应发生（所有 Ml307Http instance Open/Close 配对）
+            http_binary_mode_count_.store(0, std::memory_order_release);
+            ESP_LOGW(TAG, "SetHttpBinaryMode(false) underflow, clamped to 0");
+        }
+    }
+}
+
 void AtUart::EventTask() {
     // This task handles parsing and event processing
     // It runs at lower priority so ReceiveTask can quickly return DMA buffers
@@ -299,13 +314,14 @@ bool AtUart::ParseResponse() {
 
         // Patch B · HTTP Binary Receive Mode（来自 189 v3.5.3 验证版）
         // 必须在 find("\r\n") 之前拦截：binary content 内可能包含 \r\n 字节，
-        // 走默认分支会被截断。仅在 http_binary_mode_=true 时启用，默认 false 不改变 HEX 行为。
+        // 走默认分支会被截断。仅在引用计数 >0 时启用，默认 0 不改变 HEX 行为。
         // EC801E 不调 SetHttpBinaryMode，此分支为 dead code 不影响 +QHTTP*/+QIURC 解析。
-        if (http_binary_mode_ && rx_buffer_.size() > 22 &&
+        const bool binary_active = http_binary_mode_count_.load() > 0;
+        if (binary_active && rx_buffer_.size() > 22 &&
             memcmp(rx_buffer_.c_str(), "+MHTTPURC: \"header\"", 19) == 0) {
             return ParseBinaryHttpHeader();
         }
-        if (http_binary_mode_ && rx_buffer_.size() > 24 &&
+        if (binary_active && rx_buffer_.size() > 24 &&
             memcmp(rx_buffer_.c_str(), "+MHTTPURC: \"content\"", 20) == 0) {
             return ParseBinaryHttpContent();
         }

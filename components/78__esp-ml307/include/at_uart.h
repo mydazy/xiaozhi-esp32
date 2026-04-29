@@ -8,6 +8,7 @@
 #include <list>
 #include <cstdlib>
 #include <memory>
+#include <atomic>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
@@ -92,9 +93,8 @@ public:
 
     // HTTP Binary Receive Mode (Patch B · 2026-04-29 · 来自 189 v3.5.3 验证版)
     // 启用后，rx 解析器识别 +MHTTPURC: "header"/"content" 前缀并按二进制长度直读，
-    // 跳过 HEX 解码，UART raw 字节直传，吞吐理论翻倍。仅 ML307 模组生效，EC801E 不受影响。
-    void SetHttpBinaryMode(bool enabled) { http_binary_mode_ = enabled; }
-    bool GetHttpBinaryMode() const { return http_binary_mode_; }
+    void SetHttpBinaryMode(bool enabled);
+    bool GetHttpBinaryMode() const { return http_binary_mode_count_.load() > 0; }
 
 private:
     gpio_num_t tx_pin_;
@@ -129,8 +129,8 @@ private:
     std::string rx_buffer_;
     std::mutex rx_buffer_mutex_;  // Mutex to protect rx_buffer_ access
 
-    // HTTP Binary Receive Mode flag (Patch B)
-    bool http_binary_mode_ = false;
+    // HTTP Binary Receive Mode 引用计数（Patch B · 2026-04-29 修引用计数语义）
+    std::atomic<int> http_binary_mode_count_{0};
 
     // Callback Functions
     std::list<UrcCallback> urc_callbacks_;
