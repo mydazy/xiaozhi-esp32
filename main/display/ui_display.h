@@ -2,6 +2,7 @@
 #define UI_DISPLAY_H
 
 #include "lcd_display.h"
+#include "../scene_type.h"
 #include <lvgl.h>
 #include <memory>
 #include <functional>
@@ -69,6 +70,15 @@ public:
     void ShowControlCenter();
     void HideControlCenter();
     bool IsControlCenterVisible() const;
+
+    /**
+     * 三维心智模型 · UI 场景维度（C）查询入口
+     * 详见 docs/p30-architecture.html § 一.5
+     *
+     * 替代 IsClockMode() / IsPlayerMode() / IsControlCenterVisible() 等散落判断。
+     * 优先级：ConfigQr（互斥独占） > Player > ControlCenter > Clock > Emoji。
+     */
+    SceneType GetCurrentScene() const;
 
 private:
     // 全局状态栏（常驻 screen 顶部，clock / chat 共享）

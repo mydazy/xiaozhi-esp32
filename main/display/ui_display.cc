@@ -739,6 +739,36 @@ bool UiDisplay::IsControlCenterVisible() const {
 }
 
 // ============================================================
+// 三维心智模型 · UI 场景维度（C）查询
+// 详见 docs/p30-architecture.html § 一.5
+//
+// 阶段 0 实现：基于现有 mode flag + DeviceState 推断，不引入新成员变量。
+// 优先级：ConfigQr（互斥独占）> Player > ControlCenter > Clock > Emoji
+// ============================================================
+SceneType UiDisplay::GetCurrentScene() const {
+    // 配网 / 激活 QR 互斥独占（L5 全屏）
+    auto state = Application::GetInstance().GetDeviceState();
+    if (state == kDeviceStateWifiConfiguring ||
+        state == kDeviceStateActivating) {
+        return SceneType::kConfigQr;
+    }
+    // MP3 播放器页（is_player_mode_ 标志）
+    if (is_player_mode_) {
+        return SceneType::kPlayer;
+    }
+    // 控制中心（懒加载 + IsVisible）
+    if (control_center_ && control_center_->IsVisible()) {
+        return SceneType::kControlCenter;
+    }
+    // 时钟主屏（Idle 默认显示）
+    if (is_clock_mode_) {
+        return SceneType::kClock;
+    }
+    // 默认对话表情（Listening / Speaking 期）
+    return SceneType::kEmoji;
+}
+
+// ============================================================
 // 音乐播放器页（极简：曲名 + Play/Pause 圆按钮 + 时间 + 进度条）
 // 布局参考上游 xiaozhi-esp32-189 player_page，去掉 prev/next 简化版。
 // ============================================================
