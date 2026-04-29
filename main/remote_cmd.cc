@@ -1,6 +1,6 @@
 #include "remote_cmd.h"
 #include "application.h"
-#include "live_companion.h"
+#include "flow_engine.h"
 #include "audio/music_player.h"
 #include "board.h"
 #include "display.h"
@@ -65,7 +65,7 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "gain") == 0) OnGain(msg);
     else if (strcmp(type, "download") == 0) OnDownload(msg);
     else if (strcmp(type, "vad_config") == 0) OnVadConfig(msg);
-    else if (strcmp(type, "live_companion") == 0) OnLiveCompanion(msg);
+    else if (strcmp(type, "flow") == 0) OnFlow(msg);
     else if (strcmp(type, "stt_url") == 0) OnSttUrl(msg);
     else if (strcmp(type, "music_play") == 0) OnMusicPlay(msg);
     else if (strcmp(type, "music_stop") == 0) OnMusicStop();
@@ -137,7 +137,7 @@ void RemoteCmd::OnTts(const cJSON* msg) {
     ESP_LOGI(TAG, "tts: %s", tts_text.c_str());
     app_->Schedule([this, tts_text = std::move(tts_text)]() {
         // 暂停直播伴侣（如果正在运行）
-        if (auto* lc = app_->GetLiveCompanion(); lc && lc->IsRunning()) {
+        if (auto* lc = app_->GetFlowEngine(); lc && lc->IsRunning()) {
             lc->Suspend();
         }
         app_->SendTextToTts(tts_text);
@@ -155,7 +155,7 @@ void RemoteCmd::OnTtai(const cJSON* msg) {
     ESP_LOGI(TAG, "ttai: %s", ai_text.c_str());
     app_->Schedule([this, ai_text = std::move(ai_text)]() {
         // 暂停直播伴侣（如果正在运行）
-        if (auto* lc = app_->GetLiveCompanion(); lc && lc->IsRunning()) {
+        if (auto* lc = app_->GetFlowEngine(); lc && lc->IsRunning()) {
             lc->Suspend();
         }
         app_->SendTextToAI(ai_text);
@@ -258,12 +258,12 @@ void RemoteCmd::OnVadConfig(const cJSON* msg) {
     });
 }
 
-void RemoteCmd::OnLiveCompanion(const cJSON* msg) {
+void RemoteCmd::OnFlow(const cJSON* msg) {
     auto action_item = cJSON_GetObjectItem(msg, "action");
     const char* action = cJSON_IsString(action_item) ? action_item->valuestring : "";
-    auto* lc = app_->GetLiveCompanion();
+    auto* lc = app_->GetFlowEngine();
     if (!lc) {
-        ESP_LOGW(TAG, "LiveCompanion not initialized");
+        ESP_LOGW(TAG, "FlowEngine not initialized");
         return;
     }
 
@@ -272,7 +272,7 @@ void RemoteCmd::OnLiveCompanion(const cJSON* msg) {
         auto url_item = cJSON_GetObjectItem(msg, "url");
         if (cJSON_IsString(url_item) && url_item->valuestring[0] != '\0') {
             std::string url = url_item->valuestring;
-            ESP_LOGI(TAG, "live_companion start: %s", url.c_str());
+            ESP_LOGI(TAG, "flow start: %s", url.c_str());
             app_->Schedule([lc, url = std::move(url)]() {
                 lc->Start(url);
             });
@@ -285,7 +285,7 @@ void RemoteCmd::OnLiveCompanion(const cJSON* msg) {
             if (script_str) {
                 std::string script_json = script_str;
                 cJSON_free(script_str);
-                ESP_LOGI(TAG, "live_companion start: inline script (%d bytes)",
+                ESP_LOGI(TAG, "flow start: inline script (%d bytes)",
                          (int)script_json.size());
                 app_->Schedule([lc, script_json = std::move(script_json)]() {
                     lc->StartWithScript(script_json);
@@ -293,12 +293,12 @@ void RemoteCmd::OnLiveCompanion(const cJSON* msg) {
                 return;
             }
         }
-        ESP_LOGW(TAG, "live_companion start: missing url or script");
+        ESP_LOGW(TAG, "flow start: missing url or script");
     } else if (strcmp(action, "stop") == 0) {
-        ESP_LOGI(TAG, "live_companion stop");
+        ESP_LOGI(TAG, "flow stop");
         app_->Schedule([lc]() { lc->Stop(); });
     } else if (strcmp(action, "restart") == 0) {
-        ESP_LOGI(TAG, "live_companion restart");
+        ESP_LOGI(TAG, "flow restart");
         app_->Schedule([lc]() { lc->Restart(); });
     } else if (strcmp(action, "status") == 0) {
         app_->Schedule([this, lc]() {
@@ -309,10 +309,10 @@ void RemoteCmd::OnLiveCompanion(const cJSON* msg) {
                      state_names[state_idx],
                      lc->GetCurrentIndex() + 1, lc->GetTotalItems());
             app_->Alert("直播伴侣", buf, "", "");
-            ESP_LOGI(TAG, "live_companion: %s", buf);
+            ESP_LOGI(TAG, "flow: %s", buf);
         });
     } else {
-        ESP_LOGW(TAG, "live_companion: unknown action: %s", action);
+        ESP_LOGW(TAG, "flow: unknown action: %s", action);
     }
 }
 
@@ -466,7 +466,7 @@ void RemoteCmd::OnMusicPlay(const cJSON* msg) {
         }
         app.GetAudioService().ResetDecoder();
         // 暂停直播伴侣
-        if (auto* lc = app.GetLiveCompanion(); lc && lc->IsRunning()) {
+        if (auto* lc = app.GetFlowEngine(); lc && lc->IsRunning()) {
             lc->Suspend();
         }
 

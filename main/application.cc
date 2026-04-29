@@ -13,12 +13,13 @@
 #include "assets.h"
 #include "settings.h"
 #include "remote_cmd.h"
-#include "live_companion.h"
+#include "flow_engine.h"
 #include "device_state_event.h"
 #include "audio/music_player.h"
 
 #include <cstring>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
@@ -108,7 +109,7 @@ void Application::Initialize() {
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_STATE_CHANGED);
-        // 广播设备状态变化事件（LiveCompanion 等订阅方依赖此回调）
+        // 广播设备状态变化事件（FlowEngine 等订阅方依赖此回调）
         DeviceStateEventManager::GetInstance().PostStateChangeEvent(old_state, new_state);
     });
 
@@ -177,13 +178,14 @@ void Application::Initialize() {
         }
     });
 
-    vTaskDelay(pdMS_TO_TICKS(1500));
-
     // Start network asynchronously
     board.StartNetwork();
 
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
+
+    // 启动期内存基线打点（§ 四.3 策略 1）
+    RecordBootMemoryBaseline();
 }
 
 void Application::Run() {
@@ -273,10 +275,15 @@ void Application::Run() {
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
-        
+
             // Print debug info every 10 seconds
             if (clock_ticks_ % 10 == 0) {
                 SystemInfo::PrintHeapStats();
+            }
+
+            // 周期内存监控 + 碎片告警（§ 四.3 策略 2/3 · 每 60 秒）
+            if (clock_ticks_ % 60 == 0) {
+                MonitorMemoryHealth();
             }
         }
     }
@@ -504,7 +511,7 @@ void Application::InitializeProtocol() {
 
     // 初始化远程命令处理器和直播伴侣
     remote_cmd_ = std::make_unique<RemoteCmd>(this);
-    live_companion_ = std::make_unique<LiveCompanion>(this);
+    flow_engine_ = std::make_unique<FlowEngine>(this);
 
     if (ota_->HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
@@ -1251,5 +1258,96 @@ void Application::ResetProtocol() {
         // Reset protocol
         protocol_.reset();
     });
+}
+
+// ============================================================================
+// 三维心智模型查询 API（详见 docs/p30-architecture.html § 一.5）
+//
+// 阶段 0：基于现有 flag 推断，不引入新成员变量、不改任何现有逻辑。
+// 后续阶段：由各 Activity 模块显式调 SetActivity() / SetAudioSource()。
+// ============================================================================
+
+ActivityType Application::GetCurrentActivity() const {
+    // Music 优先级最高（占用音频通道，CloseAudioChannel 实现独占）
+    if (MusicPlayer::GetInstance().IsPlaying()) {
+        return ActivityType::kMusic;
+    }
+    // Flow（原 LiveCompanion / 已重命名为 FlowEngine）：脚本驱动的会话型业务
+    if (flow_engine_ && flow_engine_->IsRunning()) {
+        return ActivityType::kFlow;
+    }
+    // Chat：当处于对话相关状态时认为是 Chat 业务
+    auto state = GetDeviceState();
+    if (state == kDeviceStateConnecting ||
+        state == kDeviceStateListening  ||
+        state == kDeviceStateSpeaking) {
+        return ActivityType::kChat;
+    }
+    // 其余（Unknown / Starting / WifiConfiguring / Idle / Activating /
+    //       Upgrading / AudioTesting / FatalError）= 无业务活动
+    return ActivityType::kNone;
+}
+
+// ============================================================================
+// 内存监控（详见 docs/p30-architecture.html § 四.3 碎片管理策略）
+//
+// 策略 1：启动期基线打点（Initialize 末尾调用一次）
+// 策略 2：周期内存监控（clock_tick 每 60 秒调用一次）
+// 策略 3：碎片告警阈值（free<60KB 红线 / largest<8KB 但 free>30KB）
+// ============================================================================
+
+void Application::RecordBootMemoryBaseline() {
+    boot_free_int_size_ = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    boot_largest_int_block_ = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    size_t boot_free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "Boot memory baseline: INT free=%zu KB · largest=%zu KB · PSRAM free=%zu KB",
+             boot_free_int_size_ / 1024,
+             boot_largest_int_block_ / 1024,
+             boot_free_psram / 1024);
+}
+
+void Application::MonitorMemoryHealth() {
+    size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t min_free_int = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    size_t largest_int = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+
+    ESP_LOGI(TAG, "Memory[60s]: INT free=%zu/min=%zu/largest=%zu KB · PSRAM free=%zu KB",
+             free_int / 1024, min_free_int / 1024, largest_int / 1024, free_psram / 1024);
+
+    // 阈值定义（§ 四.3 策略 3）
+    constexpr size_t kSafeFreeIntMin    = 60 * 1024;   // CLAUDE.md 内部 RAM 红线
+    constexpr size_t kFragFreeIntMin    = 30 * 1024;   // 碎片化指标：free 大但 largest 小
+    constexpr size_t kFragLargestMin    = 8  * 1024;
+
+    // 红线告警：free 跌破 60KB
+    if (free_int < kSafeFreeIntMin && !memory_red_line_alerted_) {
+        ESP_LOGW(TAG, "⚠ INT free %zu KB 跌破 60KB 红线（CLAUDE.md）",
+                 free_int / 1024);
+        memory_red_line_alerted_ = true;
+    } else if (free_int >= kSafeFreeIntMin) {
+        memory_red_line_alerted_ = false;  // 恢复后允许再次告警
+    }
+
+    // 碎片化告警：free 仍多但 largest_block 已小（碎片明显）
+    if (free_int > kFragFreeIntMin && largest_int < kFragLargestMin && !fragmentation_alerted_) {
+        ESP_LOGW(TAG, "⚠ INT 碎片化: free=%zu KB / largest=%zu KB（碎片严重，建议重启）",
+                 free_int / 1024, largest_int / 1024);
+        fragmentation_alerted_ = true;
+    }
+}
+
+AudioSource Application::GetCurrentAudioSource() const {
+    // 仅 Speaking 态下才有音频源（其他态音频管线静默或仅做唤醒采集）
+    if (GetDeviceState() != kDeviceStateSpeaking) {
+        return AudioSource::kNone;
+    }
+    // MP3 播放期间通常走 Idle 态（CloseAudioChannel），但以防万一
+    if (MusicPlayer::GetInstance().IsPlaying()) {
+        return AudioSource::kMp3;
+    }
+    // 默认 Speaking = TTS（Chat / Flow 都走 TTS 输出）
+    // 注：AlarmBell / PomodoroBell / Reminder 等待对应模块加入后由模块显式设置
+    return AudioSource::kTts;
 }
 

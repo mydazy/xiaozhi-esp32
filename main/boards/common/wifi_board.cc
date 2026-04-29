@@ -3,7 +3,7 @@
 #include "display.h"
 #include "application.h"
 #include "power_manager.h"
-#include "live_companion.h"
+#include "flow_engine.h"
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"

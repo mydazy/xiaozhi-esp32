@@ -29,7 +29,7 @@ class Application;
  * │ audio_debug   │ {"type":"audio_debug", "server":"IP:8000", "mode":"raw"}   │
  * │ vad_config    │ {"type":"vad_config", "min_speech":128, "min_noise":500}   │
  * │ sleep         │ {"type":"sleep", "gyro":true}  (gyro=是否陀螺仪唤醒)        │
- * │ live_companion│ {"type":"live_companion","action":"start/stop/status/load"} │
+ * │ flow         │ {"type":"flow","action":"start/stop/status/load"} │
  * │ stt_url       │ {"type":"stt_url", "url":"https://www.mydazy.com/v1/ota/pushstt"}  设置STT回调地址    │
  * │               │ {"type":"stt_url", "url":""}  清除STT回调                   │
  * │ music_play    │ {"type":"music_play","url":"https://xxx.mp3","title":"xxx"} │
@@ -61,7 +61,7 @@ private:
     void OnDownload(const cJSON* msg);
     void OnVadConfig(const cJSON* msg);
     void OnSleep(const cJSON* msg);
-    void OnLiveCompanion(const cJSON* msg);
+    void OnFlow(const cJSON* msg);
     void OnSttUrl(const cJSON* msg);
     void OnMusicPlay(const cJSON* msg);
     void OnMusicStop();

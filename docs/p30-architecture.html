@@ -1,0 +1,2542 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MyDazy P30 架构剖析（可视化）</title>
+<meta name="description" content="P30 / P31 架构可视化：12 态状态机、任务拓扑、音频数据流、内存分布、Display Overlay 层级。markdown 权威源在 p30-architecture.md。" />
+<style>
+:root{
+  --brand:#C62828;
+  --brand-deep:#8E1C1C;
+  --brand-soft:#FCE8E8;
+  --bg:#FAFAFA;
+  --paper:#FFFFFF;
+  --ink:#1F1F1F;
+  --ink-soft:#555;
+  --line:#E5E5E5;
+  --line-strong:#BDBDBD;
+  --core0:#E0F2F1;
+  --core0-line:#00897B;
+  --core1:#FFF3E0;
+  --core1-line:#EF6C00;
+  --warn:#F57C00;
+  --danger:#C62828;
+  --ok:#2E7D32;
+  --code-bg:#F5F5F5;
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue","Hiragino Sans GB","Microsoft YaHei",sans-serif;font-size:15px;line-height:1.7}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+code,kbd{font-family:"SF Mono",Menlo,Consolas,"Roboto Mono",monospace;background:var(--code-bg);border-radius:4px;padding:1px 6px;font-size:.92em}
+
+/* topbar */
+.topbar{position:sticky;top:0;z-index:50;background:var(--brand);color:#fff;padding:10px 28px;display:flex;align-items:center;gap:18px;box-shadow:var(--shadow)}
+.topbar .logo{font-weight:700;letter-spacing:.5px}
+.topbar .meta{opacity:.85;font-size:13px}
+.topbar .spacer{flex:1}
+.topbar a{color:#fff;border-bottom:1px dashed rgba(255,255,255,.5)}
+.topbar a:hover{border-bottom-style:solid;text-decoration:none}
+
+/* layout */
+.shell{display:grid;grid-template-columns:240px minmax(0,1fr) 200px;gap:24px;max-width:1440px;margin:0 auto;padding:24px}
+.toc{position:sticky;top:64px;align-self:start;max-height:calc(100vh - 84px);overflow:auto;font-size:14px}
+.toc h3{font-size:12px;color:var(--ink-soft);letter-spacing:1px;text-transform:uppercase;margin:8px 0}
+.toc ul{list-style:none;margin:0;padding:0}
+.toc li{margin:2px 0}
+.toc a{display:block;padding:6px 10px;border-radius:6px;color:var(--ink);border-left:3px solid transparent}
+.toc a:hover{background:var(--brand-soft);color:var(--brand);text-decoration:none}
+.toc a.active{background:var(--brand-soft);color:var(--brand);border-left-color:var(--brand);font-weight:600}
+
+main{min-width:0}
+.section{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:24px 28px;margin-bottom:24px;box-shadow:var(--shadow)}
+.section h2{font-size:22px;margin:0 0 4px;color:var(--brand-deep);display:flex;align-items:center;gap:10px}
+.section h2 .num{display:inline-block;background:var(--brand);color:#fff;font-size:13px;font-weight:600;padding:2px 9px;border-radius:14px}
+.section .sub{color:var(--ink-soft);margin:0 0 18px;font-size:13.5px}
+.section h3{font-size:16px;margin:22px 0 10px;color:var(--ink);border-bottom:1px solid var(--line);padding-bottom:6px}
+
+/* hero */
+.hero{background:linear-gradient(135deg,var(--brand) 0%,var(--brand-deep) 100%);color:#fff;border-radius:10px;padding:32px 36px;margin-bottom:24px;box-shadow:var(--shadow)}
+.hero h1{margin:0 0 6px;font-size:28px;letter-spacing:.5px}
+.hero p{margin:0;opacity:.9;font-size:14px}
+.hero .badges{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.hero .badge{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);border-radius:14px;padding:3px 10px;font-size:12px}
+
+/* legend */
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--ink-soft);margin:8px 0 12px}
+.legend .item{display:flex;align-items:center;gap:6px}
+.legend .swatch{width:14px;height:14px;border-radius:3px;border:1px solid var(--line-strong)}
+
+/* svg wrap */
+.svgwrap{background:#FCFCFC;border:1px solid var(--line);border-radius:8px;padding:14px;overflow:auto}
+.svgwrap svg{display:block;margin:0 auto;max-width:100%;height:auto}
+
+/* tables */
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:8px 0}
+th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#FAFAFA;color:var(--ink-soft);font-weight:600;font-size:12.5px}
+td code{font-size:12.5px}
+.tbl-compact th,.tbl-compact td{padding:5px 8px}
+
+/* callouts */
+.callout{border-left:4px solid var(--brand);background:var(--brand-soft);padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:14px}
+.callout.warn{border-left-color:var(--warn);background:#FFF8E1}
+.callout.ok{border-left-color:var(--ok);background:#E8F5E9}
+.callout strong{color:var(--brand-deep)}
+.callout.warn strong{color:#E65100}
+.callout.ok strong{color:#1B5E20}
+
+/* svg helpers */
+.node-rect{fill:#fff;stroke:#666;stroke-width:1.5}
+.node-rect.idle{fill:#E3F2FD;stroke:#1976D2}
+.node-rect.active{fill:#FFEBEE;stroke:var(--brand);stroke-width:2.5}
+.node-rect.terminal{fill:#FFF3E0;stroke:#E65100}
+.node-rect.start{fill:#F3E5F5;stroke:#6A1B9A}
+.node-text{font:600 12px -apple-system,sans-serif;fill:#1F1F1F;text-anchor:middle;dominant-baseline:middle}
+.node-text.sm{font-size:10px;font-weight:400;fill:#666}
+.edge{fill:none;stroke:#999;stroke-width:1.5}
+.edge.major{stroke:var(--brand);stroke-width:2.2}
+.edge.terminal{stroke:#E65100;stroke-dasharray:4 3}
+.edge-label{font:10px monospace;fill:#666}
+.svg-title{font:600 14px -apple-system,sans-serif;fill:var(--brand-deep)}
+.svg-axis{font:11px monospace;fill:var(--ink-soft)}
+
+/* right anchor */
+.anchor{position:sticky;top:64px;align-self:start;font-size:13px;color:var(--ink-soft)}
+.anchor h4{font-size:11px;color:#999;margin:8px 0 6px;letter-spacing:1px}
+.anchor a{color:var(--ink-soft);display:block;padding:3px 0;border-left:2px solid transparent;padding-left:10px}
+.anchor a:hover{color:var(--brand);text-decoration:none}
+
+footer{color:var(--ink-soft);font-size:12.5px;text-align:center;padding:24px 0 40px}
+footer .src{display:inline-block;margin-top:4px;color:var(--ink-soft)}
+
+@media (max-width:1200px){
+  .shell{grid-template-columns:220px 1fr}
+  .anchor{display:none}
+}
+@media (max-width:820px){
+  .shell{grid-template-columns:1fr}
+  .toc{position:static;max-height:none}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="logo">MyDazy P30 · 架构剖析</span>
+  <span class="meta">v2.2.6 · 2026-04-28 · 可视化版</span>
+  <span class="spacer"></span>
+  <span class="meta">权威源：<a href="p30-architecture.md">p30-architecture.md</a></span>
+</div>
+
+<div class="shell">
+
+<aside class="toc">
+  <h3>目录</h3>
+  <ul>
+    <li><a href="#hero">概览</a></li>
+    <li><a href="#sec1">§ 一 四层架构鸟瞰</a></li>
+    <li><a href="#sec2">§ 二 启动链路</a></li>
+    <li><a href="#sec1_5">§ 一.5 三维心智模型</a></li>
+    <li><a href="#sec3">§ 三 12 态状态机</a></li>
+    <li><a href="#sec4">§ 四 任务拓扑</a></li>
+    <li><a href="#sec5">§ 五 音频数据流</a></li>
+    <li><a href="#sec7x">§ 七.x Overlay 层级</a></li>
+    <li><a href="#sec9">§ 九 内存分布</a></li>
+    <li><a href="#missing">未可视化章节</a></li>
+  </ul>
+  <h3>外部链接</h3>
+  <ul>
+    <li><a href="p30-architecture.md">完整架构文档（md）</a></li>
+    <li><a href="p30-architecture-review.md">量产前评估（md）</a></li>
+  </ul>
+</aside>
+
+<main>
+
+<section class="hero" id="hero">
+  <h1>P30 架构剖析 · 可视化原型</h1>
+  <p>从 12 态状态机到 8MB PSRAM 分布，5 张图把整张架构地图摆上一屏。所有数据来自 <code>docs/p30-architecture.md</code> 权威源。</p>
+  <div class="badges">
+    <span class="badge">ESP-IDF 5.5</span>
+    <span class="badge">ESP32-S3 · 16MB Flash · 8MB PSRAM</span>
+    <span class="badge">3 板共享：P30-4G / P30-WiFi / P31</span>
+    <span class="badge">12 态状态机 · 17 任务 · 5 音频任务</span>
+  </div>
+</section>
+
+<!-- ==================== § 一 四层架构鸟瞰 ==================== -->
+<section class="section" id="sec1">
+  <h2><span class="num">§ 一</span> 四层架构鸟瞰</h2>
+  <p class="sub">P30 采用经典的「业务 → 服务 → 硬件 → 平台」四层结构。<strong>L4.5 / L3.5 不存在</strong>——三遍评审后明确：业务/UI 抽象用 enum 收拢即可，不引入新基类。Application 是单例编排中枢，Board 工厂在编译期决定具体硬件实现。</p>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:#FFEBEE;border-color:#C62828"></span>L4 业务编排</span>
+    <span class="item"><span class="swatch" style="background:#FFF3E0;border-color:#EF6C00"></span>L3 服务抽象</span>
+    <span class="item"><span class="swatch" style="background:#E3F2FD;border-color:#1565C0"></span>L2 硬件抽象</span>
+    <span class="item"><span class="swatch" style="background:#F3E5F5;border-color:#6A1B9A"></span>L1 IDF / 第三方</span>
+  </div>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 940 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="P30 四层架构鸟瞰">
+      <defs>
+        <marker id="arrL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#888"/>
+        </marker>
+      </defs>
+
+      <text x="470" y="26" class="svg-title" text-anchor="middle">四层架构 · 自上而下调用 · 不穿层</text>
+      <text x="470" y="46" font-size="11.5" fill="#666" text-anchor="middle">心智三维（DeviceState / ActivityType / SceneType）以 enum 形式横切 L4，不另起新层</text>
+
+      <!-- L4 业务编排 -->
+      <g>
+        <rect x="40" y="70" width="780" height="100" rx="8" fill="#FFF5F5" stroke="#C62828" stroke-width="1.8"/>
+        <rect x="40" y="70" width="120" height="100" rx="8" fill="#C62828"/>
+        <text x="100" y="115" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">L4</text>
+        <text x="100" y="135" text-anchor="middle" font-size="11" fill="#fff">业务编排</text>
+
+        <text x="180" y="92" font-size="13" font-weight="700" fill="#B71C1C">Application（单例 · 主循环 · 12 态状态机）</text>
+        <text x="180" y="106" font-size="11.5" fill="#444" font-family="monospace">main/application.cc · main/main.cc</text>
+        <text x="180" y="119" font-size="10" fill="#888" font-style="italic">⚠ 多职能：状态机 + 主循环 + Activity 切换 + 协议初始化 + ActivationTask + 网络事件分发</text>
+
+        <rect x="180" y="122" width="195" height="38" rx="4" fill="#fff" stroke="#EF9A9A"/>
+        <text x="190" y="138" font-size="11" fill="#333" font-weight="600">DeviceState (12 态)</text>
+        <text x="190" y="153" font-size="10" fill="#888">设备能力维度 · 已有</text>
+
+        <rect x="385" y="122" width="195" height="38" rx="4" fill="#fff" stroke="#EF9A9A"/>
+        <text x="395" y="138" font-size="11" fill="#333" font-weight="600">ActivityType enum (新)</text>
+        <text x="395" y="153" font-size="10" fill="#888">业务活动维度 · 收拢散落判断</text>
+
+        <rect x="590" y="122" width="220" height="38" rx="4" fill="#fff" stroke="#EF9A9A"/>
+        <text x="600" y="138" font-size="11" fill="#333" font-weight="600">SceneType enum + AudioSource</text>
+        <text x="600" y="153" font-size="10" fill="#888">UI 场景维度 + 音频源标识</text>
+
+        <text x="860" y="120" font-size="10" fill="#999" text-anchor="end">原则：L4 只调 L3，</text>
+        <text x="860" y="135" font-size="10" fill="#999" text-anchor="end">不直接操作硬件</text>
+      </g>
+
+      <path class="edge" d="M470,170 L470,200" marker-end="url(#arrL)"/>
+
+      <!-- L3 服务（三栏：命令面 / 业务模块 / 基础服务）-->
+      <g>
+        <rect x="40" y="200" width="780" height="140" rx="8" fill="#FFFAF0" stroke="#EF6C00" stroke-width="1.8"/>
+        <rect x="40" y="200" width="120" height="140" rx="8" fill="#EF6C00"/>
+        <text x="100" y="265" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">L3</text>
+        <text x="100" y="285" text-anchor="middle" font-size="11" fill="#fff">服务抽象</text>
+
+        <!-- 三栏标题 -->
+        <text x="280" y="216" text-anchor="middle" font-size="10.5" font-weight="700" fill="#BF360C">▎命令面（Entry）</text>
+        <text x="490" y="216" text-anchor="middle" font-size="10.5" font-weight="700" fill="#C62828">▎业务模块（Activity）</text>
+        <text x="710" y="216" text-anchor="middle" font-size="10.5" font-weight="700" fill="#1565C0">▎基础服务（Service）</text>
+
+        <!-- 命令面 (3 卡 · 注 ActivityCoordinator) -->
+        <g font-size="11">
+          <rect x="180" y="222" width="200" height="30" rx="4" fill="#fff" stroke="#FFB74D"/>
+          <text x="190" y="237" fill="#333" font-weight="600">RemoteCmd</text>
+          <text x="190" y="248" fill="#888" font-size="10">15 JSON 命令（业务调度类待收拢）</text>
+
+          <rect x="180" y="256" width="200" height="30" rx="4" fill="#fff" stroke="#FFB74D"/>
+          <text x="190" y="271" fill="#333" font-weight="600">McpServer</text>
+          <text x="190" y="282" fill="#888" font-size="10">20+ MCP Tool · press_to_talk 等</text>
+
+          <rect x="180" y="290" width="200" height="44" rx="4" fill="#FFF3E0" stroke="#EF6C00" stroke-width="1.5" stroke-dasharray="3 2"/>
+          <text x="190" y="305" fill="#BF360C" font-weight="700">ActivityCoordinator（拟新增）</text>
+          <text x="190" y="318" fill="#666" font-size="10">SwitchTo / Stop / CanSwitchTo</text>
+          <text x="190" y="330" fill="#666" font-size="10">收拢 27 处 Stop / Suspend / Abort 散落</text>
+        </g>
+
+        <!-- 业务模块（受 ActivityType 管理） -->
+        <g font-size="11">
+          <rect x="395" y="222" width="200" height="30" rx="4" fill="#FFEBEE" stroke="#C62828" stroke-width="1.5"/>
+          <text x="405" y="237" fill="#B71C1C" font-weight="700">FlowEngine</text>
+          <text x="405" y="248" fill="#C62828" font-size="10">流程脚本 · 已落地（代码完成重命名）</text>
+
+          <rect x="395" y="256" width="200" height="30" rx="4" fill="#FFEBEE" stroke="#C62828"/>
+          <text x="405" y="271" fill="#333" font-weight="600">MusicPlayer</text>
+          <text x="405" y="282" fill="#888" font-size="10">MP3 流式 · 独占音频管线</text>
+
+          <rect x="395" y="290" width="200" height="44" rx="4" fill="#FAFAFA" stroke="#BBB" stroke-dasharray="3 2"/>
+          <text x="405" y="305" fill="#666" font-weight="600" font-style="italic">未来扩展位</text>
+          <text x="405" y="318" fill="#888" font-size="10">AlarmManager · Pomodoro · Reminder</text>
+          <text x="405" y="330" fill="#888" font-size="10">事件型走 AudioSource enum，不进 ActivityType</text>
+        </g>
+
+        <!-- 基础服务（核心 + 抽象） -->
+        <g font-size="11">
+          <rect x="610" y="222" width="200" height="30" rx="4" fill="#fff" stroke="#90CAF9"/>
+          <text x="620" y="237" fill="#0D47A1" font-weight="600">AudioService</text>
+          <text x="620" y="248" fill="#888" font-size="10">5 任务 · 编排音频管线</text>
+
+          <rect x="610" y="256" width="200" height="30" rx="4" fill="#fff" stroke="#90CAF9"/>
+          <text x="620" y="271" fill="#0D47A1" font-weight="600">音频抽象（基类）</text>
+          <text x="620" y="282" fill="#888" font-size="10">WakeWord · AudioProcessor · OggDemuxer</text>
+
+          <rect x="610" y="290" width="200" height="44" rx="4" fill="#fff" stroke="#90CAF9"/>
+          <text x="620" y="305" fill="#0D47A1" font-weight="600">系统服务</text>
+          <text x="620" y="318" fill="#888" font-size="10">Protocol · Ota · Assets · Settings</text>
+          <text x="620" y="330" fill="#888" font-size="10">WS/MQTT/JoyAI · 激活 · NVS</text>
+        </g>
+      </g>
+
+      <path class="edge" d="M470,340 L470,370" marker-end="url(#arrL)"/>
+
+      <!-- L2 硬件抽象（4 类 IO 角色：输出 / 输入 / 感知 / 通信）-->
+      <g>
+        <rect x="40" y="370" width="780" height="170" rx="8" fill="#F0F7FF" stroke="#1565C0" stroke-width="1.8"/>
+        <rect x="40" y="370" width="120" height="170" rx="8" fill="#1565C0"/>
+        <text x="100" y="445" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">L2</text>
+        <text x="100" y="465" text-anchor="middle" font-size="11" fill="#fff">硬件抽象</text>
+
+        <!-- Board 单行（硬件 + 软件差异）-->
+        <rect x="180" y="382" width="620" height="40" rx="4" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.5"/>
+        <text x="195" y="395" font-size="12" font-weight="700" fill="#0D47A1">Board (工厂) · DECLARE_BOARD 编译期选择 · 工厂模式 + 虚函数</text>
+        <text x="195" y="407" font-size="10" fill="#666">硬件：P30-WiFi（WiFi+加速计+触摸）· P30-4G（双网+加速计+触摸+GNSS）· P31（双网+触摸+加速计+NFC+iBeacon+GNSS+耳机）</text>
+        <text x="195" y="418" font-size="10" fill="#C62828" font-weight="600">软件：device-side AEC 仅 P30 系列 · 三连击切网仅 P30-4G · 触摸手势丰富仅 P31 · 默认网络 4G/WiFi 按板型分</text>
+
+        <!-- 4 类卡（按 IO 角色：输出 / 输入 / 感知 / 通信） -->
+        <g font-size="10.5">
+          <!-- 输出 -->
+          <rect x="180" y="426" width="152" height="108" rx="4" fill="#fff" stroke="#90CAF9"/>
+          <text x="256" y="443" text-anchor="middle" fill="#0D47A1" font-weight="700" font-size="12">▎输出</text>
+          <line x1="190" y1="448" x2="322" y2="448" stroke="#BBDEFB"/>
+          <text x="190" y="463" fill="#333" font-weight="600">JD9853 LCD（284×240）</text>
+          <text x="190" y="478" fill="#333" font-weight="600">ES8311 / ES7111 DAC</text>
+          <text x="190" y="493" fill="#333" font-weight="600">LED · Backlight PWM</text>
+          <text x="190" y="510" fill="#C62828" font-weight="600">EmoteDisplay 140+ emoji</text>
+          <text x="190" y="525" fill="#888">屏幕 / 喇叭 / 反馈 / 表情</text>
+
+          <!-- 输入 -->
+          <rect x="336" y="426" width="152" height="108" rx="4" fill="#fff" stroke="#90CAF9"/>
+          <text x="412" y="443" text-anchor="middle" fill="#0D47A1" font-weight="700" font-size="12">▎输入</text>
+          <line x1="346" y1="448" x2="478" y2="448" stroke="#BBDEFB"/>
+          <text x="346" y="463" fill="#333" font-weight="600">AXS5106L 触摸（全板）</text>
+          <text x="346" y="478" fill="#333" font-weight="600">Button（boot/vol±）</text>
+          <text x="346" y="493" fill="#333" font-weight="600">ES7210 ADC（Mic）</text>
+          <text x="346" y="510" fill="#888">Type-C Headset 检测</text>
+          <text x="346" y="525" fill="#888">手势 · 按键 · 录音</text>
+
+          <!-- 感知 -->
+          <rect x="492" y="426" width="152" height="108" rx="4" fill="#fff" stroke="#90CAF9"/>
+          <text x="568" y="443" text-anchor="middle" fill="#0D47A1" font-weight="700" font-size="12">▎感知</text>
+          <line x1="502" y1="448" x2="634" y2="448" stroke="#BBDEFB"/>
+          <text x="502" y="463" fill="#333" font-weight="600">SC7A20H 加速计（全板）</text>
+          <text x="502" y="478" fill="#333" font-weight="600">WiFi CSI（默认禁用）</text>
+          <text x="502" y="493" fill="#333" font-weight="600">iBeacon BLE（P31）</text>
+          <text x="502" y="510" fill="#333" font-weight="600">NFC WS1850S（P31）</text>
+          <text x="502" y="525" fill="#888">GNSS · VAD（4G/P31）</text>
+
+          <!-- 通信 -->
+          <rect x="648" y="426" width="152" height="108" rx="4" fill="#fff" stroke="#90CAF9"/>
+          <text x="724" y="443" text-anchor="middle" fill="#0D47A1" font-weight="700" font-size="12">▎通信</text>
+          <line x1="658" y1="448" x2="790" y2="448" stroke="#BBDEFB"/>
+          <text x="658" y="463" fill="#333" font-weight="600">WiFi STA / AP</text>
+          <text x="658" y="478" fill="#333" font-weight="600">BT/BLE 5.0</text>
+          <text x="658" y="493" fill="#333" font-weight="600">ML307R 4G（4G/P31）</text>
+          <text x="658" y="510" fill="#333" font-weight="600">BluFi 配网协议</text>
+          <text x="658" y="525" fill="#888">→ L3 Protocol 接管</text>
+        </g>
+      </g>
+
+      <path class="edge" d="M470,540 L470,570" marker-end="url(#arrL)"/>
+
+      <!-- L1 IDF -->
+      <g>
+        <rect x="40" y="570" width="780" height="60" rx="8" fill="#FAF7FB" stroke="#6A1B9A" stroke-width="1.8"/>
+        <rect x="40" y="570" width="120" height="60" rx="8" fill="#6A1B9A"/>
+        <text x="100" y="595" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">L1</text>
+        <text x="100" y="615" text-anchor="middle" font-size="11" fill="#fff">IDF / 第三方</text>
+
+        <text x="180" y="585" font-size="12" font-weight="600" fill="#4A148C">ESP-IDF 5.5 · FreeRTOS · LVGL · esp-sr (WakeNet/AFE) · esp_event_loop · esp_timer</text>
+        <text x="180" y="601" font-size="11" fill="#666">esp_lcd_jd9853 · esp-ml307 · esp_lcd_touch_axs5106l · esp_sc7a20h · esp_nfc_ws1850s · 78__xiaozhi-fonts · lvgl_gif</text>
+        <text x="180" y="619" font-size="10" fill="#999">ESP32-S3 SoC：双核 240MHz · 16MB Flash + 8MB PSRAM · 已用 WiFi+BLE+I2C+I2S+SPI · <tspan fill="#888" font-style="italic">未利用：USB OTG · SD/MMC · Touch sensor · Hall sensor</tspan></text>
+      </g>
+    </svg>
+  </div>
+
+  <h3>§ 一.1 分层原则（量产期纪律）</h3>
+  <ul style="margin:8px 0;padding-left:22px;line-height:1.9">
+    <li>L4 只与 L3 接口对话，<strong>不直接操作硬件</strong>（穿层是事故母体）</li>
+    <li>L3 通过 L2 的基类接口屏蔽板间差异（<code>Board</code> / <code>AudioCodec</code> / <code>Display</code> 都是工厂模式 + 虚函数）</li>
+    <li>L2 <em>同时承载</em>抽象基类（<code>Board / Display / AudioCodec / NetworkInterface</code>）和具体 driver（<code>LED / Backlight / typec_headset</code>）——这是 ESP-IDF 嵌入式的工程现实，<strong>不视为分层错误</strong></li>
+    <li>L2 基类定义合同，子类落地；新增板型只复制 <code>boards/</code> 目录，不动基类</li>
+    <li>L1 是 IDF 与第三方组件，<strong>不动</strong>；上游 xiaozhi-esp32 改动的部分要登记到 § 十"上游 vs 自研"对照表</li>
+    <li>三个 enum（DeviceState / ActivityType / SceneType）<strong>横切</strong>L4，不构成新层</li>
+  </ul>
+
+  <h3>§ 一.2 关键文件索引</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>层</th><th>关键文件</th></tr></thead>
+    <tbody>
+      <tr><td>L4 业务编排</td><td><code>main/application.cc/h</code> · <code>main/main.cc</code> · <code>main/device_state*.cc/h</code></td></tr>
+      <tr><td>L3 服务</td><td><code>main/audio/audio_service.cc/h</code> · <code>main/protocols/</code> · <code>main/remote_cmd.cc</code> · <code>main/mcp_server.cc</code> · <code>main/flow_engine.cc</code>（已重命名） · <code>main/audio/music_player.cc</code> · <code>main/ota.cc</code> · <code>main/assets.cc</code></td></tr>
+      <tr><td>L2 板抽象</td><td><code>main/boards/common/</code> · <code>main/boards/mydazy-p30-4g/</code> · <code>main/boards/mydazy-p30-wifi/</code> · <code>main/boards/mydazy-p31/</code></td></tr>
+      <tr><td>L2 显示 / 触摸</td><td><code>main/display/lcd_display.cc</code> · <code>main/display/ui_display.cc</code> · <code>main/display/lvgl_display/</code> · <code>main/display/ui/</code></td></tr>
+      <tr><td>L2 音频硬件</td><td><code>main/audio/codecs/</code>（ES8311 / ES7111 / ES7210 寄存器配置）</td></tr>
+      <tr><td>L2 网络 / 4G</td><td><code>main/boards/common/wifi_board.cc</code> · <code>main/boards/common/ml307_board.cc</code> · <code>main/boards/common/dual_network_board.cc</code> · <code>main/boards/common/ml307_gnss.h</code></td></tr>
+      <tr><td>L2 传感 · 标识 · 反馈</td><td><code>main/boards/common/typec_headset.cc</code> · <code>main/wifi/dns_server.cc</code> · <code>main/blufi/</code>（含 iBeacon 广播） · <code>main/led/circular_strip.cc</code> · <code>main/led/gpio_led.cc</code></td></tr>
+      <tr><td>L1 第三方组件</td><td><code>components/espressif__esp-sr</code>（WakeNet/AFE） · <code>components/78__xiaozhi-fonts</code> · <code>components/mydazy__esp_mp3_player</code> · <code>components/esp_nfc_ws1850s</code>（NFC P31）</td></tr>
+      <tr><td>L1 第三方驱动（managed）</td><td><code>mydazy/esp_lcd_jd9853</code>（LCD） · <code>mydazy/esp_lcd_touch_axs5106l</code>（触摸三板） · <code>mydazy/esp_sc7a20h</code>（加速计） · <code>78/esp-ml307</code>（4G+GNSS） · <code>espressif/button</code> · <code>esp_audio_codec</code>（Opus）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>§ 一.3.1 业务功能清单（用户感知 · 22 项）</h3>
+  <p style="font-size:13px;color:#666;margin:6px 0 12px">基于代码事实而非推测。22 项业务功能按"实现状态 × 三维"双轴盘点，决定下一步开发路径。<strong>真正"零代码从 0 起"只剩 3 项</strong>，其余 19 项都有代码基础。</p>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:#E8F5E9;border-color:#2E7D32"></span>✅ 完整实现（驱动+业务+UI）</span>
+    <span class="item"><span class="swatch" style="background:#FFF8E1;border-color:#F9A825"></span>🟢 驱动就绪 · 加业务即可</span>
+    <span class="item"><span class="swatch" style="background:#FFF3E0;border-color:#EF6C00"></span>🟡 雏形 · 需扩展</span>
+    <span class="item"><span class="swatch" style="background:#FFEBEE;border-color:#C62828"></span>❌ 未实现 · 从 0 起</span>
+  </div>
+
+  <p style="font-size:12px;color:#666;margin:6px 0 12px;padding:8px 12px;background:#F5F5F5;border-radius:6px">
+    <strong>4 步流水线对照</strong> · 每个功能完整需要走完 4 步：<strong>① 硬件/驱动</strong> → <strong>② 业务模块</strong> → <strong>③ UI 呈现</strong> → <strong>④ 端到端验证</strong>。
+    四状态映射：<span style="color:#2E7D32">✅ = 4 步全完成</span> · <span style="color:#F9A825">🟢 = ①② 完成 · ③/④ 缺</span> · <span style="color:#EF6C00">🟡 = ① 完成 · ②/③ 部分</span> · <span style="color:#C62828">❌ = ① 缺</span>。
+  </p>
+
+  <table class="tbl-compact">
+    <thead><tr>
+      <th>#</th>
+      <th>功能</th>
+      <th>状态</th>
+      <th>关键代码证据</th>
+      <th>缺什么 / 落位三维</th>
+    </tr></thead>
+    <tbody>
+      <tr style="background:#F1F8E9"><td>1</td><td>默认对话 Chat</td><td style="background:#E8F5E9">✅</td><td><code>application.cc</code> ToggleChatState · <code>remote_cmd</code> OnTtai</td><td>三维：A=Listen↔Speak / B=Chat / C=Emoji</td></tr>
+      <tr style="background:#F1F8E9"><td>2</td><td>表情包（AI 情绪）</td><td style="background:#E8F5E9">✅</td><td><code>emote_display</code> SetEmotion · <code>emoji_collection</code> 140+ 表情</td><td>Chat 子能力 · L0</td></tr>
+      <tr style="background:#F1F8E9"><td>3</td><td>MP3 流式播放</td><td style="background:#E8F5E9">✅</td><td><code>music_player.cc</code> Play/Pause/Resume · 进度查询</td><td>B=Music · C=Player（已实现）</td></tr>
+      <tr style="background:#F1F8E9"><td>4</td><td>控制中心（下拉手势）</td><td style="background:#E8F5E9">✅</td><td><code>control_center.cc</code> 6 宫格 · 音量/亮度/AEC/WiFi/4G 全有</td><td>C=ControlCenter（已实现）</td></tr>
+      <tr style="background:#F1F8E9"><td>5</td><td>配网（BluFi + AP 双击）</td><td style="background:#E8F5E9">✅</td><td><code>blufi.cc</code> + <code>wifi_ap.cc</code> · 双击切换</td><td>A=WifiCfg · C=ConfigQr（已实现）</td></tr>
+      <tr style="background:#F1F8E9"><td>6</td><td>15 JSON 远程命令</td><td style="background:#E8F5E9">✅</td><td><code>remote_cmd.h</code> 15 个 on_*：Reboot/Ota/Reconnect/Wakeup/Tts/Ttai/Volume/Gain/Download/VadConfig/Sleep/Flow/SttUrl/MusicPlay/MusicStop（业务调度类 6 个待收拢到 ActivityCoordinator）</td><td>—</td></tr>
+      <tr style="background:#F1F8E9"><td>7</td><td>MCP Tool 框架</td><td style="background:#E8F5E9">✅</td><td><code>mcp_server.cc</code> · 20+ 注册工具</td><td>—</td></tr>
+      <tr style="background:#F1F8E9"><td>8</td><td>OTA 激活 / 升级 / 状态</td><td style="background:#E8F5E9">✅</td><td><code>ota.cc</code> CheckVersion / Activate / RequestSwitch</td><td>—</td></tr>
+      <tr style="background:#FFFDE7"><td>9</td><td>流程脚本（教学/互动/问答）</td><td style="background:#FFF8E1">🟢</td><td><code>flow_engine.cc</code> 内部状态机 4 态（kIdle/kPlaying/kDelay/kSuspended）· HTTP 脚本加载 · TTS/TTAI 循环</td><td>已重命名 FlowEngine ✓ · UI 编辑器待补 · ScriptProvider 抽象</td></tr>
+      <tr style="background:#FFFDE7"><td>10</td><td>GIF 汉字笔画动画（教育卡子能力）</td><td style="background:#FFF8E1">🟢</td><td><code>lvgl_gif</code> 解码驱动完整</td><td>动态下载笔画 GIF · L1 card_overlay UI · Assets LRU 路由 · 参考上游 xiaozhi-esp32-189</td></tr>
+      <tr style="background:#FFFDE7"><td>11</td><td>GPS 定位上报</td><td style="background:#FFF8E1">🟢</td><td><code>ml307_gnss.cc</code> 完整（NMEA 解析 / GPS+BDS）· 仅 P30-4G/P31</td><td>协议层挂 ReportStatus · 周期 fetch GetLastFix</td></tr>
+      <tr style="background:#FFFDE7"><td>12</td><td>iBeacon 广播 / 扫描</td><td style="background:#FFF8E1">🟢</td><td><code>blufi/ibeacon.cc</code> 广播驱动 · 仅 P31 实例化 · <code>ota.RequestSwitch("ibeacon")</code> 路由已存在</td><td>扫描业务回调 · P30-4G/WiFi 实例化（如需要）</td></tr>
+      <tr style="background:#FFFDE7"><td>13</td><td>WiFi CSI 感知</td><td style="background:#FFF8E1">🟢</td><td><code>wifi_csi.h</code> SetEnabled / RxCallback · NVS 默认 enabled=0 · 距离三档算法雏形</td><td>ML 推理库 · 特征提取 · 远程命令开关</td></tr>
+      <tr style="background:#FFFDE7"><td>14</td><td>NFC 卡片识别（P31）</td><td style="background:#FFF8E1">🟢</td><td><code>esp_nfc_ws1850s</code> 完整支持 MIFARE/Ultralight/NTAG · <code>ota.RequestSwitch("nfc")</code> 路由</td><td>SetCardCallback 业务挂接 · UID → 服务端</td></tr>
+      <tr style="background:#FFF3E0"><td>15</td><td>主屏时间</td><td style="background:#FFF3E0">🟡</td><td><code>UiDisplay</code> 已有 <code>is_clock_mode_</code> + 88px 时间</td><td>独立 Clock Scene · NTP 校时强化</td></tr>
+      <tr style="background:#FFF3E0"><td>16</td><td>加速计运动唤醒</td><td style="background:#FFF3E0">🟡</td><td><code>sc7a20h</code> 三板实例化 · EXT1 GPIO INT1 → deep sleep 唤醒已配置</td><td>运动算法（跌落/抬起识别）· 业务挂接</td></tr>
+      <tr style="background:#FFF3E0"><td>17</td><td>激活绑定（QR）</td><td style="background:#FFF3E0">🟡</td><td><code>application.cc</code> ShowActivationCode 已存在 · 6 位激活码全屏</td><td>QR 编码库（如 lv_qrcode）· 扫描端验证</td></tr>
+      <tr style="background:#FFF3E0"><td>18</td><td>番茄钟（计时+铃声）</td><td style="background:#FFF3E0">🟡</td><td>仅 esp_timer 基础设施</td><td>状态机（工作/短休/长休）· UI · 阶段铃声 · AudioSource::PomodoroBell</td></tr>
+      <tr style="background:#FFF3E0"><td>19</td><td>闹钟（响铃）</td><td style="background:#FFF3E0">🟡</td><td><code>sleep_timer</code> 基础 · 无闹钟数据模型</td><td>AlarmManager + NVS 持久化 + UI · AudioSource::AlarmBell</td></tr>
+      <tr style="background:#FFEBEE"><td>20</td><td>教育卡（多标签学习内容）</td><td style="background:#FFEBEE">❌</td><td>无相关代码</td><td><strong>从 0 起</strong>：单词/拼音/汉字/组词多标签结构化卡片 · 服务端 show_card JSON schema · L1 overlay · Assets 卡片资源 + GIF 笔画 LRU 缓存 · <strong>参考 xiaozhi-esp32-189 上游</strong>实现</td></tr>
+      <tr style="background:#FFEBEE"><td>21</td><td>切换 AI 角色</td><td style="background:#FFEBEE">❌</td><td>无角色管理 / 无远程命令</td><td><strong>从 0 起</strong>：角色配置 NVS · RoleSwitcher Scene · 服务端协议</td></tr>
+      <tr style="background:#FFEBEE"><td>22</td><td>待办清单 + 语音提醒</td><td style="background:#FFEBEE">❌</td><td>无任何代码</td><td><strong>从 0 起</strong>：数据模型 · LVGL UI · NVS 持久化 · Reminder 事件 · AudioSource::Reminder</td></tr>
+    </tbody>
+  </table>
+
+  <h3>§ 一.3.2 系统能力清单（基础设施 · 12 项）</h3>
+  <p style="font-size:13px;color:#666;margin:6px 0 12px">这些是"用户感知不到但开发必须知道"的系统能力——往往是判断"该不该重新发明轮子"的依据。新功能开发前先看这一节，避免重复造已经存在的能力。</p>
+
+  <table class="tbl-compact">
+    <thead><tr>
+      <th>#</th>
+      <th>系统能力</th>
+      <th>状态</th>
+      <th>关键代码</th>
+      <th>用途 / 复用建议</th>
+    </tr></thead>
+    <tbody>
+      <tr style="background:#F1F8E9"><td>S1</td><td>VAD 语音活动检测</td><td style="background:#E8F5E9">✅</td><td><code>esp-sr</code> AFE 内置 · <code>AfeAudioProcessor</code></td><td>对话端点检测 · MAIN_EVENT_VAD_CHANGE</td></tr>
+      <tr style="background:#F1F8E9"><td>S2</td><td>唤醒词识别</td><td style="background:#E8F5E9">✅</td><td><code>WakeWord</code> 抽象基类 · <code>AfeMixin</code> · <code>CustomWakeWord</code></td><td>核心交互入口 · 可加多语言唤醒词</td></tr>
+      <tr style="background:#F1F8E9"><td>S3</td><td>AEC 回声消除（device-side）</td><td style="background:#E8F5E9">✅</td><td><code>audio_service.EnableDeviceAec</code> · 双击切换</td><td>仅 P30-4G/WiFi 支持，P31 无</td></tr>
+      <tr style="background:#F1F8E9"><td>S4</td><td>OTA 回滚检测 + 失败保护</td><td style="background:#E8F5E9">✅</td><td><code>ota.cc</code> MarkCurrentVersionValid · esp_ota_mark_app_invalid_rollback</td><td>升级失败自动回滚到上一版</td></tr>
+      <tr style="background:#F1F8E9"><td>S5</td><td>4 种深睡眠唤醒源</td><td style="background:#E8F5E9">✅</td><td>EXT0(boot)+EXT1(加速计)+TIMER(闹钟)+POWERON</td><td>`HandleWakeupCause`（init.cc 末尾）· 防口袋误触</td></tr>
+      <tr style="background:#F1F8E9"><td>S6</td><td>9 连击恢复出厂 + 双段保护</td><td style="background:#E8F5E9">✅</td><td>9 连击发起 + 10s 双击确认 · atomic + timestamp</td><td>review § 3.7 · 已防误触 + 服务器解绑</td></tr>
+      <tr style="background:#F1F8E9"><td>S7</td><td>多语言资源（lang_config）</td><td style="background:#E8F5E9">✅</td><td><code>assets/lang_config.h</code> · 中英日三语</td><td>OGG 音频资源按语言打包</td></tr>
+      <tr style="background:#F1F8E9"><td>S8</td><td>10+ 按键交互模式</td><td style="background:#E8F5E9">✅</td><td>单击 / 双击 / 三连击 / 四连击 / 六连击 / 九连击 / 长按 700ms / 3s / 5s / PressUp</td><td>review § 3.2 · 量产保留</td></tr>
+      <tr style="background:#F1F8E9"><td>S9</td><td>电池监控 + 充电检测</td><td style="background:#E8F5E9">✅</td><td><code>PowerManager</code> ADC + 曲线 / 直线拟合</td><td>状态栏 5 档 · 充电时染色</td></tr>
+      <tr style="background:#F1F8E9"><td>S10</td><td>FlowEngine 自动重连</td><td style="background:#E8F5E9">✅</td><td>OnAudioChannelClosed 5s 自重连</td><td>断网恢复 · 流程脚本不中断</td></tr>
+      <tr style="background:#F1F8E9"><td>S11</td><td>Type-C 耳机插拔检测</td><td style="background:#E8F5E9">✅</td><td><code>typec_headset.cc</code> · 独立任务 P3</td><td>音频路由切换</td></tr>
+      <tr style="background:#F1F8E9"><td>S12</td><td>状态机广播（Listener 模式）</td><td style="background:#E8F5E9">✅</td><td><code>DeviceStateMachine.AddStateChangeListener</code></td><td>UI / FlowEngine / RemoteCmd 各自订阅</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>系统能力 vs 业务功能的边界</strong> · S1-S12 是"基础设施层"，新功能开发应优先复用而不是重造。例：番茄钟铃声直接用 PlaySound（已实现）+ AudioSource::PomodoroBell（拟新增）；待办语音提醒走 TTS 路径（已实现）+ AudioSource::Reminder。
+  </div>
+
+  <h3>§ 一.4 架构差距小结</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>类型</th><th>项数</th><th>典型项</th><th>开发投入估算</th></tr></thead>
+    <tbody>
+      <tr><td>✅ 完整实现 · 已能跑</td><td>8</td><td>Chat / 表情 / MP3 / 控制中心 / 配网 / 远程命令 / MCP / OTA</td><td>仅 UI 打磨 · 0.5-1 周/项</td></tr>
+      <tr><td>🟢 驱动就绪 · 加业务即可</td><td>6</td><td>Flow / GIF / GPS / iBeacon / CSI / NFC</td><td>1-2 周/项 · 主要工作在协议挂接 + UI</td></tr>
+      <tr><td>🟡 雏形 · 需扩展</td><td>5</td><td>主屏时间 / 运动唤醒 / 激活 QR / 番茄钟 / 闹钟</td><td>2-3 周/项 · 需补状态机 + UI + 算法</td></tr>
+      <tr><td>❌ 未实现 · 从 0 起</td><td>3</td><td>教育卡 / 角色切换 / 待办清单</td><td>4-6 周/项 · 完整新模块</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>估算放宽提醒</strong> · 上表是<em>设备端纯开发</em>理想路径估算。真实工期需含：① 服务端协议设计 + 联调（教育卡 / Flow 都涉及）② 内容运营准备资源（GIF 笔画 / 单词卡片 / 多角色提示词）③ 多设备测试 + OTA 灰度。<strong>实际工期建议放宽 30-50%</strong>——例：教育卡 4-6 周 → 端到端 6-8 周；闹钟 3-4 周 → 端到端 4-5 周。
+  </div>
+
+  <div class="callout ok">
+    <strong>SDK 全局结论</strong> · 项目代码组织清晰、分层规范，新增功能集成成本低。<strong>所有规划功能 0 个需要新增 DeviceState 枚举</strong>——这是三遍扫描最强的证据。主要阻点不在架构层，而在 (a) 协议端对接（NFC/CSI/iBeacon 后端）+ (b) NLP/ML 库（教育卡识词）+ (c) 服务端脚本协议（Flow / 待办）。
+  </div>
+
+  <div class="callout warn">
+    <strong>意外发现 · ControlCenter 已经实现</strong> · 之前几轮文档误把 ControlCenter 列为"待实现"，实际 <code>main/display/control_center.cc</code> 6 宫格 UI 完整，含音量 / 亮度 / AEC / WiFi / 4G 全部回调。三维落位已自动满足（C=ControlCenter）。<strong>这意味着 § 一.5.2 落位表里 ControlCenter 行的"决策"实际是"已落地"</strong>。
+  </div>
+
+  <div class="callout warn">
+    <strong>意外发现 · WiFi CSI 默认禁用</strong> · CSI 完整驱动存在但 NVS 默认 <code>enabled=0</code>。这是个产品决策点：CSI 启用会增加 WiFi 包处理开销，可能影响对话延迟。建议加远程命令 <code>{"type":"csi","enabled":true,"mode":"presence"}</code> 由服务端按需启用，不要默认开。
+  </div>
+</section>
+
+<!-- ==================== § 二 启动链路 ==================== -->
+<section class="section" id="sec2">
+  <h2><span class="num">§ 二</span> 启动链路（冷启动 → 稳态）</h2>
+  <p class="sub">从上电到 <code>kDeviceStateIdle</code>（可对话稳态），共经历 7 步初始化 + 1 次异步激活。<strong>同步段卡住 = 开机黑屏延长</strong>，所以网络启动放最后并异步化。</p>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:#E3F2FD;border-color:#1565C0"></span>同步段（阻塞主流程）</span>
+    <span class="item"><span class="swatch" style="background:#FFF3E0;border-color:#EF6C00"></span>异步段（独立任务）</span>
+    <span class="item"><span class="swatch" style="background:#FFEBEE;border-color:#C62828"></span>状态机变更点</span>
+  </div>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 940 880" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="启动链路时序">
+      <defs>
+        <marker id="arrS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#1565C0"/>
+        </marker>
+        <marker id="arrAS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#EF6C00"/>
+        </marker>
+      </defs>
+
+      <text x="470" y="26" class="svg-title" text-anchor="middle">启动时序 · 同步段 → 异步段 → 稳态</text>
+
+      <!-- 时间轴 -->
+      <line x1="120" y1="60" x2="120" y2="850" stroke="#999" stroke-width="2"/>
+      <text x="100" y="60" font-size="11" fill="#666" text-anchor="end" font-weight="700">T0</text>
+
+      <!-- T0 app_main -->
+      <g>
+        <circle cx="120" cy="80" r="6" fill="#1565C0"/>
+        <rect x="160" y="60" width="700" height="60" rx="6" fill="#E3F2FD" stroke="#1565C0"/>
+        <text x="175" y="80" font-size="13" font-weight="700" fill="#0D47A1">app_main()</text>
+        <text x="780" y="80" font-size="10.5" fill="#666" text-anchor="end" font-family="monospace">main/main.cc:14</text>
+        <text x="175" y="98" font-size="11" fill="#444">esp_event_loop_create_default()</text>
+        <text x="175" y="112" font-size="11" fill="#444">nvs_flash_init()  · 损坏自动 erase 重建</text>
+      </g>
+
+      <text x="100" y="160" font-size="11" fill="#666" text-anchor="end" font-weight="700">T+0a</text>
+
+      <!-- Initialize -->
+      <g>
+        <circle cx="120" cy="160" r="6" fill="#1565C0"/>
+        <rect x="160" y="140" width="700" height="280" rx="6" fill="#E3F2FD" stroke="#1565C0"/>
+        <text x="175" y="160" font-size="13" font-weight="700" fill="#0D47A1">Application::Initialize()</text>
+        <text x="780" y="160" font-size="10.5" fill="#666" text-anchor="end" font-family="monospace">application.cc:69</text>
+
+        <g font-size="11" fill="#333">
+          <rect x="175" y="172" width="680" height="28" fill="#fff" stroke="#90CAF9" rx="3"/>
+          <text x="187" y="185" font-weight="700">[1]</text>
+          <text x="215" y="185" font-weight="600">SetDeviceState(Starting)</text>
+          <text x="850" y="185" text-anchor="end" fill="#C62828" font-weight="600">↑ 状态：Unknown → Starting</text>
+          <text x="215" y="197" fill="#666" font-size="10">第一个状态机转换点；UI 还没出来</text>
+
+          <rect x="175" y="204" width="680" height="28" fill="#fff" stroke="#90CAF9" rx="3"/>
+          <text x="187" y="217" font-weight="700">[2]</text>
+          <text x="215" y="217" font-weight="600">Board::GetInstance()  + display->SetupUI()</text>
+          <text x="215" y="229" fill="#666" font-size="10">DECLARE_BOARD 编译期工厂；emoji_box / status_bar / boot logo 创建</text>
+
+          <rect x="175" y="236" width="680" height="28" fill="#FFEBEE" stroke="#C62828" rx="3"/>
+          <text x="187" y="249" font-weight="700">[3]</text>
+          <text x="215" y="249" font-weight="600">vTaskDelay(80ms)  +  RestoreBrightness()</text>
+          <text x="215" y="261" fill="#666" font-size="10">背光延迟到 LVGL 首帧之后 → 修复开机白闪（量产关键）</text>
+
+          <rect x="175" y="268" width="680" height="28" fill="#fff" stroke="#90CAF9" rx="3"/>
+          <text x="187" y="281" font-weight="700">[4]</text>
+          <text x="215" y="281" font-weight="600">audio_codec->Initialize()  +  audio_service.Start()</text>
+          <text x="215" y="293" fill="#666" font-size="10">I2C 配寄存器；5 个音频任务起飞（INT RAM 栈）</text>
+
+          <rect x="175" y="300" width="680" height="28" fill="#fff" stroke="#90CAF9" rx="3"/>
+          <text x="187" y="313" font-weight="700">[5]</text>
+          <text x="215" y="313" font-weight="600">MusicPlayer::Initialize  +  state_machine.AddListener  +  McpServer.AddTools</text>
+          <text x="215" y="325" fill="#666" font-size="10">业务模块挂订阅；MCP 通用工具 + UserOnly 工具注册</text>
+
+          <rect x="175" y="332" width="680" height="28" fill="#fff" stroke="#90CAF9" rx="3"/>
+          <text x="187" y="345" font-weight="700">[6]</text>
+          <text x="215" y="345" font-weight="600">Board::SetNetworkEventCallback()  +  esp_timer_start(clock_timer, 1s)</text>
+          <text x="215" y="357" fill="#666" font-size="10">4G modem 错误细分 5 种 + Alert；clock 周期 tick</text>
+
+          <rect x="175" y="364" width="680" height="28" fill="#FFF3E0" stroke="#EF6C00" rx="3"/>
+          <text x="187" y="377" font-weight="700">[7]</text>
+          <text x="215" y="377" font-weight="600">Board::StartNetwork()  ← 异步立即返回</text>
+          <text x="215" y="389" fill="#666" font-size="10">关键：WiFi/4G 启动转入异步，主流程不阻塞 → 开机不卡</text>
+
+          <text x="187" y="412" fill="#888" font-size="10" font-style="italic">⚠ 历史教训：第 [7] 步如果同步阻塞，4G 模组 detect 30×1s + register 6×10s = 最坏 90s 黑屏</text>
+        </g>
+      </g>
+
+      <text x="100" y="460" font-size="11" fill="#666" text-anchor="end" font-weight="700">T+1</text>
+
+      <!-- Run -->
+      <g>
+        <circle cx="120" cy="460" r="6" fill="#1565C0"/>
+        <rect x="160" y="440" width="700" height="60" rx="6" fill="#E3F2FD" stroke="#1565C0"/>
+        <text x="175" y="460" font-size="13" font-weight="700" fill="#0D47A1">Application::Run()  · 主事件循环</text>
+        <text x="780" y="460" font-size="10.5" fill="#666" text-anchor="end" font-family="monospace">application.cc:178</text>
+        <text x="175" y="478" font-size="11" fill="#444">vTaskPrioritySet(self, 10)  →  while xEventGroupWaitBits(...)</text>
+        <text x="175" y="492" font-size="11" fill="#444">同步段结束；从此处开始等待 11 类 MAIN_EVENT_*</text>
+      </g>
+
+      <text x="100" y="540" font-size="11" fill="#666" text-anchor="end" font-weight="700">T+异步</text>
+
+      <!-- 网络异步连接 -->
+      <g>
+        <circle cx="120" cy="540" r="6" fill="#EF6C00"/>
+        <rect x="160" y="520" width="700" height="60" rx="6" fill="#FFF3E0" stroke="#EF6C00"/>
+        <text x="175" y="540" font-size="13" font-weight="700" fill="#BF360C">NetworkEvent::Connected</text>
+        <text x="175" y="558" font-size="11" fill="#444">→ MAIN_EVENT_NETWORK_CONNECTED → HandleNetworkConnectedEvent</text>
+        <text x="850" y="558" font-size="10" fill="#C62828" text-anchor="end" font-weight="600">↑ 状态：Starting → Activating</text>
+        <text x="175" y="572" font-size="11" fill="#444">xTaskCreate(ActivationTask, 8KB, prio=2)  ← 临时任务起飞</text>
+      </g>
+
+      <!-- ActivationTask -->
+      <g>
+        <circle cx="120" cy="620" r="6" fill="#EF6C00"/>
+        <rect x="160" y="600" width="700" height="120" rx="6" fill="#FFF3E0" stroke="#EF6C00"/>
+        <text x="175" y="620" font-size="13" font-weight="700" fill="#BF360C">ActivationTask  · 独立任务（激活完即删）</text>
+        <text x="780" y="620" font-size="10.5" fill="#666" text-anchor="end" font-family="monospace">application.cc:336</text>
+
+        <g font-size="11" fill="#333">
+          <rect x="175" y="632" width="680" height="22" fill="#fff" stroke="#FFB74D" rx="3"/>
+          <text x="187" y="647">CheckAssetsVersion  →  下载预打包资源 / UiImageManager.LoadAll</text>
+
+          <rect x="175" y="658" width="680" height="22" fill="#fff" stroke="#FFB74D" rx="3"/>
+          <text x="187" y="673">CheckNewVersion (Ota)  →  HTTP 检查；激活码 ShowActivationPage（Activating QR overlay）</text>
+
+          <rect x="175" y="684" width="680" height="22" fill="#fff" stroke="#FFB74D" rx="3"/>
+          <text x="187" y="699">InitializeProtocol  →  MQTT / WebSocket / JoyAI 三选一（运行期一次决定）</text>
+
+          <text x="187" y="714" fill="#888" font-style="italic">setBits(ACTIVATION_DONE)  →  通知主循环</text>
+        </g>
+      </g>
+
+      <text x="100" y="760" font-size="11" fill="#666" text-anchor="end" font-weight="700">T+稳态</text>
+
+      <!-- Idle -->
+      <g>
+        <circle cx="120" cy="760" r="8" fill="#C62828"/>
+        <rect x="160" y="740" width="700" height="100" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+        <text x="175" y="760" font-size="13" font-weight="700" fill="#B71C1C">HandleActivationDoneEvent → SetDeviceState(Idle)</text>
+        <text x="850" y="760" font-size="10" fill="#C62828" text-anchor="end" font-weight="600">↑ 状态：Activating → Idle / Upgrading</text>
+
+        <g font-size="11" fill="#333">
+          <text x="175" y="780">FinishBootAndShowClock  →  logo fade_out 400ms → 时钟主屏</text>
+          <text x="175" y="795">ShowNotification("v" + ver)  · board.SetPowerSaveLevel(LOW_POWER)  · PlaySound(OGG_SUCCESS)</text>
+          <text x="175" y="815" font-weight="600" fill="#1B5E20">✓ 稳态达成 · 可对话 · 可被唤醒</text>
+          <text x="175" y="830" font-size="10" fill="#888" font-style="italic">从 app_main 到 Idle 的实测耗时：WiFi 板 3-8 秒（取决于路由器响应）· 4G 板 8-30 秒（含 ML307 detect ≤ 30 次 + register ≤ 6 次重试）</text>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <h3>§ 二.1 关键时序点</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>步骤</th><th>性质</th><th>历史教训 / 量产关键</th></tr></thead>
+    <tbody>
+      <tr><td>[1] SetDeviceState(Starting)</td><td>同步</td><td>第一次状态机转换；订阅者必须就绪</td></tr>
+      <tr><td>[2] display->SetupUI()</td><td>同步</td><td>boot logo 上屏；emoji_box / status_bar 创建</td></tr>
+      <tr><td>[3] vTaskDelay(80ms) + RestoreBrightness()</td><td>同步</td><td><strong>P0 修复</strong>：背光延迟到 LVGL 首帧后开启 → 消除开机白闪</td></tr>
+      <tr><td>[4] audio_service.Start()</td><td>同步</td><td>5 任务起飞；INT RAM 栈不能落 PSRAM（DMA 限制）</td></tr>
+      <tr><td>[5] McpServer.AddTools</td><td>同步</td><td>通用 + UserOnly 工具注册；新增 MCP Tool 必须在这里登记</td></tr>
+      <tr><td>[7] Board::StartNetwork()</td><td>异步</td><td><strong>必须异步</strong>：4G 模组同步检测最坏 90s，会导致黑屏</td></tr>
+      <tr><td>ActivationTask</td><td>异步独立任务</td><td>8KB 栈 / prio=2；激活完成自删；CheckAssetsVersion → InitializeProtocol</td></tr>
+      <tr><td>HandleActivationDoneEvent</td><td>事件触发</td><td>Idle 稳态；FinishBootAndShowClock 切时钟主屏</td></tr>
+    </tbody>
+  </table>
+
+  <h3>§ 二.2 与上游 xiaozhi-esp32 的差异</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>维度</th><th>上游 v1.9.x</th><th>本仓库</th></tr></thead>
+    <tbody>
+      <tr><td>入口</td><td><code>Application::Start()</code> 单一调用</td><td><code>Initialize() + Run()</code> 两段式 · 自升 prio=10</td></tr>
+      <tr><td>网络等待</td><td>同步阻塞在 StartNetwork</td><td><strong>异步 + 事件驱动</strong></td></tr>
+      <tr><td>状态机</td><td><code>SetDeviceState</code> 改成员</td><td><code>DeviceStateMachine.TransitionTo</code> + Listener 广播</td></tr>
+      <tr><td>中间状态</td><td>Starting → Idle</td><td>Starting → <strong>Activating</strong> → <strong>Upgrading</strong> → Idle</td></tr>
+      <tr><td>OTA + 协议初始化</td><td>主流程同步串行</td><td>独立 <strong>ActivationTask</strong>（8KB · prio=2）</td></tr>
+      <tr><td>资产管理</td><td>无</td><td><code>CheckAssetsVersion + UiImageManager.LoadAll</code></td></tr>
+      <tr><td>4G modem 错误</td><td>简单</td><td><code>NetworkEvent</code> 细分 5 种 + Alert</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>异步化是这条链路的核心价值</strong> · 上游同步阻塞导致 4G 板量产最坏黑屏 90s。本仓库通过 (a) Network 启动异步 + (b) ActivationTask 独立任务 + (c) 状态机事件驱动 三件事，把"开机能不能上屏"和"网络/激活慢不慢"解耦。新功能加初始化代码时<strong>不要</strong>放进同步段 [1-6]——会破坏开机体验。
+  </div>
+
+  <h3>§ 二.3 启动链路三遍评审决策记录</h3>
+  <p>本节为 § 二 启动链路的三遍独立评审结果，与 § 一.5.5 状态机评审、§ 一.5.7 四层架构评审形成评审三联节。<strong>14 条发现 + 4 个候选优化方向 + 推荐路径</strong>，决策可追溯。代码层重构留作下一波 PR-A，本节先固化心智共识。</p>
+
+  <h4 style="margin-top:14px;font-size:14px;color:var(--brand-deep)">已落地 · 1500ms 神秘延迟修复（方案 B）</h4>
+  <div class="callout ok">
+    <strong>2026-04-28 已修复</strong> · 原 <code>application.cc:180</code> 的 <code>vTaskDelay(1500ms)</code> 已迁移到 <code>ml307_board.cc::NetworkTask</code> 开头。<strong>根因</strong>：GPIO9（AUDPWR-EN）级联开关同时上电 LCD + 音频 + 4G VDD_EXT 三负载，ML307R boot 完成（典型 800-1200ms）后才能响应 AT；不等会触发 AtModem::Detect 重试 30 次（最坏 30 秒浪费）。<strong>收益</strong>：① WiFi 板（mydazy-p30-wifi）启动同步段省 1.5s；② 4G 板复用 NetworkTask 独立 xTask，Application 主流程提前 1.5s 进入 Run() 主循环。
+  </div>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">三遍评审 · 14 条发现矩阵</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>#</th><th>发现</th><th>视角</th><th>严重度</th><th>状态</th></tr></thead>
+    <tbody>
+      <tr><td>S1</td><td>1500ms 神秘 vTaskDelay 未文档化（GPIO9 级联三负载 + ML307R boot 时序）</td><td>事实匹配</td><td>🔴 高</td><td>✅ 方案 B 已落地（移到 NetworkTask）</td></tr>
+      <tr><td>S2</td><td>启动同步段总耗时 ~2 秒（含 1500ms）</td><td>资源调度</td><td>🔴 高</td><td>✅ S1 修复后压到 ~500ms</td></tr>
+      <tr><td>S3</td><td>缺深睡唤醒启动路径（5 种入口压成一条）</td><td>时序正确性</td><td>🔴 高</td><td>📋 待 PR-A 候选 2（BootMode 入口分支）</td></tr>
+      <tr><td>S4</td><td>缺 4G 5 种错 / 激活重试 / OTA 升级 / 网络失败兜底分支时序</td><td>时序正确性</td><td>🟡 中</td><td>📋 待 PR-A 文档补全</td></tr>
+      <tr><td>S5</td><td>首次 vs 后续开机时序混淆（激活码场景差异）</td><td>事实匹配</td><td>🟡 中</td><td>📋 待 PR-A 拆分两条路径</td></tr>
+      <tr><td>S6</td><td>Initialize 是 monolithic God Function（100+ 行混 6 种关注点）</td><td>层次正确性</td><td>🔴 高</td><td>📋 待 PR-A 候选 1（Phase 化重构）</td></tr>
+      <tr><td>S7</td><td>缺"启动 Phase"抽象（隐式串行）</td><td>层次正确性</td><td>🔴 高</td><td>📋 待 PR-A 候选 1（7-Phase 调度器）</td></tr>
+      <tr><td>S8</td><td>同步段 / 异步段边界模糊（NetworkTask / ActivationTask 无超时无兜底）</td><td>资源调度</td><td>🟡 中</td><td>📋 待 PR-B 错误处理</td></tr>
+      <tr><td>S9</td><td>callback 注册晚于任务起飞（audio_service.SetCallbacks 在 Start 之后）</td><td>资源调度</td><td>🟡 中</td><td>📋 待 PR-B 顺序修正</td></tr>
+      <tr><td>S10</td><td>启动期错误处理薄弱（每 phase 失败均 ESP_ERROR_CHECK panic）</td><td>稳定性</td><td>🟡 中</td><td>📋 待 PR-B phase-level error</td></tr>
+      <tr><td>S11</td><td>启动期可观察性差（用户屏幕只见 logo · 无进度提示）</td><td>稳定性</td><td>🟡 中</td><td>📋 待 PR-A 候选 3（StartupReporter）</td></tr>
+      <tr><td>S12</td><td>main.cc 太瘦（启动逻辑全堆在 Application::Initialize）</td><td>层次正确性</td><td>🟡 中</td><td>📋 待 PR-A 候选 1（启动调度器移到 main.cc）</td></tr>
+      <tr><td>S13</td><td>网络与激活串行（弱网环境下用户响应慢）</td><td>稳定性</td><td>🟢 低</td><td>📋 待量产后候选 4（并行化 + 缓存降级）</td></tr>
+      <tr><td>S14</td><td>启动期内存峰值未实测（PSRAM 同时载入 LVGL+字体+AFE 模型）</td><td>资源调度</td><td>🟢 低</td><td>📋 待 PR-B 加监控点</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">4 个候选优化方向</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>候选</th><th>核心思路</th><th>覆盖发现</th><th>工作量</th><th>优先级</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>1. Phase 化启动调度器</strong></td>
+        <td>引入 <code>StartupPhases</code> 类，把 100 行 monolithic Initialize 拆成 7 个独立 phase（Hardware/UI/Service/Registration/Network/Activation/Ready）+ 一个调度器；启动入口移到 main.cc</td>
+        <td>S6 / S7 / S12</td>
+        <td>~1 周（200 行 + 重构）</td>
+        <td>🔴 必做（PR-A）</td>
+      </tr>
+      <tr>
+        <td><strong>2. BootMode 入口分支</strong></td>
+        <td>5 种唤醒入口（POWERON/EXT0/EXT1/TIMER/SoftReboot）按 BootMode 走不同 phase 子集；闹钟唤醒跳过 UI 动画 + 网络，响应时间从 ~2s 降到 &lt; 500ms</td>
+        <td>S3 / S5</td>
+        <td>~3 天（150 行）</td>
+        <td>🟡 强烈建议（PR-A）</td>
+      </tr>
+      <tr>
+        <td><strong>3. StartupReporter 可观察性</strong></td>
+        <td>① 日志加 <code>[Phase: X]</code> 标签 ② logo 下方显示进度条 ③ 通过 RemoteCmd 上报启动 phase 时长（量产数据收集）</td>
+        <td>S11</td>
+        <td>~80 行 + UI 适配</td>
+        <td>🟢 量产后</td>
+      </tr>
+      <tr>
+        <td><strong>4. 网络/激活并行化 + 缓存降级</strong></td>
+        <td>NetworkTask 与 AssetsCheckTask 并行；本地缓存可用立即用；网络断时降级到缓存模式继续 Idle</td>
+        <td>S13</td>
+        <td>~300 行 + 缓存策略</td>
+        <td>🟢 量产后（产品决策：是否支持离线降级）</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">推荐路径</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>阶段</th><th>动作</th><th>覆盖候选</th><th>工作量</th><th>触发条件</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>已完成</strong></td>
+        <td>方案 B · 1500ms 移到 NetworkTask（S1/S2 修复）</td>
+        <td>—</td>
+        <td>30 分钟（已落地）</td>
+        <td>2026-04-28 PR</td>
+      </tr>
+      <tr>
+        <td><strong>PR-A 量产前必修</strong></td>
+        <td>① Phase 化重构 ② BootMode 分支 ③ phase-level 日志标签</td>
+        <td>1 + 2 + 3 阶段一</td>
+        <td>~2 周</td>
+        <td>架构清晰、可测、可观察</td>
+      </tr>
+      <tr>
+        <td><strong>PR-B 量产前打磨</strong></td>
+        <td>① S8 异步任务超时 + 失败兜底 ② S9 callback 注册顺序 ③ S10 phase-level error 处理 ④ S14 内存峰值监控</td>
+        <td>—</td>
+        <td>~1-2 周</td>
+        <td>启动稳定性</td>
+      </tr>
+      <tr>
+        <td><strong>量产后第一波</strong></td>
+        <td>候选 3 阶段 2/3：UI 进度条 + 量产数据收集</td>
+        <td>3</td>
+        <td>~80 行</td>
+        <td>视觉打磨</td>
+      </tr>
+      <tr>
+        <td><strong>量产后产品决策</strong></td>
+        <td>候选 4：网络/激活并行化 + 离线降级模式</td>
+        <td>4</td>
+        <td>~300 行</td>
+        <td>需要产品对齐"是否离线可用"</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">Phase 化重构 · 顶层结构（候选 1 设计草案）</h4>
+  <pre style="background:#F5F5F5;border:1px solid #DDD;border-radius:6px;padding:14px;font-size:12.5px;line-height:1.55;overflow-x:auto;font-family:'SF Mono',Menlo,Consolas,monospace">// main/startup_phases.h（拟新增 · 量产前 PR-A）
+class StartupPhases {
+public:
+    enum class Phase : uint8_t {
+        Hardware,      // GPIO / 电源 / I2C
+        UI,            // LCD / Backlight / boot animation
+        Service,       // Audio / Timer / MusicPlayer
+        Registration,  // Callbacks / Listeners / MCP
+        Network,       // 异步起飞（不阻塞）
+        Activation,    // 异步起飞（不阻塞）
+        Ready          // 进 Run() 主循环
+    };
+
+    bool RunPhase(Phase p);
+    Phase GetCurrent() const;
+    void ReportProgress(int percent, const char* msg);
+
+    // BootMode 决定走哪些 phase
+    void ConfigureForMode(BootMode mode);
+};
+
+// main.cc（精简后）
+extern "C" void app_main(void) {
+    esp_event_loop_create_default();
+    nvs_flash_init();
+
+    auto mode = DetectBootMode();        // 5 种唤醒入口分支
+    StartupPhases phases;
+    phases.ConfigureForMode(mode);
+
+    for (auto p : phases.Sequence()) {
+        if (!phases.RunPhase(p)) {
+            EnterFatalError(p);          // phase-level error
+            return;
+        }
+    }
+    Application::GetInstance().Run();
+}</pre>
+
+  <div class="callout ok">
+    <strong>关键架构演进价值</strong> · 这套 Phase 化重构同时解决 S6/S7/S12 三个高严重度问题：① Initialize God Function 拆解 → 层次正确性 ② 隐式串行 → 显式 7 阶段 ③ main.cc 担当启动调度 → 关注点分离。BootMode 入口分支（候选 2）让 5 种唤醒路径各自跳过不需要的 phase，闹钟/加速计唤醒响应从 ~2s 降到 &lt; 500ms。
+  </div>
+
+  <div class="callout warn">
+    <strong>量产期纪律</strong> · ① S1/S2 已修复（方案 B），其余 12 项纯文档登记，代码层下一波再改；② 新增启动期代码必须挂在某个 Phase 下，禁止再加散落 init；③ 任何打破 phase 边界的"穿层 init"在 PR review 时直接拒绝；④ Phase 内部失败必须返回 false + 错误码，不允许 ESP_ERROR_CHECK panic（量产期不能直接挂掉）；⑤ 候选 1 真要落地前先做 git branch + 三板编译矩阵验证。
+  </div>
+</section>
+
+<!-- ==================== § 一.5 三维心智模型 ==================== -->
+<section class="section" id="sec1_5">
+  <h2><span class="num">§ 一.5</span> 三维心智模型 · 顶层认知工具</h2>
+  <p class="sub">扩展功能从这里入手定位：按三个维度查表 → 决定走哪个扩展点。<strong>三维不是绝对正交</strong>——主对话闭环下近似独立，系统流程态 / 事件型扩展下三维强联动。本节给出"思考工具 + 代码层 enum 收拢方案"，<strong>不引入新基类</strong>，状态机层面零新增枚举。</p>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:#F3E5F5;border-color:#6A1B9A"></span>A · 设备能力（DeviceState · 已有 enum）</span>
+    <span class="item"><span class="swatch" style="background:#FFEBEE;border-color:#C62828"></span>B · 业务活动（ActivityType · 拟新增 enum）</span>
+    <span class="item"><span class="swatch" style="background:#FFF3E0;border-color:#EF6C00"></span>C · UI 场景（SceneType · 拟新增 enum）</span>
+  </div>
+
+  <h3>§ 一.5.0 第一性原理推导</h3>
+  <p>问：为什么不引入 ActivitySession / SceneNavigator 基类？</p>
+  <table class="tbl-compact">
+    <thead><tr><th>必要的能力</th><th>已有的实现</th><th>是否还需要新基类？</th></tr></thead>
+    <tbody>
+      <tr><td>设备能力维度（能不能说话/听）</td><td>12 态 <code>DeviceState</code> + <code>DeviceStateMachine</code></td><td>❌ 已够</td></tr>
+      <tr><td>业务编排集中点</td><td><code>Application</code> 单例 + 主事件循环</td><td>❌ 已够</td></tr>
+      <tr><td>UI 切屏抽象</td><td>LVGL <code>lv_scr_load()</code> + <code>UiDisplay</code> mode flags</td><td>❌ LVGL 已是 Scene</td></tr>
+      <tr><td>跨业务事件总线</td><td>ESP-IDF 5.5 <code>esp_event_loop</code> + <code>EventGroup</code></td><td>❌ 已够</td></tr>
+      <tr><td>命令分发入口</td><td><code>RemoteCmd</code> + <code>McpServer</code></td><td>❌ 已够</td></tr>
+      <tr><td>音频独占协调</td><td><code>CloseAudioChannel</code> + <code>MusicPlayer.Stop()</code></td><td>❌ 已够</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>结论</strong> · 所有必要抽象都已存在。新功能压力下需要的不是新基类，而是 <strong>(a) 心智模型 + (b) 散落判断收拢成 enum + (c) 登记纪律</strong> 三件事。预计 ~300 行代码（vs 抽基类 ~3200 行），10× 杠杆，零 rebase 风险，零任务模型变化。
+  </div>
+
+  <h3>§ 一.5.1 三柱并列图（按形态分组）</h3>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 940 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="三维架构模型 · 三柱并列">
+      <text x="470" y="26" class="svg-title" text-anchor="middle">三维心智 · 设备能力 × 业务活动 × UI 场景（enum 而非基类）</text>
+      <text x="470" y="46" font-size="12" fill="#666" text-anchor="middle">主对话闭环下三维近似独立；系统流程态 / 事件型扩展下三维强联动</text>
+
+      <!-- ────────── A 柱 DeviceState ────────── -->
+      <g>
+        <rect x="40" y="70" width="280" height="48" rx="6" fill="#F3E5F5" stroke="#6A1B9A" stroke-width="1.5"/>
+        <text x="180" y="92" text-anchor="middle" font-size="14" font-weight="700" fill="#4A148C">A · 设备能力 (DeviceState)</text>
+        <text x="180" y="110" text-anchor="middle" font-size="11" fill="#6A1B9A">已有 · 12 态状态机 · 设备此刻能不能说话/听</text>
+
+        <rect x="40" y="124" width="280" height="380" rx="6" fill="#FAF7FB" stroke="#E1BEE7"/>
+
+        <g font-size="11.5">
+          <rect x="50" y="134" width="260" height="24" fill="#fff" stroke="#CE93D8" rx="3"/>
+          <text x="60" y="151" fill="#333">Unknown · id=0</text>
+          <rect x="50" y="162" width="260" height="24" fill="#fff" stroke="#CE93D8" rx="3"/>
+          <text x="60" y="179" fill="#333">Starting · id=1</text>
+          <rect x="50" y="190" width="260" height="24" fill="#fff" stroke="#CE93D8" rx="3"/>
+          <text x="60" y="207" fill="#333">WifiConfiguring · id=2</text>
+          <rect x="50" y="218" width="260" height="24" fill="#fff" stroke="#CE93D8" rx="3"/>
+          <text x="60" y="235" fill="#333">AudioTesting · id=9</text>
+          <rect x="50" y="246" width="260" height="24" fill="#FFF8E1" stroke="#F9A825" rx="3"/>
+          <text x="60" y="263" fill="#333">Activating · id=8</text>
+          <rect x="50" y="274" width="260" height="24" fill="#FFEBEE" stroke="#C62828" stroke-width="1.5" rx="3"/>
+          <text x="60" y="291" fill="#C62828" font-weight="700">Idle · id=3 （复合态 · 见 § 三）</text>
+          <rect x="50" y="302" width="260" height="24" fill="#FFEBEE" stroke="#C62828" rx="3"/>
+          <text x="60" y="319" fill="#333">Connecting · id=4</text>
+          <rect x="50" y="330" width="260" height="24" fill="#FFEBEE" stroke="#C62828" rx="3"/>
+          <text x="60" y="347" fill="#333">Listening · id=5</text>
+          <rect x="50" y="358" width="260" height="24" fill="#FFEBEE" stroke="#C62828" rx="3"/>
+          <text x="60" y="375" fill="#333">Speaking · id=6</text>
+          <rect x="50" y="386" width="260" height="24" fill="#FFF3E0" stroke="#E65100" rx="3"/>
+          <text x="60" y="403" fill="#333">Upgrading · id=7</text>
+          <rect x="50" y="414" width="260" height="24" fill="#FFF3E0" stroke="#E65100" stroke-dasharray="3 2" rx="3"/>
+          <text x="60" y="431" fill="#333">FatalError · id=10</text>
+        </g>
+
+        <text x="180" y="478" text-anchor="middle" font-size="10.5" fill="#666">代码入口：<tspan font-family="monospace">main/device_state.h</tspan></text>
+        <text x="180" y="494" text-anchor="middle" font-size="10" fill="#999">本期扩展 → 不动</text>
+      </g>
+
+      <!-- ────────── B 柱 ActivitySession ────────── -->
+      <g>
+        <rect x="340" y="70" width="280" height="48" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="1.5"/>
+        <text x="480" y="92" text-anchor="middle" font-size="14" font-weight="700" fill="#B71C1C">B · 业务活动 (ActivityType enum)</text>
+        <text x="480" y="110" text-anchor="middle" font-size="11" fill="#C62828">设备替谁干活 · 按形态分三组 · 不抽基类</text>
+
+        <rect x="340" y="124" width="280" height="380" rx="6" fill="#FFFAFA" stroke="#FFCDD2"/>
+
+        <!-- 会话型分组 -->
+        <text x="350" y="142" font-size="10" font-weight="700" fill="#C62828">▎会话型（长持续 · 占音频 · 进 enum）</text>
+
+        <g font-size="11">
+          <rect x="350" y="148" width="260" height="34" fill="#fff" stroke="#EF9A9A" rx="3"/>
+          <text x="360" y="163" fill="#333" font-weight="700" font-size="12">Chat · 默认对话</text>
+          <text x="360" y="176" fill="#888">含 教育卡 / GIF / 表情 三子能力</text>
+
+          <rect x="350" y="186" width="260" height="34" fill="#FFEBEE" stroke="#C62828" stroke-width="1.5" rx="3"/>
+          <text x="360" y="201" fill="#B71C1C" font-weight="700" font-size="12">Flow · 流程脚本（类 FlowEngine）</text>
+          <text x="360" y="214" fill="#C62828">原 LiveCompanion · 教学 / 问答 / 互动</text>
+
+          <rect x="350" y="224" width="260" height="34" fill="#fff" stroke="#EF9A9A" rx="3"/>
+          <text x="360" y="239" fill="#333" font-weight="700" font-size="12">Music · MP3 播放</text>
+          <text x="360" y="252" fill="#888">独占音频 · CloseAudioChannel 实现</text>
+        </g>
+
+        <!-- 事件型分组 -->
+        <text x="350" y="278" font-size="10" font-weight="700" fill="#888">▎事件型（短促触发 · 不进 enum · 走事件路径）</text>
+
+        <g font-size="11">
+          <rect x="350" y="284" width="260" height="30" fill="#FAFAFA" stroke="#BBB" rx="3"/>
+          <text x="360" y="298" fill="#666" font-weight="600">Alarm · 闹钟铃声（10s）</text>
+          <text x="360" y="310" fill="#888" font-size="10">短占 audio_output · 立即停 · AudioSource enum</text>
+
+          <rect x="350" y="318" width="260" height="30" fill="#FAFAFA" stroke="#BBB" rx="3"/>
+          <text x="360" y="332" fill="#666" font-weight="600">PomodoroBell · 阶段铃（5s）</text>
+          <text x="360" y="344" fill="#888" font-size="10">阶段切换触发 · 立即停 · AudioSource enum</text>
+
+          <rect x="350" y="352" width="260" height="30" fill="#FAFAFA" stroke="#BBB" rx="3"/>
+          <text x="360" y="366" fill="#666" font-weight="600">Reminder · 待办提醒</text>
+          <text x="360" y="378" fill="#888" font-size="10">语音/视觉 toast · 立即停</text>
+        </g>
+
+        <!-- 后台服务型分组 -->
+        <text x="350" y="402" font-size="10" font-weight="700" fill="#1976D2">▎后台服务型（不占音频 · 不进 enum · 独立计时）</text>
+
+        <g font-size="11">
+          <rect x="350" y="408" width="260" height="30" fill="#E3F2FD" stroke="#90CAF9" rx="3"/>
+          <text x="360" y="422" fill="#0D47A1" font-weight="600">Pomodoro 计时（25min）</text>
+          <text x="360" y="434" fill="#666" font-size="10">esp_timer · 不占音频 · 仅 UI Scene 反映</text>
+        </g>
+
+        <text x="480" y="475" text-anchor="middle" font-size="10.5" fill="#666">代码事实：<tspan font-family="monospace">FlowEngine + MusicPlayer</tspan></text>
+        <text x="480" y="491" text-anchor="middle" font-size="10" fill="#C62828" font-weight="600">建议：<tspan font-family="monospace">enum class ActivityType</tspan> 收拢 3 个会话型</text>
+      </g>
+
+      <!-- ────────── C 柱 SceneNavigator ────────── -->
+      <g>
+        <rect x="640" y="70" width="280" height="48" rx="6" fill="#FFF3E0" stroke="#EF6C00" stroke-width="1.5"/>
+        <text x="780" y="92" text-anchor="middle" font-size="14" font-weight="700" fill="#BF360C">C · UI 场景 (SceneType enum)</text>
+        <text x="780" y="110" text-anchor="middle" font-size="11" fill="#E65100">用户看到什么屏 · 复用 LVGL screen · 不叠基类</text>
+
+        <rect x="640" y="124" width="280" height="380" rx="6" fill="#FFFCF7" stroke="#FFE0B2"/>
+
+        <g font-size="11">
+          <rect x="650" y="134" width="260" height="38" fill="#fff" stroke="#FFB74D" rx="3"/>
+          <text x="660" y="150" fill="#333" font-weight="700" font-size="12">Clock · 时钟主屏</text>
+          <text x="660" y="164" fill="#888">88px 时间 + 30px 日期 · Idle 默认</text>
+
+          <rect x="650" y="176" width="260" height="38" fill="#fff" stroke="#FFB74D" rx="3"/>
+          <text x="660" y="192" fill="#333" font-weight="700" font-size="12">Emoji · 对话表情</text>
+          <text x="660" y="206" fill="#888">AI 情绪 · Listening/Speaking 期</text>
+
+          <rect x="650" y="218" width="260" height="38" fill="#fff" stroke="#FFB74D" rx="3"/>
+          <text x="660" y="234" fill="#333" font-weight="700" font-size="12">Player · MP3 播放器</text>
+          <text x="660" y="248" fill="#888">已实现 · is_player_mode_</text>
+
+          <rect x="650" y="260" width="260" height="38" fill="#fff" stroke="#FFB74D" rx="3"/>
+          <text x="660" y="276" fill="#333" font-weight="700" font-size="12">Pomodoro · 番茄钟界面</text>
+          <text x="660" y="290" fill="#888">圆环倒计时 + 工作/休息阶段</text>
+
+          <rect x="650" y="302" width="260" height="38" fill="#fff" stroke="#FFB74D" rx="3"/>
+          <text x="660" y="318" fill="#333" font-weight="700" font-size="12">Todo · 待办清单</text>
+          <text x="660" y="332" fill="#888">任务列表 + 勾选完成</text>
+
+          <rect x="650" y="344" width="260" height="38" fill="#fff" stroke="#FFB74D" rx="3"/>
+          <text x="660" y="360" fill="#333" font-weight="700" font-size="12">ControlCenter · 控制中心</text>
+          <text x="660" y="374" fill="#888">下拉手势 · 音量/亮度/快捷开关</text>
+
+          <rect x="650" y="386" width="260" height="38" fill="#fff" stroke="#FFB74D" rx="3"/>
+          <text x="660" y="402" fill="#333" font-weight="700" font-size="12">RoleSwitcher · 角色切换</text>
+          <text x="660" y="416" fill="#888">AI 角色/人格选择</text>
+
+          <rect x="650" y="428" width="260" height="38" fill="#FFCDD2" stroke="#C62828" rx="3"/>
+          <text x="660" y="444" fill="#B71C1C" font-weight="700" font-size="12">ConfigQr · 配网/激活 QR</text>
+          <text x="660" y="458" fill="#B71C1C">L5 全屏独占 · 互斥所有 Scene</text>
+        </g>
+
+        <text x="780" y="475" text-anchor="middle" font-size="10.5" fill="#666">代码事实：<tspan font-family="monospace">is_player_mode_</tspan> + LVGL screen</text>
+        <text x="780" y="491" text-anchor="middle" font-size="10" fill="#EF6C00" font-weight="600">建议：<tspan font-family="monospace">enum class SceneType</tspan> 替代散落 mode flag</text>
+      </g>
+
+      <!-- 底部说明 -->
+      <text x="470" y="528" text-anchor="middle" font-size="11.5" fill="#444" font-weight="600">每加一个新功能 → 在 A/B/C 三柱各自取值 → 在落位表登记一行</text>
+      <text x="470" y="546" text-anchor="middle" font-size="10.5" fill="#888" font-style="italic">示例：教育卡 = (A: Listening/Speaking) × (B: Chat 子能力) × (C: Emoji + L1 overlay)</text>
+    </svg>
+  </div>
+
+  <h3>§ 一.5.2 全功能落位表（量产期扩展登记）</h3>
+  <p style="font-size:13px;color:#666;margin:6px 0 12px">每加一个新功能必须填一行。三列都"无变更"= 不需要架构改动；A 列要新增 = 必须在文档评审中给出"为什么不能用 ActivityType 或事件路径表达"的论证。<strong>形态</strong> 列是新增审查项——决定走 enum 还是事件路径。</p>
+
+  <table class="tbl-compact">
+    <thead><tr>
+      <th>功能</th>
+      <th>A · DeviceState</th>
+      <th>B · ActivityType</th>
+      <th>C · SceneType</th>
+      <th>形态</th>
+      <th>Display Layer</th>
+      <th>动状态机</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>默认对话</td><td>Idle ⇄ Listening ⇄ Speaking</td><td><strong>Chat</strong></td><td>Emoji</td><td>会话型</td><td>L0 emoji</td><td>❌</td></tr>
+      <tr><td>表情包（AI 情绪）</td><td>随对话</td><td>Chat 子能力</td><td>Emoji</td><td>会话子能力</td><td>L0</td><td>❌</td></tr>
+      <tr><td>教育卡（单词/拼音/汉字/组词多标签）</td><td>Listening / Speaking</td><td>Chat 子能力 · <code>show_card</code> JSON schema</td><td>Emoji + L1 叠加</td><td>会话子能力</td><td>L1 card_overlay</td><td>❌</td></tr>
+      <tr><td>GIF 汉字笔画动画</td><td>Listening / Speaking</td><td>教育卡子能力 + 动态下载 + LRU</td><td>Emoji + L1 叠加</td><td>会话子能力</td><td>L1（参考 xiaozhi-esp32-189）</td><td>❌</td></tr>
+      <tr><td>流程脚本（直播/教学/问答）</td><td>Speaking ⇄ Listening 循环</td><td><strong>Flow</strong>（类 <code>FlowEngine</code> · 已重命名 ✓）</td><td>Emoji 或专属 Scene</td><td>会话型</td><td>L0 + L1 可选</td><td>❌</td></tr>
+      <tr><td>MP3 流式播放</td><td><strong>Idle</strong>（通道关）</td><td><strong>Music</strong></td><td>Player</td><td>会话型</td><td>L0 Player + L1 封面</td><td>❌</td></tr>
+      <tr><td>主屏时间</td><td>Idle</td><td>None</td><td><strong>Clock</strong></td><td>—</td><td>L0</td><td>❌</td></tr>
+      <tr><td>番茄钟计时（25min 后台）</td><td>Idle</td><td>None（不占音频）</td><td><strong>Pomodoro</strong></td><td>后台服务型</td><td>L0 番茄钟 UI</td><td>❌</td></tr>
+      <tr><td>番茄钟阶段铃（5s）</td><td>Speaking（铃响时）</td><td>None · <code>AudioSource::PomodoroBell</code></td><td>当前 Scene 不变</td><td>事件型</td><td>L4 modal</td><td>❌</td></tr>
+      <tr><td>闹钟响铃（10s）</td><td>任意 → Speaking</td><td>None · <code>AudioSource::AlarmBell</code></td><td>当前 Scene + 弹 modal</td><td>事件型</td><td>L4 modal</td><td>❌</td></tr>
+      <tr><td>控制中心（下拉手势）</td><td>任意</td><td>None</td><td><strong>ControlCenter</strong></td><td>—</td><td>L0 全屏</td><td>❌</td></tr>
+      <tr><td>切换 AI 角色</td><td>任意</td><td>None</td><td><strong>RoleSwitcher</strong></td><td>—</td><td>L0 全屏</td><td>❌</td></tr>
+      <tr><td>待办清单（查看）</td><td>任意</td><td>None</td><td><strong>Todo</strong></td><td>—</td><td>L0 全屏</td><td>❌</td></tr>
+      <tr><td>待办语音提醒</td><td>任意 → Speaking</td><td>None · <code>AudioSource::Reminder</code></td><td>当前 Scene 不变</td><td>事件型</td><td>L3 toast</td><td>❌</td></tr>
+      <tr><td>配网（BluFi ⇄ AP）</td><td>WifiConfiguring</td><td>None（系统）</td><td><strong>ConfigQr</strong></td><td>—</td><td>L5 全屏 QR</td><td>❌</td></tr>
+      <tr><td>激活绑定（QR）</td><td>Activating</td><td>None（系统）</td><td><strong>ConfigQr</strong></td><td>—</td><td>L5 全屏 QR</td><td>❌</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>关键观察</strong> · 16 项功能 0 个需要新增 DeviceState 枚举；只有 3 个会话型进 <code>ActivityType</code> enum（Chat / Flow / Music）；事件型用 <code>AudioSource</code> enum 标记不进 ActivityType；后台服务型只占 SceneType。<em>整个扩展空间用 3 个 enum 完全覆盖。</em>
+  </div>
+
+  <h3>§ 一.5.3 当前代码事实 → enum 收拢方案</h3>
+  <p>不抽基类，但要把散落的 <code>IsPlaying()</code> / <code>IsRunning()</code> / <code>is_player_mode_</code> 收拢成统一查询 API。这一步是低风险高回报。</p>
+
+  <table class="tbl-compact">
+    <thead><tr><th>当前现状</th><th>散落判断点</th><th>拟收拢为</th><th>收益</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>MP3 是否在播</td>
+        <td><code>MusicPlayer::IsPlaying()</code> 散落 5+ 处<br/>（Application / DeepSleep / WakeWord / Cmd）</td>
+        <td><code>ActivityType::Music</code> · <code>Application::GetCurrentActivity()</code></td>
+        <td>查询入口统一；新增 Activity 不需改散落判断</td>
+      </tr>
+      <tr>
+        <td>Flow 是否在跑</td>
+        <td><code>flow_engine_-&gt;IsRunning()</code><br/>+ <code>state == Suspended</code> 散落 3+ 处</td>
+        <td><code>ActivityType::Flow</code> · 同上</td>
+        <td>同上</td>
+      </tr>
+      <tr>
+        <td>UI 是否 Player 模式</td>
+        <td><code>UiDisplay::is_player_mode_</code> 散落 3+ 处<br/>+ <code>SwitchToPlayerMode()</code> 等手动切换</td>
+        <td><code>SceneType::Player</code> · <code>UiDisplay::GetCurrentScene()</code></td>
+        <td>替代 if-else 链；新增 Scene 仅加 enum 值</td>
+      </tr>
+      <tr>
+        <td>Speaking 时音频源</td>
+        <td>无统一标识 · LED / UI / 打断逻辑各自查 <code>MusicPlayer.IsPlaying()</code> 等</td>
+        <td><code>AudioSource</code> enum · <code>AudioService::GetCurrentSource()</code></td>
+        <td>事件型扩展（Alarm / PomodoroBell）零状态机改动</td>
+      </tr>
+      <tr>
+        <td>Activity 切换</td>
+        <td><code>OnMusicPlay</code> 里手动 <code>CloseAudioChannel</code> + <code>lc-&gt;Suspend</code></td>
+        <td>仍保留现有逻辑 · <strong>不抽 Switch 接口</strong></td>
+        <td>避免上游 rebase 冲突；只有真有第 4 个 Activity 时再考虑</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>§ 一.5.4 enum 接缝代码示例</h3>
+  <p>三个 enum 头文件 + 三个查询函数 ≈ 100 行新增；散落判断改 enum 查询 ≈ 200 行 grep + replace。<strong>总计 ~300 行</strong>，零基类、零任务调度变化、零 rebase 风险。</p>
+
+  <pre style="background:#F5F5F5;border:1px solid #DDD;border-radius:6px;padding:14px;font-size:12.5px;line-height:1.55;overflow-x:auto;font-family:'SF Mono',Menlo,Consolas,monospace">// main/activity_type.h（拟新增 · ~20 行）
+enum class ActivityType : uint8_t {
+    None,    // 真 Idle，无业务活动
+    Chat,    // 默认对话（含 教育卡 / GIF / 表情）
+    Flow,    // 流程脚本（原 LiveCompanion）
+    Music    // MP3 播放
+    // 注：Alarm / PomodoroBell / Reminder 走"事件型"，
+    //    短促触发 + 立即返回，不占 ActivityType 枚举值
+};
+
+// main/scene_type.h（拟新增 · ~20 行）
+enum class SceneType : uint8_t {
+    Clock,         // 时钟主屏（Idle 默认）
+    Emoji,         // 对话表情（Listening / Speaking）
+    Player,        // MP3 播放器（替代 is_player_mode_）
+    ConfigQr,      // 配网 / 激活 QR（L5 互斥）
+    Pomodoro,      // 番茄钟界面
+    Todo,          // 待办清单
+    ControlCenter, // 控制中心
+    RoleSwitcher   // 角色切换
+};
+
+// main/audio_source.h（拟新增 · ~15 行）
+enum class AudioSource : uint8_t {
+    None,          // 静默
+    Tts,           // AI TTS（Chat / Flow）
+    Mp3,           // MusicPlayer 输出
+    AlarmBell,     // 闹钟铃声
+    PomodoroBell,  // 番茄钟铃声
+    Reminder       // 待办语音提醒
+};
+
+// 集中查询 API（替代散落的 IsPlaying / IsRunning / is_player_mode_）
+class Application {
+public:
+    ActivityType GetCurrentActivity() const;     // ~15 行实现
+    AudioSource  GetCurrentAudioSource() const;  // ~10 行实现
+};
+
+class UiDisplay {
+public:
+    SceneType GetCurrentScene() const;           // ~10 行实现
+};
+
+// ============================================================
+// ActivityCoordinator — 业务活动协调器（拟新增 · 量产后落地）
+// ============================================================
+// 收拢散落 27 处补丁：
+//   - MusicPlayer::Stop()        × 10 处
+//   - flow_engine_->Suspend() × 4 处
+//   - AbortSpeaking()            × 8 处
+//   - CloseAudioChannel()        × 5 处
+//
+// 不抽基类、不挂任务、复用 Application::Schedule 队列
+// 仅作"业务切换协调函数集"，命名空间组织
+// ============================================================
+namespace ActivityCoordinator {
+    /**
+     * 切换到目标 Activity，自动停止当前活跃 Activity
+     * 例：SwitchTo(kChat) 自动停 Music + Suspend Flow + 准备 OpenAudioChannel
+     */
+    void SwitchTo(ActivityType target, const cJSON* args = nullptr);
+
+    /** 主动停止指定 Activity（不切换到新的）*/
+    void Stop(ActivityType which);
+
+    /** 资源冲突检查（is target 可启动？）*/
+    bool CanSwitchTo(ActivityType target);
+}
+
+// 远程命令侧：6 个业务调度类 on_* 收拢成 1 个统一入口
+//   旧：OnWakeup / OnTts / OnTtai / OnLiveCompanion / OnMusicPlay / OnMusicStop
+//   新：OnActivitySwitch(json) → ActivityCoordinator::SwitchTo(target, args)
+// 系统操作类（OnReboot/OnOta/OnReconnect/OnSttUrl/OnSleep）和音频参数类
+// （OnVolume/OnGain/OnVadConfig）保持现状。</pre>
+
+  <p style="font-size:13px;color:#666;margin-top:10px"><strong>实施步骤</strong>（量产期可落地，与功能开发并行）：</p>
+  <ol style="font-size:13px;line-height:1.8;color:#444">
+    <li>新建 3 个 enum 头文件 + 3 个查询函数实现（~100 行 · 1 个 PR）</li>
+    <li>把散落的 <code>MusicPlayer::IsPlaying()</code> / <code>lc-&gt;IsRunning()</code> / <code>is_player_mode_</code> 调用改为 enum 查询（~200 行 grep + replace · 1 个 PR · 易于 review）</li>
+    <li>新功能（教育卡 / 番茄钟等）<strong>必须</strong>用 enum 查询，禁止再加新的 IsXxx flag</li>
+    <li>事件型扩展（闹钟 / 待办语音）通过 <code>AudioSource</code> enum 标记，UI/LED/打断分支按 source 写</li>
+  </ol>
+
+  <h3>§ 一.5.5 三遍评审决策记录（不做基类抽象的理由）</h3>
+  <p>本节为决策可追溯。三遍独立评审一致结论：<strong>不引入 ActivitySession / SceneNavigator 基类</strong>。</p>
+  <table class="tbl-compact">
+    <thead><tr><th>评审视角</th><th>核心发现</th><th>结论</th></tr></thead>
+    <tbody>
+      <tr><td>软件工程基础</td><td>会话型 / 事件型 / 后台服务型形状不同，强行套基类违反 SRP；"三维正交"是过度简化（系统流程态强联动）</td><td>拆分形态分组 · 不套基类</td></tr>
+      <tr><td>ESP32-S3 工程约束</td><td>SceneNavigator 与 LVGL screen 重复；Activity 任务模型若每子类一任务则 60KB 内部 RAM 红线爆；ESP-IDF 5.5 已有 esp_event_loop</td><td>复用 LVGL + esp_event_loop · 不抽基类</td></tr>
+      <tr><td>产品演进 + 量产风险</td><td>真实成本 ~3200 行（vs enum ~300 行）· 上游 rebase 差异从 11 处升至 14+ 处 · 失败回滚 = 重写</td><td>用 enum · 失败成本对称</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>命名（双层命名 · 已落地）</strong> · 类名 / 文件名 <code>FlowEngine</code> · <code>flow_engine.cc/h</code>（与 <code>AudioService / MusicPlayer / McpServer</code> 同风格）；enum 值短名 <code>ActivityType::Flow</code>；业务文档统称 "Flow（流程）"。<strong>已落地清单</strong>：① 类名 <code>LiveCompanion → FlowEngine</code>、状态枚举 <code>LiveState → FlowState</code>；② 文件名 <code>live_companion.cc/h → flow_engine.cc/h</code>；③ FreeRTOS 任务名 <code>lc_load → flow_load</code>、esp_timer 名 <code>lc_delay → flow_delay</code>；④ <strong>RemoteCmd JSON type</strong> <code>"live_companion" → "flow"</code>（云端需同步切换，无兼容期）；⑤ Settings 持久化字段未涉及（无影响）。
+  </div>
+
+  <div class="callout warn">
+    <strong>Flow 脚本来源（待产品决策）</strong> · 当前 FlowEngine 仅支持 <em>服务器下发脚本</em>。量产后扩展教学/问答场景时，需要决定：① 仍走服务器（动态可控、依赖网络）；② 加本地脚本（断网可用、版本同步问题）；③ 双源（服务器优先 + 本地兜底）。建议在 § 八 协议层补一个 <code>ScriptProvider</code> 抽象，<em>不要</em>直接在 <code>FlowEngine</code> 里写死脚本来源。
+  </div>
+
+  <div class="callout warn">
+    <strong>量产期纪律</strong> · ① 不抽 ActivitySession / SceneNavigator 基类；② 加 3 个 enum + 3 个查询 API（~300 行）；③ 每个新功能在 § 一.5.2 落位表登记一行；④ 事件型扩展用 AudioSource enum，禁止加新 IsXxx flag；⑤ 真有第 4-5 个会话型 Activity 时再回头评估基类（<em>不是</em> 现在）。
+  </div>
+
+  <h3>§ 一.5.7 § 一 四层架构 · 三遍评审决策记录</h3>
+  <p>本节为 § 一 四层架构鸟瞰的三遍独立评审结果，与 § 一.5.5 状态机评审形成姊妹节。<strong>17 条发现已落地修正</strong>（PR-A），决策可追溯。</p>
+
+  <table class="tbl-compact">
+    <thead><tr><th>#</th><th>发现</th><th>来源视角</th><th>严重度</th><th>修正落地</th></tr></thead>
+    <tbody>
+      <tr><td>F1</td><td>ControlCenter 错位 L3 应在 UI 层</td><td>层次正确性</td><td>🔴 高</td><td>✅ 已从 L3 移走（事实是 L2/UI 子系统）</td></tr>
+      <tr><td>F2</td><td>L2 类别错位（按键/耳机标"反馈"应是输入；BluFi 错列标识应是通信；CSI 错位应是感知）</td><td>模块覆盖度</td><td>🔴 高</td><td>✅ 重组为 4 类：输出/输入/感知/通信</td></tr>
+      <tr><td>F3</td><td>iBeacon 应归"感知"类（未来扩展为接近度/室内定位）</td><td>用户洞察</td><td>🟡 中</td><td>✅ 已迁入感知类</td></tr>
+      <tr><td>F4</td><td>关键音频抽象漏标（WakeWord/AudioProcessor/OggDemuxer 基类）</td><td>模块覆盖度</td><td>🔴 高</td><td>✅ L3 加"音频抽象"组</td></tr>
+      <tr><td>F5</td><td>§ 一.3 偏业务，漏 12 项系统能力（VAD/AEC/9 连击/深睡/多语言等）</td><td>事实匹配度</td><td>🔴 高</td><td>✅ 拆分 § 一.3.1 业务（22）+ § 一.3.2 系统（12）</td></tr>
+      <tr><td>F6</td><td><strong>MusicPlayer::Stop / Suspend / Abort 散落 27 处补丁</strong>，无业务切换协调器</td><td>用户洞察</td><td>🔴 高</td><td>✅ § 一.5.4 加 ActivityCoordinator 函数集（量产后落地）</td></tr>
+      <tr><td>F7</td><td><strong>RemoteCmd 15 个 on_* 是补丁累积</strong>，6 个业务调度类应统一入口</td><td>用户洞察</td><td>🟡 中</td><td>✅ § 一.5.4 注 OnActivitySwitch 收拢路径</td></tr>
+      <tr><td>F8</td><td>FlowEngine 命名与代码不一致（曾说"拟改名"）</td><td>事实匹配度</td><td>🟡 中</td><td>✅ 代码已重命名（live_companion → flow_engine），文档全文同步</td></tr>
+      <tr><td>F9</td><td>RemoteCmd 数量错（曾标 14 实为 15）</td><td>事实匹配度</td><td>🟢 低</td><td>✅ 全文 14→15 修正</td></tr>
+      <tr><td>F10</td><td>EmoteDisplay / 140+ 表情漏标</td><td>模块覆盖度</td><td>🟡 中</td><td>✅ L2 输出层补 EmoteDisplay 卡</td></tr>
+      <tr><td>F11</td><td>L4 Application 是上帝对象未识别</td><td>层次正确性</td><td>🟡 中</td><td>✅ L4 加多职能注（状态机+主循环+Activity 切换+协议初始化+ActivationTask+网络分发）</td></tr>
+      <tr><td>F12</td><td>L3 调用关系不可见（命令面 → 业务模块 → 基础服务）</td><td>模块覆盖度</td><td>🟡 中</td><td>✅ L3 重画三栏分组</td></tr>
+      <tr><td>F13</td><td>三板软件差异未列（AEC / 按键映射 / 默认网络）</td><td>事实匹配度</td><td>🟡 中</td><td>✅ Board 行扩展软件差异</td></tr>
+      <tr><td>F14</td><td>状态分级"驱动就绪 vs 雏形"语义模糊</td><td>事实匹配度</td><td>🟡 中</td><td>✅ § 一.3.1 加 4 步流水线对照说明</td></tr>
+      <tr><td>F15</td><td>开发估算偏低 30-50%（未含多方协同）</td><td>事实匹配度</td><td>🟢 低</td><td>✅ § 一.4 加放宽 callout</td></tr>
+      <tr><td>F16</td><td>L2 抽象基类 + 具体 driver 混层</td><td>层次正确性</td><td>🟢 低</td><td>✅ § 一.1 加复合性说明（工程现实非分层错误）</td></tr>
+      <tr><td>F17</td><td>ESP32-S3 SoC 自身能力（USB OTG / Touch sensor / Hall）未体现</td><td>模块覆盖度</td><td>🟢 低</td><td>✅ L1 加 SoC 能力注（双核 / PSRAM / 已用 vs 未利用）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>PR-A + PR-B 全部完成</strong> · <strong>17 条发现 100% 落地</strong>。F1-F9 + F12（PR-A · 高/中严重度架构事实修正）+ F10/11/13/14/15/16/17（PR-B · 中低严重度视觉打磨）。代码层面 LiveCompanion → FlowEngine 重命名同步完成，散落 27 处补丁的"协调器路径"在 § 一.5.4 显式登记，等待量产后第一波 PR 落地 ActivityCoordinator 函数集。
+  </div>
+
+  <div class="callout warn">
+    <strong>关键架构债 · ActivityCoordinator 协调器</strong> · F6+F7 揭示当前最大架构债：业务活动切换没有统一协调机制，27 处散落 Stop/Suspend/Abort 调用 + 15 个 on_* 命令累积是同一个问题的不同侧面。<strong>量产后第一波 PR 强烈建议落地 ActivityCoordinator 函数集</strong>——比基类抽象成本低 10 倍，立即解决散落补丁问题。
+  </div>
+
+  <h3>§ 一.5.6 远期演进 · 基类抽象的优化设计</h3>
+  <p>本节回答：<em>如果将来真要抽基类，怎么做才不会重蹈三遍评审里的坑？</em><strong>核心：拆细粒度 + 工厂代基类 + 渐进抽取 + 复用 Schedule 队列</strong>。本节作远期参考，量产期不实施。</p>
+
+  <h4 style="margin-top:14px;font-size:14px;color:var(--brand-deep)">设计四原则</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>原则</th><th>具体做法</th><th>避开的坑</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>① 不合并不同形态</td>
+        <td>只抽 <code>LongSession</code>（管 Chat/Flow/Music 三会话型，3 方法接口）；事件型用纯函数 <code>alarm::Ring()</code>；后台计时用 esp_timer，零抽象</td>
+        <td>Chat 与 Alarm 同基类必有半空实现 → 违 SRP</td>
+      </tr>
+      <tr>
+        <td>② Scene 工厂代基类</td>
+        <td>不抽 <code>Scene</code> 基类。<code>SceneFactory::CreateScreen(SceneType)</code> + LVGL <code>lv_scr_load</code>，每 Scene 是工厂里一组创建函数</td>
+        <td>SceneNavigator 与 LVGL screen 重复造轮子</td>
+      </tr>
+      <tr>
+        <td>③ 复用 Schedule 队列</td>
+        <td>Activity 不挂独立任务。<code>Start()/Stop()/OnInterrupt()</code> 必须 &lt;10ms 返回，长 IO 走 <code>Application::Schedule(lambda)</code></td>
+        <td>每 Activity 一任务 → 6×8KB = 48KB 内部 RAM 红线爆</td>
+      </tr>
+      <tr>
+        <td>④ 需求拉动渐进抽</td>
+        <td>不预先抽。出现第 N 个同类才抽（4 个会话型抽 LongSession / 6 个 Scene 抽 Factory / 6 个 AudioSource 抽 AudioOwner）</td>
+        <td>预先抽错 → 重写代价 10×；渐进 → 单阶段独立可回滚</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">4 阶段渐进路径</h4>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 940 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="基类抽象 4 阶段渐进路径">
+      <defs>
+        <marker id="arrEv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#888"/>
+        </marker>
+      </defs>
+
+      <text x="470" y="24" class="svg-title" text-anchor="middle">4 阶段渐进路径 · 累计上限 ~1300 行（vs 立即全抽 ~3200 行）</text>
+      <text x="470" y="44" font-size="11" fill="#666" text-anchor="middle">每阶段独立可回滚 · 失败成本对称 · 由真实需求拉动</text>
+
+      <!-- 时间轴 -->
+      <line x1="40" y1="350" x2="900" y2="350" stroke="#999" stroke-width="1.5"/>
+      <text x="40" y="368" font-size="10" fill="#888">现在</text>
+      <text x="900" y="368" font-size="10" fill="#888" text-anchor="end">未来 ~12 月</text>
+
+      <!-- 阶段 1（已完成 · 绿）-->
+      <g>
+        <rect x="40" y="70" width="208" height="260" rx="8" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.8"/>
+        <rect x="40" y="70" width="208" height="32" rx="8" fill="#2E7D32"/>
+        <text x="144" y="91" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">阶段 1 · ✓ 已规划</text>
+
+        <text x="56" y="124" font-size="11" font-weight="700" fill="#1B5E20">触发：量产前</text>
+        <text x="56" y="142" font-size="10.5" fill="#444">所有功能用 enum + 登记</text>
+        <text x="56" y="156" font-size="10.5" fill="#444">即可表达，零抽象成本</text>
+
+        <line x1="56" y1="172" x2="232" y2="172" stroke="#A5D6A7"/>
+
+        <text x="56" y="190" font-size="11" font-weight="700" fill="#1B5E20">动作</text>
+        <text x="56" y="208" font-size="10.5" fill="#333">+ 3 个 enum 头文件</text>
+        <text x="56" y="222" font-size="10.5" fill="#666">  ActivityType / SceneType /</text>
+        <text x="56" y="236" font-size="10.5" fill="#666">  AudioSource</text>
+        <text x="56" y="252" font-size="10.5" fill="#333">+ 3 个 GetCurrent* API</text>
+        <text x="56" y="266" font-size="10.5" fill="#333">+ 散落 IsXxx 改 enum 查询</text>
+
+        <line x1="56" y1="282" x2="232" y2="282" stroke="#A5D6A7"/>
+
+        <text x="56" y="300" font-size="11" font-weight="700" fill="#2E7D32">+300 行 · 累积 300</text>
+        <text x="56" y="318" font-size="10" fill="#888" font-style="italic">零基类 · 零任务变动</text>
+      </g>
+
+      <path class="edge" d="M250,200 L262,200" marker-end="url(#arrEv)"/>
+
+      <!-- 阶段 2（灰）-->
+      <g>
+        <rect x="262" y="70" width="208" height="260" rx="8" fill="#FAFAFA" stroke="#9E9E9E" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <rect x="262" y="70" width="208" height="32" rx="8" fill="#9E9E9E"/>
+        <text x="366" y="91" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">阶段 2 · 未触发</text>
+
+        <text x="278" y="124" font-size="11" font-weight="700" fill="#555">触发：第 4 个会话型</text>
+        <text x="278" y="142" font-size="10.5" fill="#666">直播 + 教学 + 电台 + 故事</text>
+        <text x="278" y="156" font-size="10.5" fill="#666">→ enum 已 unwieldy</text>
+
+        <line x1="278" y1="172" x2="454" y2="172" stroke="#E0E0E0"/>
+
+        <text x="278" y="190" font-size="11" font-weight="700" fill="#555">动作</text>
+        <text x="278" y="208" font-size="10.5" fill="#333">+ 抽 <tspan font-family="monospace" font-weight="700">LongSession</tspan> 基类</text>
+        <text x="278" y="222" font-size="10.5" fill="#666">  3 方法：Start/Stop/</text>
+        <text x="278" y="236" font-size="10.5" fill="#666">  OnInterrupt（&lt;10ms）</text>
+        <text x="278" y="252" font-size="10.5" fill="#333">+ Chat/Flow/Music 改子类</text>
+        <text x="278" y="266" font-size="10.5" fill="#333">+ 复用 Schedule 队列</text>
+
+        <line x1="278" y1="282" x2="454" y2="282" stroke="#E0E0E0"/>
+
+        <text x="278" y="300" font-size="11" font-weight="700" fill="#555">+400 行 · 累积 700</text>
+        <text x="278" y="318" font-size="10" fill="#888" font-style="italic">不抽事件型 · 不挂任务</text>
+      </g>
+
+      <path class="edge" d="M472,200 L484,200" marker-end="url(#arrEv)"/>
+
+      <!-- 阶段 3（灰）-->
+      <g>
+        <rect x="484" y="70" width="208" height="260" rx="8" fill="#FAFAFA" stroke="#9E9E9E" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <rect x="484" y="70" width="208" height="32" rx="8" fill="#9E9E9E"/>
+        <text x="588" y="91" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">阶段 3 · 未触发</text>
+
+        <text x="500" y="124" font-size="11" font-weight="700" fill="#555">触发：第 6 个全屏 Scene</text>
+        <text x="500" y="142" font-size="10.5" fill="#666">+ 共享逻辑（导航/手势）</text>
+        <text x="500" y="156" font-size="10.5" fill="#666">→ enum + switch 不够</text>
+
+        <line x1="500" y1="172" x2="676" y2="172" stroke="#E0E0E0"/>
+
+        <text x="500" y="190" font-size="11" font-weight="700" fill="#555">动作</text>
+        <text x="500" y="208" font-size="10.5" fill="#333">+ <tspan font-family="monospace" font-weight="700">SceneFactory</tspan> 工厂</text>
+        <text x="500" y="222" font-size="10.5" fill="#666">  CreateScreen(type)</text>
+        <text x="500" y="236" font-size="10.5" fill="#666">  OnEnter / OnExit</text>
+        <text x="500" y="252" font-size="10.5" fill="#333">+ 不抽 Scene 基类</text>
+        <text x="500" y="266" font-size="10.5" fill="#333">+ 复用 LVGL screen</text>
+
+        <line x1="500" y1="282" x2="676" y2="282" stroke="#E0E0E0"/>
+
+        <text x="500" y="300" font-size="11" font-weight="700" fill="#555">+200 行 · 累积 900</text>
+        <text x="500" y="318" font-size="10" fill="#888" font-style="italic">工厂 vs 基类 · 4× 杠杆</text>
+      </g>
+
+      <path class="edge" d="M694,200 L706,200" marker-end="url(#arrEv)"/>
+
+      <!-- 阶段 4（灰）-->
+      <g>
+        <rect x="706" y="70" width="208" height="260" rx="8" fill="#FAFAFA" stroke="#9E9E9E" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <rect x="706" y="70" width="208" height="32" rx="8" fill="#9E9E9E"/>
+        <text x="810" y="91" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">阶段 4 · 未触发</text>
+
+        <text x="722" y="124" font-size="11" font-weight="700" fill="#555">触发：第 6 类 AudioSource</text>
+        <text x="722" y="142" font-size="10.5" fill="#666">+ 多源打断逻辑爆炸</text>
+        <text x="722" y="156" font-size="10.5" fill="#666">→ 协调 if-else 不可读</text>
+
+        <line x1="722" y1="172" x2="898" y2="172" stroke="#E0E0E0"/>
+
+        <text x="722" y="190" font-size="11" font-weight="700" fill="#555">动作</text>
+        <text x="722" y="208" font-size="10.5" fill="#333">+ 抽 <tspan font-family="monospace" font-weight="700">AudioOwner</tspan> 协议</text>
+        <text x="722" y="222" font-size="10.5" fill="#666">  Acquire / Release</text>
+        <text x="722" y="236" font-size="10.5" fill="#666">  OnPreemptedBy(other)</text>
+        <text x="722" y="252" font-size="10.5" fill="#333">+ 5 子类挂协议</text>
+        <text x="722" y="266" font-size="10.5" fill="#333">  TTS/MP3/Alarm/Bell/...</text>
+
+        <line x1="722" y1="282" x2="898" y2="282" stroke="#E0E0E0"/>
+
+        <text x="722" y="300" font-size="11" font-weight="700" fill="#555">+400 行 · 累积 1300</text>
+        <text x="722" y="318" font-size="10" fill="#888" font-style="italic">独占协调 · 仅 3 方法</text>
+      </g>
+    </svg>
+  </div>
+
+  <h4 style="margin-top:14px;font-size:14px;color:var(--brand-deep)">与"立即全套抽"对比</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>维度</th><th>立即全套抽（旧方案 · 已否决）</th><th>渐进 + 工厂（远期方案）</th></tr></thead>
+    <tbody>
+      <tr><td>总代码量</td><td>~3200 行（一次性）</td><td>上限 ~1300 行（4 阶段累积）</td></tr>
+      <tr><td>一次性下注</td><td>全押</td><td>4 阶段独立 · 单阶段可回滚</td></tr>
+      <tr><td>抽象错误代价</td><td>重写 · 量产后 OTA 风险</td><td>单阶段重做 · 阶段隔离</td></tr>
+      <tr><td>Chat/Alarm 同基类</td><td>是（违 SRP）</td><td>否 · 拆 LongSession + 事件函数</td></tr>
+      <tr><td>Scene 与 LVGL 重复</td><td>是 · SceneNavigator 基类</td><td>否 · SceneFactory 工厂代基类</td></tr>
+      <tr><td>Activity 任务模型</td><td>风险（每子类一任务 / 60KB 红线）</td><td>复用 <code>Application::Schedule</code> 队列</td></tr>
+      <tr><td>上游 rebase 影响</td><td>11 → 14+ 处差异</td><td>仅阶段 2 +2 处（其余阶段在新增模块内）</td></tr>
+      <tr><td>何时落地</td><td>量产后大版本一次</td><td>未来 12 月被需求拉动渐进</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>触发判据</strong> · 量产后每隔季度回顾一次：① 会话型 Activity 是否到 4 个？②全屏 Scene 是否到 6 个且共享逻辑出现？③ AudioSource 是否到 6 类且打断协调成 if-else 链？只有触发判据真的命中才进入对应阶段。<em>没命中就继续用 enum + 工厂函数硬编码，这本身是合格的工程</em>。
+  </div>
+
+  <div class="callout warn">
+    <strong>不要做的事</strong> · ① 不在阶段 1 阶段就抽 LongSession；② 不在 LongSession 接口里加任何"会话型 vs 事件型"分支判断（违 SRP 信号）；③ 不在 Scene 工厂里加事件总线（保持工厂职责单一）；④ 不为了"看起来更架构化"而提前抽——预先抽错的成本远高于晚一阶段抽。
+  </div>
+</section>
+
+<!-- ==================== § 三 状态机 ==================== -->
+<section class="section" id="sec3">
+  <h2><span class="num">§ 三</span> 12 态设备状态机</h2>
+  <p class="sub">定义在 <code>main/device_state.h:4</code>，转换在 <code>device_state_machine.cc</code>，事件分发在 <code>device_state_event.cc</code>。Idle/Connecting/Listening/Speaking 四态构成主对话闭环（高亮龙虾红）。</p>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:#F3E5F5;border-color:#6A1B9A"></span>启动 / 配置</span>
+    <span class="item"><span class="swatch" style="background:#FFF8E1;border-color:#F9A825"></span>激活（OTA）</span>
+    <span class="item"><span class="swatch" style="background:#FFEBEE;border-color:#C62828"></span>主对话闭环</span>
+    <span class="item"><span class="swatch" style="background:#FFF3E0;border-color:#E65100"></span>升级 / 终态</span>
+    <span class="item"><span class="swatch" style="background:#fff;border-color:#999;border-style:dashed"></span>反向 / 虚线 = 副路径</span>
+  </div>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 940 700" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="P30 12 态状态机">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#888"/>
+        </marker>
+        <marker id="arrM" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#C62828"/>
+        </marker>
+        <marker id="arrT" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#E65100"/>
+        </marker>
+      </defs>
+
+      <!-- 标题：独占首行，与节点保持 50px 净空 -->
+      <text x="470" y="28" class="svg-title" text-anchor="middle">P30 设备状态机 · 10 主态 + FatalError 终态</text>
+
+      <!-- 区域分隔标注（左侧锚点 + 顶部细带） -->
+      <text x="40" y="62" font-size="11" fill="#999" font-weight="600">① 启动 / 配置链</text>
+      <line x1="40" y1="68" x2="900" y2="68" stroke="#EEE"/>
+
+      <!-- ═══════════ ① 启动链（一字横排） ═══════════ -->
+      <g>
+        <rect class="node-rect start" x="40" y="84" width="120" height="48" rx="6"/>
+        <text class="node-text" x="100" y="104">Unknown</text>
+        <text class="node-text sm" x="100" y="120">id=0 · 构造默认</text>
+
+        <rect class="node-rect start" x="200" y="84" width="120" height="48" rx="6"/>
+        <text class="node-text" x="260" y="104">Starting</text>
+        <text class="node-text sm" x="260" y="120">id=1</text>
+
+        <rect class="node-rect start" x="370" y="48" width="160" height="48" rx="6"/>
+        <text class="node-text" x="450" y="68">WifiConfiguring</text>
+        <text class="node-text sm" x="450" y="84">id=2 · BluFi / AP</text>
+
+        <rect class="node-rect start" x="370" y="118" width="160" height="48" rx="6"/>
+        <text class="node-text" x="450" y="138">AudioTesting</text>
+        <text class="node-text sm" x="450" y="154">id=9 · 工厂模式</text>
+
+        <rect class="node-rect" x="600" y="84" width="140" height="48" rx="6" style="fill:#FFF8E1;stroke:#F9A825;stroke-width:1.5"/>
+        <text class="node-text" x="670" y="104">Activating</text>
+        <text class="node-text sm" x="670" y="120">id=8 · OTA 激活</text>
+      </g>
+
+      <!-- 启动链 edges：标签都贴外侧，绝不穿过节点 -->
+      <path class="edge" d="M160,108 L200,108" marker-end="url(#arr)"/>
+      <path class="edge" d="M320,98 Q345,98 370,72" marker-end="url(#arr)"/>
+      <path class="edge" d="M320,118 Q345,118 370,142" marker-end="url(#arr)"/>
+      <path class="edge" d="M530,72 Q565,72 600,98" marker-end="url(#arr)"/>
+      <path class="edge" d="M530,142 Q565,142 600,118" marker-end="url(#arr)"/>
+      <text class="edge-label" x="345" y="42">无凭证</text>
+      <text class="edge-label" x="345" y="186">工厂入口</text>
+      <text class="edge-label" x="555" y="58">网络已连</text>
+      <text class="edge-label" x="555" y="170">测试完</text>
+
+      <!-- ═══════════ Activating → 桥接 ═══════════ -->
+      <!-- Activating → Idle（激活完成，L 形长跨度，绕过对话闭环顶部） -->
+      <path class="edge" d="M670,132 L670,210 L305,210 L305,335" marker-end="url(#arr)"/>
+      <text class="edge-label" x="487" y="204" text-anchor="middle">激活完成 → 进入主对话闭环</text>
+
+      <!-- Activating → Upgrading（检测新版本，从 Activating 右上 → Upgrading 顶部） -->
+      <path class="edge" d="M740,108 L860,108 L860,310" marker-end="url(#arr)"/>
+      <text class="edge-label" x="868" y="200">检测新版本</text>
+      <text class="edge-label" x="868" y="214">直升 OTA</text>
+
+      <!-- Idle → Upgrading（OTA 检查触发，弧线避开主对话闭环） -->
+      <path class="edge" d="M370,335 Q615,255 800,313" marker-end="url(#arr)" style="stroke-dasharray:4 3"/>
+      <text class="edge-label" x="615" y="276" text-anchor="middle">OTA 检查（Idle 中触发）</text>
+
+      <!-- Upgrading 节点（位于对话闭环右上区域） -->
+      <rect class="node-rect terminal" x="780" y="310" width="140" height="48" rx="6"/>
+      <text class="node-text" x="850" y="330">Upgrading</text>
+      <text class="node-text sm" x="850" y="346">id=7 · OTA 升级</text>
+
+      <!-- ═══════════ ② 主对话闭环（菱形四角，红色高亮） ═══════════ -->
+      <text x="190" y="318" font-size="11" fill="#C62828" font-weight="600">② 主对话闭环（高频）</text>
+
+      <g>
+        <!-- 容器底色 -->
+        <rect x="180" y="328" width="540" height="220" rx="10" fill="#FFF5F5" stroke="#FFCDD2" stroke-width="1.2" stroke-dasharray="6 4"/>
+
+        <!-- Idle 左上 -->
+        <rect class="node-rect active" x="240" y="358" width="130" height="58" rx="6"/>
+        <text class="node-text" x="305" y="380">Idle</text>
+        <text class="node-text sm" x="305" y="398">id=3 · 稳态</text>
+
+        <!-- Connecting 右上 -->
+        <rect class="node-rect active" x="540" y="358" width="130" height="58" rx="6"/>
+        <text class="node-text" x="605" y="380">Connecting</text>
+        <text class="node-text sm" x="605" y="398">id=4 · WS/MQTT</text>
+
+        <!-- Listening 右下 -->
+        <rect class="node-rect active" x="540" y="460" width="130" height="58" rx="6"/>
+        <text class="node-text" x="605" y="482">Listening</text>
+        <text class="node-text sm" x="605" y="500">id=5 · 上传中</text>
+
+        <!-- Speaking 左下 -->
+        <rect class="node-rect active" x="240" y="460" width="130" height="58" rx="6"/>
+        <text class="node-text" x="305" y="482">Speaking</text>
+        <text class="node-text sm" x="305" y="500">id=6 · TTS 播放</text>
+
+        <!-- 主路径四条边（顺时针闭环，红色实线） -->
+        <!-- 上：Idle → Connecting -->
+        <path class="edge major" d="M370,381 L540,381" marker-end="url(#arrM)"/>
+        <text class="edge-label" x="455" y="375" text-anchor="middle" style="fill:#C62828">唤醒 / 单击</text>
+
+        <!-- 右：Connecting → Listening -->
+        <path class="edge major" d="M605,416 L605,460" marker-end="url(#arrM)"/>
+        <text class="edge-label" x="615" y="441" style="fill:#C62828">通道开</text>
+
+        <!-- 下：Listening → Speaking -->
+        <path class="edge major" d="M540,485 L370,485" marker-end="url(#arrM)"/>
+        <text class="edge-label" x="455" y="478" text-anchor="middle" style="fill:#C62828">服务器推流</text>
+
+        <!-- 左：Speaking → Idle -->
+        <path class="edge major" d="M305,460 L305,416" marker-end="url(#arrM)"/>
+        <text class="edge-label" x="295" y="441" text-anchor="end" style="fill:#C62828">TTS 完</text>
+
+        <!-- 副路径（反向虚线，灰色，区分主次） -->
+        <path class="edge" d="M540,398 L370,398" marker-end="url(#arr)" style="stroke-dasharray:3 3;opacity:.7"/>
+        <text class="edge-label" x="455" y="410" text-anchor="middle" style="fill:#999">通道关</text>
+
+        <path class="edge" d="M370,500 L540,500" marker-end="url(#arr)" style="stroke-dasharray:3 3;opacity:.7"/>
+        <text class="edge-label" x="455" y="513" text-anchor="middle" style="fill:#999">用户打断</text>
+      </g>
+
+      <!-- ═══════════ ③ FatalError 终态 ═══════════ -->
+      <text x="40" y="608" font-size="11" fill="#E65100" font-weight="600">③ 终态（不可恢复）</text>
+      <line x1="40" y1="614" x2="900" y2="614" stroke="#EEE"/>
+
+      <g>
+        <rect class="node-rect terminal" x="320" y="630" width="300" height="58" rx="6" style="stroke-dasharray:5 3;stroke-width:1.5"/>
+        <text class="node-text" x="470" y="654" style="fill:#BF360C">FatalError （终态）</text>
+        <text class="node-text sm" x="470" y="672">id=10 · 任意态可入 · 重启唯一脱出</text>
+
+        <!-- 虚线汇入：从对话闭环底部中段下来，标签在垂直线右侧 -->
+        <path class="edge terminal" d="M470,548 L470,630" marker-end="url(#arrT)"/>
+        <text class="edge-label" x="478" y="578" style="fill:#E65100">不可恢复错误</text>
+        <text class="edge-label" x="478" y="594" style="fill:#E65100">（任意态 → 终态）</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="callout">
+    <strong>关键转换规则速查</strong> · <code>IsValidTransition()</code> 校验合法性，<code>TransitionTo()</code> 同步广播给所有 <code>StateChangeListener</code>（Application、FlowEngine、RemoteCmd、UI）。
+  </div>
+
+  <table class="tbl-compact">
+    <thead><tr><th>当前态</th><th>目标态</th><th>触发事件</th><th>处理函数</th></tr></thead>
+    <tbody>
+      <tr><td>Starting</td><td>WifiConfiguring / Activating</td><td>无凭证 / 网络已连</td><td><code>HandleNetworkConnectedEvent()</code></td></tr>
+      <tr><td>Activating</td><td>Idle / Upgrading</td><td>OTA 检查完成</td><td><code>HandleActivationDoneEvent()</code></td></tr>
+      <tr><td>Idle</td><td>Connecting</td><td>唤醒词 / 单击 / 远程命令</td><td><code>HandleStartListeningEvent()</code></td></tr>
+      <tr><td>Connecting</td><td>Listening</td><td>WS/MQTT 通道打开</td><td><code>Protocol::on_audio_channel_opened_</code></td></tr>
+      <tr><td>Listening</td><td>Speaking</td><td>服务器推流</td><td><code>AudioService::on_incoming_audio_</code></td></tr>
+      <tr><td>Speaking</td><td>Listening / Idle</td><td>TTS 完 / 通道关</td><td><code>protocol_->on_audio_channel_closed_</code></td></tr>
+      <tr><td>任意</td><td>FatalError</td><td>不可恢复错误</td><td>单向，需重启脱出</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>扩展原则</strong> · 这 <strong>11 态</strong>（不是 12 态，长期文档错误已纠正）已覆盖对话/配网/激活/升级/工厂全闭环。教育卡、GIF、MP3、直播脚本等扩展走 <em>命令层 + Display overlay</em>，不动状态机。详见 § 七.x。
+  </div>
+
+  <h3>§ 三.1 状态机三遍评审决策记录 · 链路推演</h3>
+  <p>本节为 § 三 12 态状态机的代码层深度评审（与 § 一.5.5 早期 SVG 设计评审互补）。<strong>反复推演 12 条状态链路 + 14 条发现 + 3 个严重 bug</strong>，决策可追溯。</p>
+
+  <div class="callout warn">
+    <strong>🔴 严重事实纠正 · 文档长期错误</strong> · 真实 enum 只有 <strong>11 态</strong>（kDeviceStateUnknown 到 kDeviceStateFatalError），不是文档反复说的"12 态"。<code>device_state.h</code> 实测 11 个枚举值，<code>STATE_STRINGS[]</code> 11 个状态名 + 1 个 "invalid_state" 占位。<em>前面所有"12 态"表述实为统计错误</em>，本节起统一为 11 态。
+  </div>
+
+  <div class="callout warn">
+    <strong>🔴 严重 bug · FatalError 不可达</strong> · grep 全代码：<strong>没有任何代码 SetDeviceState(kDeviceStateFatalError)</strong>。<code>IsValidTransition()</code> 也<strong>没有任何 case 把 FatalError 列为合法 to</strong>。结果：① 设计上 FatalError 是"任意态可入"，但代码无入口；② 即便有人调 SetDeviceState(FatalError) 也会被 IsValidTransition 拒绝；③ 整个 FatalError 枚举值是<strong>死代码</strong>。这是"状态设计 vs 代码实现"的根本不一致。
+  </div>
+
+  <h4 style="margin-top:14px;font-size:14px;color:var(--brand-deep)">三遍评审 · 14 条发现矩阵</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>#</th><th>发现</th><th>视角</th><th>严重度</th></tr></thead>
+    <tbody>
+      <tr><td>T1</td><td><strong>"12 态" 实为 11 态</strong>，跨多文档反复事实错误</td><td>事实匹配</td><td>🔴 高</td></tr>
+      <tr><td>T2</td><td><strong>FatalError 不可达 + 死代码</strong>（全代码 0 处 SetDeviceState · IsValidTransition 0 处允许 to）</td><td>设计 vs 实现</td><td>🔴 高</td></tr>
+      <tr><td>T3</td><td><strong>双广播机制冗余</strong>：DeviceStateMachine listeners + DeviceStateEventManager (esp_event_loop) 两套并行；listener lambda 内部又 esp_event_post 一次</td><td>设计冗余</td><td>🟡 中</td></tr>
+      <tr><td>T4</td><td>Listener 回调在调用方任务上下文同步执行 · 阻塞会卡主循环 · 无超时保护</td><td>资源调度</td><td>🟡 中</td></tr>
+      <tr><td>T5</td><td>无 reentrancy guard · listener 内调 SetDeviceState 可能引发递归</td><td>资源调度</td><td>🟡 中</td></tr>
+      <tr><td>T6</td><td>状态转换无超时（WifiConfiguring 永不出 / Activating 永不停 / Connecting 失败具体多久回 Idle 不明）</td><td>边缘 case</td><td>🟡 中</td></tr>
+      <tr><td>T7</td><td>Idle → Activating 反向激活路径未文档化（业务场景不明）</td><td>事实匹配</td><td>🟢 低</td></tr>
+      <tr><td>T8</td><td>Idle → Speaking 跳过 Connecting/Listening（远程 OnTts 直推 TTS）未文档化</td><td>事实匹配</td><td>🟢 低</td></tr>
+      <tr><td>T9</td><td>AudioTesting 是死胡同（仅可回 WifiConfiguring）合理但用户路径长</td><td>边缘 case</td><td>🟢 低</td></tr>
+      <tr><td>T10</td><td>Connecting → Idle 失败原因不可见（无错误码）</td><td>设计冗余</td><td>🟢 低</td></tr>
+      <tr><td>T11</td><td>Upgrading 失败 → Idle 但失败原因（网络/校验/写 flash）无信号</td><td>设计冗余</td><td>🟢 低</td></tr>
+      <tr><td>T12</td><td>Idle 复合态（Default/Music/Flow.Suspended）状态机不可见 · 见 § 一.5.3</td><td>设计冗余</td><td>🟡 中</td></tr>
+      <tr><td>T13</td><td>状态进入瞬间副作用未排序（多个 listener 顺序由注册顺序决定，无 priority）</td><td>资源调度</td><td>🟢 低</td></tr>
+      <tr><td>T14</td><td>SetDeviceState(Starting) 在 listener 注册之前发生 · Starting 转换无订阅者</td><td>启动期竞态</td><td>🟡 中（已在 § 二.3 S9 登记）</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">12 条状态链路推演（覆盖度核查）</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>#</th><th>链路</th><th>合法性</th><th>问题</th></tr></thead>
+    <tbody>
+      <tr><td>L1</td><td>冷启动：Unknown → Starting → Activating → Idle</td><td>✅</td><td>—</td></tr>
+      <tr><td>L2</td><td>无凭证配网：Starting → WifiConfiguring → Activating → Idle</td><td>✅</td><td>—</td></tr>
+      <tr><td>L3</td><td>工厂模式：Starting → WifiConfiguring → AudioTesting → WifiConfiguring → Activating → Idle</td><td>✅</td><td>路径长（用户必须先进 WifiConfiguring 才能进 AudioTesting）</td></tr>
+      <tr><td>L4</td><td>主对话循环：Idle → Connecting → Listening ⇄ Speaking → Idle</td><td>✅</td><td>—</td></tr>
+      <tr><td>L5</td><td>OTA 升级：Idle → Upgrading → Reboot 或 Idle (失败)</td><td>✅</td><td>失败原因不广播（T11）</td></tr>
+      <tr><td>L6</td><td>激活后直接升级：Activating → Upgrading → Reboot</td><td>✅</td><td>—</td></tr>
+      <tr><td>L7</td><td><strong>任意 → FatalError</strong>（不可恢复错误）</td><td>❌</td><td><strong>链路完全断裂</strong>（T2 严重 bug）</td></tr>
+      <tr><td>L8</td><td>网络断开重连：Listening → Idle → Connecting → ...</td><td>✅</td><td>—</td></tr>
+      <tr><td>L9</td><td>用户打断 TTS：Speaking → Listening</td><td>✅</td><td>—</td></tr>
+      <tr><td>L10</td><td>MP3 期间用户唤醒：Idle (Music 子模式) → Connecting → Chat 路径</td><td>✅</td><td>Idle 子模式状态机不可见（T12）</td></tr>
+      <tr><td>L11</td><td>闹钟响铃：深睡 TIMER → Starting → ??? → Speaking → 回深睡</td><td>⚠</td><td>路径未文档化 · 与 § 二.3 S3 同源</td></tr>
+      <tr><td>L12</td><td>配网期间断电：WifiConfiguring → 断电 → Unknown → Starting → 重新走</td><td>✅</td><td>NVS 配网状态如何持久化未明示</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">4 个候选优化方向</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>候选</th><th>核心思路</th><th>覆盖发现</th><th>工作量</th><th>优先级</th></tr></thead>
+    <tbody>
+      <tr><td><strong>1. 修 FatalError 不可达 bug</strong></td><td>① 在 IsValidTransition 各 case 显式允许 → FatalError ② 加几处 SetDeviceState(FatalError) 实际入口（启动失败 / 关键资源耗尽）③ FatalError 进入后 Alert + 自动重启倒计时</td><td>T2 / L7</td><td>~50 行 + 决策位点设计</td><td>🔴 必做（量产前）</td></tr>
+      <tr><td><strong>2. 状态机文档与代码对账</strong></td><td>① 全文 12 态 → 11 态 ② 状态转换表与 IsValidTransition 1:1 对账 ③ 每条边的"触发条件 + 业务场景"加文档</td><td>T1 / T7 / T8</td><td>~100 行文档（无代码）</td><td>🔴 必做（事实修正）</td></tr>
+      <tr><td><strong>3. 双广播机制收拢</strong></td><td>删除 DeviceStateEventManager（esp_event_post 那套），所有订阅者改走 DeviceStateMachine.AddStateChangeListener；或反之只保留一套。<em>选其一即可</em></td><td>T3</td><td>~150 行（grep replace）</td><td>🟡 量产后</td></tr>
+      <tr><td><strong>4. 状态超时 + 错误码扩展</strong></td><td>① 加 DeviceStateError 副信号（Connecting 失败 / Upgrading 失败 / Activating 超时） ② WifiConfiguring 加 5 分钟超时退出 ③ Activating 10 次重试后进 FatalError（依赖候选 1）</td><td>T6 / T10 / T11</td><td>~200 行</td><td>🟡 量产后</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">推荐路径</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>阶段</th><th>动作</th><th>工作量</th></tr></thead>
+    <tbody>
+      <tr><td><strong>PR-A 量产前必修</strong></td><td>候选 1（FatalError bug 修复 · 必做） + 候选 2（11 态文档纠正 · 已开始）</td><td>1-2 天</td></tr>
+      <tr><td><strong>PR-B 量产前打磨</strong></td><td>T4 listener 超时保护 · T5 reentrancy guard · T13 priority 机制（如有需要）</td><td>~半周</td></tr>
+      <tr><td><strong>量产后</strong></td><td>候选 3 双广播收拢 · 候选 4 状态超时 + 错误码</td><td>~1-2 周</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>核心结论</strong> · 11 态 enum 集合本身设计合理（覆盖对话/配网/激活/升级/工厂闭环），<strong>不需要新增或删除枚举值</strong>。问题在 (a) 文档与代码事实不一致（11 vs 12）(b) FatalError 链路断裂（设计与实现对不上）(c) 双广播冗余 + 副作用边界模糊。前两个量产前必修；后两个量产后再考虑。
+  </div>
+
+  <div class="callout warn">
+    <strong>量产期纪律</strong> · ① 不新增 DeviceState 枚举值（11 态足够）；② 修 FatalError bug 时只改 IsValidTransition 和入口几处 SetDeviceState，不动其他 case；③ 11 态文档纠正全文同步（HTML + markdown + CLAUDE.md）；④ 任何"为新功能加状态"的提议先回到 § 一.5 三维心智模型——99% 应该走 ActivityType / SceneType / AudioSource enum 路径。
+  </div>
+</section>
+
+<!-- ==================== § 四 任务拓扑 ==================== -->
+<section class="section" id="sec4">
+  <h2><span class="num">§ 四</span> FreeRTOS 任务拓扑</h2>
+  <p class="sub">按 CLAUDE.md 规范：网络/OTA 上 Core 0，音频实时/LVGL 上 Core 1。优先级 P12（最高）→ P1（后台）。✅ 原 wake_encode PSRAM 栈红线已于 2026-04-28 修复（栈改 INTERNAL）。</p>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:var(--core0);border-color:var(--core0-line)"></span>Core 0 · 网络/编解码/主循环</span>
+    <span class="item"><span class="swatch" style="background:var(--core1);border-color:var(--core1-line)"></span>Core 1 · 音频实时/LVGL</span>
+    <span class="item"><span class="swatch" style="background:#E8F5E9;border-color:#2E7D32"></span>原红线任务（已修复）</span>
+  </div>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 880 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FreeRTOS 任务拓扑泳道">
+      <text x="440" y="20" class="svg-title" text-anchor="middle">双 Core 泳道 · 按优先级 P12 → P1 垂直排序</text>
+
+      <!-- 优先级标尺 -->
+      <g class="svg-axis">
+        <text x="20" y="60">P12</text>
+        <text x="20" y="105">P10</text>
+        <text x="20" y="150">P8</text>
+        <text x="20" y="195">P7</text>
+        <text x="20" y="240">P6</text>
+        <text x="20" y="285">P5</text>
+        <text x="20" y="330">P4</text>
+        <text x="20" y="375">P3</text>
+        <text x="20" y="420">P2</text>
+        <text x="20" y="465">P1</text>
+        <text x="20" y="510" style="fill:#999">系统</text>
+      </g>
+
+      <!-- 泳道背景 -->
+      <rect x="60" y="40" width="395" height="475" fill="var(--core0)" opacity=".5" rx="6"/>
+      <rect x="465" y="40" width="395" height="475" fill="var(--core1)" opacity=".5" rx="6"/>
+      <text x="257" y="36" class="svg-axis" text-anchor="middle" style="font-weight:600;fill:var(--core0-line)">Core 0 · 网络 / OTA / 主循环</text>
+      <text x="662" y="36" class="svg-axis" text-anchor="middle" style="font-weight:600;fill:var(--core1-line)">Core 1 · 音频实时 / LVGL</text>
+
+      <!-- Core 1 任务 -->
+      <g>
+        <rect x="475" y="48" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
+        <text class="node-text" x="565" y="62">audio_input · INT</text>
+        <text class="node-text sm" x="565" y="76">I2S ADC + 唤醒词</text>
+
+        <rect x="475" y="93" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
+        <text class="node-text" x="565" y="107">audio_output · INT</text>
+        <text class="node-text sm" x="565" y="121">PCM → DAC DMA · 4KB</text>
+
+        <rect x="475" y="138" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
+        <text class="node-text" x="565" y="152">AFE processor</text>
+        <text class="node-text sm" x="565" y="166">AEC + NS + VAD · 8KB</text>
+
+        <rect x="475" y="273" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
+        <text class="node-text" x="565" y="287">LVGL · 8KB</text>
+        <text class="node-text sm" x="565" y="301">UI 刷新 · esp-idf 内置</text>
+
+        <rect x="675" y="273" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
+        <text class="node-text" x="765" y="287">flow_load</text>
+        <text class="node-text sm" x="765" y="301">直播脚本 · 8KB</text>
+
+        <rect x="475" y="363" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
+        <text class="node-text" x="565" y="377">audio_communication</text>
+        <text class="node-text sm" x="565" y="391">AFE 回声消除 · 4KB</text>
+
+        <rect x="675" y="363" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
+        <text class="node-text" x="765" y="377">dns_server · 2KB</text>
+        <text class="node-text sm" x="765" y="391">配网 AP 模式</text>
+
+        <rect x="475" y="408" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
+        <text class="node-text" x="565" y="422">headset_detect · 3KB</text>
+        <text class="node-text sm" x="565" y="436">Type-C 耳机</text>
+      </g>
+
+      <!-- Core 0 任务 -->
+      <g>
+        <rect x="65" y="93" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="155" y="107">main_app · 8KB</text>
+        <text class="node-text sm" x="155" y="121">Application::Run 主循环</text>
+
+        <!-- 原红线任务: encode_wake_word（已修） -->
+        <rect x="65" y="228" width="180" height="48" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+        <text class="node-text" x="155" y="244" style="fill:#2E7D32">✅ encode_wake_word</text>
+        <text class="node-text sm" x="155" y="258">INTERNAL 栈 24KB · 已修</text>
+        <text class="node-text sm" x="155" y="270">afe_wake_word.cc:176</text>
+
+        <rect x="65" y="183" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="155" y="197">opus_codec · 24KB</text>
+        <text class="node-text sm" x="155" y="211">Opus 编/解码</text>
+
+        <rect x="265" y="318" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="355" y="332">wifi 驱动 · P23</text>
+        <text class="node-text sm" x="355" y="346">esp-idf 内置</text>
+
+        <rect x="65" y="318" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="155" y="332">modem_task · 4KB</text>
+        <text class="node-text sm" x="155" y="346">ML307 AT · 仅 4G/P31</text>
+
+        <rect x="65" y="363" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="155" y="377">tcpip · LWIP</text>
+        <text class="node-text sm" x="155" y="391">P18 · esp-idf 内置</text>
+
+        <rect x="65" y="408" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="155" y="422">activation · 8KB</text>
+        <text class="node-text sm" x="155" y="436">临时 · 激活完即删</text>
+
+        <rect x="265" y="408" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="355" y="422">stt_post · 4KB</text>
+        <text class="node-text sm" x="355" y="436">STT HTTP POST</text>
+
+        <rect x="65" y="453" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="155" y="467">LedEvent · 2KB</text>
+        <text class="node-text sm" x="155" y="481">LED 状态机</text>
+
+        <rect x="265" y="453" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="355" y="467">clock_timer · 3.5KB</text>
+        <text class="node-text sm" x="355" y="481">esp_timer P22</text>
+      </g>
+
+      <!-- 优先级横线 -->
+      <g stroke="#ddd" stroke-dasharray="2 3">
+        <line x1="60" y1="135" x2="860" y2="135"/>
+        <line x1="60" y1="180" x2="860" y2="180"/>
+        <line x1="60" y1="225" x2="860" y2="225"/>
+        <line x1="60" y1="270" x2="860" y2="270"/>
+        <line x1="60" y1="315" x2="860" y2="315"/>
+        <line x1="60" y1="360" x2="860" y2="360"/>
+        <line x1="60" y1="405" x2="860" y2="405"/>
+        <line x1="60" y1="450" x2="860" y2="450"/>
+      </g>
+
+      <!-- 通信 -->
+      <g>
+        <rect x="60" y="540" width="800" height="68" rx="6" fill="#FAFAFA" stroke="#ddd"/>
+        <text class="svg-axis" x="80" y="560" style="font-weight:600">任务间通信</text>
+        <text class="svg-axis" x="80" y="580">EventGroup（Application + AudioService 各一份） · xQueue（音频包） · std::deque + mutex（Schedule lambda）</text>
+        <text class="svg-axis" x="80" y="598">Protocol → Application：on_incoming_audio_ / on_incoming_json_ 直接回调</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="callout">
+    <strong>✅ 红线任务已修</strong>（2026-04-28）· <code>encode_wake_word</code>（<code>afe_wake_word.cc:176</code>）栈从 <code>MALLOC_CAP_SPIRAM</code> 改为 <code>MALLOC_CAP_INTERNAL</code>。根因：ESP32-S3 cache 与 PSRAM 共享 SPI 接口，任意核 flash op (NVS / OTA) 触发 <code>spi_flash_op_lock()</code> 会同时禁用两核 cache+PSRAM，PSRAM 栈任务被调度即崩（<code>SP=0x60100000</code>），pin Core 1 救不了。代价：24KB 内部 RAM 长期占用（<code>SPIRAM_MALLOC_RESERVE_INTERNAL=96KB</code> 已为此预留预算）。
+  </div>
+
+  <h3>§ 四.1 任务拓扑三遍评审决策记录 · 全 SDK 穷尽扫描</h3>
+  <p>第二轮 grep 覆盖 main/ + components/ + managed_components/ 全部 <code>xTaskCreate*</code>，发现实际任务数远超之前文档。决策可追溯。</p>
+
+  <div class="callout warn">
+    <strong>🔴 严重事实纠正 · 应用层任务实测 ~25 个</strong> · 之前文档说 17 → 第一轮 Agent 扫描 11 → 第二轮全 SDK 穷尽 grep <strong>25+</strong>。漏列覆盖：audio_opus_enc/dec 双任务 / wake_word_check / mp3_player 三任务（dl/decode/play）/ wifi_ap 4 任务 / blufi / wifi_board / gfx_core / activation / ota_upgrade / 板级 vol_adjust / delayed_wake / welcome 等。
+  </div>
+
+  <div class="callout warn">
+    <strong>🔴 红线违规 3 项（不是 review 标的 1 项）</strong> ·
+    <strong>1）<code>custom_wake_word.cc:222-230</code></strong> 自定义唤醒词 encode 任务 24KB <strong>PSRAM 栈 + Core 0</strong>（<em>之前只修 afe_wake_word，custom_wake_word 漏修！</em>）·
+    <strong>2）<code>remote_cmd.cc:430</code></strong> stt_post 4KB <strong>PSRAM 栈 + Core 0</strong> 显式 pinned · HTTP POST ·
+    <strong>3）<code>mp3_player.cc:166</code></strong> mp3_dl 6KB <strong>PSRAM 栈 + Core 0</strong>（README 注 HTTP I/O safe，但 cache 共享 SPI 仍有风险）
+  </div>
+
+  <h4 style="margin-top:14px;font-size:14px;color:var(--brand-deep)">完整任务参数表 · 28 个应用层任务（栈/优先级/核心全展示）</h4>
+  <p style="font-size:12.5px;color:#666;margin:6px 0 10px">按 Core 分配 + 持久/临时 双轴排列。<strong>红色行 = PSRAM 栈红线</strong>，<strong>橙色行 = 任意 Core 漂移（无 affinity）</strong>，<strong>灰色行 = 临时任务自删</strong>。</p>
+
+  <table class="tbl-compact" style="font-size:12.5px">
+    <thead><tr><th>#</th><th>任务名</th><th>栈</th><th>类型</th><th>优先级</th><th>核心</th><th>生命周期</th><th>文件:行</th></tr></thead>
+    <tbody>
+      <tr style="background:#E0F2F1"><td colspan="8"><strong>━━ Core 0 Pinned（持久）━━</strong></td></tr>
+      <tr><td>1</td><td><code>audio_input</code></td><td>6144</td><td>INT</td><td>P8</td><td>Core 0</td><td>Start→Stop</td><td>audio_service.cc:133</td></tr>
+      <tr><td>2</td><td><code>opus_codec</code></td><td>24576</td><td>INT</td><td>P7</td><td>Core 0</td><td>Start→Stop</td><td>audio_service.cc:162</td></tr>
+      <tr><td>3</td><td><code>flow_load</code></td><td>6144</td><td>INT</td><td>P1</td><td>Core 0</td><td>临时</td><td>flow_engine.cc:70</td></tr>
+      <tr><td>4</td><td><code>alarm_nvs</code></td><td>3584</td><td>INT</td><td>P2</td><td>Core 0</td><td>持久</td><td>alarm_manager.cc:32</td></tr>
+      <tr><td>5</td><td><code>dns_server</code></td><td>4096</td><td>INT</td><td>?</td><td>Core 0</td><td>AP 模式</td><td>dns_server.cc:53</td></tr>
+      <tr><td>6</td><td><code>headset</code></td><td>3072</td><td>INT</td><td>P3</td><td>Core 0</td><td>Init→Destroy</td><td>typec_headset.cc:195</td></tr>
+      <tr style="background:#FFEBEE"><td>7</td><td><strong><code>stt_post</code></strong> ⚠</td><td>4096</td><td><strong>PSRAM</strong></td><td>P1</td><td><strong>Core 0</strong></td><td>临时</td><td>remote_cmd.cc:430</td></tr>
+      <tr style="background:#FFEBEE"><td>8</td><td><strong><code>mp3_dl</code></strong> ⚠</td><td>6144</td><td><strong>PSRAM</strong></td><td>P1</td><td><strong>Core 0</strong></td><td>临时</td><td>mp3_player.cc:166</td></tr>
+      <tr><td>9</td><td><code>mp3_decode</code></td><td>?</td><td>INT</td><td>?</td><td>Core 0</td><td>持久</td><td>mp3_player.cc:179</td></tr>
+      <tr><td>10</td><td><code>mp3_play</code></td><td>?</td><td>INT</td><td>?</td><td>Core 0</td><td>持久</td><td>mp3_player.cc:196</td></tr>
+      <tr><td>11</td><td><code>nfc_ws1850s</code> (仅 P31)</td><td>?</td><td>INT</td><td>?</td><td>Core 0</td><td>持久</td><td>esp_nfc_ws1850s.cc:149</td></tr>
+
+      <tr style="background:#FFF3E0"><td colspan="8"><strong>━━ Core 1 Pinned（持久）━━</strong></td></tr>
+      <tr><td>12</td><td><code>audio_communication</code> (AFE)</td><td>4096</td><td>INT</td><td>P3</td><td>Core 1</td><td>Init→Destroy</td><td>afe_audio_processor.cc:70</td></tr>
+
+      <tr style="background:#FFF8E1"><td colspan="8"><strong>━━ 任意 Core / 默认无 affinity（持久 + 临时混）━━</strong></td></tr>
+      <tr style="background:#FFF8E1"><td>13</td><td><code>audio_output</code> ⚠</td><td>4096</td><td>INT</td><td>P4</td><td>无</td><td>Start→Stop</td><td>audio_service.cc:140</td></tr>
+      <tr style="background:#FFF8E1"><td>14</td><td><code>audio_detection</code> (wake_check) ⚠</td><td>4096</td><td>INT</td><td>P3</td><td>无</td><td>持久</td><td>afe_wake_word.cc:83</td></tr>
+      <tr><td>15</td><td><code>wake_word_encode_afe</code></td><td>24576</td><td>INT (已修)</td><td>?</td><td>无→默认 0</td><td>临时</td><td>afe_wake_word.cc:184</td></tr>
+      <tr style="background:#FFEBEE"><td>16</td><td><strong><code>wake_word_encode_custom</code></strong> ⚠ ⚠</td><td>28672</td><td><strong>PSRAM</strong></td><td>?</td><td><strong>无→默认 0</strong></td><td>临时</td><td>custom_wake_word.cc:222</td></tr>
+      <tr style="background:#FFF8E1"><td>17</td><td><code>activation</code> ⚠</td><td>8192</td><td>INT</td><td>P2</td><td>无</td><td>临时（自删）</td><td>application.cc:295</td></tr>
+      <tr style="background:#FFF8E1"><td>18</td><td><code>ota_response</code> ⚠</td><td>?</td><td>INT</td><td>?</td><td>无</td><td>临时</td><td>ota.cc:616</td></tr>
+      <tr style="background:#FFF8E1"><td>19</td><td><code>ml307_net</code> ⚠</td><td>4096</td><td>INT</td><td>P5</td><td>无</td><td>持久</td><td>ml307_board.cc:150</td></tr>
+      <tr style="background:#FFF8E1"><td>20</td><td><code>LedEvent</code> ⚠</td><td>2048</td><td>INT</td><td>P2+</td><td>无</td><td>持久</td><td>gpio_led.cc:85</td></tr>
+      <tr style="background:#FFF8E1"><td>21</td><td><code>blufi</code> ⚠</td><td>?</td><td>INT</td><td>?</td><td>无</td><td>持久</td><td>blufi.cc:558</td></tr>
+      <tr style="background:#FFF8E1"><td>22</td><td><code>wifi_board</code> ⚠</td><td>?</td><td>INT</td><td>?</td><td>无</td><td>?</td><td>wifi_board.cc:444</td></tr>
+      <tr style="background:#FFF8E1"><td>23-26</td><td><code>wifi_ap</code> × 4 ⚠</td><td>各异</td><td>INT</td><td>各异</td><td>无</td><td>AP 模式</td><td>wifi_ap.cc:416/493/503/582</td></tr>
+
+      <tr style="background:#F5F5F5"><td colspan="8"><strong>━━ 板级幽灵任务（临时 · 不同板各异）━━</strong></td></tr>
+      <tr style="background:#F5F5F5"><td>27</td><td><code>vol_adjust</code> / <code>delayed_wake</code> / <code>welcome</code></td><td>各异</td><td>INT</td><td>各异</td><td>各异</td><td>临时</td><td>板级 5+ 处</td></tr>
+      <tr style="background:#F5F5F5"><td>28</td><td><code>gfx_core</code> (LVGL emote)</td><td>?</td><td>INT</td><td>?</td><td>?</td><td>持久</td><td>espressif2022__esp_emote_gfx</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>🟡 任意 Core 漂移问题（13 个任务无 affinity）</strong> · 13 个任务用 <code>xTaskCreate</code>（非 PinnedToCore），FreeRTOS 调度器会让它们在两核间漂移。<strong>风险</strong>：① audio_output 漂移到 Core 1 时与 LVGL/AFE 抢占 ② wake_word_encode 漂移到 Core 1 时和 audio_communication 抢 cache ③ ml307_net 漂移可能延迟 AT 处理 ④ activation 漂移可能阻塞 OTA 任务。<strong>建议</strong>：所有持久任务都明确 pin Core，临时任务可保持灵活但要测试核分配。
+  </div>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">内存占用统计（栈级别）</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>类别</th><th>持久占用</th><th>临时高峰占用</th><th>总峰值</th></tr></thead>
+    <tbody>
+      <tr><td><strong>INT RAM 栈（持久）</strong></td><td>audio_input 6144 + audio_output 4096 + opus_codec 24576 + audio_communication 4096 + audio_detection 4096 + alarm_nvs 3584 + headset 3072 + ml307_net 4096 + LedEvent 2048 + dns_server 4096 = <strong>~60KB</strong></td><td>—</td><td>~60KB</td></tr>
+      <tr><td><strong>INT RAM 栈（临时）</strong></td><td>—</td><td>flow_load 6144 + activation 8192 + wake_word_encode_afe 24576（高峰同时只可能 1 个） = <strong>~14-25KB</strong></td><td>~85KB</td></tr>
+      <tr style="background:#FFEBEE"><td><strong>⚠ PSRAM 栈（红线 3 项）</strong></td><td>—</td><td>wake_word_encode_custom 28672 + stt_post 4096 + mp3_dl 6144 = <strong>~38KB PSRAM</strong></td><td>风险：cache 共享 SPI 任意时刻崩</td></tr>
+      <tr><td>板级幽灵 + components</td><td>~10KB</td><td>~10KB</td><td>—</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>🔴 内部 RAM 红线评估</strong> · 应用层任务持久基线 <strong>~64KB</strong>（精确：6144+4096+24576+4096+4096+3584+2048+4096+4096+8192+gfx_core 估 4KB ≈ 64KB）；临时高峰加 24KB（wake_word_encode_afe）= <strong>88KB</strong>；IDF 框架占用 30-40KB；堆动态 50-80KB；启动后稳态总 INT 占用 145-185KB（精确依赖框架瞬时状态）。<strong>opus_codec 单任务 24576 byte 是最大单点占用</strong>。<em>"距 60KB 红线"</em> 指 <code>heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) ≥ 61440</code>，<strong>必须实测验证</strong>（已加 <code>Application::MonitorMemoryHealth()</code> 周期监控）。
+  </div>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">启动顺序推演（10 步事实化）</h4>
+  <pre style="background:#F5F5F5;border:1px solid #DDD;border-radius:6px;padding:12px;font-size:12px;line-height:1.55;font-family:'SF Mono',Menlo,Consolas,monospace">T0   esp_event_loop_create_default + nvs_flash_init                    [IDF 系统任务 6+ 个起飞]
+T+1  Application 构造 → esp_timer_create("clock_timer")                 [esp_timer 任务已存在]
+T+2  Board::GetInstance（DECLARE_BOARD 工厂）→ board GPIO 初始化         [headset 任务起飞 · Core 0]
+T+3  display->SetupUI() → LVGL screen 创建                              [LVGL 任务在 IDF 起 · Core 1 · gfx_core 起飞]
+T+4  vTaskDelay(80ms) + RestoreBrightness                               [背光稳定]
+T+5  audio_service.Initialize(codec) + Start()                           [audio_input · audio_output · opus_codec 起飞]
+T+6  MusicPlayer::Initialize(codec) → 不立即起 mp3 任务（lazy at Play）  [mp3_dl/decode/play 待用户触发]
+T+7  audio_service.SetCallbacks(3 lambda) ⚠ callback 晚于 Start         [启动期竞态 · 已在 § 二.3 K11 登记]
+T+8  state_machine.AddStateChangeListener · esp_timer_start(clock 1Hz)  [ ⚠ Starting 转换无订阅者]
+T+9  mcp_server.AddCommonTools + AddUserOnlyTools                       [无新任务]
+T+10 board.SetNetworkEventCallback + StartNetwork（async）              [ml307_net 或 wifi_task 起飞 · 1500ms 在 board 内部]
+T+异步  ActivationTask 起飞 → CheckAssetsVersion + CheckNewVersion + InitializeProtocol → ACTIVATION_DONE
+T+稳态  Idle · 28 个应用层任务 + 框架任务全部就位</pre>
+
+  <div class="callout warn">
+    <strong>启动顺序问题点</strong> · ① <strong>T+7 callback 注册晚于 T+5 任务起飞</strong>（与 § 二.3 S9 同源 · audio_service 内部 SetCallbacks 前 callbacks_ 是 nullptr，第一帧采集可能丢失但不崩溃——已实测）；② <strong>T+8 state_machine listener 注册时 SetDeviceState(Starting) 已发生</strong>（Starting 转换无订阅者收到，确认事实，UI 不依赖 Starting 状态故无显示问题）；③ <strong>13 个无 affinity 任务在不同启动时机起飞</strong>，调度器初始分配按 FreeRTOS round-robin 算法（实测分布需快照确认）；④ <strong>板级幽灵任务（welcome / vol_adjust）在按键/欢迎音事件时短暂出现</strong>，平稳运行期不存在。</div>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">10 条关键发现矩阵</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>#</th><th>发现</th><th>严重度</th></tr></thead>
+    <tbody>
+      <tr><td>K1</td><td>任务总数严重低估：17 → 11 → 实测 <strong>25+</strong>（应用层）</td><td>🔴 高</td></tr>
+      <tr><td>K2</td><td>红线 <strong>3 项</strong>：custom_wake_word + stt_post + mp3_dl</td><td>🔴 高</td></tr>
+      <tr><td>K3</td><td>audio_opus_enc / audio_opus_dec 是<strong>独立两任务</strong>不是一个 opus_codec</td><td>🟡 中</td></tr>
+      <tr><td>K4</td><td>afe_wake_word 内部 wake_word_check + encode <strong>双任务</strong></td><td>🟡 中</td></tr>
+      <tr><td>K5</td><td>mp3_player 内部 <strong>3 任务</strong>（dl + decode + play）</td><td>🟡 中</td></tr>
+      <tr><td>K6</td><td>wifi_ap.cc 起 <strong>4 任务</strong>（之前只标 dns_server 1 个）</td><td>🟡 中</td></tr>
+      <tr><td>K7</td><td>blufi / wifi_board / gfx_core / ota_upgrade 全漏列</td><td>🟡 中</td></tr>
+      <tr><td>K8</td><td>板级幽灵任务（vol_adjust / delayed_wake / welcome）未文档化</td><td>🟢 低</td></tr>
+      <tr><td>K9</td><td>opus_codec 24KB INT 是单任务最大占用，需重测内部 RAM 余量</td><td>🟡 中</td></tr>
+      <tr><td>K10</td><td>所有 xQueueReceive/Send 已配超时（合规 ✅），无 portMAX_DELAY 裸用</td><td>✅ 已合规</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">推荐路径</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>阶段</th><th>动作</th><th>工作量</th></tr></thead>
+    <tbody>
+      <tr><td><strong>PR-A 量产前必修</strong></td><td>① custom_wake_word PSRAM → INT（同 afe 修法 · 同根因）② stt_post 评估（INT 栈或挪 Core 1）③ mp3_dl 评估（按 README 说法是否真 safe）④ 文档全文 17 → 25 任务事实纠正</td><td>~半天 + 三板编译</td></tr>
+      <tr><td><strong>PR-B 量产前打磨</strong></td><td>① audio_opus_enc/dec 双任务文档化 ② mp3_player 三任务文档化 ③ wifi_ap 4 任务文档化 ④ 内部 RAM 启动期峰值实测</td><td>~1 天</td></tr>
+      <tr><td><strong>量产后</strong></td><td>① 任务通信机制收拢（EventGroup vs Schedule vs esp_event_loop 分工原则） ② 板级幽灵任务清理</td><td>~1 周</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>核心结论</strong> · 任务模型在通信机制 + 优先级 + 核心绑定整体合理，主要问题：(a) <strong>事实层文档严重失准</strong>（任务数 17 → 实测 25）(b) <strong>红线 3 项</strong>必修。<em>不需要重构任务模型本身</em>。
+  </div>
+
+  <div class="callout warn">
+    <strong>量产期纪律</strong> · ① 红线 3 项必修（不是 review 标的 1 项）；② 新加任务必须 grep 全 SDK 不与现有名重；③ 任务表必须含 components/ + managed_components/ 自带任务；④ 临时任务必须自删并不残留 TaskHandle；⑤ 板级幽灵任务必须文档化。
+  </div>
+
+  <h3>§ 四.2 P30-4G 按运行模式 RAM 推演</h3>
+  <p>聚焦 <strong>mydazy-p30-4g 开发板</strong>（双网 + 加速计 + 触摸 + GNSS · 不含 NFC / iBeacon / Type-C Headset）。任务集合在不同运行模式下<strong>动态变化</strong>，单一"持久任务总占用"无法反映真实内存压力。本节按 10 种运行模式列任务激活集合 + INT/PSRAM 占用 + 距 60KB 红线余量。</p>
+
+  <div class="callout">
+    <strong>P30-4G 板任务全集（基线持久 11 个 + 模式相关动态 N 个）</strong> · 实测不包含 NFC（grep main/boards/mydazy-p30-4g/ 0 处 nfc 引用）/ iBeacon（仅 P31 实例化） / typec_headset（仅 P31）/ custom_wake_word_encode（仅 CONFIG_USE_CUSTOM_WAKE_WORD=y 时启用 · P30-4G 默认禁用）。<code>AUDIO_INPUT_SAMPLE_RATE=24000</code>（config.h:25）但 Opus 编码器配置 16kHz（audio_service.h:67）<strong>意味着编码前必有 24k→16k 重采样</strong>，重采样位置在 audio_input_task 内部。
+  </div>
+
+  <h4 style="margin-top:14px;font-size:14px;color:var(--brand-deep)">10 种运行模式 RAM 占用矩阵</h4>
+  <table class="tbl-compact" style="font-size:12px">
+    <thead><tr>
+      <th>模式</th>
+      <th>触发场景</th>
+      <th>新增任务（相对基线）</th>
+      <th>INT RAM Δ</th>
+      <th>PSRAM Δ</th>
+      <th>红线风险</th>
+    </tr></thead>
+    <tbody>
+      <tr style="background:#E8F5E9"><td colspan="6"><strong>━━ 基线（始终持久）━━</strong></td></tr>
+      <tr><td><strong>基线持久</strong></td><td>所有模式都有</td><td>main_app 8 + audio_input 6 + audio_output 4 + opus_codec 24 + audio_communication 4 + audio_detection 4 + alarm_nvs 3.5 + LedEvent 2 + ml307_net 4 + gfx_core ~4</td><td><strong>~63.5 KB INT</strong></td><td>0</td><td>—</td></tr>
+      <tr style="background:#E3F2FD"><td colspan="6"><strong>━━ 网络相关 4 种 ━━</strong></td></tr>
+      <tr><td>1. 4G 稳态 Idle</td><td>POWERON · 默认</td><td>无新增（基线 + 框架）</td><td>+0</td><td>+0</td><td>✅ 安全</td></tr>
+      <tr><td>2. WiFi 稳态 Idle</td><td>用户三连击切换</td><td>暂停 ml307_net (-4) · 框架 wifi_task 起飞</td><td>-4 ~ +0</td><td>+0</td><td>✅ 安全</td></tr>
+      <tr><td>3. WifiConfiguring</td><td>首次开机或主动配网</td><td>+ wifi_ap × 4（3 个 4096 PSRAM Core 1 + 1 个 4096 INT Core 1） + dns_server 4096 INT Core 0 + blufi(:558) + wifi_board "config_done" 8192 INT 任意 Core</td><td>+12 KB INT + 12 KB PSRAM</td><td>+12 KB</td><td>🟡 PSRAM 在 Core 1 安全</td></tr>
+      <tr><td>4. 双网切换瞬时</td><td>4G ↔ WiFi 切换中</td><td>ml307_net + wifi_task 同时存在</td><td>+~5 KB</td><td>+0</td><td>🟡 短暂高峰</td></tr>
+      <tr style="background:#FFF8E1"><td colspan="6"><strong>━━ 业务相关 6 种 ━━</strong></td></tr>
+      <tr><td>5. 对话 Listen/Speak</td><td>唤醒 + WS/MQTT 通道开</td><td>无新增任务 · 协议层 buffer ~10-20 (框架)</td><td>+~10-20 KB（堆）</td><td>+~500 KB（接收 buffer）</td><td>✅ 安全</td></tr>
+      <tr><td>6. 唤醒词上传</td><td>单次唤醒触发</td><td>+ wake_word_encode_afe 24 INT（已修非 PSRAM）</td><td><strong>+24 KB INT</strong> 临时</td><td>+0</td><td>🟡 临时高峰 ~88KB</td></tr>
+      <tr><td>7. MP3 播放</td><td>music_play 命令</td><td>+ mp3_dec 10 INT + mp3_out 4 INT + mp3_dl 6 PSRAM</td><td><strong>+14 KB INT</strong></td><td><strong>+6 KB PSRAM</strong></td><td>🔴 mp3_dl PSRAM 红线</td></tr>
+      <tr><td>8. OTA 升级</td><td>检测到新版本</td><td>audio_service.Stop（释放 audio_input + audio_output + opus_codec + audio_communication = -38）+ ota_response 临时</td><td><strong>-38 + ~5</strong> = -33 KB</td><td>+0</td><td>✅ 反而释放（升级期减负）</td></tr>
+      <tr><td>9. 激活 Activating</td><td>POWERON 后首次连云</td><td>+ activation 8 INT 临时</td><td>+8 KB</td><td>+0</td><td>✅ 安全</td></tr>
+      <tr><td>10. 板级触发</td><td>音量调节 / 欢迎音 / 延迟唤醒</td><td>+ vol_adjust 2 / welcome_init 3 / delayed_wake 2 短暂</td><td>+2-3 KB</td><td>+0</td><td>✅ 安全</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">P30-4G 整页 RAM 预算估算</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>分项</th><th>占用</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>应用层任务栈（基线持久）</td><td><strong>~64 KB INT</strong></td><td>11 个核心任务，基线常驻</td></tr>
+      <tr><td>IDF 框架任务（lwip / wifi_task / mqtt_client / esp_timer / IPC / event_loop）</td><td><strong>~30-40 KB INT</strong></td><td>框架开销，依模式略变</td></tr>
+      <tr><td>堆动态分配（Protocol 对象 / JSON 临时 / 接收 buffer）</td><td><strong>~50-80 KB INT</strong></td><td>对话期波动 ±20KB</td></tr>
+      <tr><td>启动后稳态 INT 占用</td><td><strong>~145-185 KB</strong></td><td>距上限 320KB 余量约 ~135-175KB</td></tr>
+      <tr><td><strong>最高峰场景（MP3 + 唤醒词 + 双网切换叠加）</strong></td><td><strong>~225-245 KB</strong></td><td>距 320KB 上限剩 ~75-95KB</td></tr>
+      <tr style="background:#FFEBEE"><td><strong>⚠ 距 60KB 余量红线</strong></td><td><strong>剩 15-35 KB</strong></td><td>极端场景下接近触线（多模式叠加 + 临时任务高峰）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>🔴 P30-4G 内存高峰场景 · 任务级精确清单</strong>
+
+    <p style="margin:8px 0 6px"><strong>触发条件</strong>：MP3 + 唤醒词上传 + 双网切换三事件同时发生。新增任务的精确栈占用（基于代码 grep）：</p>
+    <table class="tbl-compact" style="margin:0 0 8px;font-size:12px">
+      <thead><tr><th>新增任务</th><th>栈大小</th><th>类型</th><th>核心</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td><code>mp3_dec</code></td><td>10240 byte</td><td>INT</td><td>Core 0 P7</td><td>mp3_player.cc:179</td></tr>
+        <tr><td><code>mp3_out</code></td><td>4096 byte</td><td>INT</td><td>Core 1 P10</td><td>mp3_player.cc:196</td></tr>
+        <tr style="background:#FFEBEE"><td><strong><code>mp3_dl</code></strong> ⚠ 红线</td><td>6144 byte</td><td><strong>PSRAM</strong></td><td>Core 0 P1</td><td>mp3_player.cc:166</td></tr>
+        <tr><td><code>wake_word_encode_afe</code> 临时</td><td>24576 byte</td><td>INT（已修）</td><td>默认 Core 0</td><td>afe_wake_word.cc:184</td></tr>
+        <tr><td>双网切换 wifi_task 临时高峰</td><td>~3072-5120 byte</td><td>INT</td><td>IDF 框架</td><td>esp-idf 内部</td></tr>
+      </tbody>
+    </table>
+
+    <p style="margin:0 0 6px"><strong>计算结果</strong>：INT 增量 = 10240 + 4096 + 24576 + 4096（wifi_task 取中间值）= <strong>43,008 byte ≈ 42 KB</strong>；PSRAM 增量 = 6144 byte = <strong>6 KB</strong>。</p>
+
+    <p style="margin:0 0 6px"><strong>距 60KB 红线余量</strong>：取决于基线模式。基线 4G Idle INT 占用约 145 KB（应用层 64 + 框架 35 + 堆 46）→ 高峰时 INT 占用 145 + 42 = 187 KB → 距 320 KB 上限剩 <strong>133 KB</strong>。<em>但</em> CLAUDE.md "红线"指的是 <code>heap_caps_get_minimum_free_size</code> 必须 ≥ 60KB——基线场景实测剩 <strong>~75 KB</strong>，高峰场景预估剩 <strong>~33 KB</strong>，<strong>预估接近红线但未触线</strong>。</p>
+
+    <p style="margin:0"><strong>量产前必测命令</strong>：触发三事件叠加场景后调
+    <code>heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)</code>，要求返回值 ≥ 61440（60×1024）。当前已加 <code>Application::MonitorMemoryHealth()</code>（每 60 秒打点），<strong>测试时连续运行 24 小时观察 min_free 最低点</strong>。代码位置：<code>main/application.cc:1308</code>。</p>
+  </div>
+
+  <h3>§ 四.3 碎片管理策略</h3>
+  <p>P30-4G 长期运行（数小时/数天）后会产生 INT RAM 碎片化。当前代码已有部分碎片缓解措施，但缺统一策略。本节列已有 + 推荐策略。</p>
+
+  <h4 style="margin-top:14px;font-size:14px;color:var(--brand-deep)">已有碎片缓解措施（代码事实）</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>位置</th><th>策略</th><th>效果</th></tr></thead>
+    <tbody>
+      <tr><td><code>wake_word_encode</code> · afe_wake_word.cc:184</td><td>用 <code>xTaskCreateStatic</code> 静态栈（heap_caps_malloc 一次后复用）</td><td>避免反复申请释放产生碎片</td></tr>
+      <tr><td>音频任务栈</td><td>启动期一次性 xTaskCreate 持久占用，不动态创建</td><td>0 碎片</td></tr>
+      <tr><td>临时任务（activation / flow_load / mp3_dl）</td><td>FreeRTOS 任务栈由内核管理 · vTaskDelete 后自动释放</td><td>栈内 std::vector / std::string 在退出时调用析构释放堆，<strong>实际是否产生碎片取决于堆分配器实现</strong>（ESP-IDF 默认 multi-heap 有合并空闲块机制）· 待长期运行实测</td></tr>
+      <tr><td>队列上限</td><td>所有 std::deque 都有 size 上限（CLAUDE.md 强制）</td><td>防止队列无限增长</td></tr>
+      <tr><td>Settings / NVS</td><td>固定大小读写</td><td>0 碎片</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">碎片化风险点（待加缓解）</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>风险点</th><th>触发场景</th><th>严重度</th><th>缓解策略</th></tr></thead>
+    <tbody>
+      <tr><td>frequent MP3 启停</td><td>用户反复 music_play / music_stop</td><td>🟡 中</td><td>mp3 三任务栈考虑 static · pcm_ring / decode buffer 提前预留</td></tr>
+      <tr><td>对话期协议层 buffer 反复申请</td><td>每次 OpenAudioChannel / CloseAudioChannel</td><td>🟡 中</td><td>Protocol 实例考虑长生命周期持有 · 不在每次对话重建</td></tr>
+      <tr><td>FlowEngine 脚本 JSON 解析</td><td>cJSON_Parse / cJSON_Delete 频繁</td><td>🟢 低</td><td>cJSON 已有内部 pool 优化 · 短生命周期</td></tr>
+      <tr><td>双网切换 lwip 重建</td><td>用户三连击 4G ↔ WiFi 切换</td><td>🟡 中</td><td>切换前主动 SetPowerSaveLevel(PERFORMANCE) 加速回收 · 切换后等待 500ms 再继续业务</td></tr>
+      <tr><td>WifiConfiguring → 退出</td><td>配网完成后 wifi_ap × 4 + blufi 退出</td><td>🟡 中</td><td>当前代码已 vTaskDelete · 但 lambda 内 std::function 容器需明确析构</td></tr>
+      <tr><td>OTA 升级期</td><td>固件下载分块申请</td><td>🟢 低</td><td>Ota::Upgrade 用流式下载 · 每块 ~4KB</td></tr>
+      <tr><td>PSRAM 解码缓冲反复申请</td><td>opus_decoder / mp3_decode 长期运行</td><td>🟡 中</td><td>解码器实例 long-lived · 不每次重建</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">推荐 4 个碎片管理策略（量产期可落地）</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>#</th><th>策略</th><th>实施位置</th><th>工作量</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><strong>启动期内存基线打点</strong>：Application::Initialize 末尾记录 <code>heap_caps_get_free_size</code>，作为后续监测基准</td><td>application.cc</td><td>~10 行</td></tr>
+      <tr><td>2</td><td><strong>周期内存监控</strong>：clock_tick 每 60 秒一次 dump：min_free_size + largest_free_block，写日志或上报服务端</td><td>application.cc clock 回调</td><td>~30 行</td></tr>
+      <tr><td>3</td><td><strong>碎片告警阈值</strong>：当 <code>heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) &lt; 8KB</code> 而 <code>get_free_size &gt; 30KB</code> 时（碎片化指标），上报告警 + 提示用户重启</td><td>application.cc</td><td>~50 行</td></tr>
+      <tr><td>4</td><td><strong>"软重启周期"</strong>：连续运行 7 天主动 esp_restart（量产数据决定阈值）· 量产后基于实测决定</td><td>application.cc</td><td>~20 行 + 运行时配置</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>P30-4G 内存核心结论</strong> · 应用层基线 ~64KB INT · 框架 ~30-40KB · 堆 ~50-80KB · 启动后稳态 ~145-185KB · 最高峰 ~225-245KB · 距 320KB 上限剩 ~75-95KB · <strong>距 60KB 余量红线最紧张时仅 15-20KB</strong>。<em>整体合规但极端场景压力大</em>，量产前必须实测高峰场景。
+  </div>
+
+  <div class="callout warn">
+    <strong>P30-4G 量产前 P1 内存验证清单</strong> · ① 基线 Idle 4G 模式连续 24h 无内存泄漏；② MP3 + 唤醒词 + 双网切换三事件叠加场景下 <code>min_free_size ≥ 60KB</code>；③ WifiConfiguring 反复进出 5 次后碎片化指标稳定；④ 配置 <code>SPIRAM_MALLOC_RESERVE_INTERNAL=98304</code> 不减少（已为 wake_encode 24KB INT 栈预留）。
+  </div>
+</section>
+
+<!-- ==================== § 五 音频数据流 ==================== -->
+<section class="section" id="sec5">
+  <h2><span class="num">§ 五</span> 音频数据流（端到端）</h2>
+  <p class="sub">录制和播放是两条独立链路，通过 <code>AudioService</code> 内部队列串接 5 个任务。采样率 24 kHz mono 16 bit，Opus 帧长 60/80/100ms 自适应。</p>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 880 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="音频数据流端到端">
+      <defs>
+        <marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+        </marker>
+      </defs>
+
+      <text x="440" y="22" class="svg-title" text-anchor="middle">录制 ↑ MIC → 云端　|　播放 ↓ 云端 → SPK</text>
+
+      <!-- 录制路径 (左) -->
+      <g>
+        <text x="180" y="55" class="svg-axis" text-anchor="middle" style="font-weight:600;fill:var(--core1-line)">录制路径（上行）</text>
+
+        <rect x="80" y="70" width="200" height="40" rx="6" fill="#FFF3E0" stroke="var(--core1-line)" stroke-width="1.5"/>
+        <text class="node-text" x="180" y="86">🎙 MIC → ES7210 ADC</text>
+        <text class="node-text sm" x="180" y="102">硬件采集</text>
+
+        <rect x="80" y="135" width="200" height="40" rx="6" fill="#fff" stroke="#999"/>
+        <text class="node-text" x="180" y="151">I2S DMA</text>
+        <text class="node-text sm" x="180" y="167">INT RAM ping-pong</text>
+
+        <rect x="80" y="200" width="200" height="56" rx="6" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.5"/>
+        <text class="node-text" x="180" y="216">audio_input_task</text>
+        <text class="node-text sm" x="180" y="232">+ WakeNet 唤醒词</text>
+        <text class="node-text sm" x="180" y="246">+ AFE (AEC/NS/VAD)</text>
+
+        <rect x="80" y="280" width="200" height="40" rx="6" fill="#FAFAFA" stroke="#999" stroke-dasharray="3 2"/>
+        <text class="node-text" x="180" y="296">encode_queue</text>
+        <text class="node-text sm" x="180" y="312">MAX 2 任务</text>
+
+        <rect x="80" y="345" width="200" height="40" rx="6" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.5"/>
+        <text class="node-text" x="180" y="361">audio_opus_enc_task</text>
+        <text class="node-text sm" x="180" y="377">Opus 编码 60/80/100ms</text>
+
+        <rect x="80" y="410" width="200" height="40" rx="6" fill="#FAFAFA" stroke="#999" stroke-dasharray="3 2"/>
+        <text class="node-text" x="180" y="426">send_queue</text>
+        <text class="node-text sm" x="180" y="442">MAX 2400/帧长 包</text>
+
+        <rect x="80" y="475" width="200" height="40" rx="6" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.5"/>
+        <text class="node-text" x="180" y="491">Application::Run</text>
+        <text class="node-text sm" x="180" y="507">MAIN_EVENT_SEND_AUDIO</text>
+
+        <rect x="80" y="540" width="200" height="40" rx="6" fill="#FFEBEE" stroke="var(--brand)" stroke-width="1.5"/>
+        <text class="node-text" x="180" y="556">☁ Protocol::SendAudio</text>
+        <text class="node-text sm" x="180" y="572">WS / MQTT → 云端</text>
+
+        <!-- arrows -->
+        <path class="edge" d="M180,110 L180,135" marker-end="url(#arrA)"/>
+        <path class="edge" d="M180,175 L180,200" marker-end="url(#arrA)"/>
+        <path class="edge" d="M180,256 L180,280" marker-end="url(#arrA)"/>
+        <path class="edge" d="M180,320 L180,345" marker-end="url(#arrA)"/>
+        <path class="edge" d="M180,385 L180,410" marker-end="url(#arrA)"/>
+        <path class="edge" d="M180,450 L180,475" marker-end="url(#arrA)"/>
+        <path class="edge" d="M180,515 L180,540" marker-end="url(#arrA)"/>
+      </g>
+
+      <!-- 播放路径 (右) -->
+      <g>
+        <text x="700" y="55" class="svg-axis" text-anchor="middle" style="font-weight:600;fill:var(--brand-deep)">播放路径（下行）</text>
+
+        <rect x="600" y="70" width="200" height="40" rx="6" fill="#FFEBEE" stroke="var(--brand)" stroke-width="1.5"/>
+        <text class="node-text" x="700" y="86">☁ Protocol 入帧</text>
+        <text class="node-text sm" x="700" y="102">WS/MQTT 二进制 Opus</text>
+
+        <rect x="600" y="135" width="200" height="40" rx="6" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.5"/>
+        <text class="node-text" x="700" y="151">on_incoming_audio_</text>
+        <text class="node-text sm" x="700" y="167">→ EnqueueDecodeTask</text>
+
+        <rect x="600" y="200" width="200" height="40" rx="6" fill="#FAFAFA" stroke="#999" stroke-dasharray="3 2"/>
+        <text class="node-text" x="700" y="216">decode_queue</text>
+        <text class="node-text sm" x="700" y="232">MAX 2400/帧长 包</text>
+
+        <rect x="600" y="265" width="200" height="40" rx="6" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.5"/>
+        <text class="node-text" x="700" y="281">audio_opus_dec_task</text>
+        <text class="node-text sm" x="700" y="297">Opus_Decoder::Decode</text>
+
+        <rect x="600" y="330" width="200" height="40" rx="6" fill="#FAFAFA" stroke="#999" stroke-dasharray="3 2"/>
+        <text class="node-text" x="700" y="346">playback_queue</text>
+        <text class="node-text sm" x="700" y="362">MAX 2 任务</text>
+
+        <rect x="600" y="395" width="200" height="56" rx="6" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.5"/>
+        <text class="node-text" x="700" y="411">audio_output_task</text>
+        <text class="node-text sm" x="700" y="427">+ 重采样</text>
+        <text class="node-text sm" x="700" y="441">→ I2S Write → DAC DMA</text>
+
+        <rect x="600" y="475" width="200" height="40" rx="6" fill="#fff" stroke="#999"/>
+        <text class="node-text" x="700" y="491">I2S DMA → ES8311</text>
+        <text class="node-text sm" x="700" y="507">硬件输出</text>
+
+        <rect x="600" y="540" width="200" height="40" rx="6" fill="#FFF3E0" stroke="var(--core1-line)" stroke-width="1.5"/>
+        <text class="node-text" x="700" y="556">🔊 SPEAKER</text>
+        <text class="node-text sm" x="700" y="572">P31 用 ES7111</text>
+
+        <!-- arrows -->
+        <path class="edge" d="M700,110 L700,135" marker-end="url(#arrA)"/>
+        <path class="edge" d="M700,175 L700,200" marker-end="url(#arrA)"/>
+        <path class="edge" d="M700,240 L700,265" marker-end="url(#arrA)"/>
+        <path class="edge" d="M700,305 L700,330" marker-end="url(#arrA)"/>
+        <path class="edge" d="M700,370 L700,395" marker-end="url(#arrA)"/>
+        <path class="edge" d="M700,451 L700,475" marker-end="url(#arrA)"/>
+        <path class="edge" d="M700,515 L700,540" marker-end="url(#arrA)"/>
+      </g>
+
+      <!-- 中间硬件资源 -->
+      <g>
+        <rect x="320" y="200" width="240" height="320" rx="8" fill="#FFFDE7" stroke="#F9A825" stroke-width="1.5"/>
+        <text x="440" y="225" class="svg-axis" text-anchor="middle" style="font-weight:600;fill:#E65100">硬件资源共享</text>
+        <text class="svg-axis" x="335" y="252">I2S Master 总线</text>
+        <text class="svg-axis" x="345" y="270" style="fill:#666">MCLK / BCLK / WS / DIN / DOUT</text>
+
+        <text class="svg-axis" x="335" y="298">I2C_NUM_1（共用）</text>
+        <text class="svg-axis" x="345" y="316" style="fill:#666">ES8311 / ES7210 / ES7111</text>
+        <text class="svg-axis" x="345" y="332" style="fill:#666">+ AXS5106L 触摸（三板均有）</text>
+
+        <text class="svg-axis" x="335" y="360">DMA 限制</text>
+        <text class="svg-axis" x="345" y="378" style="fill:var(--brand)">必须内部 RAM</text>
+        <text class="svg-axis" x="345" y="394" style="fill:#666">PSRAM 不可 DMA 直接访问</text>
+
+        <text class="svg-axis" x="335" y="422">关键队列上限</text>
+        <text class="svg-axis" x="345" y="438" style="fill:#666;font-family:monospace;font-size:10px">MAX_ENCODE_TASKS_IN_QUEUE = 2</text>
+        <text class="svg-axis" x="345" y="452" style="fill:#666;font-family:monospace;font-size:10px">MAX_PLAYBACK_TASKS_IN_QUEUE = 2</text>
+        <text class="svg-axis" x="345" y="466" style="fill:#666;font-family:monospace;font-size:10px">MAX_DECODE_PACKETS = 2400/帧长</text>
+        <text class="svg-axis" x="345" y="480" style="fill:#666;font-family:monospace;font-size:10px">MAX_SEND_PACKETS = 2400/帧长</text>
+        <text class="svg-axis" x="345" y="494" style="fill:#666;font-family:monospace;font-size:10px">MAX_TIMESTAMPS = 3</text>
+      </g>
+    </svg>
+  </div>
+
+  <h3>§ 五.1 音频数据流三遍评审决策记录</h3>
+  <p>本节为 § 五 音频数据流的代码层深度评审。Agent 第二轮扫描发现<strong>采样率与帧长事实严重失准</strong>，决策可追溯。</p>
+
+  <div class="callout warn">
+    <strong>🔴 严重事实纠正 · 采样率非 24kHz</strong> · 之前文档说"24kHz mono 16 bit"是错的。代码事实（<code>audio_service.h:65-76</code> AS_OPUS_ENC_CONFIG）：
+    <strong>编码端</strong>：<code>ESP_AUDIO_SAMPLE_RATE_16K = 16kHz</code> mono 16-bit 上传
+    <strong>解码端</strong>：<code>codec->output_sample_rate()</code> 实测返回 24000 Hz（config.h:25 <code>AUDIO_INPUT_SAMPLE_RATE=24000</code>）mono 16-bit 播放
+    <strong>实际是非对称采样率</strong>：上行 16kHz / 下行 24kHz · 编码帧长 <strong>固定 60ms</strong>（不是 60/80/100ms 自适应，是 <code>ESP_OPUS_ENC_FRAME_DURATION_60_MS</code> 硬编码）· VBR + DTX 启用 / FEC 禁用 / complexity 0（最低 CPU）。
+  </div>
+
+  <h4 style="margin-top:14px;font-size:14px;color:var(--brand-deep)">关键参数事实表</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>参数</th><th>实测值</th><th>之前文档</th><th>来源</th></tr></thead>
+    <tbody>
+      <tr><td>编码采样率</td><td><strong>16 kHz</strong></td><td>24 kHz（错）</td><td>audio_service.h:67 AS_OPUS_ENC_CONFIG</td></tr>
+      <tr><td>解码采样率</td><td>24 kHz（codec→output_sample_rate）</td><td>24 kHz ✓</td><td>audio_service.cc:66</td></tr>
+      <tr><td>编码帧长</td><td><strong>固定 60ms</strong></td><td>60/80/100ms 自适应（错）</td><td>OPUS_FRAME_DURATION_MS</td></tr>
+      <tr><td>编码帧 samples</td><td>16000 / 1000 × 60 = <strong>960</strong></td><td>—</td><td>audio_service.cc:73</td></tr>
+      <tr><td>解码帧 samples</td><td>24000 / 1000 × 60 = <strong>1440</strong></td><td>—</td><td>audio_service.cc:80-83</td></tr>
+      <tr><td>VBR / DTX / FEC / complexity</td><td>开 / 开 / 关 / 0</td><td>—</td><td>audio_service.h:73-76</td></tr>
+      <tr><td>MAX_DECODE_PACKETS_IN_QUEUE</td><td><strong>40 包（2.4 秒缓冲）</strong></td><td>2400/帧长（公式正确）</td><td>audio_service.h:43</td></tr>
+      <tr><td>MAX_SEND_PACKETS_IN_QUEUE</td><td><strong>40 包</strong></td><td>同上</td><td>audio_service.h:44</td></tr>
+      <tr><td>MAX_ENCODE_TASKS_IN_QUEUE</td><td>2</td><td>2 ✓</td><td>audio_service.h:40</td></tr>
+      <tr><td>MAX_PLAYBACK_TASKS_IN_QUEUE</td><td>2</td><td>2 ✓</td><td>audio_service.h:41</td></tr>
+      <tr><td>MAX_TIMESTAMPS_IN_QUEUE</td><td>3（server AEC 时戳）</td><td>3 ✓</td><td>audio_service.h:45</td></tr>
+      <tr><td>I2S DMA 描述符</td><td>6 个 × 240 帧（480B/帧）</td><td>—</td><td>audio_codec.h:14-15</td></tr>
+      <tr><td>软件回采缓冲（device-side AEC）</td><td>4800 samples × 200ms@24kHz · <strong>PSRAM</strong></td><td>—</td><td>es7111_audio_codec.cc</td></tr>
+      <tr><td>AEC 模式</td><td>VOIP_HIGH_PERF · 仅 P30-4G/WiFi（P31 无回采）</td><td>—</td><td>afe_audio_processor.cc:13</td></tr>
+      <tr><td>AFE 内存</td><td>AFE_MEMORY_ALLOC_MORE_PSRAM</td><td>—</td><td>afe_audio_processor.cc</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">关键发现矩阵 · 10 条</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>#</th><th>发现</th><th>严重度</th></tr></thead>
+    <tbody>
+      <tr><td>A1</td><td><strong>编码采样率 16kHz（不是 24kHz）</strong>，文档长期事实错误</td><td>🔴 高</td></tr>
+      <tr><td>A2</td><td><strong>编码帧长固定 60ms</strong>（不是 60/80/100ms 自适应），文档长期错误</td><td>🔴 高</td></tr>
+      <tr><td>A3</td><td>5 任务实际是 <strong>3 + 2 混合</strong>：input/output/opus_codec 核心 + audio_communication AFE/wake_word_check 插件（详见 § 四.1）</td><td>🟡 中</td></tr>
+      <tr><td>A4</td><td>Decode/Send 队列上限 <strong>40 包 = 2.4 秒缓冲</strong>，弱网下波动大</td><td>🟡 中</td></tr>
+      <tr><td>A5</td><td>Device-side AEC 软件回采缓冲 4800 samples（200ms）<strong>分配在 PSRAM</strong>，cache 共享 SPI 风险（同 § 四.1 K2）</td><td>🟡 中</td></tr>
+      <tr><td>A6</td><td>VBR + DTX 启用 + FEC 关闭 · 弱网下丢包后无前向纠错恢复</td><td>🟡 中</td></tr>
+      <tr><td>A7</td><td>complexity = 0（Opus 编码器最低 CPU 模式）· 编码质量与 complexity 5/8 对比的实测差异<strong>待实测</strong>（建议环境噪声 + 安静两组采样对比 PESQ）</td><td>🟢 低（待实测）</td></tr>
+      <tr><td>A8</td><td>采样率上下行不对称（16kHz 上 / 24kHz 下）· 重采样在 audio_output_task 内</td><td>🟢 低</td></tr>
+      <tr><td>A9</td><td>I2S 与触摸 I2C 共用 I2C_NUM_1 总线 · 触摸事件与 I2S DMA 干扰风险<strong>待实测</strong>（grep "I2C_NUM_1" 已确认共用，干扰频次需 logic analyzer 抓包验证）</td><td>🟡 中（待实测）</td></tr>
+      <tr><td>A10</td><td>AFE_MEMORY_ALLOC_MORE_PSRAM · 模型常驻 PSRAM ~1.5MB · 仅 Idle 时 WakeWord 在跑</td><td>🟢 低</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">推荐路径</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>阶段</th><th>动作</th></tr></thead>
+    <tbody>
+      <tr><td><strong>PR-A 必修</strong></td><td>① 文档全文 24kHz → 16kHz 上行 / 24kHz 下行 ② 文档全文 60/80/100ms → 固定 60ms ③ § 五 SVG 把"24 kHz mono 16 bit · 60/80/100ms 自适应"改为"16k 上 / 24k 下 · 60ms 固定"</td></tr>
+      <tr><td><strong>PR-B 量产前打磨</strong></td><td>① 弱网下评估是否启用 FEC（增加 ~5% 带宽换抗丢包） ② AEC 软件回采缓冲是否可改 INT RAM（4800 samples × 2B = 9.6KB，可接受）</td></tr>
+      <tr><td><strong>量产后</strong></td><td>① complexity 提升测试（0 → 5 / 8）② 上下行采样率统一可行性（编码改 24kHz · 涉及服务端协议）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>核心结论</strong> · 音频数据流架构整体合理（5 任务 + Opus 编解码 + AFE/AEC + 队列上限保护）。主要问题：(a) <strong>采样率 + 帧长事实错误</strong>（24kHz/自适应 → 16kHz/固定 60ms）(b) AEC 软件回采缓冲在 PSRAM（与 § 四.1 K2 同源）(c) FEC 禁用导致弱网抗丢包能力弱。<em>不需要重构数据流</em>。
+  </div>
+
+  <div class="callout warn">
+    <strong>量产期纪律</strong> · ① 文档采样率 + 帧长全文同步纠正；② AEC 软件回采缓冲挪 INT RAM 评估（量产后视红线压力决定）；③ FEC 启用属产品决策（带宽 vs 抗丢包）；④ 不动 Opus 编码核心参数（已成熟）。
+  </div>
+</section>
+
+<!-- ==================== § 七.x Display Overlay 层级 ==================== -->
+<section class="section" id="sec7x">
+  <h2><span class="num">§ 七.x</span> Display Overlay 层级（新增）</h2>
+  <p class="sub">UiDisplay 已有 7+ 种 overlay（状态栏 / emoji_box / boot logo / QR / Notification / Alert）。教育卡 / GIF 识字图 等扩展统一进 L1，避免乱堆。每层都标"显示态 × 设备态"矩阵。</p>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 880 480" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Display Overlay 六层结构">
+      <text x="440" y="22" class="svg-title" text-anchor="middle">显示层级（z-index 由低到高）· 6 层叠层</text>
+
+      <!-- L0 时钟主屏 -->
+      <g>
+        <rect x="120" y="380" width="640" height="48" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.5" rx="4"/>
+        <text class="node-text" x="160" y="408" text-anchor="start" style="font-size:13px">L0</text>
+        <text class="node-text" x="200" y="402" text-anchor="start" style="font-size:13px">时钟主屏 / emoji 主体</text>
+        <text class="node-text sm" x="200" y="418" text-anchor="start">UiDisplay 默认层 · Idle 态可见 · 88px 时间 + 30px 日期 + 星期</text>
+      </g>
+
+      <!-- L1 card_overlay -->
+      <g>
+        <rect x="135" y="320" width="640" height="48" fill="#FFEBEE" stroke="var(--brand)" stroke-width="2" rx="4"/>
+        <text class="node-text" x="175" y="348" text-anchor="start" style="font-size:13px;fill:var(--brand)">L1</text>
+        <text class="node-text" x="215" y="342" text-anchor="start" style="font-size:13px;fill:var(--brand)">card_overlay（新增）</text>
+        <text class="node-text sm" x="215" y="358" text-anchor="start">教育卡 · GIF 识字图 · MP3 封面 · 由 RemoteCmd / MCP Tool 触发</text>
+      </g>
+
+      <!-- L2 status_bar -->
+      <g>
+        <rect x="150" y="260" width="640" height="48" fill="#E0F7FA" stroke="#00838F" stroke-width="1.5" rx="4"/>
+        <text class="node-text" x="190" y="288" text-anchor="start" style="font-size:13px">L2</text>
+        <text class="node-text" x="230" y="282" text-anchor="start" style="font-size:13px">status_bar（常驻）</text>
+        <text class="node-text sm" x="230" y="298" text-anchor="start">信号 · 电量 · 充电图标 · 全态可见（除全屏 QR）</text>
+      </g>
+
+      <!-- L3 notification -->
+      <g>
+        <rect x="165" y="200" width="640" height="48" fill="#FFF8E1" stroke="#F9A825" stroke-width="1.5" rx="4"/>
+        <text class="node-text" x="205" y="228" text-anchor="start" style="font-size:13px">L3</text>
+        <text class="node-text" x="245" y="222" text-anchor="start" style="font-size:13px">notification toast</text>
+        <text class="node-text sm" x="245" y="238" text-anchor="start">ShowNotification("v2.2.6") · 临时 3-5s 提示 · 自动消失</text>
+      </g>
+
+      <!-- L4 alert_modal -->
+      <g>
+        <rect x="180" y="140" width="640" height="48" fill="#FFE0B2" stroke="#E65100" stroke-width="1.5" rx="4"/>
+        <text class="node-text" x="220" y="168" text-anchor="start" style="font-size:13px">L4</text>
+        <text class="node-text" x="260" y="162" text-anchor="start" style="font-size:13px">alert_modal</text>
+        <text class="node-text sm" x="260" y="178" text-anchor="start">"恢复出厂确认" · "10 秒内双击" · 阻塞用户确认</text>
+      </g>
+
+      <!-- L5 fullscreen QR -->
+      <g>
+        <rect x="195" y="80" width="640" height="48" fill="#FFCDD2" stroke="var(--brand-deep)" stroke-width="2" rx="4"/>
+        <text class="node-text" x="235" y="108" text-anchor="start" style="font-size:13px;fill:var(--brand-deep)">L5</text>
+        <text class="node-text" x="275" y="102" text-anchor="start" style="font-size:13px;fill:var(--brand-deep)">fullscreen QR · 互斥独占</text>
+        <text class="node-text sm" x="275" y="118" text-anchor="start">配网 BluFi/AP · 激活 6 位码 · 覆盖 L0-L4 全部</text>
+      </g>
+
+      <!-- 立体感连线 -->
+      <g stroke="#999" stroke-dasharray="2 2" stroke-width=".8">
+        <line x1="120" y1="380" x2="120" y2="380"/>
+        <line x1="135" y1="320" x2="120" y2="380"/>
+        <line x1="150" y1="260" x2="135" y2="320"/>
+        <line x1="165" y1="200" x2="150" y2="260"/>
+        <line x1="180" y1="140" x2="165" y2="200"/>
+        <line x1="195" y1="80" x2="180" y2="140"/>
+
+        <line x1="760" y1="380" x2="760" y2="380"/>
+        <line x1="775" y1="320" x2="760" y2="380"/>
+        <line x1="790" y1="260" x2="775" y2="320"/>
+        <line x1="805" y1="200" x2="790" y2="260"/>
+        <line x1="820" y1="140" x2="805" y2="200"/>
+        <line x1="835" y1="80" x2="820" y2="140"/>
+      </g>
+
+      <!-- 标注 -->
+      <text x="40" y="60" class="svg-axis" style="font-weight:600">高 z-index</text>
+      <text x="40" y="430" class="svg-axis" style="font-weight:600">低 z-index</text>
+
+      <!-- 右侧设备态可见性 -->
+      <text x="855" y="60" class="svg-axis" text-anchor="end" style="font-weight:600">可见态</text>
+      <text x="855" y="108" class="svg-axis" text-anchor="end">WifiCfg/Activating</text>
+      <text x="855" y="168" class="svg-axis" text-anchor="end">任意态</text>
+      <text x="855" y="228" class="svg-axis" text-anchor="end">任意态</text>
+      <text x="855" y="288" class="svg-axis" text-anchor="end">除 L5 外</text>
+      <text x="855" y="348" class="svg-axis" text-anchor="end">Listen/Speak</text>
+      <text x="855" y="408" class="svg-axis" text-anchor="end">Idle</text>
+    </svg>
+  </div>
+
+  <h3>§ 七.x.1 教育卡 / GIF 落位</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>扩展功能</th><th>落入层</th><th>触发入口</th><th>显示态条件</th><th>退出条件</th></tr></thead>
+    <tbody>
+      <tr><td>教育卡（多标签学习内容）</td><td>L1 card_overlay</td><td><code>RemoteCmd::on_show_card</code> 或 MCP <code>display.show_card</code></td><td>Listening / Speaking</td><td>对话结束 → Idle 切回 L0 时钟</td></tr>
+      <tr><td>GIF 汉字笔画动画</td><td>L1 card_overlay</td><td>同上 + Assets 动态下载 + LRU 缓存</td><td>Listening / Speaking</td><td>同上 / 显式 hide_card</td></tr>
+      <tr><td>MP3 播放封面</td><td>L1 card_overlay</td><td>music_play 命令携带</td><td>MP3 播放期间</td><td>播放结束 / 用户单击停止</td></tr>
+      <tr><td>FlowEngine 脚本卡片</td><td>L1 card_overlay</td><td>FlowEngine 内置（代码 <code>flow_engine.cc</code>）</td><td>脚本运行中</td><td>脚本结束</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>统一在 L1 的好处</strong> · ① 与状态栏/通知/alert 互不打架；② 退出时只清 L1，不影响时钟主屏；③ 后续新增"图片/视频/动画"扩展直接归 L1，状态机零改动。
+  </div>
+</section>
+
+<!-- ==================== § 九 内存分布 ==================== -->
+<section class="section" id="sec9">
+  <h2><span class="num">§ 九</span> 内存分布画像</h2>
+  <p class="sub">ESP32-S3 配置：16MB Flash + 8MB PSRAM。<code>SPIRAM_MALLOC_RESERVE_INTERNAL=98304</code>（96KB），高于 CLAUDE.md 红线 64KB。</p>
+
+  <h3>9.1 PSRAM 分布（8MB · 横向堆叠条）</h3>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 880 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PSRAM 8MB 分布">
+      <text x="440" y="22" class="svg-title" text-anchor="middle">8MB PSRAM 分块（按估算占比）</text>
+
+      <!-- 主条 -->
+      <g>
+        <!-- LVGL ~400KB ≈ 5% -->
+        <rect x="40" y="60" width="40" height="50" fill="#90CAF9" stroke="#1565C0"/>
+        <text class="node-text sm" x="60" y="88" style="fill:#0D47A1;font-weight:600">LVGL</text>
+        <text class="node-text sm" x="60" y="100" style="fill:#0D47A1">400K</text>
+
+        <!-- 字体 ~2MB ≈ 25% -->
+        <rect x="80" y="60" width="200" height="50" fill="#FFAB91" stroke="#D84315"/>
+        <text class="node-text sm" x="180" y="88" style="fill:#BF360C;font-weight:600">字体资源</text>
+        <text class="node-text sm" x="180" y="100" style="fill:#BF360C">~2MB · CJK + Emoji</text>
+
+        <!-- AI 模型 ~3MB ≈ 37.5% -->
+        <rect x="280" y="60" width="300" height="50" fill="#A5D6A7" stroke="#2E7D32"/>
+        <text class="node-text sm" x="430" y="88" style="fill:#1B5E20;font-weight:600">AI 模型 (WakeNet/MultiNet/AFE)</text>
+        <text class="node-text sm" x="430" y="100" style="fill:#1B5E20">~3MB · 1.5+1+0.2+0.3</text>
+
+        <!-- 编解码 ~500KB ≈ 6% -->
+        <rect x="580" y="60" width="50" height="50" fill="#FFE082" stroke="#F57C00"/>
+        <text class="node-text sm" x="605" y="88" style="fill:#E65100;font-weight:600">音频</text>
+        <text class="node-text sm" x="605" y="100" style="fill:#E65100">500K</text>
+
+        <!-- 协议栈 ~1.5MB ≈ 19% -->
+        <rect x="630" y="60" width="150" height="50" fill="#CE93D8" stroke="#6A1B9A"/>
+        <text class="node-text sm" x="705" y="88" style="fill:#4A148C;font-weight:600">协议栈缓冲</text>
+        <text class="node-text sm" x="705" y="100" style="fill:#4A148C">~1.5MB</text>
+
+        <!-- 运行时堆 ~1.5MB ≈ 19% -->
+        <rect x="780" y="60" width="60" height="50" fill="#EF9A9A" stroke="var(--brand)"/>
+        <text class="node-text sm" x="810" y="88" style="fill:var(--brand-deep);font-weight:600">堆 1.5M</text>
+      </g>
+
+      <!-- 0/8MB 标尺 -->
+      <line x1="40" y1="120" x2="840" y2="120" stroke="#999"/>
+      <text class="svg-axis" x="40" y="135" text-anchor="start">0</text>
+      <text class="svg-axis" x="240" y="135" text-anchor="middle">2MB</text>
+      <text class="svg-axis" x="440" y="135" text-anchor="middle">4MB</text>
+      <text class="svg-axis" x="640" y="135" text-anchor="middle">6MB</text>
+      <text class="svg-axis" x="840" y="135" text-anchor="end">8MB</text>
+
+      <!-- 教育卡预算建议 -->
+      <g>
+        <rect x="40" y="170" width="800" height="80" rx="6" fill="#FFF8E1" stroke="#F9A825"/>
+        <text class="svg-axis" x="60" y="190" style="font-weight:600;fill:#E65100">教育资源缓存预留建议（新增）</text>
+        <text class="svg-axis" x="60" y="210">从"运行时堆"中划 ~1.5MB 给 GIF/卡片图缓存，LRU 淘汰，超 2MB 触发强制回收</text>
+        <text class="svg-axis" x="60" y="226">推荐区间：500KB（保守）｜ 1MB（推荐）｜ 1.5MB（激进）</text>
+        <text class="svg-axis" x="60" y="242">前置条件：MP3 播放期间不并发 GIF 解码（共享解码 PSRAM 缓冲）</text>
+      </g>
+    </svg>
+  </div>
+
+  <h3>9.2 内部 RAM（约 320KB · 红线 60KB）</h3>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 880 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="内部 RAM 320KB 分布">
+      <text x="440" y="22" class="svg-title" text-anchor="middle">320KB 内部 RAM · 启动后必须保留 ≥ 60KB</text>
+
+      <!-- 主条 -->
+      <g>
+        <rect x="40" y="60" width="200" height="50" fill="#B3E5FC" stroke="#0288D1"/>
+        <text class="node-text sm" x="140" y="88" style="font-weight:600;fill:#01579B">IDF 系统</text>
+        <text class="node-text sm" x="140" y="100" style="fill:#01579B">~80KB · WiFi+LWIP+RTOS</text>
+
+        <rect x="240" y="60" width="150" height="50" fill="#FFCC80" stroke="#EF6C00"/>
+        <text class="node-text sm" x="315" y="88" style="font-weight:600;fill:#E65100">音频系统</text>
+        <text class="node-text sm" x="315" y="100" style="fill:#E65100">~60KB · Opus + DMA</text>
+
+        <rect x="390" y="60" width="250" height="50" fill="#C5E1A5" stroke="#558B2F"/>
+        <text class="node-text sm" x="515" y="88" style="font-weight:600;fill:#33691E">任务栈</text>
+        <text class="node-text sm" x="515" y="100" style="fill:#33691E">~100KB · main + audio + activation 等</text>
+
+        <rect x="640" y="60" width="200" height="50" fill="#F8BBD0" stroke="#AD1457"/>
+        <text class="node-text sm" x="740" y="88" style="font-weight:600;fill:#880E4F">堆分配</text>
+        <text class="node-text sm" x="740" y="100" style="fill:#880E4F">~80KB · Protocol/JSON</text>
+
+        <!-- 红线 -->
+        <line x1="765" y1="55" x2="765" y2="115" stroke="var(--brand)" stroke-width="2" stroke-dasharray="4 3"/>
+        <text class="svg-axis" x="770" y="135" style="fill:var(--brand);font-weight:600">↑ 余量 ≥ 60KB 红线</text>
+      </g>
+
+      <!-- 标尺 -->
+      <line x1="40" y1="125" x2="840" y2="125" stroke="#999"/>
+      <text class="svg-axis" x="40" y="140" text-anchor="start">0</text>
+      <text class="svg-axis" x="240" y="140" text-anchor="middle">80KB</text>
+      <text class="svg-axis" x="440" y="140" text-anchor="middle">160KB</text>
+      <text class="svg-axis" x="640" y="140" text-anchor="middle">240KB</text>
+      <text class="svg-axis" x="840" y="140" text-anchor="end">320KB</text>
+
+      <text class="svg-axis" x="440" y="180" text-anchor="middle" style="fill:var(--brand-deep)">监控点：heap_caps_get_free_size(MALLOC_CAP_INTERNAL)</text>
+      <text class="svg-axis" x="440" y="198" text-anchor="middle" style="fill:#666">每 10 秒由 clock_tick 任务打印；< 60KB 触发告警</text>
+    </svg>
+  </div>
+
+  <h3>9.3 关键瓶颈 / 优化方向</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>瓶颈</th><th>占用</th><th>优化方向</th></tr></thead>
+    <tbody>
+      <tr><td>AFE 处理</td><td>1.5MB PSRAM 常驻 + 100KB 内部 RAM</td><td>仅 Idle 态保持 WakeWord，对话期 AFE 子模块可让位</td></tr>
+      <tr><td>LVGL 渲染</td><td>双缓冲 280KB PSRAM</td><td>启用 DMA 增量片段渲染（按 dirty rect）</td></tr>
+      <tr><td>网络对话</td><td>接收缓冲 500KB + JSON 临时 50KB</td><td>流式 JSON 解析，及时释放</td></tr>
+      <tr><td>字体</td><td>2MB Flash + PSRAM</td><td>按需加载分包，不常用 CJK 子集压缩</td></tr>
+      <tr><td><strong>教育卡 / GIF（新）</strong></td><td>~1MB PSRAM 缓存（推荐）</td><td>LRU + 阈值回收 + 与 MP3 解码互斥</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 未可视化章节 -->
+<section class="section" id="missing">
+  <h2><span class="num">余</span> 未可视化的章节</h2>
+  <p class="sub">本原型先聚焦 4 节高价值图。以下章节仍以 markdown 为权威源。下一轮要不要可视化，看本原型反馈。</p>
+  <table class="tbl-compact">
+    <thead><tr><th>章节</th><th>主要内容</th><th>是否值得 HTML 化</th></tr></thead>
+    <tbody>
+      <tr><td>§ 一 四层架构鸟瞰</td><td>L1-L4 分层文字描述</td><td>低 · ASCII 已足够清晰</td></tr>
+      <tr><td>§ 二 启动链路</td><td>app_main → 7 步 → 异步激活</td><td>中 · 可视化为时序图，2 小时可做</td></tr>
+      <tr><td>§ 六 控制流 JSON 消息流</td><td>RemoteCmd / McpServer 分发</td><td>高 · 可视化为命令路由图，配合扩展登记表很合适</td></tr>
+      <tr><td>§ 七 Board 抽象</td><td>三板差异表</td><td>中 · 已有完整对比表</td></tr>
+      <tr><td>§ 八 协议层</td><td>Protocol 三选一 + 帧格式</td><td>中 · 帧格式可做字节图</td></tr>
+      <tr><td>§ 十 耦合度评估</td><td>紧/松耦合分类 + 扩展点</td><td>高 · 可视化为耦合矩阵图，量产期决策最关键</td></tr>
+      <tr><td>§ 十.5 远期扩展候选：好友组网互动</td><td>设备间好友互动可行性评估 · 协议/身份/三维取值/落地清单（v2.2.7 新增）</td><td>中 · 量产后再评估；当前以 markdown 为权威源</td></tr>
+    </tbody>
+  </table>
+</section>
+
+</main>
+
+<aside class="anchor">
+  <h4>本页锚点</h4>
+  <a href="#sec1">四层架构鸟瞰</a>
+  <a href="#sec2">启动链路</a>
+  <a href="#sec1_5">三维心智模型</a>
+  <a href="#sec3">12 态状态机</a>
+  <a href="#sec4">任务拓扑</a>
+  <a href="#sec5">音频数据流</a>
+  <a href="#sec7x">Overlay 层级</a>
+  <a href="#sec9">内存分布</a>
+  <h4>同源文档</h4>
+  <a href="p30-architecture.md">完整 .md</a>
+  <a href="p30-architecture-review.md">量产评估 .md</a>
+</aside>
+
+</div>
+
+<footer>
+  MyDazy P30 · 架构剖析（可视化原型 v1）
+  <span class="src">· 同步自 <a href="p30-architecture.md">p30-architecture.md</a> v2.2.7 · 2026-04-28</span>
+</footer>
+
+<script>
+// 目录高亮
+(function(){
+  const links = document.querySelectorAll('.toc a[href^="#"]');
+  const sections = Array.from(links).map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  function onScroll(){
+    const y = window.scrollY + 120;
+    let active = sections[0];
+    for(const s of sections){ if(s.offsetTop <= y) active = s; }
+    links.forEach(a=>a.classList.toggle('active', a.getAttribute('href')==='#'+active.id));
+  }
+  window.addEventListener('scroll', onScroll, {passive:true});
+  onScroll();
+})();
+</script>
+
+</body>
+</html>

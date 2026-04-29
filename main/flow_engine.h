@@ -1,5 +1,5 @@
-#ifndef LIVE_COMPANION_H
-#define LIVE_COMPANION_H
+#ifndef FLOW_ENGINE_H
+#define FLOW_ENGINE_H
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -14,8 +14,8 @@
 
 class Application;
 
-// 直播伴侣状态
-enum class LiveState {
+// Flow 引擎状态
+enum class FlowState {
     kIdle,       // 空闲
     kPlaying,    // 播放中（等待 TTS 完成）
     kDelay,      // 两项之间的延时等待
@@ -32,25 +32,26 @@ struct ScriptItem {
 };
 
 /**
- * AI 直播伴侣
+ * Flow 流程引擎（原 LiveCompanion / 直播伴侣）
  *
  * 通过 HTTP 拉取 JSON 脚本，按顺序循环播放 TTS/TTAI 内容。
  * 支持高优先级用户交互打断，完成后自动恢复脚本。
+ * 通用流程引擎：教学 / 互动 / 问答 / 直播伴侣等场景共用。
  *
  * 远程命令格式:
- * ┌───────────────────┬───────────────────────────────────────────────────────┐
- * │ 启动              │ {"type":"live_companion","action":"start","url":"..."} │
- * │ 停止              │ {"type":"live_companion","action":"stop"}              │
- * │ 状态              │ {"type":"live_companion","action":"status"}            │
- * └───────────────────┴───────────────────────────────────────────────────────┘
+ * ┌───────────────────┬─────────────────────────────────────────────┐
+ * │ 启动              │ {"type":"flow","action":"start","url":"..."} │
+ * │ 停止              │ {"type":"flow","action":"stop"}              │
+ * │ 状态              │ {"type":"flow","action":"status"}            │
+ * └───────────────────┴─────────────────────────────────────────────┘
  */
-class LiveCompanion {
+class FlowEngine {
 public:
-    explicit LiveCompanion(Application* app);
-    ~LiveCompanion();
+    explicit FlowEngine(Application* app);
+    ~FlowEngine();
 
-    LiveCompanion(const LiveCompanion&) = delete;
-    LiveCompanion& operator=(const LiveCompanion&) = delete;
+    FlowEngine(const FlowEngine&) = delete;
+    FlowEngine& operator=(const FlowEngine&) = delete;
 
     /// 通过 URL 加载远程脚本并开始播放（异步 HTTP 下载）
     void Start(const std::string& url);
@@ -70,11 +71,11 @@ public:
     /// 从头重新开始当前脚本
     void Restart();
 
-    LiveState GetState() const { return state_.load(); }
+    FlowState GetState() const { return state_.load(); }
     int GetCurrentIndex() const { return current_index_.load(); }
     int GetTotalItems() const { return total_items_.load(); }
     int GetLoopCount() const { return loop_count_.load(); }
-    bool IsRunning() const { return state_.load() != LiveState::kIdle; }
+    bool IsRunning() const { return state_.load() != FlowState::kIdle; }
 
     /// TTS 播放完成通知（由 Application tts.stop 拦截后调用，替代状态转换）
     void NotifyTtsFinished();
@@ -89,7 +90,7 @@ private:
     Application* app_;
 
     // 状态
-    std::atomic<LiveState> state_{LiveState::kIdle};
+    std::atomic<FlowState> state_{FlowState::kIdle};
     std::atomic<int> current_index_{0};
     std::atomic<int> total_items_{0};
     std::atomic<int> loop_count_{0};
@@ -124,4 +125,4 @@ private:
     static void DelayTimerCallback(void* arg);
 };
 
-#endif // LIVE_COMPANION_H
+#endif // FLOW_ENGINE_H

@@ -16,8 +16,10 @@
 #include "audio_service.h"
 #include "device_state.h"
 #include "device_state_machine.h"
+#include "activity_type.h"
+#include "audio_source.h"
 
-class LiveCompanion;
+class FlowEngine;
 class RemoteCmd;
 
 // Main event bits
@@ -68,6 +70,17 @@ public:
 
     DeviceState GetDeviceState() const { return state_machine_.GetState(); }
     bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
+
+    /**
+     * 三维心智模型查询 API（详见 docs/p30-architecture.html § 一.5）
+     *
+     * GetCurrentActivity()    — 业务活动维度（B），收拢 IsPlaying/IsRunning 等散落判断
+     * GetCurrentAudioSource() — 音频源标识，Speaking 态下分支用（LED/UI/打断）
+     *
+     * 阶段 0 实现：基于现有 flag 推断；后续阶段由各 Activity 模块显式 Set。
+     */
+    ActivityType GetCurrentActivity() const;
+    AudioSource  GetCurrentAudioSource() const;
     
     /**
      * Request state transition
@@ -123,7 +136,7 @@ public:
     AudioService& GetAudioService() { return audio_service_; }
 
     // UI 主屏时钟与对话模式切换（由 remote_cmd 调用）
-    LiveCompanion* GetLiveCompanion() { return live_companion_.get(); }
+    FlowEngine* GetFlowEngine() { return flow_engine_.get(); }
     RemoteCmd* GetRemoteCmd() { return remote_cmd_.get(); }
 
     /**
@@ -149,7 +162,7 @@ private:
     AudioService audio_service_;
     std::unique_ptr<Ota> ota_;
     std::unique_ptr<RemoteCmd> remote_cmd_;
-    std::unique_ptr<LiveCompanion> live_companion_;
+    std::unique_ptr<FlowEngine> flow_engine_;
     esp_timer_handle_t delayed_wake_timer_ = nullptr;
     std::string pending_wake_text_;
 
@@ -159,6 +172,12 @@ private:
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
+
+    // 内存监控（详见 docs/p30-architecture.html § 四.3 碎片管理策略）
+    size_t boot_free_int_size_ = 0;          // 启动期基线
+    size_t boot_largest_int_block_ = 0;
+    bool memory_red_line_alerted_ = false;
+    bool fragmentation_alerted_ = false;
 
 
     // Event handlers
@@ -175,6 +194,10 @@ private:
 
     // Activation task (runs in background)
     void ActivationTask();
+
+    // 内存监控（详见 docs/p30-architecture.html § 四.3）
+    void RecordBootMemoryBaseline();
+    void MonitorMemoryHealth();
 
     // Helper methods
     void CheckAssetsVersion();

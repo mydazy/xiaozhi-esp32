@@ -1,4 +1,4 @@
-#include "live_companion.h"
+#include "flow_engine.h"
 #include "application.h"
 #include "board.h"
 #include "device_state_event.h"
@@ -8,7 +8,7 @@
 #include <esp_log.h>
 #include <cstring>
 
-#define TAG "LiveCompanion"
+#define TAG "FlowEngine"
 
 // 脚本最大大小 8KB
 static constexpr int kMaxScriptSize = 8192;
@@ -19,13 +19,13 @@ static constexpr int kHttpRetryCount = 3;
 // 恢复脚本的默认延时(ms)，可由脚本 JSON 的 resume_delay_s 字段覆盖
 static constexpr int kDefaultResumeDelayMs = 5000;
 
-LiveCompanion::LiveCompanion(Application* app) : app_(app) {
+FlowEngine::FlowEngine(Application* app) : app_(app) {
     // 创建延时定时器
     esp_timer_create_args_t timer_args = {
         .callback = DelayTimerCallback,
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
-        .name = "lc_delay",
+        .name = "flow_delay",
         .skip_unhandled_events = true,
     };
     esp_timer_create(&timer_args, &delay_timer_);
@@ -37,7 +37,7 @@ LiveCompanion::LiveCompanion(Application* app) : app_(app) {
         });
 }
 
-LiveCompanion::~LiveCompanion() {
+FlowEngine::~FlowEngine() {
     Stop();
     if (delay_timer_) {
         esp_timer_stop(delay_timer_);
@@ -50,14 +50,14 @@ LiveCompanion::~LiveCompanion() {
 // 公共 API
 // ============================================================================
 
-void LiveCompanion::Start(const std::string& url) {
+void FlowEngine::Start(const std::string& url) {
     if (url.empty()) {
         ESP_LOGW(TAG, "Start: empty URL");
         return;
     }
 
     // 先停止当前播放
-    if (state_ != LiveState::kIdle) {
+    if (state_ != FlowState::kIdle) {
         Stop();
     }
 
@@ -68,7 +68,7 @@ void LiveCompanion::Start(const std::string& url) {
 
         // 在后台任务中下载脚本（TLS 需要内部 RAM 栈）
         BaseType_t ok = xTaskCreatePinnedToCore(
-            LoadScriptTask, "lc_load", 6144, this, 1, &load_task_handle_, 0);
+            LoadScriptTask, "flow_load", 6144, this, 1, &load_task_handle_, 0);
         if (ok != pdPASS) {
             load_task_handle_ = nullptr;
             app_->Alert("直播伴侣", "启动失败: 内存不足", "", "");
@@ -77,12 +77,12 @@ void LiveCompanion::Start(const std::string& url) {
     });
 }
 
-void LiveCompanion::RestartLast() {
+void FlowEngine::RestartLast() {
     if (last_script_json_.empty()) return;
     StartWithScript(last_script_json_);
 }
 
-void LiveCompanion::StartWithScript(const std::string& json_str) {
+void FlowEngine::StartWithScript(const std::string& json_str) {
     if (json_str.empty()) {
         ESP_LOGW(TAG, "StartWithScript: empty script");
         return;
@@ -92,7 +92,7 @@ void LiveCompanion::StartWithScript(const std::string& json_str) {
     last_script_json_ = json_str;
 
     // 先停止当前播放
-    if (state_ != LiveState::kIdle) {
+    if (state_ != FlowState::kIdle) {
         Stop();
     }
 
@@ -101,7 +101,7 @@ void LiveCompanion::StartWithScript(const std::string& json_str) {
         return;
     }
 
-    state_ = LiveState::kPlaying;
+    state_ = FlowState::kPlaying;
     loop_count_ = 1;
     app_->ForceListeningMode(kListeningModeManualStop);
 
@@ -116,8 +116,8 @@ void LiveCompanion::StartWithScript(const std::string& json_str) {
     PlayCurrentItem();
 }
 
-void LiveCompanion::NotifyTtsFinished() {
-    if (state_ != LiveState::kPlaying) return;
+void FlowEngine::NotifyTtsFinished() {
+    if (state_ != FlowState::kPlaying) return;
 
     if (recap_pending_.exchange(false)) {
         ESP_LOGI(TAG, "<<< 回顾完毕, 继续脚本第 %d 项", current_index_.load() + 1);
@@ -127,9 +127,9 @@ void LiveCompanion::NotifyTtsFinished() {
     }
 }
 
-void LiveCompanion::Stop() {
-    LiveState prev = state_.exchange(LiveState::kIdle);
-    if (prev == LiveState::kIdle) return;
+void FlowEngine::Stop() {
+    FlowState prev = state_.exchange(FlowState::kIdle);
+    if (prev == FlowState::kIdle) return;
 
     esp_timer_stop(delay_timer_);
 
@@ -159,30 +159,30 @@ void LiveCompanion::Stop() {
     ESP_LOGI(TAG, "已播放 %d 轮, 当前第 %d 项", loops, played_items);
 }
 
-void LiveCompanion::Suspend() {
+void FlowEngine::Suspend() {
     // 从 Playing 或 Delay 状态暂停（只标记状态，不调用 AbortSpeaking 避免递归）
-    LiveState expected = LiveState::kPlaying;
-    if (state_.compare_exchange_strong(expected, LiveState::kSuspended)) {
+    FlowState expected = FlowState::kPlaying;
+    if (state_.compare_exchange_strong(expected, FlowState::kSuspended)) {
         ESP_LOGI(TAG, ">>> 插播暂停 [第%d轮 %d/%d项] 脚本已挂起",
                  loop_count_.load(), current_index_.load() + 1, total_items_.load());
         return;
     }
 
-    expected = LiveState::kDelay;
-    if (state_.compare_exchange_strong(expected, LiveState::kSuspended)) {
+    expected = FlowState::kDelay;
+    if (state_.compare_exchange_strong(expected, FlowState::kSuspended)) {
         esp_timer_stop(delay_timer_);
         ESP_LOGI(TAG, ">>> 插播暂停 [第%d轮 %d/%d项] 等待间隔中断",
                  loop_count_.load(), current_index_.load() + 1, total_items_.load());
     }
 }
 
-void LiveCompanion::Resume() {
-    if (state_ != LiveState::kSuspended) return;
+void FlowEngine::Resume() {
+    if (state_ != FlowState::kSuspended) return;
 
     app_->Schedule([this]() {
-        if (state_ != LiveState::kSuspended) return;
+        if (state_ != FlowState::kSuspended) return;
 
-        state_ = LiveState::kPlaying;
+        state_ = FlowState::kPlaying;
         app_->ForceListeningMode(kListeningModeManualStop);
 
         int idx = current_index_.load();
@@ -210,15 +210,15 @@ void LiveCompanion::Resume() {
     });
 }
 
-void LiveCompanion::Restart() {
-    LiveState prev = state_.load();
-    if (prev == LiveState::kIdle) return;
+void FlowEngine::Restart() {
+    FlowState prev = state_.load();
+    if (prev == FlowState::kIdle) return;
 
     esp_timer_stop(delay_timer_);
     current_index_ = 0;
     loop_count_ = 1;
     recap_pending_ = false;
-    state_ = LiveState::kPlaying;
+    state_ = FlowState::kPlaying;
     app_->ForceListeningMode(kListeningModeManualStop);
 
     ESP_LOGI(TAG, "========== 直播伴侣从头开始 ==========");
@@ -232,14 +232,14 @@ void LiveCompanion::Restart() {
 // 脚本加载
 // ============================================================================
 
-void LiveCompanion::LoadScriptTask(void* arg) {
-    auto* lc = static_cast<LiveCompanion*>(arg);
+void FlowEngine::LoadScriptTask(void* arg) {
+    auto* lc = static_cast<FlowEngine*>(arg);
 
     bool success = lc->LoadScript(lc->pending_url_);
 
     if (success) {
         Application::GetInstance().Schedule([lc]() {
-            lc->state_ = LiveState::kPlaying;
+            lc->state_ = FlowState::kPlaying;
             // 设置 ManualStop 模式，确保 TTS 完成后回到 Idle
             Application::GetInstance().ForceListeningMode(kListeningModeManualStop);
             lc->PlayCurrentItem();
@@ -257,7 +257,7 @@ void LiveCompanion::LoadScriptTask(void* arg) {
     vTaskDelete(NULL);
 }
 
-bool LiveCompanion::LoadScript(const std::string& url) {
+bool FlowEngine::LoadScript(const std::string& url) {
     auto& board = Board::GetInstance();
     auto network = board.GetNetwork();
     if (!network) {
@@ -310,7 +310,7 @@ bool LiveCompanion::LoadScript(const std::string& url) {
     return false;
 }
 
-bool LiveCompanion::ParseScript(const std::string& json_str) {
+bool FlowEngine::ParseScript(const std::string& json_str) {
     cJSON* root = cJSON_Parse(json_str.c_str());
     if (!root) {
         ESP_LOGE(TAG, "JSON parse failed");
@@ -392,8 +392,8 @@ bool LiveCompanion::ParseScript(const std::string& json_str) {
 // 播放控制
 // ============================================================================
 
-void LiveCompanion::PlayCurrentItem() {
-    if (state_ != LiveState::kPlaying) return;
+void FlowEngine::PlayCurrentItem() {
+    if (state_ != FlowState::kPlaying) return;
 
     int idx = current_index_.load();
 
@@ -406,7 +406,7 @@ void LiveCompanion::PlayCurrentItem() {
             int lc = loop_count_.fetch_add(1) + 1;
             ESP_LOGI(TAG, "---------- 第 %d 轮循环开始 ----------", lc);
         } else {
-            state_ = LiveState::kIdle;
+            state_ = FlowState::kIdle;
             app_->ForceListeningMode(kListeningModeAutoStop);
             app_->SetDeviceState(kDeviceStateIdle);
             ESP_LOGI(TAG, "========== 脚本播放完毕 (共 %d 轮) ==========",
@@ -446,7 +446,7 @@ void LiveCompanion::PlayCurrentItem() {
     }
 }
 
-void LiveCompanion::ScheduleNext() {
+void FlowEngine::ScheduleNext() {
     int idx = current_index_.load();
     int delay_ms = 0;
 
@@ -461,14 +461,14 @@ void LiveCompanion::ScheduleNext() {
     current_index_ = idx + 1;
 
     if (delay_ms > 0) {
-        state_ = LiveState::kDelay;
+        state_ = FlowState::kDelay;
         esp_timer_start_once(delay_timer_, (uint64_t)delay_ms * 1000);
         ESP_LOGI(TAG, "等待 %d ms 后播放下一项", delay_ms);
     } else {
         app_->Schedule([this]() {
-            LiveState s = state_.load();
-            if (s == LiveState::kPlaying || s == LiveState::kDelay) {
-                state_ = LiveState::kPlaying;
+            FlowState s = state_.load();
+            if (s == FlowState::kPlaying || s == FlowState::kDelay) {
+                state_ = FlowState::kPlaying;
                 PlayCurrentItem();
             } else {
                 ESP_LOGW(TAG, "ScheduleNext 跳过: state=%d", (int)s);
@@ -477,7 +477,7 @@ void LiveCompanion::ScheduleNext() {
     }
 }
 
-void LiveCompanion::ScheduleResumeAfterDelay(int delay_ms) {
+void FlowEngine::ScheduleResumeAfterDelay(int delay_ms) {
     esp_timer_start_once(delay_timer_, (uint64_t)delay_ms * 1000);
 }
 
@@ -485,11 +485,11 @@ void LiveCompanion::ScheduleResumeAfterDelay(int delay_ms) {
 // 回调
 // ============================================================================
 
-void LiveCompanion::OnDeviceStateChanged(DeviceState prev, DeviceState curr) {
+void FlowEngine::OnDeviceStateChanged(DeviceState prev, DeviceState curr) {
     if (!IsRunning()) return;
 
     // 暂停状态下有新的 TTS 开始播放 → 用户仍在互动中，取消恢复定时器
-    if (curr == kDeviceStateSpeaking && state_ == LiveState::kSuspended) {
+    if (curr == kDeviceStateSpeaking && state_ == FlowState::kSuspended) {
         esp_timer_stop(delay_timer_);
         ESP_LOGI(TAG, "--- 用户互动中, 取消恢复定时器");
         return;
@@ -497,7 +497,7 @@ void LiveCompanion::OnDeviceStateChanged(DeviceState prev, DeviceState curr) {
 
     // Suspended 状态下回到 Idle（用户交互结束），启动恢复定时器
     // 覆盖两种场景：Speaking→Idle（AI回复完）和 Listening→Idle（用户没说话超时）
-    if (curr == kDeviceStateIdle && state_.load() == LiveState::kSuspended) {
+    if (curr == kDeviceStateIdle && state_.load() == FlowState::kSuspended) {
         ESP_LOGI(TAG, "<<< 用户互动结束, %d ms 后恢复脚本", resume_delay_ms_);
         ScheduleResumeAfterDelay(resume_delay_ms_);
         return;
@@ -518,9 +518,9 @@ void LiveCompanion::OnDeviceStateChanged(DeviceState prev, DeviceState curr) {
     }
 
     // Speaking → Idle：TTS 播放完成
-    LiveState current_state = state_.load();
+    FlowState current_state = state_.load();
 
-    if (current_state == LiveState::kPlaying) {
+    if (current_state == FlowState::kPlaying) {
         if (recap_pending_.exchange(false)) {
             // 回顾 TTAI 播完，继续播放当前脚本项
             ESP_LOGI(TAG, "<<< 回顾完毕, 继续脚本第 %d 项", current_index_.load() + 1);
@@ -532,16 +532,16 @@ void LiveCompanion::OnDeviceStateChanged(DeviceState prev, DeviceState curr) {
     }
 }
 
-void LiveCompanion::DelayTimerCallback(void* arg) {
-    auto* lc = static_cast<LiveCompanion*>(arg);
+void FlowEngine::DelayTimerCallback(void* arg) {
+    auto* lc = static_cast<FlowEngine*>(arg);
 
     Application::GetInstance().Schedule([lc]() {
-        LiveState current = lc->state_.load();  // 在 main_event_loop 中实时读取
-        if (current == LiveState::kDelay) {
+        FlowState current = lc->state_.load();  // 在 main_event_loop 中实时读取
+        if (current == FlowState::kDelay) {
             // 延时结束，播放下一项
-            lc->state_ = LiveState::kPlaying;
+            lc->state_ = FlowState::kPlaying;
             lc->PlayCurrentItem();
-        } else if (current == LiveState::kSuspended) {
+        } else if (current == FlowState::kSuspended) {
             // 恢复延时结束，恢复播放
             lc->Resume();
         }

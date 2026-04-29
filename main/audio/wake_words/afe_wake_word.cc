@@ -173,7 +173,7 @@ void AfeWakeWord::EncodeWakeWordData() {
     const size_t stack_size = 4096 * 6;
     wake_word_opus_.clear();
     if (wake_word_encode_task_stack_ == nullptr) {
-        wake_word_encode_task_stack_ = (StackType_t*)heap_caps_malloc(stack_size, MALLOC_CAP_SPIRAM);
+        wake_word_encode_task_stack_ = (StackType_t*)heap_caps_malloc(stack_size, MALLOC_CAP_INTERNAL);
         assert(wake_word_encode_task_stack_ != nullptr);
     }
     if (wake_word_encode_task_buffer_ == nullptr) {
