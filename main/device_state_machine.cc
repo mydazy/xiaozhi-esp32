@@ -37,6 +37,13 @@ bool DeviceStateMachine::IsValidTransition(DeviceState from, DeviceState to) con
         return true;
     }
 
+    // 🔴 修复（2026-04-28 P0）：FatalError 之前不可达 bug。
+    // 任何状态都允许转入 FatalError（不可恢复错误终态 · 唯一脱出方式是 esp_restart）。
+    // 详见 docs/p30-architecture.html § 三.1 评审 T2。
+    if (to == kDeviceStateFatalError) {
+        return true;
+    }
+
     // Define valid state transitions based on the state diagram
     switch (from) {
         case kDeviceStateUnknown:
