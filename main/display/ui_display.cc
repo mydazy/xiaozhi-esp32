@@ -440,11 +440,11 @@ void UiDisplay::FinishBootAndShowClock() {
 // ============================================================
 
 void UiDisplay::ShowQrCode(const char* qr_content,
-                            const char* bottom, const char* top,
+                            const char* highlight, const char* top,
+                            const char* bottom,
                             const char* left_label, const char* right_label,
                             bool active_left,
-                            std::function<void()> on_double_click,
-                            const char* highlight) {
+                            std::function<void()> on_double_click) {
     DisplayLockGuard lock(this);
     HideQrCode();
 
@@ -531,8 +531,12 @@ void UiDisplay::ShowQrCode(const char* qr_content,
         return lbl;
     };
 
-    // 顶部提示词
-    make_label(top, lv_color_hex(0x333333), LV_ALIGN_TOP_MID, 6);
+    // 配网模式顶部固定提示（仅在显示左右色条时有效）
+    if (has_bars) {
+        make_label("双击切换模式", lv_color_hex(0xAAAAAA), LV_ALIGN_TOP_MID, 2);
+    }
+    // 顶部业务提示词（配网模式下移避开"双击切换"提示）
+    make_label(top, lv_color_hex(0x333333), LV_ALIGN_TOP_MID, has_bars ? 22 : 6);
 
     // 中央二维码（调用方拼好内容，内部不做格式判断）
 #if CONFIG_LV_USE_QRCODE
@@ -557,7 +561,8 @@ void UiDisplay::ShowQrCode(const char* qr_content,
     // 底部辅助文字
     make_label(bottom, lv_color_hex(0x999999), LV_ALIGN_BOTTOM_MID, bottom_y, true);
 
-    if (global_status_bar_) lv_obj_move_foreground(global_status_bar_);
+    // QR 页全屏独占，overlay 必须在最前层（避免顶部 top 文字被全局状态栏 36px 遮挡）
+    lv_obj_move_foreground(qr_overlay_);
     ESP_LOGI(TAG, "QR页: content=%s top=%s bottom=%s highlight=%s",
              qr_content, top ? top : "", bottom ? bottom : "", highlight ? highlight : "");
 }

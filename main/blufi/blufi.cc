@@ -75,8 +75,7 @@ bool Blufi::InitializeController() {
   ESP_LOGI(TAG, "【阶段1/2】初始化 BLE 控制器");
 
   if (static_mem_released_) {
-    Settings settings("wifi", true);
-    settings.SetInt("force_ap", 1);
+    ESP_LOGE(TAG, "BT 静态 RAM 已释放，无法启动 BLE；走 Application::Reboot 重启以恢复 BT 能力");
     Application::GetInstance().Reboot();  // 内部安全序列 + esp_restart，不返回
     return false;  // 理论上到不了这里
   }
@@ -152,8 +151,9 @@ bool Blufi::Start(const std::string &device_name) {
         [](const std::vector<wifi_ap_record_t> &) { Blufi::OnScanDone(); });
   }
 
-  // 设备名 set 移到 INIT_FINISH 回调（NimBLE 主机栈 init 会重置 GAP service buffer，
-  // 在 host_init 之前 set 会被覆盖 → 广播打出乱码）
+#ifdef CONFIG_BT_NIMBLE_ENABLED
+  ble_svc_gap_device_name_set(device_name_.c_str());
+#endif
 
   // 初始化主机栈和回调（控制器已在 InitializeController() 中初始化）
   static esp_blufi_callbacks_t callbacks = {
@@ -181,9 +181,6 @@ bool Blufi::Start(const std::string &device_name) {
     ESP_LOGE(TAG, "已清理 BLE 控制器资源");
     return false;
   }
-
-  // 修复 BLUFI↔AP 切换 bug：原代码仅在 INIT_FINISH callback 里设 true，
-  initialized_ = true;
 
   // ⚠️ 同步等待 INIT_FINISH（NimBLE 异步初始化 GATT profile，flash op 密集）
   // 超时 3s：正常 < 100ms，超时说明 NimBLE 异常但至少能释放调用方的 LVGL 锁
@@ -447,10 +444,6 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
     ESP_LOGI(TAG, "[1/8] Blufi初始化完成");
     // ⭐ 关键修复：在profile真正初始化完成后才设置状态
     self.initialized_ = true;
-#ifdef CONFIG_BT_NIMBLE_ENABLED
-    // NimBLE 主机栈已就绪（GAP service buffer 已分配），此时 set 才生效
-    ble_svc_gap_device_name_set(self.device_name_.c_str());
-#endif
     self.advertising_ = self.StartAdvertising();
     if (!self.advertising_) {
       ESP_LOGW(TAG, "[1/8] 广播启动失败，advertising_=false");
@@ -558,8 +551,7 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
     // ⭐ 异步执行WiFi连接，避免阻塞NimBLE host task
     // TryConnectAndSave 最多阻塞10s，超过BLE supervision timeout(6s)会导致
     // BLE断连，小程序收不到配网结果→显示"配网超时"而实际WiFi已连接成功
-    // P1 修：Pin Core 1（BLE/WiFi 协议任务 · 与 wifi_ap 同核 · 避 Core 0 NVS 死锁）
-    xTaskCreatePinnedToCore([](void *arg) {
+    xTaskCreate([](void *arg) {
       auto &self = Blufi::GetInstance();
       std::string error;
       if (self.credential_validator_(self.ssid_, self.password_, error)) {
@@ -590,7 +582,7 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
                                         nullptr);
       }
       vTaskDelete(NULL);
-    }, "blufi_wifi", 4096, NULL, 5, NULL, 1);
+    }, "blufi_wifi", 4096, NULL, 5, NULL);
     break;
   }
 

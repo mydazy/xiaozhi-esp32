@@ -682,10 +682,12 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
     ESP_LOGI(TAG, "Activation: mac=%s code=%s", mac.c_str(), code.c_str());
 
     // 通用 ShowQrCode：扫码跳转 H5/小程序绑定页，URL 携带 MAC 用于设备识别
+    // 参数：(qr_content, highlight, top, bottom, ...)
     std::string bind_url = "https://mydazy.cn/ota/bind?mac=" + mac;
-    display->ShowQrCode(bind_url.c_str(), "扫码或输入激活码", "绑定设备",               // top：标题
-                        nullptr, nullptr, true, nullptr,  // 无色条 / 无双击切换
-                        code.c_str());            // highlight：6 位激活码（蓝色大字）
+    display->ShowQrCode(bind_url.c_str(),
+                        code.c_str(),              // highlight：6 位激活码（蓝色大字）
+                        "绑定设备",                // top
+                        "扫码或输入激活码");       // bottom
     display->SetChatMessage("system", message.c_str());
 
     display->SetStatus(Lang::Strings::ACTIVATION);

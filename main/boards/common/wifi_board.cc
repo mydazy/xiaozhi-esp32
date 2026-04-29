@@ -170,13 +170,17 @@ bool WifiBoard::StartConfigMode(ConfigMode mode, bool is_switch) {
             if (mode == ConfigMode::BLUFI) {
                 // 蓝牙配网：二维码扫码跳转 H5/小程序，设备名通过蓝牙广播匹配
                 display->ShowQrCode("https://mydazy.cn/ota/blufi",
-                                     show_name.c_str(), "微信扫码配网",
+                                    show_name.c_str(),         // highlight：设备名（蓝色加亮）
+                                    "双击切换模式",            // top
+                                    "微信扫码配网",      // bottom：操作引导
                                     "蓝牙配网", "热点配网", true);
             } else {
                 // 热点配网：调用方拼接标准 WiFi 二维码格式
                 std::string wifi_qr = "WIFI:T:nopass;S:" + show_name + ";;";
                 display->ShowQrCode(wifi_qr.c_str(),
-                                    show_name.c_str(), "连接WiFi热点",
+                                    show_name.c_str(),         // highlight：设备名（蓝色加亮）
+                                    "双击切换模式",            // top
+                                    "连接WiFi热点",       // bottom：辅助说明
                                     "蓝牙配网", "热点配网", false);
             }
         }
@@ -442,8 +446,7 @@ void WifiBoard::OnConfigSuccess() {
 
     app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "", "", Lang::Sounds::OGG_SUCCESS);
 
-    // P1 修：Pin Core 1（与 wifi_ap / blufi_wifi 同核 · 配网清理任务）
-    xTaskCreatePinnedToCore([](void* arg) {
+    xTaskCreate([](void* arg) {
         auto* self = static_cast<WifiBoard*>(arg);
 
         // 1. 等待提示音 + BLE数据发送完成
@@ -468,7 +471,7 @@ void WifiBoard::OnConfigSuccess() {
         Application::GetInstance().Reboot();  // 内部 esp_restart() 不返回
 
         vTaskDelete(NULL);
-    }, "config_done", 8192, this, 5, NULL, 1);
+    }, "config_done", 8192, this, 5, NULL);
 }
 
 // ============ 其他方法 ============
@@ -508,15 +511,12 @@ std::string WifiBoard::GetBoardJson() {
 
     json += R"("mac":")" + SystemInfo::GetMacAddress() + R"(")";
 
-    // 声学校准 acoustic JSON：当前 AudioCodec 未提供 calibration 接口，留待后续接入
-    // （189 提供 is_calibrated/mic_sensitivity 等字段，本仓库 codec 抽象层尚未同步）
 
     json += R"(})";
     return json;
 }
 
 void WifiBoard::SetPowerSaveLevel(PowerSaveLevel level) {
-    // PERFORMANCE=禁用 PS / 其他档位=启用 PS（细粒度由 board 子类覆写）
     WifiStation::GetInstance().SetPowerSaveMode(level != PowerSaveLevel::PERFORMANCE);
 }
 

@@ -201,11 +201,10 @@ esp_err_t esp_blufi_host_init(void) {
   // 确保 controller 已经完全就绪
   vTaskDelay(pdMS_TO_TICKS(100));
 
-  // 【IDF 5.4.3 关键修复】当 CONFIG_BT_CONTROLLER_ENABLED=1 时，
   // esp_nimble_init() 会跳过 FreeRTOS 适配层初始化
   // 我们需要手动初始化，因为我们使用分离的控制器初始化
 #if CONFIG_BT_CONTROLLER_ENABLED
-  BLUFI_INFO("【IDF 5.4.3 FIX】Initializing NimBLE FreeRTOS adaptation layer...");
+  BLUFI_INFO(" Initializing NimBLE FreeRTOS adaptation layer...");
 
   // 声明 NimBLE 内部初始化函数
   extern void os_mempool_module_init(void);
