@@ -159,11 +159,14 @@ bool Mp3Player::Play(const std::string& url, const std::string& title, std::stri
         }
     };
 
-    // Download: PSRAM stack OK — one-shot I/O at low priority, tolerates flash-op stalls.
+    // Download: PSRAM stack OK — one-shot I/O at low priority.
+    // 🔴 修红线（2026-04-28 P0）：Core 0 → Core 1（PSRAM 栈保持 · 同 wifi_ap 已验证模式）。
+    // 根因：CLAUDE.md "PSRAM 栈 + Core 0" 红线 · 虽然 mp3_dl 大部分时间在 socket recv（cache 禁用期被 sleep 不被调度），
+    //       但严格遵守红线规则更稳。挪 Core 1 与 wifi_ap "config_ok"（PSRAM Core 1 已验证）同模式。
     TaskHandle_t download_task = nullptr;
     active_tasks_.fetch_add(1, std::memory_order_acq_rel);
     BaseType_t ret = xTaskCreatePinnedToCoreWithCaps(
-        DownloadThunk, "mp3_dl", 6 * 1024, this, 1, &download_task, 0, MALLOC_CAP_SPIRAM);
+        DownloadThunk, "mp3_dl", 6 * 1024, this, 1, &download_task, 1, MALLOC_CAP_SPIRAM);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Play failed: download task creation failed");
         active_tasks_.fetch_sub(1, std::memory_order_acq_rel);

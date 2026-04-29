@@ -219,7 +219,11 @@ void CustomWakeWord::EncodeWakeWordData() {
     const size_t stack_size = 4096 * 7;
     wake_word_opus_.clear();
     if (wake_word_encode_task_stack_ == nullptr) {
-        wake_word_encode_task_stack_ = (StackType_t*)heap_caps_malloc(stack_size, MALLOC_CAP_SPIRAM);
+        // 🔴 修红线（2026-04-28 P0）：栈从 PSRAM 改为 INTERNAL。
+        // 根因：ESP32-S3 cache 与 PSRAM 共享 SPI · NVS/OTA flash op 触发 spi_flash_op_lock()
+        //       会同时禁用两核 cache+PSRAM · PSRAM 栈任务被调度即崩（SP=0x60100000）。
+        // 同 afe_wake_word.cc:176 修法。代价：28 KB 内部 RAM（已含在 SPIRAM_MALLOC_RESERVE_INTERNAL=98304 预算内）。
+        wake_word_encode_task_stack_ = (StackType_t*)heap_caps_malloc(stack_size, MALLOC_CAP_INTERNAL);
         assert(wake_word_encode_task_stack_ != nullptr);
     }
     if (wake_word_encode_task_buffer_ == nullptr) {
@@ -227,7 +231,8 @@ void CustomWakeWord::EncodeWakeWordData() {
         assert(wake_word_encode_task_buffer_ != nullptr);
     }
 
-    wake_word_encode_task_ = xTaskCreateStatic([](void* arg) {
+    // P1 修：Pin Core 1（28KB 重计算 · 减 Core 0 负担 · 与 AFE 同核）
+    wake_word_encode_task_ = xTaskCreateStaticPinnedToCore([](void* arg) {
         auto this_ = (CustomWakeWord*)arg;
         {
             auto start_time = esp_timer_get_time();
@@ -289,7 +294,7 @@ void CustomWakeWord::EncodeWakeWordData() {
             this_->wake_word_cv_.notify_all();
         }
         vTaskDelete(NULL);
-    }, "encode_wake_word", stack_size, this, 2, wake_word_encode_task_stack_, wake_word_encode_task_buffer_);
+    }, "encode_wake_word", stack_size, this, 2, wake_word_encode_task_stack_, wake_word_encode_task_buffer_, 1);
 }
 
 bool CustomWakeWord::GetWakeWordOpus(std::vector<uint8_t>& opus) {

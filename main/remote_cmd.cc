@@ -427,9 +427,14 @@ void RemoteCmd::PostSttText(const std::string& text) {
     };
 
     auto* args = new std::tuple<RemoteCmd*, std::string, std::string>(this, std::move(url), std::move(stt_text));
+    // 🔴 修红线（2026-04-28 P0）：从 PSRAM Core 0 改为 INT Core 1。
+    // 根因：ESP32-S3 cache 与 PSRAM 共享 SPI · NVS/OTA flash op 触发 spi_flash_op_lock()
+    //       会同时禁用两核 cache+PSRAM · PSRAM 栈任务被调度即崩（SP=0x60100000）。
+    // 改动：① MALLOC_CAP_SPIRAM → MALLOC_CAP_INTERNAL ② Core 0 → Core 1（减 Core 0 负担）
+    // 代价：4 KB 内部 RAM 临时占用（HTTP POST 自删后释放）。
     BaseType_t ret = xTaskCreatePinnedToCoreWithCaps(
         task_func, "stt_post", 4096, args,
-        1, nullptr, 0, MALLOC_CAP_SPIRAM);
+        1, nullptr, 1, MALLOC_CAP_INTERNAL);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create stt_post task");
         stt_posting_.store(false);
