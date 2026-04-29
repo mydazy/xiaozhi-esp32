@@ -681,12 +681,9 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
     std::string mac = SystemInfo::GetMacAddress();
     ESP_LOGI(TAG, "Activation: mac=%s code=%s", mac.c_str(), code.c_str());
 
-    // UiDisplay 独立渲染激活页（QR + 激活码）；其它 Display 子类 fallback 为聊天消息
-    if (auto* ui = dynamic_cast<UiDisplay*>(display)) {
-        ui->ShowActivationPage(mac.c_str(), code.c_str());
-    } else {
-        display->SetChatMessage("system", message.c_str());
-    }
+    // 通用 ShowQrCode：UiDisplay 渲染绑定二维码页，其它 Display 子类回退到基类空实现
+    display->ShowQrCode(mac.c_str(), "绑定设备", "扫码或输入激活码", code.c_str());
+    display->SetChatMessage("system", message.c_str());
 
     display->SetStatus(Lang::Strings::ACTIVATION);
     audio_service_.PlaySound(Lang::Sounds::OGG_ACTIVATION);

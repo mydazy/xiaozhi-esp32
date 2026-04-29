@@ -631,9 +631,9 @@ private:
                 }
                 app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
                 vTaskDelay(pdMS_TO_TICKS(3000));
-                // NVS 全擦 + otadata 擦除 + 3 秒倒计时 esp_restart；LDO 复位由 ShutdownHandler 接管
-                SystemReset::DoFactoryReset();
-                app.Reboot();
+                // 9 连击+双击确认触发恢复出厂：NVS 全擦 + 3 秒倒计时 esp_restart
+                // LDO 复位由 ShutdownHandler 接管（穿越 esp_restart 保持 GPIO LOW）
+                SystemReset::CheckButtons(true);
                 return;
             }
 

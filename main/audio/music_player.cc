@@ -81,10 +81,18 @@ void MusicPlayer::Initialize(AudioCodec* codec) {
     mydazy::Mp3Player::Callbacks cb;
     // Async error → hop back to the main task before touching UI.
     cb.on_error = [](const char* status, const char* message) {
+        // W5 修（2026-04-29）· 错误时除 Alert 外还要：
+        // ① 主动 Stop（清理 download/decode/output 三任务，避免残留 abort 后野指针）
+        // ② 退出 Player UI 模式（参考 cb.on_pause_timeout 的写法）
         std::string s = status ? status : "";
         std::string m = message ? message : "";
         Application::GetInstance().Schedule([s = std::move(s), m = std::move(m)]() {
-            Application::GetInstance().Alert(s.c_str(), m.c_str(), "", "");
+            auto& app = Application::GetInstance();
+            MusicPlayer::GetInstance().Stop();
+            if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+                ui->SwitchOutPlayerMode();
+            }
+            app.Alert(s.c_str(), m.c_str(), "triangle_exclamation", "");
         });
     };
     // Graceful end-of-stream → 自动退出 Player UI 模式（必须 hop 回主任务，组件回调来自 worker task）
