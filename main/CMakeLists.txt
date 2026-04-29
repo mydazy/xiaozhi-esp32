@@ -137,15 +137,24 @@ else()
 endif()
 list(APPEND SOURCES ${BOARD_SOURCES})
 
-# UI 资源 .c（SquareLine 生成的 lv_image_dsc_t 全局符号 + maru 字体）
-# 双轨制：assets/icons/* 同时被 build_default_assets.py 打到 assets 分区（运行时加载用），
-# 也以全局符号编译进固件代码段（control_center.cc 等模块直接 &ui_img_xxx 用）。
-# 链接器 --gc-sections 会丢弃未引用的符号，不浪费 Flash。
-file(GLOB ASSETS_C_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/*.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/*.c
+# UI 资源 .c —— 精确列表（不用 GLOB 兜底，避免误编未重构功能）
+# ─────────────────────────────────────────────────────────────────
+# 当前重构进度：仅「主屏时间 + 配网切换 + 音乐播放」走代码层，
+# 其他 UI 功能（教学卡 / 番茄钟 / 待办 / 闹钟 / 主页 logo 等）暂未重构。
+# 已重构功能用到的编译期符号显式列出，未重构的 .c 留在源码但不编：
+#
+# 路径分工：
+#  - 字体 (assets/fonts/*.c)：✗ 不编  · 走运行时 cbin_font_create("font_xxx.bin")
+#                              .bin 由 build_default_assets.py 打到 assets 分区
+#  - 图标小（状态栏频繁刷新）：✓ 编  · control_center.cc 直接 &ui_img_xxx 取址
+#  - 图标大（其他 UI 一次性显示）：✗ 不编 · 走运行时 ui_image_manager
+#  - 板级 logo (boards/*/ui_img_start_logo_png.c)：✓ 编（BOARD_SOURCES 自动加）
+#
+# 后续逐个 UI 功能重构时，把对应图标显式追加到此列表 + 在 .cc 加 LV_IMG_DECLARE。
+list(APPEND SOURCES
+    "assets/icons/ui_img_icon_signal_wifi_png.c"     # 状态栏 WiFi 图标 (control_center.cc:91)
+    "assets/icons/ui_img_icon_signal_4g_4_png.c"     # 状态栏 4G 图标 (control_center.cc:297)
 )
-list(APPEND SOURCES ${ASSETS_C_SOURCES})
 
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)
