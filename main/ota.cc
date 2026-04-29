@@ -322,6 +322,12 @@ esp_err_t Ota::RequestSwitch(const std::string& type, cJSON* data) {
 // ============================================================
 
 esp_err_t Ota::ReportStatus(cJSON* payload) {
+    auto state = Application::GetInstance().GetDeviceState();
+    if (state != kDeviceStateIdle) {
+        ESP_LOGD(TAG, "skip /status POST, state=%d (仅 idle 上报)", (int)state);
+        cJSON_Delete(payload);
+        return ESP_ERR_INVALID_STATE;
+    }
     return PostToOta("/status", payload);
 }
 
@@ -574,6 +580,12 @@ esp_err_t Ota::Activate() {
 
 // P30: 状态上报到 MyDazy 服务器
 bool Ota::ReportStatus() {
+    auto state = Application::GetInstance().GetDeviceState();
+    if (state != kDeviceStateIdle) {
+        ESP_LOGD(TAG, "skip /status POST, state=%d (仅 idle 上报)", (int)state);
+        return false;
+    }
+
     std::string url = GetCheckVersionUrl();
     if (url.length() < 10) {
         ESP_LOGE(TAG, "Status URL base not set");

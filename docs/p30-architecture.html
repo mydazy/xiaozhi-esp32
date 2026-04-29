@@ -2025,13 +2025,88 @@ T+稳态  Idle · 28 个应用层任务 + 框架任务全部就位</pre>
   <table class="tbl-compact">
     <thead><tr><th>位置</th><th>策略</th><th>效果</th></tr></thead>
     <tbody>
-      <tr><td><code>wake_word_encode</code> · afe_wake_word.cc:184</td><td>用 <code>xTaskCreateStatic</code> 静态栈（heap_caps_malloc 一次后复用）</td><td>避免反复申请释放产生碎片</td></tr>
+      <tr><td><code>wake_word_encode</code> · afe_wake_word + custom_wake_word</td><td>✅ <code>xTaskCreateStaticPinnedToCore</code> 静态栈（INT 24K · Pin Core 1）</td><td>0 碎片 · P0 红线已修</td></tr>
+      <tr style="background:#E8F5E9"><td><strong>临时任务静态栈 ✅ P0c 完成 2026-04-29</strong></td><td>4 任务改 <code>xTaskCreateStaticPinnedToCore</code>：<code>activation</code> 8K（Core 0）· <code>flow_load</code> 6K（Core 0）· <code>status_assets</code> 4K（Core 0）· <code>stt_post</code> 4K（Core 1）</td><td><strong>减堆碎片 ~22 KB</strong>（每次任务创建/销毁不再 alloc/free）</td></tr>
       <tr><td>音频任务栈</td><td>启动期一次性 xTaskCreate 持久占用，不动态创建</td><td>0 碎片</td></tr>
-      <tr><td>临时任务（activation / flow_load / mp3_dl）</td><td>FreeRTOS 任务栈由内核管理 · vTaskDelete 后自动释放</td><td>栈内 std::vector / std::string 在退出时调用析构释放堆，<strong>实际是否产生碎片取决于堆分配器实现</strong>（ESP-IDF 默认 multi-heap 有合并空闲块机制）· 待长期运行实测</td></tr>
       <tr><td>队列上限</td><td>所有 std::deque 都有 size 上限（CLAUDE.md 强制）</td><td>防止队列无限增长</td></tr>
       <tr><td>Settings / NVS</td><td>固定大小读写</td><td>0 碎片</td></tr>
     </tbody>
   </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">📋 sdkconfig 优化总览 · 2026-04-29 完成态（权威源 <code>sdkconfig.defaults</code>）</h4>
+  <p style="font-size:13px;color:#666">分 4 档展示所有量产纪律相关 sdkconfig 配置项 · A/B 是 P0 主动改 · C 是已启用的内存优化 · D 是模组/编译/分区配置。</p>
+
+  <h4 style="margin-top:14px;font-size:13.5px;color:var(--brand-deep)">A · 长期稳定 ✅ · 5 类 Watchdog（P0-3 完成）</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>配置项</th><th>值</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr style="background:#E8F5E9"><td><code>ESP_TASK_WDT_EN</code> / <code>INIT</code></td><td>y / y</td><td>任务看门狗启用 + 启动期初始化</td></tr>
+      <tr style="background:#E8F5E9"><td><code>ESP_TASK_WDT_TIMEOUT_S</code></td><td><strong>10</strong></td><td>任务卡死 10s 触发 panic + 重启</td></tr>
+      <tr style="background:#E8F5E9"><td><code>ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0</code> / <code>CPU1</code></td><td>y / y</td><td>双核 idle 任务监控（防 CPU 跑死循环）</td></tr>
+      <tr style="background:#E8F5E9"><td><code>ESP_INT_WDT</code> / <code>TIMEOUT_MS</code></td><td>y / <strong>300</strong></td><td>中断/调度卡死 300ms 触发 panic</td></tr>
+      <tr style="background:#E8F5E9"><td><code>ESP_INT_WDT_CHECK_CPU1</code></td><td>y</td><td>监控 Core 1 中断</td></tr>
+      <tr style="background:#E8F5E9"><td><code>FREERTOS_CHECK_STACKOVERFLOW_CANARY</code></td><td>y</td><td>栈越界检测（canary 模式）· 触发 → panic + 上报任务名</td></tr>
+      <tr style="background:#E8F5E9"><td><code>ESP_BROWNOUT_DET</code> / <code>LVL_SEL_7</code> / <code>USE_INTR</code></td><td>y / y(2.6V) / y</td><td>电压跌落检测 · 中断方式（非立即重启）</td></tr>
+      <tr style="background:#E8F5E9"><td><code>FREERTOS_USE_TRACE_FACILITY</code></td><td>y</td><td><code>uxTaskGetSystemState</code> / 任务运行时统计 / high-water mark 探针</td></tr>
+      <tr style="background:#E8F5E9"><td><code>FREERTOS_GENERATE_RUN_TIME_STATS</code></td><td>y</td><td>CPU 占用率统计</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:14px;font-size:13.5px;color:var(--brand-deep)">B · INT RAM 优化 ✅ · P0a 主动改（2026-04-29 完成 · 释放 ~21-30 KB INT）</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>配置项</th><th>原值</th><th>新值</th><th>INT 释放</th><th>副作用</th></tr></thead>
+    <tbody>
+      <tr style="background:#E8F5E9"><td><code>BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL</code></td><td>y</td><td><strong>n</strong></td><td>—</td><td>—（关闭 INT 模式 · 配 EXTERNAL 启用）</td></tr>
+      <tr style="background:#E8F5E9"><td><code>BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL</code></td><td>n</td><td><strong>y</strong></td><td><strong>+15-20 KB</strong></td><td>NimBLE 控制结构挪 PSRAM · BluFi 启动慢 ~50ms（一次性配网场景，可接受）</td></tr>
+      <tr style="background:#E8F5E9"><td><code>LWIP_TCP_WND_DEFAULT</code></td><td>5760</td><td><strong>4096</strong></td><td><strong>+3-5 KB</strong></td><td>单 TCP 接收吞吐略降（HTTP Binary 已翻倍对冲）</td></tr>
+      <tr style="background:#E8F5E9"><td><code>LWIP_TCP_SND_BUF_DEFAULT</code></td><td>5760</td><td><strong>4096</strong></td><td><strong>+3-5 KB</strong></td><td>单 TCP 发送吞吐略降（同上）</td></tr>
+      <tr style="background:#E8F5E9"><td colspan="3"><strong>P0a 合计</strong></td><td><strong>+21-30 KB INT</strong></td><td>无阻断风险 · 量产前弱网/配网压测验证</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:14px;font-size:13.5px;color:var(--brand-deep)">C · 已启用的内存优化（继承前期改动 · 无需再动）</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>配置项</th><th>值</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><td><code>COMPILER_OPTIMIZATION_SIZE</code></td><td>y</td><td>编译器 -Os（牺牲速度换 Flash 体积）</td></tr>
+      <tr><td><code>NEWLIB_NANO_FORMAT</code></td><td>y</td><td>Nano printf · 减 ~20 KB Flash + 少量 RAM</td></tr>
+      <tr><td><code>MBEDTLS_DYNAMIC_BUFFER</code></td><td>y</td><td>TLS buffer 按需 alloc（减 mbedtls 静态 INT 占用）</td></tr>
+      <tr><td><code>MBEDTLS_SSL_KEEP_PEER_CERTIFICATE</code></td><td>n</td><td>不留 peer 证书副本（省内存）</td></tr>
+      <tr><td><code>MBEDTLS_SSL_RENEGOTIATION</code></td><td>n</td><td>关 SSL 重协商（fix ESP_SSL error · 省 INT）</td></tr>
+      <tr><td><code>ESP_WIFI_STATIC_RX_BUFFER_NUM</code></td><td><strong>6</strong></td><td>从 ESP-HI ESP32C3 复制（默认 10 → 6 · 省 ~6 KB）</td></tr>
+      <tr><td><code>ESP_WIFI_DYNAMIC_RX_BUFFER_NUM</code></td><td>8</td><td>动态 RX buffer 上限</td></tr>
+      <tr><td><code>ESP_WIFI_DYNAMIC_RX_MGMT_BUFFER</code></td><td>y</td><td>管理帧 buffer 动态化</td></tr>
+      <tr><td><code>ESP_WIFI_IRAM_OPT</code> / <code>RX_IRAM_OPT</code></td><td>n / n</td><td>WiFi 代码不放 IRAM（省 IRAM·略损 RX 性能）</td></tr>
+      <tr><td><code>ESP_WIFI_ENTERPRISE_SUPPORT</code></td><td>n</td><td>关企业级 WiFi（WPA2-Enterprise）· 省 Flash + RAM</td></tr>
+      <tr><td><code>ESP_MAIN_TASK_STACK_SIZE</code></td><td>8192</td><td>main_app 栈 8K（量产实测稳定值）</td></tr>
+      <tr><td><code>UART_ISR_IN_IRAM</code></td><td>y</td><td>UART ISR 进 IRAM（fix ML307 FIFO Overflow）</td></tr>
+      <tr><td><code>SPIRAM_MALLOC_RESERVE_INTERNAL</code></td><td>98304（96 KB）</td><td>给 DMA / 必要 INT 分配预留 96 KB</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:14px;font-size:13.5px;color:var(--brand-deep)">D · 业务/启动配置（启动优化 / 分区 / LVGL / Log）</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>类别</th><th>关键配置</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Bootloader</strong></td><td><code>BOOTLOADER_COMPILER_OPTIMIZATION_PERF=y</code> · <code>BOOTLOADER_LOG_LEVEL_NONE=y</code> · <code>BOOTLOADER_SKIP_VALIDATE_ALWAYS=y</code> · <code>BOOTLOADER_APP_ROLLBACK_ENABLE=y</code></td><td>启动加速 · 静默 · 跳过校验 · OTA 失败回滚</td></tr>
+      <tr><td><strong>分区表</strong></td><td><code>PARTITION_TABLE_CUSTOM=y</code> · <code>PARTITION_TABLE_CUSTOM_FILENAME="partitions/v2/16m.csv"</code></td><td>16MB Flash 自定义分区</td></tr>
+      <tr><td><strong>HTTPD</strong></td><td><code>HTTPD_MAX_REQ_HDR_LEN=2048</code> · <code>HTTPD_MAX_URI_LEN=2048</code></td><td>HTTP 服务端 header/URI 长度上限</td></tr>
+      <tr><td><strong>LVGL 9.2.2</strong></td><td>关 ANIMIMG / CALENDAR / CHART / KEYBOARD / LED / LIST / MENU / MSGBOX / SPAN / SPINBOX / SPINNER / TABVIEW / TILEVIEW / WIN <br/>开 GIF / LODEPNG / FONT_FMT_TXT_LARGE</td><td>裁剪 LVGL widget · 省 Flash · GIF 支持识字图（P0 教育卡）</td></tr>
+      <tr><td><strong>Log</strong></td><td><code>LOG_DEFAULT_LEVEL_INFO=y</code> · <code>LOG_MAXIMUM_LEVEL_DEBUG=y</code> · <code>ESP_CONSOLE_UART_BAUDRATE=2000000</code></td><td>默认 INFO · 可动态升 DEBUG · 串口 2Mbps（OTA 日志高速回收）</td></tr>
+      <tr><td><strong>P30 业务</strong></td><td><code>EN_SC7A20H_WAKE=y</code></td><td>SC7A20H 加速计运动唤醒</td></tr>
+      <tr><td><strong>编译</strong></td><td><code>COMPILER_CXX_EXCEPTIONS=y</code> · <code>COMPILER_CXX_RTTI=y</code></td><td>支持 C++ 异常 / RTTI（项目大量用 dynamic_cast）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>sdkconfig 优化最终结论</strong> · A 类 Watchdog 5 件 + B 类 INT 释放 21-30 KB + C 类继承优化已全部就位 · D 类业务配置稳定。<strong>下一轮 P1 候选</strong>（量产稳定后再做）：① <code>SPIRAM_FETCH_INSTRUCTIONS=y</code> 把部分指令搬 PSRAM（释放 ~30 KB Flash · 但 cache miss 影响实时性需评估） ② <code>LWIP_MAX_SOCKETS</code> 10 → 8（释放 ~2 KB） ③ NimBLE role 裁剪（如不需 CENTRAL 可关 · 释放 ~5 KB）。
+  </div>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">opus_codec high-water 探针 ✅（2026-04-29 加入 · 量产前实测验证 24K 栈合理性）</h4>
+  <p style="font-size:13px;color:#666"><code>main/audio/audio_service.cc::OpusCodecTask</code> 任务体加 1000 帧（~60s）一次 <code>uxTaskGetStackHighWaterMark</code> log。<strong>保持 24K 栈不缩</strong>，量产 1 周后据数据决定：高水位 &lt; 12K → 缩到 16K（释放 8K INT）；&lt; 8K → 缩到 12K（释放 12K INT）。</p>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">PCM 缓冲扩展 ✅（2026-04-29 · 240ms 突发抗性）</h4>
+  <p style="font-size:13px;color:#666"><code>MAX_ENCODE/PLAYBACK_TASKS_IN_QUEUE</code> 从 2（120ms）扩到 4（240ms），抵御 LVGL 全屏刷+NVS commit+WakeNet 推理+OTA chunk 写累积突发。RAM 增量：encode +3.8K PSRAM · playback +5.7K PSRAM · INT 几乎不变。不放更大（如 6/360ms）：超 250ms 上行用户感知"延迟"。</p>
 
   <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">碎片化风险点（待加缓解）</h4>
   <table class="tbl-compact">
@@ -2191,12 +2266,12 @@ T+稳态  Idle · 28 个应用层任务 + 框架任务全部就位</pre>
         <text class="svg-axis" x="345" y="378" style="fill:var(--brand)">必须内部 RAM</text>
         <text class="svg-axis" x="345" y="394" style="fill:#666">PSRAM 不可 DMA 直接访问</text>
 
-        <text class="svg-axis" x="335" y="422">关键队列上限</text>
-        <text class="svg-axis" x="345" y="438" style="fill:#666;font-family:monospace;font-size:10px">MAX_ENCODE_TASKS_IN_QUEUE = 2</text>
-        <text class="svg-axis" x="345" y="452" style="fill:#666;font-family:monospace;font-size:10px">MAX_PLAYBACK_TASKS_IN_QUEUE = 2</text>
+        <text class="svg-axis" x="335" y="422">关键队列上限（2026-04-29 更新）</text>
+        <text class="svg-axis" x="345" y="438" style="fill:#2E7D32;font-family:monospace;font-size:10px;font-weight:600">MAX_ENCODE_TASKS_IN_QUEUE = 4 ✅</text>
+        <text class="svg-axis" x="345" y="452" style="fill:#2E7D32;font-family:monospace;font-size:10px;font-weight:600">MAX_PLAYBACK_TASKS_IN_QUEUE = 4 ✅</text>
         <text class="svg-axis" x="345" y="466" style="fill:#666;font-family:monospace;font-size:10px">MAX_DECODE_PACKETS = 2400/帧长</text>
         <text class="svg-axis" x="345" y="480" style="fill:#666;font-family:monospace;font-size:10px">MAX_SEND_PACKETS = 2400/帧长</text>
-        <text class="svg-axis" x="345" y="494" style="fill:#666;font-family:monospace;font-size:10px">MAX_TIMESTAMPS = 3</text>
+        <text class="svg-axis" x="345" y="494" style="fill:#666;font-family:monospace;font-size:10px">PCM 缓冲 240ms（120ms→240ms）</text>
       </g>
     </svg>
   </div>
@@ -2223,8 +2298,8 @@ T+稳态  Idle · 28 个应用层任务 + 框架任务全部就位</pre>
       <tr><td>VBR / DTX / FEC / complexity</td><td>开 / 开 / 关 / 0</td><td>—</td><td>audio_service.h:73-76</td></tr>
       <tr><td>MAX_DECODE_PACKETS_IN_QUEUE</td><td><strong>40 包（2.4 秒缓冲）</strong></td><td>2400/帧长（公式正确）</td><td>audio_service.h:43</td></tr>
       <tr><td>MAX_SEND_PACKETS_IN_QUEUE</td><td><strong>40 包</strong></td><td>同上</td><td>audio_service.h:44</td></tr>
-      <tr><td>MAX_ENCODE_TASKS_IN_QUEUE</td><td>2</td><td>2 ✓</td><td>audio_service.h:40</td></tr>
-      <tr><td>MAX_PLAYBACK_TASKS_IN_QUEUE</td><td>2</td><td>2 ✓</td><td>audio_service.h:41</td></tr>
+      <tr style="background:#E8F5E9"><td>MAX_ENCODE_TASKS_IN_QUEUE</td><td><strong>4 ✅</strong>（240ms PCM 缓冲）</td><td>原 2（120ms · 2026-04-29 P0+ 改）</td><td>audio_service.h:43</td></tr>
+      <tr style="background:#E8F5E9"><td>MAX_PLAYBACK_TASKS_IN_QUEUE</td><td><strong>4 ✅</strong>（240ms PCM 缓冲）</td><td>原 2（120ms · 同上）</td><td>audio_service.h:44</td></tr>
       <tr><td>MAX_TIMESTAMPS_IN_QUEUE</td><td>3（server AEC 时戳）</td><td>3 ✓</td><td>audio_service.h:45</td></tr>
       <tr><td>I2S DMA 描述符</td><td>6 个 × 240 帧（480B/帧）</td><td>—</td><td>audio_codec.h:14-15</td></tr>
       <tr><td>软件回采缓冲（device-side AEC）</td><td>4800 samples × 200ms@24kHz · <strong>PSRAM</strong></td><td>—</td><td>es7111_audio_codec.cc</td></tr>

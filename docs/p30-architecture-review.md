@@ -209,7 +209,7 @@ HandleWakeupCause（在 InitializeGpio 末尾调用）
   ├─ Alert("确认恢复", "开始执行")
   ├─ vTaskDelay(3000ms)
   ├─ RequestServerUnbind() ← HTTP /reset，5s 超时，失败不阻塞
-  └─ SystemReset::DoFactoryReset()
+  └─ SystemReset::CheckButtons()
        ├─ ResetNvsFlash       ← nvs_flash_erase
        ├─ ResetToFactory      ← otadata 分区擦除
        └─ RestartInSeconds(3) ← esp_restart
@@ -330,7 +330,7 @@ main/
 - **关机/重启电源复位**：`ShutdownHandler` 用 ESP-IDF 标准 hook，无需改 base Board，OTA / 出厂复位 / 网络切换全路径覆盖
 - **双重保护的恢复出厂**：9 连击发起 + 10s 内双击确认 + atomic + timestamp 防误触
 - **logo 资源公共化**：`display/ui_img_start_logo_png.c` 三板共用，CMakeLists 集中管理
-- **system_reset 接口分层**：上游默认 `SystemReset(pins)+CheckButtons` 不破坏；新增 `static DoFactoryReset()` 给无专用 GPIO 的板用
+- **system_reset 接口分层**：上游默认 `SystemReset(pins)+CheckButtons` 不破坏；新增 `static CheckButtons()` 给无专用 GPIO 的板用
 
 ### 5.2 风险与建议（按优先级）
 
@@ -339,7 +339,7 @@ main/
 - **logo 持续显示** — 已修复（Idle 触发 fade_out，不再固定 3s）
 - **死代码** — 已清理（`boot_long_press_confirmed_` / `CleanupDisplay`）
 - **恢复出厂确认窗口文案 vs 代码不一致** — 已修复（统一 10 秒）
-- **system_reset 调用** — 已重构（`DoFactoryReset` 一行替代两行）
+- **system_reset 调用** — 已重构（`CheckButtons` 一行替代两行）
 
 #### 🟡 量产可放行，建议 OTA 后端跟进
 
@@ -421,5 +421,5 @@ main/
 | `UiDisplay::SwitchToClockMode` | `main/display/ui_display.cc:295` |
 | `MyDazyP30_4GBoard::HandleBootDoubleClick`（恢复出厂确认 + AEC 切换） | `main/boards/mydazy-p30-4g/mydazy_p30_4g_board.cc:510` |
 | `MyDazyP30_4GBoard::EnterDeepSleep` | `main/boards/mydazy-p30-4g/mydazy_p30_4g_board.cc:442` |
-| `SystemReset::DoFactoryReset` | `main/boards/common/system_reset.cc:39` |
+| `SystemReset::CheckButtons` | `main/boards/common/system_reset.cc:39` |
 | `WifiBoard::EnterWifiConfigMode`（禁区） | `main/boards/common/wifi_board.cc:319` |
