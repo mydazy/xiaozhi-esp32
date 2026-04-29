@@ -36,9 +36,13 @@ void SystemReset::CheckButtons() {
     }
 }
 
-void SystemReset::DoFactoryReset() {
-    ResetNvsFlash();
-    ResetToFactory();   // 内部 RestartInSeconds(3) 后 esp_restart
+// 静态重载 · 业务层运行时复位（不读 GPIO 不依赖实例）
+void SystemReset::CheckButtons(bool force_factory_reset) {
+    if (force_factory_reset) {
+        ESP_LOGI(TAG, "Force factory reset (skip GPIO check)");
+        ResetNvsFlash();
+        ResetToFactory();
+    }
 }
 
 void SystemReset::ResetNvsFlash() {
@@ -47,11 +51,23 @@ void SystemReset::ResetNvsFlash() {
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to erase NVS flash");
     }
-    // 紧接着 esp_restart，无需 nvs_flash_init（重启后由 app_main 重建）
+    ret = nvs_flash_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize NVS flash");
+    }
 }
 
 void SystemReset::ResetToFactory() {
     ESP_LOGI(TAG, "Resetting to factory");
+    // Erase otadata partition
+    const esp_partition_t* partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, NULL);
+    if (partition == NULL) {
+        ESP_LOGE(TAG, "Failed to find otadata partition");
+        return;
+    }
+    esp_partition_erase_range(partition, 0, partition->size);
+    ESP_LOGI(TAG, "Erased otadata partition");
+
     // Reboot in 3 seconds
     RestartInSeconds(3);
 }

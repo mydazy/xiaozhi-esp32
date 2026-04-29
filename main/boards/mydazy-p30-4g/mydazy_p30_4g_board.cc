@@ -555,11 +555,10 @@ private:
             waiting_factory_reset_confirm_.store(false);
             AbortIfSpeaking();
             app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
-            vTaskDelay(pdMS_TO_TICKS(3000));
             // mydazy 业务：先通知服务器解绑（失败不阻塞本地擦除）
             RequestServerUnbind();
-            // 通用恢复出厂：NVS 全擦 + otadata 擦除 + 3 秒倒计时 esp_restart；LDO 复位由 ShutdownHandler 接管
-            SystemReset::DoFactoryReset();
+            // 9 连击+双击确认触发恢复出厂：NVS 全擦 + 3 秒倒计时 esp_restart
+            SystemReset::CheckButtons(true);
             return;
         }
 
