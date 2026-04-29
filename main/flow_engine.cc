@@ -67,11 +67,17 @@ void FlowEngine::Start(const std::string& url) {
         app_->Alert("直播伴侣", "加载脚本中...", "", "");
 
         // 在后台任务中下载脚本（TLS 需要内部 RAM 栈）
-        BaseType_t ok = xTaskCreatePinnedToCore(
-            LoadScriptTask, "flow_load", 6144, this, 1, &load_task_handle_, 0);
-        if (ok != pdPASS) {
-            load_task_handle_ = nullptr;
-            app_->Alert("直播伴侣", "启动失败: 内存不足", "", "");
+        // P0c 修：静态栈（xTaskCreateStatic）减堆碎片
+        // P1 修：Pin Core 0（HTTP 与 Application 主循环同核）
+        // 重入保护：调用方已通过 state_ != FlowState::kIdle 时 Stop() · LoadScriptTask 末尾置 load_task_handle_ = nullptr
+        constexpr uint32_t kFlowLoadStackSize = 6144;
+        static StackType_t s_flow_load_stack[kFlowLoadStackSize / sizeof(StackType_t)];
+        static StaticTask_t s_flow_load_tcb;
+        load_task_handle_ = xTaskCreateStaticPinnedToCore(
+            LoadScriptTask, "flow_load", kFlowLoadStackSize / sizeof(StackType_t),
+            this, 1, s_flow_load_stack, &s_flow_load_tcb, 0);
+        if (load_task_handle_ == nullptr) {
+            app_->Alert("直播伴侣", "启动失败: 任务创建失败", "", "");
             ESP_LOGE(TAG, "Failed to create load task");
         }
     });

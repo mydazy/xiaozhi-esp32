@@ -613,8 +613,13 @@ bool Ota::ReportStatus() {
 
     if (!resp.empty()) {
         auto *resp_ptr = new std::string(std::move(resp));
+        // P0c 修：静态栈（xTaskCreateStatic）减堆碎片
         // P1 修：Pin Core 0（HTTP + 服务器时间同步 · 与 Application 主循环同核）
-        BaseType_t task_created = xTaskCreatePinnedToCore([](void* p) {
+        // 重入保护：CheckVersion 由 Activation 串行调用，物理不可能两次同时跑（依赖时序）
+        constexpr uint32_t kStatusAssetsStackSize = 4096;
+        static StackType_t s_status_assets_stack[kStatusAssetsStackSize / sizeof(StackType_t)];
+        static StaticTask_t s_status_assets_tcb;
+        TaskHandle_t task_created = xTaskCreateStaticPinnedToCore([](void* p) {
             std::unique_ptr<std::string> holder(static_cast<std::string*>(p));
             cJSON* root = cJSON_Parse(holder->c_str());
             if (!root) { vTaskDelete(NULL); return; }
@@ -662,9 +667,10 @@ bool Ota::ReportStatus() {
 
             cJSON_Delete(root);
             vTaskDelete(NULL);
-        }, "status_assets", 4096, resp_ptr, 4, NULL, 0);
+        }, "status_assets", kStatusAssetsStackSize / sizeof(StackType_t),
+           resp_ptr, 4, s_status_assets_stack, &s_status_assets_tcb, 0);
 
-        if (task_created != pdPASS) {
+        if (task_created == nullptr) {
             delete resp_ptr;
         }
     }

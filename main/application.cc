@@ -60,6 +60,10 @@ Application::~Application() {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
     }
+    if (response_timeout_timer_ != nullptr) {
+        esp_timer_stop(response_timeout_timer_);
+        esp_timer_delete(response_timeout_timer_);
+    }
     vEventGroupDelete(event_group_);
 }
 
@@ -301,13 +305,19 @@ void Application::HandleNetworkConnectedEvent() {
             return;
         }
 
+        // P0c 修：静态栈（xTaskCreateStatic）减堆碎片
         // P1 修：Pin Core 0（HTTP + Application 主循环同核 · 避免漂移）
-        xTaskCreatePinnedToCore([](void* arg) {
+        // 重入保护：activation_task_handle_ 检查 + lambda 内部 nullptr 复位（保证 buffer 复用安全）
+        constexpr uint32_t kActivationStackSize = 8192;  // 4096 * 2
+        static StackType_t s_activation_stack[kActivationStackSize / sizeof(StackType_t)];
+        static StaticTask_t s_activation_tcb;
+        activation_task_handle_ = xTaskCreateStaticPinnedToCore([](void* arg) {
             Application* app = static_cast<Application*>(arg);
             app->ActivationTask();
             app->activation_task_handle_ = nullptr;
             vTaskDelete(NULL);
-        }, "activation", 4096 * 2, this, 2, &activation_task_handle_, 0);
+        }, "activation", kActivationStackSize / sizeof(StackType_t), this, 2,
+           s_activation_stack, &s_activation_tcb, 0);
     }
 
     // Update the status bar immediately to show the network state
@@ -926,6 +936,10 @@ void Application::HandleStateChangedEvent() {
     auto led = board.GetLed();
     led->OnStateChanged();
 
+    // W4 弱网修复 · 状态切换统一停 timer，避免上一态的 timer 误触发
+    // Listening/Speaking 在各自 case 末尾按需重启
+    StopResponseTimeout();
+
     // UI 页面切换：idle 切时钟主屏，对话/配网切 chat 模式（显示表情/emoji/提示）
     auto* lcd = dynamic_cast<UiDisplay*>(display);
 
@@ -976,6 +990,8 @@ void Application::HandleStateChangedEvent() {
                 play_popup_on_listening_ = false;
                 audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
             }
+            // W4 · 启动 15s 等服务端首帧响应（STT+LLM+TTS 链路）
+            StartResponseTimeout(15000);
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
@@ -986,6 +1002,8 @@ void Application::HandleStateChangedEvent() {
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
             audio_service_.ResetDecoder();
+            // W4 · 启动 30s 等 TTS 流播完（覆盖典型 TTS 句长 + 网络抖动）
+            StartResponseTimeout(30000);
             break;
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
@@ -1092,7 +1110,6 @@ void Application::Reboot() {
     if (backlight) {
         backlight->SetBrightness(0);
     }
-    board.PrepareForReboot();
 
     esp_restart();
 }
@@ -1350,5 +1367,68 @@ AudioSource Application::GetCurrentAudioSource() const {
     // 默认 Speaking = TTS（Chat / Flow 都走 TTS 输出）
     // 注：AlarmBell / PomodoroBell / Reminder 等待对应模块加入后由模块显式设置
     return AudioSource::kTts;
+}
+
+// ============================================================================
+// W4 弱网修复（2026-04-29）· Listening/Speaking 期响应超时管理
+//
+// 场景：弱网下用户说话 → Listening → 等服务端 STT+LLM+TTS → Speaking → 回 Idle
+// 任何一个环节卡死（4G 假连接、TLS 握手失败、TCP 半开等）都会让设备停在
+// Listening/Speaking 屏幕，用户无感知。本 timer 主动 timeout 回 Idle + Alert。
+//
+// 时长定义：
+//   - Listening 15s：等服务端首帧 tts.start（STT 200ms + LLM 5s + 网络 10s 余量）
+//   - Speaking  30s：等 TTS 流播完（典型 TTS 一句 5-10s + 网络抖动 + 多句续播缓冲）
+//
+// 实现要点：
+//   - esp_timer 跑在 esp_timer task（默认 Core 0），callback 不能直接调 SetDeviceState
+//   - 必须 Schedule(lambda) 切回 main task 执行
+//   - 状态切换时先 Stop（避免上一态 timer 误触发）再按需 Start
+// ============================================================================
+
+void Application::StartResponseTimeout(int timeout_ms) {
+    // Lazy 创建 timer（只在第一次需要时创建，省启动期资源）
+    if (response_timeout_timer_ == nullptr) {
+        esp_timer_create_args_t args = {
+            .callback = [](void* arg) {
+                static_cast<Application*>(arg)->OnResponseTimeout();
+            },
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "response_timeout",
+            .skip_unhandled_events = false,
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&args, &response_timeout_timer_));
+    }
+    // 幂等：之前如果在跑就先停（Listening→Speaking 重置场景）
+    esp_timer_stop(response_timeout_timer_);
+    esp_timer_start_once(response_timeout_timer_, (uint64_t)timeout_ms * 1000);
+}
+
+void Application::StopResponseTimeout() {
+    if (response_timeout_timer_ != nullptr) {
+        esp_timer_stop(response_timeout_timer_);
+    }
+}
+
+void Application::OnResponseTimeout() {
+    // 在 esp_timer task 执行 · 必须 Schedule(lambda) 切回 main 任务
+    Schedule([this]() {
+        DeviceState state = state_machine_.GetState();
+        // Race 守卫：状态可能在 timer 触发与本 lambda 执行之间已经变化（例如服务端最后一刻回包）
+        if (state != kDeviceStateListening && state != kDeviceStateSpeaking) {
+            ESP_LOGI(TAG, "W4 · Response timeout fired but state already %d, ignoring", (int)state);
+            return;
+        }
+        ESP_LOGW(TAG, "⚠ W4 · Response timeout in state %d (network stuck or server unreachable), abort and back to idle", (int)state);
+        // Speaking 态需要先 abort（通知服务端停止 TTS 推流），Listening 态无 active speaking
+        if (state == kDeviceStateSpeaking) {
+            AbortSpeaking(kAbortReasonNone);
+        }
+        SetDeviceState(kDeviceStateIdle);
+        // 复用现有 SERVER_TIMEOUT 字符串（locales/zh-CN/language.json:29 = "等待响应超时"）
+        Alert(Lang::Strings::ERROR, Lang::Strings::SERVER_TIMEOUT,
+              "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+    });
 }
 

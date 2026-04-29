@@ -166,6 +166,11 @@ private:
     esp_timer_handle_t delayed_wake_timer_ = nullptr;
     std::string pending_wake_text_;
 
+    // W4 弱网修复（2026-04-29）· Listening/Speaking 期等待服务端响应超时
+    // 用户说完话进 Listening → 等 STT+LLM+TTS 响应 → 进 Speaking 播放 TTS → 回 Idle
+    // 弱网下任何一个环节卡死都需要主动 timeout 回 Idle + Alert，避免用户感知"屏幕停在 Speaking 没响应"
+    esp_timer_handle_t response_timeout_timer_ = nullptr;
+
     bool has_server_time_ = false;
     bool aborted_ = false;
     bool assets_version_checked_ = false;
@@ -198,6 +203,15 @@ private:
     // 内存监控（详见 docs/p30-architecture.html § 四.3）
     void RecordBootMemoryBaseline();
     void MonitorMemoryHealth();
+
+    // W4 弱网修复（2026-04-29）· Listening/Speaking 期响应超时管理
+    // StartResponseTimeout: 进 Listening 启动 timer（默认 15s 等 STT+LLM+TTS 首帧）
+    //                       进 Speaking 重置 timer（默认 30s 等 TTS 流播完）
+    // StopResponseTimeout : 离开 Listening/Speaking 进 Idle/其他态时停 timer
+    // OnResponseTimeout   : timer 触发回调（在 esp_timer task 执行 · 必须 Schedule(lambda) 切回 main）
+    void StartResponseTimeout(int timeout_ms);
+    void StopResponseTimeout();
+    void OnResponseTimeout();
 
     // Helper methods
     void CheckAssetsVersion();

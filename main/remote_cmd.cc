@@ -432,10 +432,16 @@ void RemoteCmd::PostSttText(const std::string& text) {
     //       会同时禁用两核 cache+PSRAM · PSRAM 栈任务被调度即崩（SP=0x60100000）。
     // 改动：① MALLOC_CAP_SPIRAM → MALLOC_CAP_INTERNAL ② Core 0 → Core 1（减 Core 0 负担）
     // 代价：4 KB 内部 RAM 临时占用（HTTP POST 自删后释放）。
-    BaseType_t ret = xTaskCreatePinnedToCoreWithCaps(
-        task_func, "stt_post", 4096, args,
-        1, nullptr, 1, MALLOC_CAP_INTERNAL);
-    if (ret != pdPASS) {
+    //
+    // P0c 修：xTaskCreatePinnedToCoreWithCaps（动态 INT alloc）→ xTaskCreateStaticPinnedToCore
+    // 4 KB 静态 BSS 栈 · 减堆碎片 · stt_posting_ atomic_flag 已防重入（buffer 复用安全）
+    constexpr uint32_t kSttPostStackSize = 4096;
+    static StackType_t s_stt_post_stack[kSttPostStackSize / sizeof(StackType_t)];
+    static StaticTask_t s_stt_post_tcb;
+    TaskHandle_t handle = xTaskCreateStaticPinnedToCore(
+        task_func, "stt_post", kSttPostStackSize / sizeof(StackType_t), args,
+        1, s_stt_post_stack, &s_stt_post_tcb, 1);
+    if (handle == nullptr) {
         ESP_LOGE(TAG, "Failed to create stt_post task");
         stt_posting_.store(false);
         delete args;
