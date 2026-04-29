@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>P30-4G 资源规划 · ESP32-S3 优秀设计目标态</title>
+<meta name="description" content="脱开现有分配，基于 ESP32-S3 best practices 重新规划：28 任务 Core/RAM/优先级/WiFi-4G 差异化 + 长期稳定运行设计。" />
+<style>
+:root{
+  --brand:#C62828; --brand-deep:#8E1C1C; --brand-soft:#FCE8E8;
+  --bg:#FAFAFA; --paper:#FFFFFF; --ink:#1F1F1F; --ink-soft:#555;
+  --line:#E5E5E5;
+  --core0:#E0F2F1; --core0-line:#00897B;
+  --core1:#FFF3E0; --core1-line:#EF6C00;
+  --psram:#FFEBEE; --psram-line:#C62828;
+  --ok:#2E7D32; --warn:#F57C00;
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:15px;line-height:1.7}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+code{font-family:"SF Mono",Menlo,Consolas,monospace;background:#F5F5F5;border-radius:4px;padding:1px 6px;font-size:.9em}
+
+.topbar{position:sticky;top:0;z-index:50;background:var(--brand);color:#fff;
+  padding:10px 28px;display:flex;align-items:center;gap:18px;box-shadow:var(--shadow)}
+.topbar .logo{font-weight:700}
+.topbar .meta{opacity:.85;font-size:13px}
+.topbar .spacer{flex:1}
+.topbar a{color:#fff;border-bottom:1px dashed rgba(255,255,255,.5)}
+
+.shell{max-width:1280px;margin:0 auto;padding:24px}
+.section{background:var(--paper);border:1px solid var(--line);border-radius:10px;
+  padding:24px 28px;margin-bottom:24px;box-shadow:var(--shadow)}
+.section h2{font-size:22px;margin:0 0 4px;color:var(--brand-deep);
+  display:flex;align-items:center;gap:10px}
+.section h2 .num{display:inline-block;background:var(--brand);color:#fff;
+  font-size:13px;font-weight:600;padding:2px 9px;border-radius:14px}
+.section .sub{color:var(--ink-soft);margin:0 0 16px;font-size:13.5px}
+.section h3{font-size:16px;margin:22px 0 10px;color:var(--ink);
+  border-bottom:1px solid var(--line);padding-bottom:6px}
+.section h4{font-size:14px;margin:14px 0 8px;color:var(--brand-deep)}
+
+.hero{background:linear-gradient(135deg,var(--brand),var(--brand-deep));color:#fff;
+  border-radius:10px;padding:32px 36px;margin-bottom:24px;box-shadow:var(--shadow)}
+.hero h1{margin:0 0 6px;font-size:28px}
+.hero p{margin:0;opacity:.9;font-size:14px}
+.hero .badges{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.hero .badge{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);
+  border-radius:14px;padding:3px 10px;font-size:12px}
+
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--ink-soft);margin:8px 0 12px}
+.legend .item{display:flex;align-items:center;gap:6px}
+.legend .swatch{width:14px;height:14px;border-radius:3px;border:1px solid #999}
+
+table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}
+th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#FAFAFA;color:var(--ink-soft);font-weight:600;font-size:12.5px}
+
+.callout{border-left:4px solid var(--brand);background:var(--brand-soft);
+  padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:14px}
+.callout.ok{border-left-color:var(--ok);background:#E8F5E9}
+.callout.warn{border-left-color:var(--warn);background:#FFF8E1}
+.callout strong{color:var(--brand-deep)}
+
+.svgwrap{background:#FCFCFC;border:1px solid var(--line);border-radius:8px;
+  padding:14px;overflow:auto}
+.svgwrap svg{display:block;margin:0 auto;max-width:100%;height:auto}
+
+footer{color:var(--ink-soft);font-size:12.5px;text-align:center;padding:24px 0 40px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="logo">MyDazy P30-4G · 资源规划目标态</span>
+  <span class="meta">v1.0 · ESP32-S3 优秀设计 · 三遍评审 · 2026-04-28</span>
+  <span class="spacer"></span>
+  <span class="meta"><a href="p30-architecture.html">主架构</a> · <a href="p30-business-flows.html">主流程</a></span>
+</div>
+
+<div class="shell">
+
+<section class="hero">
+  <h1>P30-4G 资源规划 · 目标态</h1>
+  <p>脱开原有分配约束，基于 <strong>ESP32-S3 优秀设计原则</strong> 重新规划：双核 + RAM + 优先级 + WiFi/4G 模式差异化 + 长期稳定运行。<em>这不是现状文档，是目标态——后续项目按此优化</em>。</p>
+  <div class="badges">
+    <span class="badge">三遍评审推演</span>
+    <span class="badge">ESP32-S3 best practices</span>
+    <span class="badge">WiFi vs 4G 差异化</span>
+    <span class="badge">28 任务重新规划</span>
+    <span class="badge">长期稳定运行</span>
+  </div>
+</section>
+
+<!-- ════════════ § 1 优化原则 ════════════ -->
+<section class="section">
+  <h2><span class="num">§ 1</span> ESP32-S3 优秀设计原则（10 条）</h2>
+  <p class="sub">规划基于业内通用 ESP32-S3 best practices，是后续推算的"判据"。</p>
+
+  <table>
+    <thead><tr><th>#</th><th>原则</th><th>当前项目违反点</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><strong>双核分工严格</strong>：Core 0 网络/控制 · Core 1 音频实时/UI</td><td>当前 Core 0 挤 11 任务（含 audio_input P8）· Core 1 利用率 &lt; 30%</td></tr>
+      <tr><td>2</td><td><strong>实时任务必须 Pin Core</strong>，禁止漂移</td><td>13 个任务用 xTaskCreate（无 affinity）：audio_output / audio_detection / wake_word_encode / ml307_net / activation / LedEvent 等</td></tr>
+      <tr><td>3</td><td><strong>PSRAM 栈不挂 Core 0</strong>（cache 共享 SPI · NVS/OTA flash op 时禁用 cache，PSRAM 栈任务被调度即崩 SP=0x60100000）</td><td>红线 3 项：custom_wake_word / stt_post / mp3_dl</td></tr>
+      <tr><td>4</td><td><strong>实时音频用 INT 栈</strong> + DMA 内部 RAM 缓冲（PSRAM 无 DMA 直读）</td><td>audio_input/output/codec 已用 INT ✅</td></tr>
+      <tr><td>5</td><td><strong>临时任务用静态栈</strong>（xTaskCreateStatic）减少碎片</td><td>仅 wake_word_encode_afe 静态 · 其他临时任务（activation/flow_load/stt_post/mp3_dl）都动态</td></tr>
+      <tr><td>6</td><td><strong>优先级分层</strong>：P12 实时硬中断响应 / P10 实时数据流 / P8 编解码 / P5 UI / P3 后台 / P1 维护</td><td>当前优先级散乱（main_app P10 偏高 · audio_input P8 偏低 · flow_load P1 偏低）</td></tr>
+      <tr><td>7</td><td><strong>Task Watchdog 启用</strong>持久任务周期 reset · IWDG 中断超时检测</td><td>未启用 / 不可知（待 grep 确认）</td></tr>
+      <tr><td>8</td><td><strong>事件驱动</strong>避免 portMAX_DELAY 裸用</td><td>已合规 ✅</td></tr>
+      <tr><td>9</td><td><strong>资源池化</strong>：connection / buffer pool 复用</td><td>Protocol 实例每次重建 · cJSON 反复 alloc</td></tr>
+      <tr><td>10</td><td><strong>WiFi/4G 差异化资源</strong>：WiFi 模式不要保留 4G 任务栈</td><td>当前 ml307_net 在 WiFi 板被编译进但永不启用（死代码污染）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════ § 2 三遍评审推演 ════════════ -->
+<section class="section">
+  <h2><span class="num">§ 2</span> 三遍评审推演（基于 ESP32-S3 原则）</h2>
+
+  <h3>第一遍 · ESP32-S3 硬件特性视角</h3>
+  <p>ESP32-S3 双核 240MHz · 16MB Flash + 8MB PSRAM（octal SPI 80MHz）· 320KB INT RAM · WiFi+BLE 共射频。<strong>关键观察</strong>：</p>
+  <table>
+    <thead><tr><th>发现</th><th>严重度</th><th>建议</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Core 0 严重过载</strong>（11 应用层 + WiFi/lwip/MQTT IDF 任务）</td><td>🔴 高</td><td>把 audio_input/audio_output/audio_detection/mp3_dec/wake_word_encode 全挪 Core 1</td></tr>
+      <tr><td><strong>Core 1 利用率 &lt; 30%</strong>（仅 audio_communication + LVGL + mp3_out）</td><td>🟡 中</td><td>承接 Core 0 移过来的音频任务</td></tr>
+      <tr><td>opus_codec 单任务 24KB INT，最大单点占用</td><td>🟡 中</td><td>拆成 audio_opus_enc 8KB + audio_opus_dec 8KB 双任务（节省 8KB INT）</td></tr>
+      <tr><td>13 任务无 affinity 漂移</td><td>🟡 中</td><td>全部 Pin Core，禁漂移</td></tr>
+      <tr><td>PSRAM cache 共享 SPI 风险（NVS/OTA 触发）</td><td>🔴 高</td><td>红线 3 项 PSRAM → INT，Core 0 严禁 PSRAM 栈</td></tr>
+    </tbody>
+  </table>
+
+  <h3>第二遍 · WiFi vs 4G 模式差异化视角</h3>
+  <table>
+    <thead><tr><th>项</th><th>WiFi 模式</th><th>4G 模式</th><th>差异化策略</th></tr></thead>
+    <tbody>
+      <tr><td>ml307_net 任务</td><td>不存在（不编译/编译但不启动）</td><td>持久 4KB INT Core 0</td><td>WiFi 板编译开关 #if MYDAZY_HAS_4G_CAPABLE</td></tr>
+      <tr><td>WiFi STA 任务</td><td>持久（IDF 框架）</td><td>仅切换到 WiFi 时启动</td><td>4G 板默认 4G 优先，WiFi 备路径</td></tr>
+      <tr><td>1500ms 延迟</td><td>不需要（直接发 WiFi STA）</td><td>需要（ML307R boot）</td><td>已修方案 B（移到 ml307_board.cc::NetworkTask）</td></tr>
+      <tr><td>接收 buffer</td><td>~500KB PSRAM（吞吐高）</td><td>~256KB PSRAM（带宽低）</td><td>按模式 alloc 不同大小</td></tr>
+      <tr><td>唤醒响应延迟</td><td>~500ms（WiFi 协议恢复快）</td><td>~3-8s（4G 重连慢）</td><td>4G 模式下加"快速握手"路径</td></tr>
+      <tr><td>深睡唤醒重连</td><td>~1s</td><td>~5s（含 1500ms boot）</td><td>4G 模式深睡前主动注销，唤醒后快速 reattach</td></tr>
+      <tr><td>WiFi CSI</td><td>可启用（NVS enabled=1）</td><td>不可（4G 路径不经 WiFi）</td><td>仅 WiFi 模式可启 CSI 感知</td></tr>
+    </tbody>
+  </table>
+
+  <h3>第三遍 · 长期稳定运行视角</h3>
+  <table>
+    <thead><tr><th>风险</th><th>当前状态</th><th>建议</th></tr></thead>
+    <tbody>
+      <tr><td>任务死锁未检测</td><td>Task Watchdog 未启用</td><td>启用 CONFIG_ESP_TASK_WDT_EN · 持久任务 esp_task_wdt_add() · 5s 超时重启</td></tr>
+      <tr><td>堆碎片长期累积</td><td>已加 MonitorMemoryHealth 监控（§ 四.3）</td><td>+ 周 7 天软重启（量产数据决定阈值）</td></tr>
+      <tr><td>Stack overflow 静默</td><td>未启用 stack overflow 检测</td><td>CONFIG_FREERTOS_CHECK_STACKOVERFLOW=2（canary 模式）</td></tr>
+      <tr><td>WiFi/4G 假连接</td><td>断网检测延迟</td><td>30s 心跳超时 → 主动 reset 网络栈</td></tr>
+      <tr><td>PSRAM 损坏静默</td><td>无校验</td><td>启动期 PSRAM 完整性测试 + 周期 heap_caps_check_integrity_all()</td></tr>
+      <tr><td>Brownout 异常</td><td>未启用 brownout 检测</td><td>CONFIG_ESP_BROWNOUT_DET_LVL=7（2.6V 阈值）</td></tr>
+      <tr><td>任务 CPU 占用未知</td><td>无运行时统计</td><td>CONFIG_FREERTOS_USE_TRACE_FACILITY=y · 每小时 dump uxTaskGetSystemState</td></tr>
+      <tr><td>OTA 失败回滚</td><td>有 esp_ota_mark_app_invalid_rollback ✅</td><td>已合规</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>三遍综合</strong> · 第一遍发现核心分配失衡 + Core 0 过载；第二遍发现 WiFi/4G 资源未差异化；第三遍发现长期稳定运行 5 个看门狗未启用。<strong>合并优化方向</strong>：① 双核重平衡 ② 模式条件编译 ③ 5 类 watchdog 启用 ④ 静态栈临时任务 ⑤ 红线 3 项必修。
+  </div>
+</section>
+
+<!-- ════════════ § 3 重新规划 28 任务（目标态）════════════ -->
+<section class="section">
+  <h2><span class="num">§ 3</span> 重新规划 28 任务分配（目标态）</h2>
+  <p class="sub">基于上面 10 原则 + 三遍评审，重新规划每个任务的 Core / 优先级 / 栈类型 / 静态-动态。<strong>右列"现状"是当前代码 · 左列"目标"是规划</strong>。</p>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:#E0F2F1;border-color:#00897B"></span>Core 0 Pinned</span>
+    <span class="item"><span class="swatch" style="background:#FFF3E0;border-color:#EF6C00"></span>Core 1 Pinned</span>
+    <span class="item"><span class="swatch" style="background:#E8F5E9;border-color:#2E7D32"></span>静态栈（xTaskCreateStatic）</span>
+    <span class="item"><span class="swatch" style="background:#FFEBEE;border-color:#C62828"></span>必修红线</span>
+  </div>
+
+  <h4>音频核心 9 任务（重平衡到 Core 1）</h4>
+  <table>
+    <thead><tr><th>任务</th><th>目标 Core/P/栈</th><th>现状 Core/P/栈</th><th>变更理由</th></tr></thead>
+    <tbody>
+      <tr style="background:#FFF3E0"><td>audio_input</td><td>Core 1 · P12 · 6K INT</td><td>Core 0 · P8 · 6K INT</td><td>I2S 实时采集应在 Core 1 高优先级</td></tr>
+      <tr style="background:#FFF3E0"><td>audio_output</td><td>Core 1 · P10 · 4K INT</td><td>任意 Core · P4 · 4K INT</td><td>实时输出必须 Pin Core 1</td></tr>
+      <tr style="background:#FFF3E0"><td>audio_opus_enc（拆出）</td><td>Core 1 · P8 · 8K INT</td><td>合并在 opus_codec 24K Core 0</td><td>编码独立 + 挪 Core 1 减负 Core 0</td></tr>
+      <tr style="background:#FFF3E0"><td>audio_opus_dec（拆出）</td><td>Core 1 · P8 · 8K INT</td><td>同上</td><td>解码独立 + Core 1</td></tr>
+      <tr style="background:#FFF3E0"><td>audio_communication AFE</td><td>Core 1 · P5 · 4K INT（保持）</td><td>Core 1 · P3 · 4K INT</td><td>提优先级避免被 LVGL 抢占</td></tr>
+      <tr style="background:#FFF3E0"><td>audio_detection wake_check</td><td>Core 1 · P5 · 4K INT</td><td>任意 · P3 · 4K INT</td><td>必须 Pin · Core 1 与 AFE 协同</td></tr>
+      <tr style="background:#E8F5E9"><td>wake_word_encode_afe</td><td>Core 1 · P3 · 24K INT 静态</td><td>任意 · P2 · 24K INT 静态 ✅</td><td>Pin Core 1 保留静态栈</td></tr>
+      <tr style="background:#FFEBEE"><td><strong>wake_word_encode_custom</strong></td><td>Core 1 · P3 · 28K INT 静态</td><td><strong>任意 · 28K PSRAM</strong></td><td>🔴 PSRAM → INT 修红线 · Pin Core 1</td></tr>
+      <tr style="background:#FFF3E0"><td>LVGL（已有）</td><td>Core 1 · P5 · 8K INT（保持）</td><td>Core 1 · P5 · 8K INT</td><td>无变更</td></tr>
+    </tbody>
+  </table>
+
+  <h4>业务任务 5 个</h4>
+  <table>
+    <thead><tr><th>任务</th><th>目标</th><th>现状</th><th>变更理由</th></tr></thead>
+    <tbody>
+      <tr style="background:#E8F5E9"><td>flow_load</td><td>Core 0 · P1 · 6K INT 静态</td><td>Core 0 · P1 · 6K INT 动态</td><td>静态栈减碎片</td></tr>
+      <tr style="background:#FFEBEE"><td><strong>stt_post</strong></td><td>Core 1 · P1 · 4K INT 静态</td><td><strong>Core 0 · 4K PSRAM</strong></td><td>🔴 PSRAM → INT 修红线 · 挪 Core 1 减 Core 0 负担</td></tr>
+      <tr style="background:#E0F2F1"><td>alarm_nvs</td><td>Core 0 · P2 · 3.5K INT（保持）</td><td>Core 0 · P2 · 3.5K INT</td><td>NVS 操作合 Core 0</td></tr>
+      <tr style="background:#E8F5E9"><td>activation</td><td>Core 0 · P2 · 8K INT 静态</td><td>任意 · P2 · 8K INT 动态</td><td>HTTP 操作配 Core 0 · 静态栈</td></tr>
+      <tr style="background:#E8F5E9"><td>ota_response</td><td>Core 0 · P2 · 4K INT 静态</td><td>任意 · 动态</td><td>同上</td></tr>
+    </tbody>
+  </table>
+
+  <h4>网络配网 6 个 · WiFi vs 4G 差异化</h4>
+  <table>
+    <thead><tr><th>任务</th><th>WiFi 模式</th><th>4G 模式</th><th>变更</th></tr></thead>
+    <tbody>
+      <tr><td>ml307_net</td><td>❌ 不存在（编译开关）</td><td>Core 0 · P5 · 4K INT（Pin）</td><td>WiFi 板省 4KB · 当前编译进死代码</td></tr>
+      <tr><td>WiFi STA（IDF）</td><td>持久 Core 0</td><td>仅切换备路径时启动</td><td>—</td></tr>
+      <tr><td>dns_server（仅配网期）</td><td>Core 1 · P2 · 4K INT</td><td>Core 1 · P2 · 4K INT</td><td>从 Core 0 挪走（与 NVS flash op 不冲突）</td></tr>
+      <tr><td>wifi_ap × 4</td><td>Core 1（已 ✅）· 4K PSRAM × 3 + 4K INT × 1</td><td>同 WiFi 模式</td><td>保持现状（PSRAM 在 Core 1 安全）</td></tr>
+      <tr><td>blufi</td><td>Core 1 · P3 · 4K INT 静态（明确 Pin）</td><td>同</td><td>Pin Core 1 · 静态栈</td></tr>
+      <tr><td>wifi_board "config_done"</td><td>Core 1 · P5 · 8K INT</td><td>同</td><td>明确 Pin · 不再任意漂移</td></tr>
+    </tbody>
+  </table>
+
+  <h4>UI / 反馈 + 板级 + components 8 个</h4>
+  <table>
+    <thead><tr><th>任务</th><th>目标</th><th>变更</th></tr></thead>
+    <tbody>
+      <tr style="background:#E0F2F1"><td>main_app</td><td>Core 0 · P10 · 8K INT（保持）</td><td>Application 主循环</td></tr>
+      <tr><td>LedEvent</td><td>Core 0 · P2 · 2K INT（明确 Pin）</td><td>从任意挪 Core 0 · GPIO 操作集中</td></tr>
+      <tr><td>headset（P31）</td><td>Core 0 · P3 · 3K INT（保持）</td><td>—</td></tr>
+      <tr><td>nfc_ws1850s（P31）</td><td>Core 0 · P1 · 4K INT（保持）</td><td>—</td></tr>
+      <tr style="background:#FFEBEE"><td><strong>mp3_dl</strong></td><td>Core 1 · P1 · 6K INT 静态</td><td>🔴 <strong>Core 0 6K PSRAM</strong> → 修红线</td></tr>
+      <tr style="background:#FFF3E0"><td>mp3_dec</td><td>Core 1 · P7 · 10K INT</td><td>从 Core 0 挪 Core 1（解码与 audio_opus_dec 同位）</td></tr>
+      <tr><td>mp3_play / mp3_out</td><td>Core 1 · P10 · 4K INT（保持）</td><td>—</td></tr>
+      <tr><td>gfx_core</td><td>Core 1 · P4 · 4K INT（明确 Pin）</td><td>从 Core 1 默认明确 Pin</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════ § 4 优化前后对比 ════════════ -->
+<section class="section">
+  <h2><span class="num">§ 4</span> 优化前后双核负载对比</h2>
+
+  <table>
+    <thead><tr><th>核心</th><th>优化前任务（应用层）</th><th>优化后任务</th><th>变化</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Core 0</strong></td><td>main_app · audio_input · opus_codec · flow_load · alarm_nvs · dns_server · ml307_net · headset · mp3_dec · 临时任务（11+ 任务）</td><td>main_app · alarm_nvs · ml307_net · headset · nfc · activation · ota_response · LedEvent · flow_load · stt_post（移走）/ 临时（6-8 任务）</td><td><strong>Core 0 任务数 11→8</strong>，减负 27%</td></tr>
+      <tr><td><strong>Core 1</strong></td><td>audio_communication · LVGL · mp3_out · audio_output（任意飘）/ 3-4 任务</td><td>audio_input · audio_output · audio_opus_enc · audio_opus_dec · audio_communication · audio_detection · wake_word_encode · LVGL · mp3_dec · mp3_out · gfx_core · dns_server · wifi_ap × 4 · blufi · wifi_board / 15-17 任务</td><td><strong>Core 1 任务数 3→15+</strong>，承接重负载</td></tr>
+      <tr><td><strong>任意漂移</strong></td><td>13 任务无 affinity</td><td><strong>0 任务</strong>（全部 Pin Core）</td><td>消除漂移风险</td></tr>
+      <tr><td><strong>PSRAM 红线</strong></td><td>3 个（custom_wake_word + stt_post + mp3_dl）</td><td><strong>0 个</strong>（全部 PSRAM → INT）</td><td>红线消除</td></tr>
+      <tr><td><strong>静态栈临时任务</strong></td><td>1 个（wake_word_encode_afe）</td><td><strong>5 个</strong>（+ flow_load + stt_post + activation + ota_response + custom_wake_word）</td><td>碎片大幅减少</td></tr>
+    </tbody>
+  </table>
+
+  <h4>RAM 总占用对比（4G 稳态 Idle 基线）</h4>
+  <table>
+    <thead><tr><th>项</th><th>优化前</th><th>优化后</th><th>差异</th></tr></thead>
+    <tbody>
+      <tr><td>opus_codec 单任务</td><td>24K INT Core 0</td><td>拆 audio_opus_enc 8K + audio_opus_dec 8K Core 1 = 16K</td><td>-8K INT</td></tr>
+      <tr><td>red line 3 项 PSRAM → INT</td><td>+0 INT / +38K PSRAM</td><td>+38K INT / 0 PSRAM</td><td>+38K INT 占用（换可靠性）</td></tr>
+      <tr><td>WiFi 模式省 ml307_net</td><td>+4K INT</td><td>0（编译开关）</td><td>WiFi 板 -4K INT</td></tr>
+      <tr><td><strong>总占用变化</strong></td><td>~145K INT 基线</td><td><strong>~175K INT</strong> 基线（修红线代价）</td><td><strong>+30K INT</strong> 但消除红线风险</td></tr>
+      <tr><td><strong>距 60K 红线余量</strong></td><td>余 75K</td><td><strong>余 45K</strong> 🟡</td><td>更紧但安全可控</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>关键 trade-off</strong> · 修红线代价是 +30K INT 占用（PSRAM 数据搬到 INT），距 60K 红线余量从 75K → 45K。<strong>仍合规</strong>但要更小心高峰场景。<em>不修红线</em>则面临 NVS/OTA 期间崩溃风险。<strong>建议优先保可靠性</strong>。
+  </div>
+</section>
+
+<!-- ════════════ § 5 长期稳定运行 ════════════ -->
+<section class="section">
+  <h2><span class="num">§ 5</span> 长期稳定运行设计（5 类 Watchdog）</h2>
+  <p class="sub">连续运行 7 天 / 30 天 / 90 天的稳定性靠 5 类机制保证。</p>
+
+  <table>
+    <thead><tr><th>#</th><th>机制</th><th>配置</th><th>触发动作</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><strong>Task Watchdog</strong></td><td>CONFIG_ESP_TASK_WDT_EN=y · timeout 5s · 持久任务 esp_task_wdt_add()</td><td>任务卡死 5s → panic + 自动重启</td></tr>
+      <tr><td>2</td><td><strong>Interrupt Watchdog</strong></td><td>CONFIG_ESP_INT_WDT=y · timeout 300ms</td><td>中断/调度卡死 300ms → panic</td></tr>
+      <tr><td>3</td><td><strong>Stack Overflow 检测</strong></td><td>CONFIG_FREERTOS_CHECK_STACKOVERFLOW=2（canary 模式）</td><td>栈越界 → panic + 上报任务名</td></tr>
+      <tr><td>4</td><td><strong>Brownout 检测</strong></td><td>CONFIG_ESP_BROWNOUT_DET_LVL=7（2.6V 阈值）</td><td>电压跌落 → 安全重启</td></tr>
+      <tr><td>5</td><td><strong>Heap Integrity Watchdog</strong></td><td>已加 <code>MonitorMemoryHealth</code> + 加 <code>heap_caps_check_integrity_all(MALLOC_CAP_INTERNAL, true)</code> 每小时一次</td><td>堆损坏 → 上报 + 软重启</td></tr>
+    </tbody>
+  </table>
+
+  <h4>额外稳定性措施</h4>
+  <table>
+    <tbody>
+      <tr><td><strong>WiFi/4G 自愈</strong></td><td>30s 心跳超时 → 主动 reset 网络栈 · 5 次失败 → reboot</td></tr>
+      <tr><td><strong>PSRAM 完整性</strong></td><td>启动期 PSRAM 测试（写读模式）· 失败 → FatalError</td></tr>
+      <tr><td><strong>任务 CPU 统计</strong></td><td>CONFIG_FREERTOS_USE_TRACE_FACILITY=y · 每小时 dump uxTaskGetSystemState · 异常占用任务上报</td></tr>
+      <tr><td><strong>每周软重启</strong></td><td>连续运行 7 天主动 esp_restart（量产数据决定阈值）</td></tr>
+      <tr><td><strong>OTA 回滚</strong></td><td>已实现 esp_ota_mark_app_invalid_rollback ✅</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════ § 6 迁移路径 ════════════ -->
+<section class="section">
+  <h2><span class="num">§ 6</span> 现状 → 目标态迁移路径</h2>
+  <p class="sub">不一次性大改。分 4 阶段，每阶段独立可验证 + 可回滚。</p>
+
+  <table>
+    <thead><tr><th>阶段</th><th>动作</th><th>工作量</th><th>风险</th></tr></thead>
+    <tbody>
+      <tr><td><strong>P0 量产前必修</strong></td><td>① 修 3 红线（PSRAM → INT 静态栈）② 启用 5 类 Watchdog ③ FatalError bug ④ 已加 MonitorMemoryHealth</td><td>~半天 + 三板编译</td><td>低（只改栈类型 + sdkconfig）</td></tr>
+      <tr><td><strong>P1 量产前打磨</strong></td><td>① 13 任意漂移任务全部 Pin Core ② opus_codec 拆 enc + dec 双任务 ③ 临时任务改静态栈</td><td>~1 周 + 全 SKU 测试</td><td>中（拆 opus_codec 涉及 audio_service 重构）</td></tr>
+      <tr><td><strong>P2 量产后第一波</strong></td><td>① audio_input 挪 Core 1 ② audio_detection / mp3_dec 挪 Core 1 ③ WiFi/4G 编译开关差异化</td><td>~1-2 周</td><td>中（双核重平衡需要全场景压测）</td></tr>
+      <tr><td><strong>P3 量产后稳定期</strong></td><td>① 资源池化（Protocol/cJSON pool） ② 每周软重启策略 ③ WiFi/4G 自愈 30s 心跳</td><td>~1-2 周</td><td>低（增量优化）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>P0 阶段单独评估</strong> · 修 3 红线是<strong>真改代码 + 编译验证</strong>，但每个任务的修改就 1-3 行 + 改栈分配宏。建议先做 custom_wake_word（同 wake_word_encode_afe 修法 · 1 行 PSRAM→INT），其他两个评估后再做。
+  </div>
+</section>
+
+<!-- ════════════ § 7 量产 checklist ════════════ -->
+<section class="section">
+  <h2><span class="num">§ 7</span> 长期稳定运行验证 checklist</h2>
+
+  <table>
+    <thead><tr><th>类别</th><th>验证项</th><th>方法</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="3">P0 必修</td><td>3 红线全修</td><td>grep MALLOC_CAP_SPIRAM | xTaskCreate · 0 个 Core 0 + PSRAM 组合</td></tr>
+      <tr><td>5 Watchdog 启用</td><td>sdkconfig grep WDT · 全部 =y</td></tr>
+      <tr><td>FatalError 可达</td><td>构造异常场景验证 SetDeviceState(FatalError) 成功</td></tr>
+      <tr><td rowspan="4">长期稳定（30 天 / 90 天）</td><td>min_free_size 不持续下降</td><td>已加 MonitorMemoryHealth · 24h log 看趋势</td></tr>
+      <tr><td>largest_free_block 稳定 ≥ 8KB</td><td>同上 · 碎片化指标</td></tr>
+      <tr><td>无 Task Watchdog 触发</td><td>无 panic 日志</td></tr>
+      <tr><td>无 Stack Overflow</td><td>无 canary 触发日志</td></tr>
+      <tr><td rowspan="3">WiFi/4G 模式</td><td>WiFi 板编译无 ml307 死代码</td><td>idf_component.yml 看依赖</td></tr>
+      <tr><td>4G 板深睡唤醒重连 &lt; 8s</td><td>实测计时</td></tr>
+      <tr><td>双网切换无内存泄漏</td><td>10 次 4G ↔ WiFi 切换前后 free_size 对比</td></tr>
+      <tr><td rowspan="2">高峰场景</td><td>三事件叠加 min_free ≥ 60KB</td><td>MP3 + 唤醒 + 双网切换</td></tr>
+      <tr><td>OTA 升级不撞红线</td><td>升级期 audio_service.Stop 释放 + min_free 监控</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>目标态结论</strong> · 完成 P0 + P1 后，P30-4G 进入"<strong>0 红线 / 0 漂移 / 5 类 Watchdog 全启用 / 静态栈临时任务</strong>"状态。INT 占用从 145K → 175K（+30K 换可靠性），距 60K 红线余量 45K。三事件叠加场景需实测确认。<em>这是后续项目对齐的目标态</em>。
+  </div>
+
+  <div class="callout">
+    <strong>项目流程合理性最终判断</strong> · 系统架构本身（双核 + PSRAM + 11 态状态机 + 三维心智）<strong>设计合理</strong>，问题都在<em>具体分配实现</em>层（红线 / 漂移 / 优先级 / Watchdog 缺失）。按本规划 P0+P1 修完即可进入量产可控状态。
+  </div>
+</section>
+
+<!-- ════════════ § 8 逐环节 RAM 合理性推演 ════════════ -->
+<section class="section">
+  <h2><span class="num">§ 8</span> 逐环节 RAM 合理性推演（不动 opus_codec）</h2>
+  <p class="sub">每个任务 + 每个 buffer 的 RAM 占用 vs 实际需求对账。<strong>opus_codec 24KB 保留不动</strong>（产品决策）· PSRAM 不抠优化（重复利用空间充裕，距 8MB 上限剩 ~3.5MB）· 焦点在合理性判断 + 偏大项实测验证。</p>
+
+  <h3>INT RAM 任务级合理性表</h3>
+  <table>
+    <thead><tr><th>任务 / Buffer</th><th>当前栈/大小</th><th>实际需求估算</th><th>合理性</th><th>建议</th></tr></thead>
+    <tbody>
+      <tr><td><code>main_app</code></td><td>8 KB</td><td>Application::Run + Schedule lambda 队列 ≈ 4-6 KB</td><td>🟡 偏大 2-4K</td><td>实测 high water mark · 减到 6 KB</td></tr>
+      <tr><td><code>audio_input</code>（含 AFE）</td><td>6 KB</td><td>I2S DMA + AFE 输入 + 唤醒 callback ≈ 5-6 KB</td><td>✅ 合理</td><td>保持</td></tr>
+      <tr><td><code>opus_codec</code></td><td>24 KB</td><td>enc + dec + ring + opus 库内部状态 ≈ 20-24 KB</td><td>✅ 合理（产品决策保留）</td><td><strong>保留不动</strong></td></tr>
+      <tr><td><code>audio_output</code></td><td>4 KB</td><td>PCM 重采样 + I2S DMA write ≈ 3-4 KB</td><td>✅ 合理</td><td>保持</td></tr>
+      <tr><td><code>audio_communication</code> AFE</td><td>4 KB</td><td>AEC 计算 + NS + VAD ≈ 4 KB</td><td>✅ 合理</td><td>保持</td></tr>
+      <tr><td><code>audio_detection</code> wake_check</td><td>4 KB</td><td>WakeNet 检测循环 ≈ 3-4 KB</td><td>✅ 合理</td><td>保持</td></tr>
+      <tr><td><code>wake_word_encode_afe</code> 临时</td><td>24 KB INT 静态</td><td>opus encoder + 录音上传 ≈ 20-24 KB</td><td>✅ 合理（已修非 PSRAM）</td><td>静态栈减碎片</td></tr>
+      <tr><td><code>main_loop Schedule lambda 队列</code></td><td>不固定（堆）</td><td>对话期 ≤ 10 lambda × 100 byte ≈ 1 KB</td><td>✅ 合理</td><td>已加 size 上限</td></tr>
+      <tr><td><code>alarm_nvs</code></td><td>3.5 KB</td><td>NVS 写入小记录 ≈ 2 KB</td><td>🟡 略大</td><td>实测 · 可减到 2 KB</td></tr>
+      <tr><td><code>LedEvent</code></td><td>2 KB</td><td>GPIO 状态机 ≈ 1-2 KB</td><td>✅ 合理</td><td>保持</td></tr>
+      <tr><td><code>ml307_net</code></td><td>4 KB</td><td>ML307 AT 队列 + 解析 ≈ 4 KB</td><td>✅ 合理</td><td>WiFi 板编译开关去掉</td></tr>
+      <tr><td><code>headset</code>（P31）</td><td>3 KB</td><td>Type-C ADC 检测循环 ≈ 2 KB</td><td>🟡 略大</td><td>P31 板独立任务，非主路径</td></tr>
+      <tr><td><code>dns_server</code>（仅配网期）</td><td>4 KB INT 持久</td><td>DHCP/DNS 简单转发 ≈ 2 KB · <strong>配网完不释放</strong></td><td>🔴 浪费</td><td><strong>配网退出主动 vTaskDelete</strong> · 释放 4 KB</td></tr>
+      <tr><td><code>flow_load</code> 临时</td><td>6 KB INT</td><td>HTTP 下载 + cJSON 解析 ≈ 6 KB</td><td>✅ 合理</td><td>改静态栈减碎片</td></tr>
+      <tr><td><code>activation</code> 临时</td><td>8 KB INT</td><td>HTTP + cJSON + Settings 持久化 ≈ 6 KB</td><td>🟡 略大</td><td>实测 · 可减到 6 KB</td></tr>
+      <tr><td><code>stt_post</code> 临时（P0 修后）</td><td>4 KB INT Core 1</td><td>HTTP POST ≈ 4 KB</td><td>✅ 合理</td><td>保持</td></tr>
+    </tbody>
+  </table>
+
+  <h3>INT RAM 优化空间汇总</h3>
+  <table>
+    <tbody>
+      <tr><td>偏大可减</td><td>main_app -2K · alarm_nvs -1.5K · headset -1K · activation -2K = <strong>-6.5 KB</strong></td></tr>
+      <tr><td>明显浪费可释放</td><td>dns_server 配网完未释放 = <strong>-4 KB</strong>（修改：配网退出主动 vTaskDelete）</td></tr>
+      <tr><td>WiFi 板编译开关去 ml307_net</td><td>WiFi 板独享 <strong>-4 KB</strong></td></tr>
+      <tr><td><strong>合计可省（量产期实测后）</strong></td><td>4G 板 <strong>-10.5 KB</strong> / WiFi 板 <strong>-14.5 KB</strong></td></tr>
+    </tbody>
+  </table>
+
+  <h3>PSRAM Buffer 复用现状</h3>
+  <table>
+    <thead><tr><th>Buffer</th><th>大小</th><th>生命周期</th><th>是否复用</th></tr></thead>
+    <tbody>
+      <tr><td>LVGL 双缓冲</td><td>~280 KB</td><td>持久</td><td>常驻 · 渲染 FB · 不复用（LVGL 内部需要双 buffer ping-pong）</td></tr>
+      <tr><td>字体（CJK + Emoji + FontAwesome）</td><td>~2 MB</td><td>持久</td><td>常驻 · 不复用（可分包但产品决策不动）</td></tr>
+      <tr><td>WakeNet 模型</td><td>~1.5 MB</td><td>持久（仅 Idle 期跑）</td><td>常驻 · 不释放（产品决策）</td></tr>
+      <tr><td>Opus 编解码状态</td><td>~200 KB</td><td>持久（音频任务在跑）</td><td>encoder + decoder 各持有 · 不复用</td></tr>
+      <tr><td>MQTT/WS 接收 buffer</td><td>~500 KB</td><td>持久（连接期）</td><td>IDF 框架管理 · 协议层共享 lwip socket pool</td></tr>
+      <tr><td>MP3 ring buffer</td><td>~200 KB</td><td>仅播放期</td><td>cleanup_rings() 退出释放 ✅</td></tr>
+      <tr><td>Assets 下载 buffer</td><td>~50 KB</td><td>下载期</td><td>临时 alloc/free ✅</td></tr>
+      <tr><td>JSON cJSON 临时</td><td>1-50 KB</td><td>解析期</td><td>反复 alloc/free（碎片化但非占用）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>PSRAM 重复利用结论</strong> · 当前占用 ~4.5 MB / 上限 8 MB · 余量 <strong>~3.5 MB 充裕</strong>。<em>不需要过度优化</em>。MultiNet 已禁用（实际比文档估算少 1MB+）· WakeNet/AFE 互斥编译不重复 · MP3 ring 退出释放 · IDF 框架管理接收 buffer。<strong>结论：PSRAM 整体合理，无需动</strong>。
+  </div>
+</section>
+
+<!-- ════════════ § 9 Core 分配深度优化方案 ════════════ -->
+<section class="section">
+  <h2><span class="num">§ 9</span> Core 分配深度优化方案（不动 opus_codec / audio_input）</h2>
+  <p class="sub">保留 opus_codec 24KB Core 0 · 保留 audio_input Core 0（与 codec I2S 同位）。<strong>焦点在 12 个漂移任务 Pin Core + 重计算任务挪 Core 1</strong>，平衡双核负载。</p>
+
+  <h3>Core 分配优化对照表（每个漂移任务的去向）</h3>
+  <table>
+    <thead><tr><th>任务</th><th>当前 Core</th><th>目标 Core</th><th>变更理由</th></tr></thead>
+    <tbody>
+      <tr style="background:#FFF8E1"><td colspan="4"><strong>━━ 不动（产品决策）━━</strong></td></tr>
+      <tr><td><code>opus_codec</code></td><td>Core 0 · 24 KB INT</td><td><strong>保持 Core 0</strong></td><td>产品决策保留 · 单核运行已优化</td></tr>
+      <tr><td><code>audio_input</code></td><td>Core 0 · 6 KB INT</td><td><strong>保持 Core 0</strong></td><td>I2S codec 同核避免跨核共享</td></tr>
+      <tr><td><code>main_app</code></td><td>Core 0 · 8 KB INT</td><td><strong>保持 Core 0</strong></td><td>主循环不动</td></tr>
+
+      <tr style="background:#E0F2F1"><td colspan="4"><strong>━━ Core 0 Pin（明确）━━</strong></td></tr>
+      <tr><td><code>audio_output</code></td><td>任意</td><td><strong>Core 0 P4</strong></td><td>与 audio_input 同核 codec I2S 同位</td></tr>
+      <tr><td><code>LedEvent</code></td><td>任意</td><td><strong>Core 0 P2+</strong></td><td>GPIO 操作集中</td></tr>
+      <tr><td><code>activation</code> 临时</td><td>任意</td><td><strong>Core 0 P2</strong></td><td>HTTP + Application 主循环同核</td></tr>
+      <tr><td><code>ota_response</code> 临时</td><td>任意</td><td><strong>Core 0 P2</strong></td><td>HTTP 操作 Core 0</td></tr>
+
+      <tr style="background:#FFF3E0"><td colspan="4"><strong>━━ Core 1 Pin（减 Core 0 负担 + 与 AFE 同核）━━</strong></td></tr>
+      <tr><td><code>audio_detection</code> wake_check</td><td>任意</td><td><strong>Core 1 P5</strong></td><td>与 audio_communication AFE 同核 · 唤醒计算 cluster</td></tr>
+      <tr><td><code>wake_word_encode_afe</code> 临时（24K）</td><td>任意（默认 Core 0）</td><td><strong>Core 1 P3</strong></td><td>24KB 重计算 · Core 0 已重负载</td></tr>
+      <tr><td><code>blufi</code> 临时</td><td>任意</td><td><strong>Core 1 P3</strong></td><td>BLE 协议任务 Core 1（与 wifi_ap 同核）</td></tr>
+      <tr><td><code>wifi_board "config_done"</code> 临时</td><td>任意</td><td><strong>Core 1 P5</strong></td><td>配网相关 · Core 1</td></tr>
+      <tr><td><code>flow_load</code> 临时</td><td>Core 0（已 Pin）</td><td>保持 Core 0 P1</td><td>HTTP 下载</td></tr>
+    </tbody>
+  </table>
+
+  <h3>优化前后双核任务分布</h3>
+  <table>
+    <thead><tr><th>核心</th><th>优化前</th><th>优化后</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Core 0 持久 + 临时</strong></td><td>main_app · audio_input · opus_codec · audio_output(漂) · alarm_nvs · dns_server(配网期) · ml307_net · headset · LedEvent(漂) · flow_load · activation(漂) · ota_response(漂) · 板级幽灵 = 13 任务</td><td>main_app · audio_input · opus_codec · audio_output · alarm_nvs · dns_server(配网期) · ml307_net · headset · LedEvent · flow_load · activation · ota_response · 板级幽灵 = <strong>13 任务（明确 Pin）</strong></td></tr>
+      <tr><td><strong>Core 1 持久 + 临时</strong></td><td>audio_communication · LVGL · mp3_out · audio_detection(漂) · wake_word_encode(漂) · stt_post(P0 修后) · mp3_dl(P0 修后) · wifi_ap × 4 · blufi(漂) · wifi_board(漂) · gfx_core = 13 任务（含临时）</td><td>audio_communication · LVGL · mp3_out · audio_detection · wake_word_encode · stt_post · mp3_dl · wifi_ap × 4 · blufi · wifi_board · gfx_core = <strong>13 任务（明确 Pin）</strong></td></tr>
+      <tr><td><strong>任意 Core 漂移</strong></td><td>12 个无 affinity</td><td><strong>0 个</strong></td></tr>
+    </tbody>
+  </table>
+
+  <h3>双核 CPU 负载估算（240MHz × 2）</h3>
+  <table>
+    <thead><tr><th>核心</th><th>主要 CPU 消费者</th><th>估算占用</th><th>合理性</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Core 0</strong></td><td>opus_codec 编解码（最重）+ audio_input I2S + WiFi/lwip/MQTT IDF 任务 + ml307_net AT</td><td>~50-70%（对话期）</td><td>🟡 接近上限但可控</td></tr>
+      <tr><td><strong>Core 1</strong></td><td>audio_communication AFE（次重）+ LVGL 渲染 + audio_detection 唤醒检测 + wake_encode 临时</td><td>~30-50%（对话期）</td><td>✅ 合理 · 仍有余量</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>Core 分配核心结论</strong> · 不动 opus_codec / audio_input 前提下，把 12 个漂移任务全 Pin Core，<strong>双核任务数趋于平衡（13:13）</strong>。Core 0 仍负载较重（opus_codec 重计算）但可控。<strong>关键改进</strong>：① 24KB wake_encode 临时挪 Core 1 减 Core 0 重计算高峰 ② audio_detection 与 AFE 同核协同 ③ 临时任务消除漂移不确定性。
+  </div>
+
+  <div class="callout warn">
+    <strong>Pin Core 实施建议</strong> · 12 个 xTaskCreate → xTaskCreatePinnedToCore，每处加一个 core 参数。改动小但<strong>必须三板编译矩阵全过</strong>（P30-4G / P30-WiFi / P31）+ <strong>对话期 + MP3 + 配网三场景压测</strong>，确认无优先级反转或调度异常。
+  </div>
+</section>
+
+<!-- ════════════ § 10 弱网风险测算（8 场景）════════════ -->
+<section class="section">
+  <h2><span class="num">§ 10</span> 弱网风险测算 · 8 场景</h2>
+  <p class="sub">P30-4G 在弱网环境（4G 信号差 / WiFi 不稳 / 高丢包）下的行为推算 + 加固建议。<strong>用户感知最直接</strong>，量产前必测。</p>
+
+  <h3>弱网条件定义（量产测试用）</h3>
+  <table>
+    <tbody>
+      <tr><td><strong>4G 弱信号</strong></td><td>CSQ &lt; 15（信号强度低）/ RSRP &lt; -110 dBm</td></tr>
+      <tr><td><strong>WiFi 弱信号</strong></td><td>RSSI &lt; -80 dBm / 重传率 &gt; 30%</td></tr>
+      <tr><td><strong>高丢包</strong></td><td>丢包率 &gt; 10%</td></tr>
+      <tr><td><strong>高抖动</strong></td><td>jitter &gt; 200 ms</td></tr>
+      <tr><td><strong>网络中断</strong></td><td>完全断网（飞行模式 / WiFi 关）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>8 场景风险矩阵</h3>
+  <table>
+    <thead><tr><th>#</th><th>场景</th><th>风险</th><th>当前防御</th><th>建议加固</th><th>严重度</th></tr></thead>
+    <tbody>
+      <tr><td>W1</td><td>4G register 失败重试</td><td>6 × 10s = 60s 阻塞 · 用户开机等待</td><td>有重试 + Alert("REG_ERROR")</td><td>① 重试 3 次后快速降级 → WiFi 备路径 ② 屏幕显示重试进度</td><td>🟡 中</td></tr>
+      <tr><td>W2</td><td>4G detect 失败重试</td><td>30 × 1s = 30s 阻塞</td><td>已加 1500ms boot 等待 + 30 重试</td><td>5 次后判定模组故障 → Alert + 不再重试</td><td>🟢 低（已优化）</td></tr>
+      <tr><td>W3</td><td>Activation 重试 10 次</td><td>3-10s 退避 = 100s · 用户停在激活页</td><td>有指数退避</td><td>① 加 Cancel 按钮（用户主动跳过）② 缓存上次激活码本地校验</td><td>🟡 中</td></tr>
+      <tr><td>W4</td><td><strong>Listening 期网络断（TTS 不下来）</strong></td><td><strong>用户无响应感知 · 长时间停 Speaking</strong></td><td><strong>无 timeout（待核实）</strong></td><td><strong>加 30s timeout → Alert + 回 Idle</strong></td><td>🔴 高</td></tr>
+      <tr><td>W5</td><td>MP3 播放期网络断（流式下载断）</td><td>mp3_ring 见底 → I2S DMA underrun → 爆音 / 静音</td><td>有 ring buffer ~200KB 缓冲 · 退出条件不明</td><td>① 缓冲水位 &lt; 20% 主动停止 + Alert ② 触发自动重连</td><td>🟡 中</td></tr>
+      <tr><td>W6</td><td>FlowEngine 断网重连</td><td>5s 退避（已实现）</td><td>OnAudioChannelClosed 5s 自重连 ✅</td><td>已合规 · 量产期监控重连成功率</td><td>✅ 已防御</td></tr>
+      <tr><td>W7</td><td>OTA 升级中网络断</td><td>部分写入分区</td><td>esp_ota_mark_app_invalid_rollback 自动回滚 ✅</td><td>已合规</td><td>✅ 已防御</td></tr>
+      <tr><td>W8</td><td>DNS 解析超时 / TLS 握手失败</td><td>所有 HTTP 请求失败</td><td>esp_netif 默认 60s timeout · MQTT 重连</td><td>① DNS 超时 5s（不要默认 60s）② TLS 失败明确 Alert</td><td>🟡 中</td></tr>
+    </tbody>
+  </table>
+
+  <h3>P0 弱网必修（量产前）</h3>
+  <table>
+    <tbody>
+      <tr><td><strong>W4 修复</strong></td><td>Application 加 listening_timeout_ms_ = 30000 · 超时 → AbortSpeaking + 回 Idle + Alert("network_timeout")</td></tr>
+      <tr><td><strong>W5 修复</strong></td><td>MusicPlayer 加 ring_low_water_threshold = 20% · 触发 → 主动 Stop + Alert</td></tr>
+      <tr><td><strong>W1 修复</strong></td><td>ML307 register 3 次失败 → 4G 板降级到 WiFi 备路径（如有 WiFi 凭证）· 屏幕显示降级提示</td></tr>
+      <tr><td><strong>W8 修复</strong></td><td>DNS / TLS 超时统一改为 5s · 失败明确 Alert（不要静默重试）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>弱网压测 checklist（量产前 P0）</h3>
+  <table>
+    <thead><tr><th>测试场景</th><th>方法</th><th>通过标准</th></tr></thead>
+    <tbody>
+      <tr><td>4G 弱信号区开机</td><td>用屏蔽袋包住 4G 天线 · 模拟 CSQ 5</td><td>开机 90s 内进 Idle 或 Alert · 不卡死</td></tr>
+      <tr><td>对话期 WiFi 路由器拔电源</td><td>断网 30s 后恢复</td><td>Listening / Speaking → 30s timeout → Alert · 恢复后能重连</td></tr>
+      <tr><td>MP3 播放中断网</td><td>同上</td><td>20% 缓冲触发 → 主动停 · 不爆音</td></tr>
+      <tr><td>OTA 升级中拔电源</td><td>升级 30% 时断电</td><td>重启后回滚到上一版本 · 不变砖</td></tr>
+      <tr><td>4G ↔ WiFi 切换循环</td><td>10 次连续切换</td><td>无内存泄漏 · 切换响应 &lt; 8s</td></tr>
+      <tr><td>持续 24h 弱网（CSQ 10）</td><td>低信号区放置</td><td>无主动 reboot · min_free_size ≥ 60KB</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>弱网 P0 关键</strong> · W4 (Listening 期 TTS 不下来无 timeout) 是最容易被忽略的<strong>用户感知问题</strong>——用户屏幕停在 Speaking 不知道发生什么。修这一项需要 ~50 行代码（Application 加 timer + Schedule timeout 处理），量产前必修。
+  </div>
+
+  <div class="callout ok">
+    <strong>弱网整体结论</strong> · 8 场景中 W6 / W7 已防御，W2 已优化（1500ms 方案），其余 5 个（W1/W3/W4/W5/W8）需要量产前加固。<strong>关键修复点是 W4（Listening timeout）</strong>，其他可量产期渐进加固。
+  </div>
+</section>
+
+</div>
+
+<footer>
+  MyDazy P30-4G · 资源规划目标态 v1.0 · 2026-04-28
+  <br/>
+  与 <a href="p30-architecture.html">主架构剖析</a>（现状）+ <a href="p30-business-flows.html">主流程图</a>（流程）三文档互补
+</footer>
+
+</body>
+</html>
