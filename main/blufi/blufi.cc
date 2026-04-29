@@ -182,6 +182,9 @@ bool Blufi::Start(const std::string &device_name) {
     return false;
   }
 
+  // 修复 BLUFI↔AP 切换 bug：原代码仅在 INIT_FINISH callback 里设 true，
+  initialized_ = true;
+
   // ⚠️ 同步等待 INIT_FINISH（NimBLE 异步初始化 GATT profile，flash op 密集）
   // 超时 3s：正常 < 100ms，超时说明 NimBLE 异常但至少能释放调用方的 LVGL 锁
   if (init_done_sem_ &&

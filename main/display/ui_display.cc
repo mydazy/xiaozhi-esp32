@@ -323,8 +323,7 @@ void UiDisplay::SwitchToClockMode() {
         lv_obj_remove_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN);  // clock 模式主动显示
         lv_obj_move_foreground(global_status_bar_);
     }
-    if (wifi_qr_overlay_)    lv_obj_move_foreground(wifi_qr_overlay_);
-    if (activation_overlay_) lv_obj_move_foreground(activation_overlay_);
+    if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
     is_clock_mode_ = true;
     ESP_LOGI(TAG, "Switched to clock mode");
@@ -359,8 +358,7 @@ void UiDisplay::SwitchToChatMode() {
 
     // chat 模式主动隐藏全局状态栏（信号 + 电池）—— 不依赖 z-order 巧合，语义明确且 UpdateGlobalStatusIcons 能早退省 CPU
     if (global_status_bar_)  lv_obj_add_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN);
-    if (wifi_qr_overlay_)    lv_obj_move_foreground(wifi_qr_overlay_);
-    if (activation_overlay_) lv_obj_move_foreground(activation_overlay_);
+    if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
     is_clock_mode_ = false;
     ESP_LOGI(TAG, "Switched to chat mode");
@@ -406,9 +404,7 @@ void UiDisplay::FinishBootAndShowClock() {
     if (is_player_mode_) return;
 
     // 清理可能残留的开机引导覆盖层（激活码 / 配网 QR），避免切到时钟后仍被 overlay 遮挡。
-    // SwitchToClockMode 内会主动 move_foreground 这两个 overlay；不在此处清理则用户看不到时钟。
-    HideActivationPage();
-    HideWifiQrCode();
+    HideQrCode();
 
     if (!emoji_box_) {
         SwitchToClockMode();
@@ -440,51 +436,52 @@ void UiDisplay::FinishBootAndShowClock() {
 }
 
 // ============================================================
-// 配网 QR 页（蓝牙/热点切换）
+// 通用二维码页（合并配网 BLUFI/AP + 设备绑定，未来支持付费等扩展）
 // ============================================================
 
-void UiDisplay::ShowWifiQrCode(const char* qr_content, const char* hint,
-                                const char* left_label, const char* right_label,
-                                bool active_left,
-                                std::function<void()> on_double_click) {
+void UiDisplay::ShowQrCode(const char* qr_content,
+                            const char* top, const char* bottom, const char* highlight,
+                            const char* left_label, const char* right_label,
+                            bool active_left,
+                            std::function<void()> on_double_click) {
     DisplayLockGuard lock(this);
-    HideWifiQrCode();
+    HideQrCode();
 
     auto* screen = lv_screen_active();
-    if (!screen) return;
+    if (!screen || !qr_content) return;
 
-    bool is_blufi = active_left;
+    // 保活双击 callback（仅显示色条时启用 click 事件）
+    qr_double_click_cb_ = std::move(on_double_click);
+    qr_last_click_us_   = 0;
 
-    // 保活双击 callback；LVGL click 事件会查 wifi_qr_double_click_cb_ 是否设
-    wifi_qr_double_click_cb_ = std::move(on_double_click);
-    wifi_qr_last_click_us_   = 0;
+    // 全屏白底 overlay
+    qr_overlay_ = lv_obj_create(screen);
+    lv_obj_set_size(qr_overlay_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_align(qr_overlay_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_remove_flag(qr_overlay_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(qr_overlay_, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(qr_overlay_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(qr_overlay_, 0, 0);
+    lv_obj_set_style_radius(qr_overlay_, 0, 0);
+    lv_obj_set_style_pad_all(qr_overlay_, 0, 0);
 
-    wifi_qr_overlay_ = lv_obj_create(screen);
-    lv_obj_set_size(wifi_qr_overlay_, LV_HOR_RES, LV_VER_RES);
-    lv_obj_align(wifi_qr_overlay_, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_remove_flag(wifi_qr_overlay_, LV_OBJ_FLAG_SCROLLABLE);
-    // 双击切换需要 CLICKABLE：手动用上次 click 时间戳 < 500ms 判定双击
-    if (wifi_qr_double_click_cb_) {
-        lv_obj_add_flag(wifi_qr_overlay_, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(wifi_qr_overlay_, OnWifiQrClicked, LV_EVENT_CLICKED, this);
+    if (qr_double_click_cb_) {
+        lv_obj_add_flag(qr_overlay_, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(qr_overlay_, OnQrClicked, LV_EVENT_CLICKED, this);
     } else {
-        lv_obj_remove_flag(wifi_qr_overlay_, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(qr_overlay_, LV_OBJ_FLAG_CLICKABLE);
     }
-    lv_obj_set_style_bg_color(wifi_qr_overlay_, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(wifi_qr_overlay_, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(wifi_qr_overlay_, 0, 0);
-    lv_obj_set_style_radius(wifi_qr_overlay_, 0, 0);
-    lv_obj_set_style_pad_all(wifi_qr_overlay_, 0, 0);
 
     constexpr int kBarW = 40;
-    const int kCenterW = LV_HOR_RES - kBarW * 2;
+    const bool has_bars = (left_label && left_label[0]) || (right_label && right_label[0]);
+    const int kCenterW = has_bars ? (LV_HOR_RES - kBarW * 2) : LV_HOR_RES;
     const lv_color_t color_on  = lv_color_hex(0x2196F3);
     const lv_color_t color_off = lv_color_hex(0xE0E0E0);
 
-    // 左右竖排色条（UTF-8 逐字符）
+    // 左右竖排色条 lambda（UTF-8 逐字符竖排）— 仅 left/right 非空时画
     auto make_bar = [&](lv_align_t align, const char* text, bool on) {
         if (!text || !text[0]) return;
-        lv_obj_t* bar = lv_obj_create(wifi_qr_overlay_);
+        lv_obj_t* bar = lv_obj_create(qr_overlay_);
         lv_obj_set_size(bar, kBarW, LV_VER_RES);
         lv_obj_align(bar, align, 0, 0);
         lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
@@ -515,170 +512,82 @@ void UiDisplay::ShowWifiQrCode(const char* qr_content, const char* hint,
             p += b;
         }
     };
-
-    make_bar(LV_ALIGN_TOP_LEFT, left_label, active_left);
+    make_bar(LV_ALIGN_TOP_LEFT,  left_label,  active_left);
     make_bar(LV_ALIGN_TOP_RIGHT, right_label, !active_left);
 
-    bool has_bars = (left_label && left_label[0]) || (right_label && right_label[0]);
-    if (has_bars) {
-        lv_obj_t* tip = lv_label_create(wifi_qr_overlay_);
-        lv_label_set_text(tip, "双击切换模式");
-        lv_obj_set_style_text_font(tip, &BUILTIN_TEXT_FONT, 0);
-        lv_obj_set_style_text_color(tip, lv_color_hex(0xAAAAAA), 0);
-        lv_obj_set_style_text_align(tip, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_width(tip, kCenterW);
-        lv_obj_align(tip, LV_ALIGN_TOP_MID, 0, 2);
-    }
+    // 居中文本 label 创建辅助 lambda
+    auto make_label = [&](const char* text, lv_color_t color,
+                          lv_align_t align, int y_off, bool scroll = false) -> lv_obj_t* {
+        if (!text || !text[0]) return nullptr;
+        lv_obj_t* lbl = lv_label_create(qr_overlay_);
+        lv_label_set_text(lbl, text);
+        lv_obj_set_style_text_font(lbl, &BUILTIN_TEXT_FONT, 0);
+        lv_obj_set_style_text_color(lbl, color, 0);
+        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_width(lbl, kCenterW);
+        if (scroll) lv_label_set_long_mode(lbl, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_align(lbl, align, 0, y_off);
+        return lbl;
+    };
 
-    // QR 码
+    // 顶部提示词
+    make_label(top, lv_color_hex(0x333333), LV_ALIGN_TOP_MID, 6);
+
+    // 中央二维码（调用方拼好内容，内部不做格式判断）
 #if CONFIG_LV_USE_QRCODE
     constexpr int kQrSize = 160;
-    const bool is_url = (strncmp(qr_content, "http", 4) == 0);
-    char qr_data[256];
-    if (is_url) snprintf(qr_data, sizeof(qr_data), "%s", qr_content);
-    else        snprintf(qr_data, sizeof(qr_data), "WIFI:T:nopass;S:%s;;", qr_content);
-
-    lv_obj_t* qr = lv_qrcode_create(wifi_qr_overlay_);
+    lv_obj_t* qr = lv_qrcode_create(qr_overlay_);
     lv_qrcode_set_size(qr, kQrSize);
     lv_qrcode_set_dark_color(qr, lv_color_black());
     lv_qrcode_set_light_color(qr, lv_color_white());
-    lv_qrcode_update(qr, qr_data, strlen(qr_data));
-    lv_obj_align(qr, LV_ALIGN_CENTER, 0, -15);
-
+    lv_qrcode_update(qr, qr_content, strlen(qr_content));
+    lv_obj_align(qr, LV_ALIGN_CENTER, 0, -10);
 #else
-    lv_obj_t* fallback = lv_label_create(wifi_qr_overlay_);
-    lv_obj_set_style_text_font(fallback, &BUILTIN_TEXT_FONT, 0);
-    lv_obj_set_style_text_color(fallback, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_text_align(fallback, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(fallback, kCenterW);
-    lv_label_set_text(fallback, is_blufi ? "打开小程序蓝牙配网" : qr_content);
-    lv_obj_align(fallback, LV_ALIGN_CENTER, 0, 0);
+    make_label(qr_content, lv_color_hex(0x333333), LV_ALIGN_CENTER, 0);
 #endif
 
-    const char* h = (hint && hint[0]) ? hint : qr_content;
-    lv_obj_t* hl = lv_label_create(wifi_qr_overlay_);
-    lv_label_set_text(hl, h);
-    lv_obj_set_style_text_font(hl, &BUILTIN_TEXT_FONT, 0);
-    lv_obj_set_width(hl, kCenterW);
-    lv_obj_set_style_text_align(hl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(hl, lv_color_hex(0x999999), 0);
-    lv_label_set_long_mode(hl, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_align(hl, LV_ALIGN_BOTTOM_MID, 0, -3);
-
-    ESP_LOGI(TAG, "配网页: mode=%s content=%s", is_blufi ? "BluFi" : "AP", qr_content);
-}
-
-void UiDisplay::HideWifiQrCode() {
-    DisplayLockGuard lock(this);
-    if (wifi_qr_overlay_) {
-        lv_obj_del(wifi_qr_overlay_);
-        wifi_qr_overlay_ = nullptr;
-        ESP_LOGI(TAG, "隐藏配网 QR");
+    // 高亮大字（蓝色，如激活码 / 付款金额）
+    int bottom_y = -3;
+    if (highlight && highlight[0]) {
+        make_label(highlight, lv_color_hex(0x2196F3), LV_ALIGN_BOTTOM_MID, -25);
+        bottom_y = -6;  // 给高亮让出空间
     }
-    // 释放 lambda（捕获的外部对象生命周期独立于 UiDisplay）
-    wifi_qr_double_click_cb_ = nullptr;
-    wifi_qr_last_click_us_   = 0;
+
+    // 底部辅助文字
+    make_label(bottom, lv_color_hex(0x999999), LV_ALIGN_BOTTOM_MID, bottom_y, true);
+
+    if (global_status_bar_) lv_obj_move_foreground(global_status_bar_);
+    ESP_LOGI(TAG, "QR页: content=%s top=%s bottom=%s highlight=%s",
+             qr_content, top ? top : "", bottom ? bottom : "", highlight ? highlight : "");
 }
 
-// LVGL 事件回调：用上次 click 时间戳判定 < 500ms 双击
-void UiDisplay::OnWifiQrClicked(lv_event_t* e) {
+void UiDisplay::HideQrCode() {
+    DisplayLockGuard lock(this);
+    if (qr_overlay_) {
+        lv_obj_del(qr_overlay_);
+        qr_overlay_ = nullptr;
+        ESP_LOGI(TAG, "隐藏 QR 页");
+    }
+    qr_double_click_cb_ = nullptr;
+    qr_last_click_us_   = 0;
+}
+
+// LVGL click 事件 → 用上次时间戳判定 < 500ms 双击
+void UiDisplay::OnQrClicked(lv_event_t* e) {
     auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
-    if (!self || !self->wifi_qr_double_click_cb_) return;
+    if (!self || !self->qr_double_click_cb_) return;
 
     const uint64_t now  = esp_timer_get_time();
-    const uint64_t last = self->wifi_qr_last_click_us_;
+    const uint64_t last = self->qr_last_click_us_;
     constexpr uint64_t kDoubleClickWindowUs = 500 * 1000;
 
     if (last != 0 && (now - last) < kDoubleClickWindowUs) {
-        // 命中双击：先拷贝 cb 再调，防止 cb 内部 HideWifiQrCode 把自己析构
-        auto cb = self->wifi_qr_double_click_cb_;
-        self->wifi_qr_last_click_us_ = 0;
+        // 拷贝 cb 后调，防止 cb 内部 HideQrCode 把 cb 自己析构
+        auto cb = self->qr_double_click_cb_;
+        self->qr_last_click_us_ = 0;
         cb();
     } else {
-        self->wifi_qr_last_click_us_ = now;
-    }
-}
-
-// ============================================================
-// 激活绑定页（URL QR + 6 位激活码）
-// ============================================================
-
-void UiDisplay::ShowActivationPage(const char* bind_url, const char* activation_code) {
-    DisplayLockGuard lock(this);
-    HideActivationPage();
-
-    auto* screen = lv_screen_active();
-    if (!screen || !bind_url) return;
-
-    activation_overlay_ = lv_obj_create(screen);
-    lv_obj_set_size(activation_overlay_, LV_HOR_RES, LV_VER_RES);
-    lv_obj_align(activation_overlay_, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_remove_flag(activation_overlay_, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(activation_overlay_, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(activation_overlay_, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(activation_overlay_, 0, 0);
-    lv_obj_set_style_radius(activation_overlay_, 0, 0);
-    lv_obj_set_style_pad_all(activation_overlay_, 0, 0);
-
-    // 顶部标题
-    lv_obj_t* title = lv_label_create(activation_overlay_);
-    lv_label_set_text(title, "绑定设备");
-    lv_obj_set_style_text_font(title, &BUILTIN_TEXT_FONT, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0x333333), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 6);
-
-    // QR 码
-#if CONFIG_LV_USE_QRCODE
-    constexpr int kQrSize = 140;
-    lv_obj_t* qr = lv_qrcode_create(activation_overlay_);
-    lv_qrcode_set_size(qr, kQrSize);
-    lv_qrcode_set_dark_color(qr, lv_color_black());
-    lv_qrcode_set_light_color(qr, lv_color_white());
-    lv_qrcode_update(qr, bind_url, strlen(bind_url));
-    lv_obj_align(qr, LV_ALIGN_CENTER, 0, -18);
-#else
-    lv_obj_t* fallback = lv_label_create(activation_overlay_);
-    lv_label_set_text(fallback, bind_url);
-    lv_obj_set_style_text_font(fallback, &BUILTIN_TEXT_FONT, 0);
-    lv_obj_set_style_text_color(fallback, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_text_align(fallback, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(fallback, LV_HOR_RES - 20);
-    lv_obj_align(fallback, LV_ALIGN_CENTER, 0, 0);
-#endif
-
-    // 激活码（大字号醒目显示）
-    if (activation_code && activation_code[0]) {
-        lv_obj_t* code_lbl = lv_label_create(activation_overlay_);
-        lv_label_set_text(code_lbl, activation_code);
-        lv_obj_set_style_text_font(code_lbl, &BUILTIN_TEXT_FONT, 0);
-        lv_obj_set_style_text_color(code_lbl, lv_color_hex(0x2196F3), 0);
-        lv_obj_set_style_text_align(code_lbl, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(code_lbl, LV_ALIGN_BOTTOM_MID, 0, -28);
-
-        lv_obj_t* tip = lv_label_create(activation_overlay_);
-        lv_label_set_text(tip, "扫码或输入激活码");
-        lv_obj_set_style_text_font(tip, &BUILTIN_TEXT_FONT, 0);
-        lv_obj_set_style_text_color(tip, lv_color_hex(0x999999), 0);
-        lv_obj_align(tip, LV_ALIGN_BOTTOM_MID, 0, -6);
-    } else {
-        lv_obj_t* tip = lv_label_create(activation_overlay_);
-        lv_label_set_text(tip, "扫码绑定设备");
-        lv_obj_set_style_text_font(tip, &BUILTIN_TEXT_FONT, 0);
-        lv_obj_set_style_text_color(tip, lv_color_hex(0x666666), 0);
-        lv_obj_align(tip, LV_ALIGN_BOTTOM_MID, 0, -10);
-    }
-
-    if (global_status_bar_) lv_obj_move_foreground(global_status_bar_);
-    ESP_LOGI(TAG, "激活页: %s%s%s", bind_url,
-             activation_code ? " code=" : "", activation_code ? activation_code : "");
-}
-
-void UiDisplay::HideActivationPage() {
-    DisplayLockGuard lock(this);
-    if (activation_overlay_) {
-        lv_obj_del(activation_overlay_);
-        activation_overlay_ = nullptr;
-        ESP_LOGI(TAG, "隐藏激活页");
+        self->qr_last_click_us_ = now;
     }
 }
 
@@ -911,8 +820,7 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
         lv_obj_remove_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(global_status_bar_);
     }
-    if (wifi_qr_overlay_)    lv_obj_move_foreground(wifi_qr_overlay_);
-    if (activation_overlay_) lv_obj_move_foreground(activation_overlay_);
+    if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
     is_player_mode_ = true;
     is_clock_mode_  = false;   // 复用 clock 状态字段，与 SwitchToChatMode 保持互斥

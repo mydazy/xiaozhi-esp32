@@ -168,15 +168,16 @@ bool WifiBoard::StartConfigMode(ConfigMode mode, bool is_switch) {
         auto display = Board::GetInstance().GetDisplay();
         if (display) {
             if (mode == ConfigMode::BLUFI) {
-                // 蓝牙配网：显示配网页面（含 network.png 图片）
-                std::string hint = "微信扫码配网：" + show_name;
-                display->ShowWifiQrCode("blufi", hint.c_str(),
-                    "蓝牙配网", "热点配网", true);
+                // 蓝牙配网：二维码扫码跳转 H5/小程序，设备名通过蓝牙广播匹配
+                display->ShowQrCode("https://mydazy.cn/ota/blufi",
+                                     show_name.c_str(), "微信扫码配网",
+                                    "蓝牙配网", "热点配网", true);
             } else {
-                // 热点配网：生成 WiFi QR 码
-                display->ShowWifiQrCode(show_name.c_str(),
-                    ("连接热点: " + show_name).c_str(),
-                    "蓝牙配网", "热点配网", false);
+                // 热点配网：调用方拼接标准 WiFi 二维码格式
+                std::string wifi_qr = "WIFI:T:nopass;S:" + show_name + ";;";
+                display->ShowQrCode(wifi_qr.c_str(),
+                                    show_name.c_str(), "连接WiFi热点",
+                                    "蓝牙配网", "热点配网", false);
             }
         }
     }
