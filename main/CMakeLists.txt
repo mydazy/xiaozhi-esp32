@@ -137,6 +137,16 @@ else()
 endif()
 list(APPEND SOURCES ${BOARD_SOURCES})
 
+# UI 资源 .c（SquareLine 生成的 lv_image_dsc_t 全局符号 + maru 字体）
+# 双轨制：assets/icons/* 同时被 build_default_assets.py 打到 assets 分区（运行时加载用），
+# 也以全局符号编译进固件代码段（control_center.cc 等模块直接 &ui_img_xxx 用）。
+# 链接器 --gc-sections 会丢弃未引用的符号，不浪费 Flash。
+file(GLOB ASSETS_C_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/*.c
+)
+list(APPEND SOURCES ${ASSETS_C_SOURCES})
+
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)
     list(APPEND SOURCES "audio/processors/afe_audio_processor.cc")
