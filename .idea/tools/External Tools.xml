@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<toolSet name="External Tools">
+  <tool name="Play OGG" description="使用 macOS afplay 试听当前选中的 ogg 文件（后台播放，不阻塞 IDE）" showInMainMenu="true" showInEditor="true" showInProject="true" showInSearchPopup="true" disabled="false" useConsole="false" showConsoleOnStdOut="false" showConsoleOnStdErr="false" synchronizeAfterRun="false">
+    <exec>
+      <option name="COMMAND" value="/usr/bin/afplay" />
+      <option name="PARAMETERS" value="$FilePath$" />
+      <option name="WORKING_DIRECTORY" value="$ProjectFileDir$" />
+    </exec>
+  </tool>
+  <tool name="Play OGG (waveform)" description="使用 ffplay 试听并显示波形（自动退出）" showInMainMenu="true" showInEditor="true" showInProject="true" showInSearchPopup="true" disabled="false" useConsole="true" showConsoleOnStdOut="false" showConsoleOnStdErr="false" synchronizeAfterRun="false">
+    <exec>
+      <option name="COMMAND" value="/opt/homebrew/bin/ffplay" />
+      <option name="PARAMETERS" value="-autoexit -hide_banner -loglevel error $FilePath$" />
+      <option name="WORKING_DIRECTORY" value="$ProjectFileDir$" />
+    </exec>
+  </tool>
+  <tool name="Stop All Audio" description="停止所有 afplay/ffplay 进程" showInMainMenu="true" showInEditor="false" showInProject="true" showInSearchPopup="true" disabled="false" useConsole="false" showConsoleOnStdOut="false" showConsoleOnStdErr="false" synchronizeAfterRun="false">
+    <exec>
+      <option name="COMMAND" value="/usr/bin/killall" />
+      <option name="PARAMETERS" value="-q afplay ffplay" />
+      <option name="WORKING_DIRECTORY" value="$ProjectFileDir$" />
+    </exec>
+  </tool>
+  <tool name="Play OGG Folder" description="播放当前选中目录下所有 ogg 文件（顺序）" showInMainMenu="true" showInEditor="false" showInProject="true" showInSearchPopup="true" disabled="false" useConsole="true" showConsoleOnStdOut="true" showConsoleOnStdErr="true" synchronizeAfterRun="false">
+    <exec>
+      <option name="COMMAND" value="/bin/sh" />
+      <option name="PARAMETERS" value="-c &quot;for f in &quot;$FileDir$&quot;/*.ogg; do echo &quot;▶ $f&quot;; /usr/bin/afplay &quot;$f&quot;; done&quot;" />
+      <option name="WORKING_DIRECTORY" value="$ProjectFileDir$" />
+    </exec>
+  </tool>
+</toolSet>
