@@ -1836,8 +1836,8 @@ namespace ActivityCoordinator {
       <tr><td>4</td><td><code>alarm_nvs</code></td><td>3584</td><td>INT</td><td>P2</td><td>Core 0</td><td>持久</td><td>alarm_manager.cc:32</td></tr>
       <tr><td>5</td><td><code>dns_server</code></td><td>4096</td><td>INT</td><td>?</td><td>Core 0</td><td>AP 模式</td><td>dns_server.cc:53</td></tr>
       <tr><td>6</td><td><code>headset</code></td><td>3072</td><td>INT</td><td>P3</td><td>Core 0</td><td>Init→Destroy</td><td>typec_headset.cc:195</td></tr>
-      <tr style="background:#FFEBEE"><td>7</td><td><strong><code>stt_post</code></strong> ⚠</td><td>4096</td><td><strong>PSRAM</strong></td><td>P1</td><td><strong>Core 0</strong></td><td>临时</td><td>remote_cmd.cc:430</td></tr>
-      <tr style="background:#FFEBEE"><td>8</td><td><strong><code>mp3_dl</code></strong> ⚠</td><td>6144</td><td><strong>PSRAM</strong></td><td>P1</td><td><strong>Core 0</strong></td><td>临时</td><td>mp3_player.cc:166</td></tr>
+      <tr><td>7</td><td><code>stt_post</code> ✅</td><td>4096</td><td>INT</td><td>P1</td><td>Core 1</td><td>临时</td><td>remote_cmd.cc:436（5b9e9f75 修：PSRAM Core0→INT Core1）</td></tr>
+      <tr><td>8</td><td><code>mp3_dl</code> ✅</td><td>6144</td><td>PSRAM</td><td>P1</td><td>Core 1</td><td>临时</td><td>mp3_player.cc:169（5b9e9f75 修：Core0→Core1，栈保持 PSRAM）</td></tr>
       <tr><td>9</td><td><code>mp3_decode</code></td><td>?</td><td>INT</td><td>?</td><td>Core 0</td><td>持久</td><td>mp3_player.cc:179</td></tr>
       <tr><td>10</td><td><code>mp3_play</code></td><td>?</td><td>INT</td><td>?</td><td>Core 0</td><td>持久</td><td>mp3_player.cc:196</td></tr>
       <tr><td>11</td><td><code>nfc_ws1850s</code> (仅 P31)</td><td>?</td><td>INT</td><td>?</td><td>Core 0</td><td>持久</td><td>esp_nfc_ws1850s.cc:149</td></tr>
@@ -1845,18 +1845,20 @@ namespace ActivityCoordinator {
       <tr style="background:#FFF3E0"><td colspan="8"><strong>━━ Core 1 Pinned（持久）━━</strong></td></tr>
       <tr><td>12</td><td><code>audio_communication</code> (AFE)</td><td>4096</td><td>INT</td><td>P3</td><td>Core 1</td><td>Init→Destroy</td><td>afe_audio_processor.cc:70</td></tr>
 
-      <tr style="background:#FFF8E1"><td colspan="8"><strong>━━ 任意 Core / 默认无 affinity（持久 + 临时混）━━</strong></td></tr>
-      <tr style="background:#FFF8E1"><td>13</td><td><code>audio_output</code> ⚠</td><td>4096</td><td>INT</td><td>P4</td><td>无</td><td>Start→Stop</td><td>audio_service.cc:140</td></tr>
-      <tr style="background:#FFF8E1"><td>14</td><td><code>audio_detection</code> (wake_check) ⚠</td><td>4096</td><td>INT</td><td>P3</td><td>无</td><td>持久</td><td>afe_wake_word.cc:83</td></tr>
-      <tr><td>15</td><td><code>wake_word_encode_afe</code></td><td>24576</td><td>INT (已修)</td><td>?</td><td>无→默认 0</td><td>临时</td><td>afe_wake_word.cc:184</td></tr>
-      <tr style="background:#FFEBEE"><td>16</td><td><strong><code>wake_word_encode_custom</code></strong> ⚠ ⚠</td><td>28672</td><td><strong>PSRAM</strong></td><td>?</td><td><strong>无→默认 0</strong></td><td>临时</td><td>custom_wake_word.cc:222</td></tr>
-      <tr style="background:#FFF8E1"><td>17</td><td><code>activation</code> ⚠</td><td>8192</td><td>INT</td><td>P2</td><td>无</td><td>临时（自删）</td><td>application.cc:295</td></tr>
-      <tr style="background:#FFF8E1"><td>18</td><td><code>ota_response</code> ⚠</td><td>?</td><td>INT</td><td>?</td><td>无</td><td>临时</td><td>ota.cc:616</td></tr>
-      <tr style="background:#FFF8E1"><td>19</td><td><code>ml307_net</code> ⚠</td><td>4096</td><td>INT</td><td>P5</td><td>无</td><td>持久</td><td>ml307_board.cc:150</td></tr>
-      <tr style="background:#FFF8E1"><td>20</td><td><code>LedEvent</code> ⚠</td><td>2048</td><td>INT</td><td>P2+</td><td>无</td><td>持久</td><td>gpio_led.cc:85</td></tr>
-      <tr style="background:#FFF8E1"><td>21</td><td><code>blufi</code> ⚠</td><td>?</td><td>INT</td><td>?</td><td>无</td><td>持久</td><td>blufi.cc:558</td></tr>
-      <tr style="background:#FFF8E1"><td>22</td><td><code>wifi_board</code> ⚠</td><td>?</td><td>INT</td><td>?</td><td>无</td><td>?</td><td>wifi_board.cc:444</td></tr>
-      <tr style="background:#FFF8E1"><td>23-26</td><td><code>wifi_ap</code> × 4 ⚠</td><td>各异</td><td>INT</td><td>各异</td><td>无</td><td>AP 模式</td><td>wifi_ap.cc:416/493/503/582</td></tr>
+      <tr style="background:#E8F5E9"><td colspan="8"><strong>━━ Core 0 Pinned · 后续整改（739a2a78 显式 Pin）━━</strong></td></tr>
+      <tr><td>13</td><td><code>audio_output</code> ✅</td><td>4096</td><td>INT</td><td>P4</td><td>Core 0</td><td>Start→Stop</td><td>audio_service.cc:140（与 audio_input 同核 codec I2S 同位）</td></tr>
+      <tr><td>17</td><td><code>activation</code> ✅</td><td>8192</td><td>INT</td><td>P2</td><td>Core 0</td><td>临时（自删）</td><td>application.cc:301（HTTP + 主循环同核）</td></tr>
+      <tr><td>18</td><td><code>status_assets</code> ✅（原 ota_response）</td><td>4096</td><td>INT</td><td>P4</td><td>Core 0</td><td>临时</td><td>ota.cc:616（HTTP + 服务器时间同步）</td></tr>
+      <tr><td>19</td><td><code>ml307_net</code> ✅</td><td>4096</td><td>INT</td><td>P5</td><td>Core 0</td><td>持久</td><td>ml307_board.cc:150（4G modem UART/PPP 同核）</td></tr>
+      <tr><td>20</td><td><code>LedEvent</code> ✅</td><td>2048</td><td>INT</td><td>P2+</td><td>Core 0</td><td>持久</td><td>gpio_led.cc:85（GPIO 操作集中）</td></tr>
+
+      <tr style="background:#FFF3E0"><td colspan="8"><strong>━━ Core 1 Pinned · 后续整改（739a2a78 + 5b9e9f75）━━</strong></td></tr>
+      <tr><td>14</td><td><code>audio_detection</code> ✅</td><td>4096</td><td>INT</td><td><strong>P5</strong>（P3→P5）</td><td>Core 1</td><td>持久</td><td>afe_wake_word.cc:83（与 AFE 同核 · 提优先级）</td></tr>
+      <tr><td>15</td><td><code>encode_wake_word</code>（AFE）✅</td><td>24576</td><td>INT</td><td>P2</td><td>Core 1</td><td>临时</td><td>afe_wake_word.cc:184（栈 PSRAM→INT + Pin Core 1）</td></tr>
+      <tr><td>16</td><td><code>encode_wake_word</code>（custom）✅</td><td>28672</td><td>INT</td><td>P2</td><td>Core 1</td><td>临时</td><td>custom_wake_word.cc:235（PSRAM→INT + Pin Core 1）</td></tr>
+      <tr><td>21</td><td><code>blufi_wifi</code> ✅</td><td>4096</td><td>INT</td><td>P5</td><td>Core 1</td><td>临时</td><td>blufi.cc:559（避 Core 0 NVS 死锁）</td></tr>
+      <tr><td>22</td><td><code>config_done</code> ✅</td><td>8192</td><td>INT</td><td>P5</td><td>Core 1</td><td>临时</td><td>wifi_board.cc:445（与 wifi_ap 同核）</td></tr>
+      <tr style="background:#FFF8E1"><td>23-26</td><td><code>wifi_ap</code> × 4 · <code>config_switch</code> × 2</td><td>各异</td><td>INT</td><td>各异</td><td>Core 1</td><td>AP 模式</td><td>wifi_ap.cc + p30-4g/wifi board.cc（739a2a78 已 Pin Core 1）</td></tr>
 
       <tr style="background:#F5F5F5"><td colspan="8"><strong>━━ 板级幽灵任务（临时 · 不同板各异）━━</strong></td></tr>
       <tr style="background:#F5F5F5"><td>27</td><td><code>vol_adjust</code> / <code>delayed_wake</code> / <code>welcome</code></td><td>各异</td><td>INT</td><td>各异</td><td>各异</td><td>临时</td><td>板级 5+ 处</td></tr>
@@ -1864,8 +1866,8 @@ namespace ActivityCoordinator {
     </tbody>
   </table>
 
-  <div class="callout warn">
-    <strong>🟡 任意 Core 漂移问题（13 个任务无 affinity）</strong> · 13 个任务用 <code>xTaskCreate</code>（非 PinnedToCore），FreeRTOS 调度器会让它们在两核间漂移。<strong>风险</strong>：① audio_output 漂移到 Core 1 时与 LVGL/AFE 抢占 ② wake_word_encode 漂移到 Core 1 时和 audio_communication 抢 cache ③ ml307_net 漂移可能延迟 AT 处理 ④ activation 漂移可能阻塞 OTA 任务。<strong>建议</strong>：所有持久任务都明确 pin Core，临时任务可保持灵活但要测试核分配。
+  <div class="callout">
+    <strong>✅ 任意 Core 漂移问题已修</strong>（2026-04-28 · commit <code>739a2a78</code>） · 11 个原 <code>xTaskCreate</code>（无 affinity）任务全部改为 <code>xTaskCreatePinnedToCore</code>，按业务归属固定到目标核：Core 0 收 audio_output / activation / status_assets / ml307_net / LedEvent；Core 1 收 audio_detection（顺便 P3→P5）/ encode_wake_word ×2 / blufi_wifi / config_done / config_switch ×2。原"漂移→cache miss / 抢占 LVGL"风险消除。
   </div>
 
   <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">内存占用统计（栈级别）</h4>

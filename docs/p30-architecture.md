@@ -185,6 +185,7 @@ app_main()  main/main.cc:14
 ## 四、FreeRTOS 任务拓扑（按核心+优先级）
 
 任务按 CLAUDE.md 规范分配：网络与 OTA 上 Core 0，音频实时与 LVGL 上 Core 1。优先级从 P12（最高实时）到 P1（后台）。
+✅ **2026-04-28 整改**：全部应用任务已显式 `xTaskCreatePinnedToCore` 到指定核（commit `739a2a78`），消除 FreeRTOS 调度漂移；详见任务表第 5 列。
 
 ```
 Core 0（网络 / modem / OTA / main loop 主战场）        Core 1（音频实时 / LVGL）
@@ -206,18 +207,19 @@ Core 0（网络 / modem / OTA / main loop 主战场）        Core 1（音频实
 |-------|------|----------|--------|------|---------|------|
 | `main_app` | `main.cc:14` | 8192 | 10 | Core 0 | 永久 | `Application::Run()` 主事件循环 |
 | `audio_input` | `audio_service.cc:133` | 6144 (P_USE_PROC) / 4096 | 8 | Core 0 | Start→Stop | I2S 采集 + 唤醒词 |
-| `audio_output` | `audio_service.cc:140` | 4096 | 4 | 任意 | Start→Stop | PCM → DAC DMA |
+| `audio_output` | `audio_service.cc:140` | 4096 | 4 | **Core 0** | Start→Stop | PCM → DAC DMA（✅ 2026-04-28 显式 Pin Core 0：与 audio_input 同核 codec I2S 同位） |
 | `opus_codec` | `audio_service.cc:147` | 24576 | 7 | Core 0 | Start→Stop | Opus 编/解码 |
-| `audio_communication` | `processors/afe_audio_processor.cc` | 4096 | 3 | Core 1 | Start→Stop | AFE 回声消除 |
-| `encode_wake_word` | `audio/wake_words/afe_wake_word.cc:179` | 24KB, **INTERNAL 栈** | 2 | 任意 | 一次性（栈复用） | 唤醒词 Opus 编码上报（✅ 2026-04-28 修：栈 PSRAM→INTERNAL，避开 cache 禁用窗口崩溃） |
-| `activation` | `application.cc:297` | 8192 | 2 | 任意 | 网络上线→完成 | OTA 激活 + 协议初始化 |
+| `audio_communication` | `processors/afe_audio_processor.cc:74` | 4096 | 3 | Core 1 | Start→Stop | AFE 回声消除 |
+| `audio_detection` | `audio/wake_words/afe_wake_word.cc:87` | 4096 | **5** | **Core 1** | 永久 | 唤醒词检测主循环（✅ 2026-04-28 修：P3→P5 提优先级 + 显式 Pin Core 1，与 AFE 同核） |
+| `encode_wake_word` | `audio/wake_words/afe_wake_word.cc:179` | 24KB, **INTERNAL 栈** | 2 | **Core 1** | 一次性（栈复用） | 唤醒词 Opus 编码上报（✅ 2026-04-28 修：栈 PSRAM→INTERNAL + Pin Core 1） |
+| `activation` | `application.cc:297` | 8192 | 2 | **Core 0** | 网络上线→完成 | OTA 激活 + 协议初始化（✅ 2026-04-28 显式 Pin Core 0：HTTP + 主循环同核） |
 | `stt_post` | `remote_cmd.cc` | 4096 | 1 | Core 0 | 触发→完成 | STT 文本回调 HTTP POST |
 | `flow_load` | `flow_engine.cc` | 6144 | 1 | Core 0 | 触发→完成 | FlowEngine HTTP 脚本加载（一次性任务，加载完成自删） |
 | `lvgl_task` | (esp_idf 内置) | 配置项 | 5 | Core 1 | 永久 | LVGL 图形引擎 |
 | `wifi_task` | (esp_idf 内置) | 配置项 | 23 | Core 0 | 网络启动→停止 | WiFi 驱动 |
 | `tcpip_thread` | (esp_idf 内置) | 配置项 | 18 | Core 0 | 永久 | LWIP TCP/IP |
 | `modem_task` | `boards/common/ml307_board.cc` | 4096 | 5 | Core 0 | 网络启动→停止 | 4G AT 命令 |
-| `LedEvent` | `led/gpio_led.cc:85` | 2048 | 5 | 任意 | 永久 | LED 状态机 |
+| `LedEvent` | `led/gpio_led.cc:85` | 2048 | 5 | **Core 0** | 永久 | LED 状态机（✅ 2026-04-28 显式 Pin Core 0：GPIO 操作集中） |
 | `dns_server` | `wifi/dns_server.cc` | 2048 | 5 | Core 1 | AP 模式中 | 配网 DNS |
 | `headset_detect` | `boards/common/typec_headset.cc` | 3072 | 3 | Core 0 | Init→Destroy | Type-C 耳机 |
 | `clock_timer` | esp_timer 服务 | 3584 | 22 | Core 0 | 永久 | 周期 tick |
