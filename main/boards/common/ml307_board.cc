@@ -65,6 +65,20 @@ void Ml307Board::OnNetworkEvent(NetworkEvent event, const std::string& data) {
 }
 
 void Ml307Board::NetworkTask() {
+    // ─── ML307R 模组上电稳定窗口（必须保留）────────────────────────────────
+    // 根因：GPIO9（AUDPWR-EN）级联开关同时上电 LCD + 音频 + 4G VDD_EXT 三负载，
+    //       上电瞬间负载冲击大；ML307R 模组 boot 完成后才能响应 AT 命令。
+    // 不等：AtModem::Detect 立刻发 AT → 模组未就绪 → detect 重试 30 次 × 1s
+    //       = 最坏 30 秒浪费（且日志刷屏）。
+    // 1500ms 经验值：覆盖三负载 LDO 稳态 + ML307R boot 完成（典型 800-1200ms）。
+    //
+    // 设计变更（2026-04-28，方案 B）：原本在 Application::Initialize 里同步
+    //   等 1500ms，阻塞主流程；现移到 NetworkTask（独立 xTask），
+    //   Application 主流程提前 1.5s 进入 Run()，开机响应感更快。
+    //   WiFi 板（mydazy-p30-wifi）不走此路径，启动同步段直接省 1.5s。
+    // ───────────────────────────────────────────────────────────────────────
+    vTaskDelay(pdMS_TO_TICKS(1500));
+
     // Notify modem detection started
     OnNetworkEvent(NetworkEvent::ModemDetecting);
 
