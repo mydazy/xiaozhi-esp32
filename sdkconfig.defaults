@@ -15,9 +15,24 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/v2/16m.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
 
-CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+# P30 长期稳定运行 · 5 类 Watchdog 显式声明（详见 docs/p30-resource-plan.html § 5）
+# 历史问题：之前仅声明 timeout，其余依赖 ESP-IDF 默认值，量产前存在被改 default 风险。
+CONFIG_ESP_TASK_WDT_EN=y                    # 任务看门狗启用
+CONFIG_ESP_TASK_WDT_INIT=y                  # 启动期初始化
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10            # 任务卡死 10s 触发 panic
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y  # 监控 Core 0 idle
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y  # 监控 Core 1 idle
+CONFIG_ESP_INT_WDT=y                        # 中断看门狗启用
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=300           # 中断卡死 300ms 触发 panic
+CONFIG_ESP_INT_WDT_CHECK_CPU1=y             # 监控 Core 1 中断
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y  # 栈越界 canary 检测
+CONFIG_ESP_BROWNOUT_DET=y                   # 电压跌落检测
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_7=y         # 阈值 2.6V（最高灵敏）
+CONFIG_ESP_BROWNOUT_DET_LVL=7
+CONFIG_ESP_BROWNOUT_USE_INTR=y              # 用中断方式（非立即重启）
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y        # uxTaskGetSystemState 任务运行时统计
 
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
