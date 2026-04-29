@@ -83,7 +83,6 @@ public:
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
     virtual std::string GetBrandName() { return "MyDazy"; }
-    // 深度睡眠入口；非休眠板子可不实现（兜底为空，不会进 sleep）
     virtual void EnterDeepSleep(bool enable_gyro_wakeup = true) { (void)enable_gyro_wakeup; }
 };
 

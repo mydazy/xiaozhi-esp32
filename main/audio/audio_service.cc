@@ -325,10 +325,6 @@ void AudioService::AudioOutputTask() {
 }
 
 void AudioService::OpusCodecTask() {
-    // 2026-04-29 · high-water 探针：每 1000 帧（约 60s @ 60ms/帧）log 一次实际栈用量
-    // 目的：实测 24K 栈是否过度预留 · 量产 1 周后据数据决定是否缩到 12-16K
-    // 探针开销：每 60s 一次 uxTaskGetStackHighWaterMark + ESP_LOGI · CPU 几乎为零
-    static int frame_counter = 0;
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
         audio_queue_cv_.wait(lock, [this]() {
@@ -338,18 +334,6 @@ void AudioService::OpusCodecTask() {
         });
         if (service_stopped_) {
             break;
-        }
-
-        // high-water 探针（每 1000 帧打一次 · ~60s）
-        // 注：uxTaskGetStackHighWaterMark 返回 "运行以来见过的最少剩余空间"（free bytes，越小越接近溢出）
-        //     "实际峰值已用" = 总栈 - free
-        if (++frame_counter >= 1000) {
-            frame_counter = 0;
-            UBaseType_t free_words = uxTaskGetStackHighWaterMark(NULL);
-            unsigned free_bytes = free_words * sizeof(StackType_t);
-            unsigned used_bytes = 24576 - free_bytes;
-            ESP_LOGI(TAG, "[opus_codec] stack peak used: %u / 24576 bytes (%u%% · free %u bytes)",
-                     used_bytes, used_bytes * 100 / 24576, free_bytes);
         }
 
         /* Decode the audio from decode queue */

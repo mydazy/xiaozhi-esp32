@@ -75,7 +75,7 @@ void PowerSaveTimer::PowerSaveCheck() {
                 on_enter_sleep_mode_();
             }
 
-            if (cpu_max_freq_ < 120) {
+            if (cpu_max_freq_ <= 160) {
                 // 深度省电模式：关闭唤醒词检测和音频输入（< 80 MHz）
                 ESP_LOGI(TAG, "深度省电模式：关闭音频，降频至 %d MHz", cpu_max_freq_);
                 auto& audio_service = app.GetAudioService();
