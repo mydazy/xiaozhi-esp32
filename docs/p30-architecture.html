@@ -163,7 +163,7 @@ footer .src{display:inline-block;margin-top:4px;color:var(--ink-soft)}
     <span class="badge">ESP-IDF 5.5</span>
     <span class="badge">ESP32-S3 · 16MB Flash · 8MB PSRAM</span>
     <span class="badge">3 板共享：P30-4G / P30-WiFi / P31</span>
-    <span class="badge">12 态状态机 · 17 任务 · 5 音频任务</span>
+    <span class="badge">11 态状态机 · 28 任务（main/ 0 漂移）· 5 音频任务</span>
   </div>
 </section>
 
@@ -1670,7 +1670,16 @@ namespace ActivityCoordinator {
 <!-- ==================== § 四 任务拓扑 ==================== -->
 <section class="section" id="sec4">
   <h2><span class="num">§ 四</span> FreeRTOS 任务拓扑</h2>
-  <p class="sub">按 CLAUDE.md 规范：网络/OTA 上 Core 0，音频实时/LVGL 上 Core 1。优先级 P12（最高）→ P1（后台）。✅ 原 wake_encode PSRAM 栈红线已于 2026-04-28 修复（栈改 INTERNAL）。</p>
+  <p class="sub">按 CLAUDE.md 规范：网络/OTA 上 Core 0，音频实时/LVGL 上 Core 1。优先级 P12（最高）→ P1（后台）。✅ <strong>2026-04-29 P1 整改完成 · 漂移清零</strong>：<code>main/</code> 下全部 32 处 <code>xTaskCreate*</code> 调用确认 Pin 到指定核（grep <code>xTaskCreate\b</code> = 0 命中）；本轮修 14 处历史漂移任务 + 2 处 PSRAM/Core0 红线（详见下方红框 callout）。</p>
+
+  <div class="callout">
+    <strong>✅ P1 14 处漂移任务 Pin Core 完成</strong>（2026-04-29 · main/ 下零裸 <code>xTaskCreate</code>）
+    <ul style="margin:8px 0 0 18px">
+      <li><strong>Core 0（网络/codec/主循环 · 7 task）</strong>：<code>audio_input</code> / <code>audio_output</code> ×2 分支 / <code>activation</code> / <code>status_assets</code> (ota.cc) / <code>LedEvent</code> / <code>ml307_net</code></li>
+      <li><strong>Core 1（音频实时/AFE/BLE+WiFi 协议 · 7 task）</strong>：<code>audio_detection</code> / <code>encode_wake_word</code> ×2（AFE + Custom）/ <code>blufi_wifi</code> / <code>config_done</code> / <code>config_switch</code> ×2（4G/WiFi 板）</li>
+      <li>历史 PSRAM/Core0 红线消除：<code>encode_wake_word</code>（custom_wake_word.cc）栈 PSRAM→INTERNAL；<code>stt_post</code> PSRAM/Core0→INT/Core1（review § 5.2 K1/K2 同步关闭）</li>
+    </ul>
+  </div>
 
   <div class="legend">
     <span class="item"><span class="swatch" style="background:var(--core0);border-color:var(--core0-line)"></span>Core 0 · 网络/编解码/主循环</span>
@@ -1766,21 +1775,21 @@ namespace ActivityCoordinator {
         <text class="node-text" x="155" y="377">tcpip · LWIP</text>
         <text class="node-text sm" x="155" y="391">P18 · esp-idf 内置</text>
 
-        <rect x="65" y="408" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
-        <text class="node-text" x="155" y="422">activation · 8KB</text>
-        <text class="node-text sm" x="155" y="436">临时 · 激活完即删</text>
+        <rect x="65" y="408" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+        <text class="node-text" x="155" y="422" style="fill:#2E7D32">✅ activation · 8KB</text>
+        <text class="node-text sm" x="155" y="436">临时 · 激活完即删 · Pin Core 0</text>
 
-        <rect x="265" y="408" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
-        <text class="node-text" x="355" y="422">stt_post · 4KB</text>
-        <text class="node-text sm" x="355" y="436">STT HTTP POST</text>
+        <rect x="265" y="408" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+        <text class="node-text" x="355" y="422" style="fill:#2E7D32">✅ status_assets · 4KB</text>
+        <text class="node-text sm" x="355" y="436">OTA 资源 · Pin Core 0</text>
 
-        <rect x="65" y="453" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
-        <text class="node-text" x="155" y="467">LedEvent · 2KB</text>
-        <text class="node-text sm" x="155" y="481">LED 状态机</text>
+        <rect x="65" y="453" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+        <text class="node-text" x="155" y="467" style="fill:#2E7D32">✅ LedEvent · 2KB</text>
+        <text class="node-text sm" x="155" y="481">LED 状态机 · Pin Core 0</text>
 
-        <rect x="265" y="453" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
-        <text class="node-text" x="355" y="467">clock_timer · 3.5KB</text>
-        <text class="node-text sm" x="355" y="481">esp_timer P22</text>
+        <rect x="265" y="453" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+        <text class="node-text" x="355" y="467" style="fill:#2E7D32">✅ ml307_net · 4KB</text>
+        <text class="node-text sm" x="355" y="481">4G modem · Pin Core 0</text>
       </g>
 
       <!-- 优先级横线 -->
@@ -1816,11 +1825,11 @@ namespace ActivityCoordinator {
     <strong>🔴 严重事实纠正 · 应用层任务实测 ~25 个</strong> · 之前文档说 17 → 第一轮 Agent 扫描 11 → 第二轮全 SDK 穷尽 grep <strong>25+</strong>。漏列覆盖：audio_opus_enc/dec 双任务 / wake_word_check / mp3_player 三任务（dl/decode/play）/ wifi_ap 4 任务 / blufi / wifi_board / gfx_core / activation / ota_upgrade / 板级 vol_adjust / delayed_wake / welcome 等。
   </div>
 
-  <div class="callout warn">
-    <strong>🔴 红线违规 3 项（不是 review 标的 1 项）</strong> ·
-    <strong>1）<code>custom_wake_word.cc:222-230</code></strong> 自定义唤醒词 encode 任务 24KB <strong>PSRAM 栈 + Core 0</strong>（<em>之前只修 afe_wake_word，custom_wake_word 漏修！</em>）·
-    <strong>2）<code>remote_cmd.cc:430</code></strong> stt_post 4KB <strong>PSRAM 栈 + Core 0</strong> 显式 pinned · HTTP POST ·
-    <strong>3）<code>mp3_player.cc:166</code></strong> mp3_dl 6KB <strong>PSRAM 栈 + Core 0</strong>（README 注 HTTP I/O safe，但 cache 共享 SPI 仍有风险）
+  <div class="callout ok">
+    <strong>✅ 红线违规 3 项已全部修复</strong>（2026-04-28 / 2026-04-29 P0+P1） ·
+    <strong>1）<code>custom_wake_word.cc:222-230</code></strong> ✅ 24KB 栈 PSRAM→INTERNAL + StaticPin Core 1（commit 5b9e9f75）·
+    <strong>2）<code>remote_cmd.cc:430</code></strong> ✅ stt_post 栈 PSRAM→INT + Core 0→Core 1 显式 pinned（commit 5b9e9f75）·
+    <strong>3）<code>mp3_player.cc:166</code></strong> ✅ mp3_dl 挪 Core 0→Core 1（栈保持 PSRAM，避开 Core 0 NVS flash op 锁，README 安全前提满足）
   </div>
 
   <h4 style="margin-top:14px;font-size:14px;color:var(--brand-deep)">完整任务参数表 · 28 个应用层任务（栈/优先级/核心全展示）</h4>
@@ -1876,7 +1885,7 @@ namespace ActivityCoordinator {
     <tbody>
       <tr><td><strong>INT RAM 栈（持久）</strong></td><td>audio_input 6144 + audio_output 4096 + opus_codec 24576 + audio_communication 4096 + audio_detection 4096 + alarm_nvs 3584 + headset 3072 + ml307_net 4096 + LedEvent 2048 + dns_server 4096 = <strong>~60KB</strong></td><td>—</td><td>~60KB</td></tr>
       <tr><td><strong>INT RAM 栈（临时）</strong></td><td>—</td><td>flow_load 6144 + activation 8192 + wake_word_encode_afe 24576（高峰同时只可能 1 个） = <strong>~14-25KB</strong></td><td>~85KB</td></tr>
-      <tr style="background:#FFEBEE"><td><strong>⚠ PSRAM 栈（红线 3 项）</strong></td><td>—</td><td>wake_word_encode_custom 28672 + stt_post 4096 + mp3_dl 6144 = <strong>~38KB PSRAM</strong></td><td>风险：cache 共享 SPI 任意时刻崩</td></tr>
+      <tr style="background:#E8F5E9"><td><strong>✅ PSRAM 栈红线（已全部消除）</strong></td><td>—</td><td>wake_word_encode_custom 28672 ✅ → INT/Core1 · stt_post 4096 ✅ → INT/Core1 · mp3_dl 6144 ⚠ 保留 PSRAM 但已挪 Core1（README HTTP I/O safe，避开 Core 0 NVS 锁即可）</td><td>cache 共享 SPI 风险消除</td></tr>
       <tr><td>板级幽灵 + components</td><td>~10KB</td><td>~10KB</td><td>—</td></tr>
     </tbody>
   </table>
@@ -1924,18 +1933,18 @@ T+稳态  Idle · 28 个应用层任务 + 框架任务全部就位</pre>
   <table class="tbl-compact">
     <thead><tr><th>阶段</th><th>动作</th><th>工作量</th></tr></thead>
     <tbody>
-      <tr><td><strong>PR-A 量产前必修</strong></td><td>① custom_wake_word PSRAM → INT（同 afe 修法 · 同根因）② stt_post 评估（INT 栈或挪 Core 1）③ mp3_dl 评估（按 README 说法是否真 safe）④ 文档全文 17 → 25 任务事实纠正</td><td>~半天 + 三板编译</td></tr>
-      <tr><td><strong>PR-B 量产前打磨</strong></td><td>① audio_opus_enc/dec 双任务文档化 ② mp3_player 三任务文档化 ③ wifi_ap 4 任务文档化 ④ 内部 RAM 启动期峰值实测</td><td>~1 天</td></tr>
+      <tr style="background:#E8F5E9"><td><strong>✅ PR-A 量产前必修（已完成 2026-04-29）</strong></td><td>① custom_wake_word PSRAM → INT ✅ ② stt_post 挪 INT/Core 1 ✅ ③ mp3_dl 挪 Core 1 ✅ ④ 文档全文 17 → 28 任务事实纠正 ✅ ⑤ P1 14 处漂移任务全部 Pin Core ✅（grep 验收 0 命中）</td><td>已完成</td></tr>
+      <tr><td><strong>PR-B 量产前打磨</strong></td><td>① audio_opus_enc/dec 双任务文档化 ② mp3_player 三任务文档化 ③ wifi_ap 4 任务文档化 ④ 内部 RAM 启动期峰值实测 ⑤ 临时任务静态栈（activation/flow_load/ota_response 改 xTaskCreateStatic）</td><td>~1 天</td></tr>
       <tr><td><strong>量产后</strong></td><td>① 任务通信机制收拢（EventGroup vs Schedule vs esp_event_loop 分工原则） ② 板级幽灵任务清理</td><td>~1 周</td></tr>
     </tbody>
   </table>
 
   <div class="callout ok">
-    <strong>核心结论</strong> · 任务模型在通信机制 + 优先级 + 核心绑定整体合理，主要问题：(a) <strong>事实层文档严重失准</strong>（任务数 17 → 实测 25）(b) <strong>红线 3 项</strong>必修。<em>不需要重构任务模型本身</em>。
+    <strong>✅ 核心结论（2026-04-29 更新）</strong> · 任务模型在通信机制 + 优先级 + 核心绑定整体合理。原 (a) <strong>事实层文档失准</strong>（17 → 实测 28）✅ 已纠正、(b) <strong>红线 3 项</strong> ✅ 全部修复、(c) <strong>14 处任意 Core 漂移</strong> ✅ Pin 清零（main/ 下 grep <code>xTaskCreate\b</code> = 0 命中）。任务模型不再需要重构。
   </div>
 
   <div class="callout warn">
-    <strong>量产期纪律</strong> · ① 红线 3 项必修（不是 review 标的 1 项）；② 新加任务必须 grep 全 SDK 不与现有名重；③ 任务表必须含 components/ + managed_components/ 自带任务；④ 临时任务必须自删并不残留 TaskHandle；⑤ 板级幽灵任务必须文档化。
+    <strong>量产期纪律</strong> · ① 红线 3 项 ✅ 全部修复；② 新加任务必须 grep 全 SDK 不与现有名重；③ 任务表必须含 components/ + managed_components/ 自带任务；④ 临时任务必须自删并不残留 TaskHandle；⑤ 板级幽灵任务必须文档化；⑥ <strong>新增任务必须 Pin Core 不留漂移</strong>（grep <code>xTaskCreate\b</code> 必须 0 命中）。
   </div>
 
   <h3>§ 四.2 P30-4G 按运行模式 RAM 推演</h3>

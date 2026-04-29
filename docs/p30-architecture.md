@@ -185,44 +185,61 @@ app_main()  main/main.cc:14
 ## 四、FreeRTOS 任务拓扑（按核心+优先级）
 
 任务按 CLAUDE.md 规范分配：网络与 OTA 上 Core 0，音频实时与 LVGL 上 Core 1。优先级从 P12（最高实时）到 P1（后台）。
-✅ **2026-04-28 整改**：全部应用任务已显式 `xTaskCreatePinnedToCore` 到指定核（commit `739a2a78`），消除 FreeRTOS 调度漂移；详见任务表第 5 列。
+
+✅ **2026-04-29 P1 整改完成 · 漂移清零**：`main/` 下全部 32 处 `xTaskCreate*` 调用确认 Pin 到指定核（grep `xTaskCreate\b` = 0 命中）。本轮 P1 修改 14 处历史漂移任务（audio_input、audio_output ×2 分支、audio_detection、encode_wake_word ×2、activation、status_assets、LedEvent、blufi_wifi、config_done、config_switch ×2、ml307_net），FreeRTOS 调度抖动彻底消除。Core 落位见任务表第 5 列。
 
 ```
-Core 0（网络 / modem / OTA / main loop 主战场）        Core 1（音频实时 / LVGL）
-┌────────────────────────────────────────┐    ┌─────────────────────────────┐
-│ P10  main_app          (8KB INT)       │    │ P12  audio_input    INT     │
-│ P8   audio_input  (当前在 Core0,见下注) │    │ P10  audio_output   INT     │
-│ P7   opus_codec   (当前在 Core0)       │    │ P8   AFE processor          │
-│ P6   wake_word    (✅ 已改 INTERNAL)   │    │ P5   LVGL                   │
-│ P4   wifi/modem/lwip                   │    │ P3   audio_communication    │
-│ P3   tcpip                             │    │ P2   headset_detect         │
-│ P2   activation (临时, PSRAM 可)       │    │ P1   后台                   │
-│ P1   stt_post (临时, PSRAM 可)         │    └─────────────────────────────┘
-└────────────────────────────────────────┘
+Core 0（网络 / modem / codec / 主循环主战场）         Core 1（音频实时 / LVGL / BLE+WiFi 协议）
+┌────────────────────────────────────────────┐    ┌──────────────────────────────────┐
+│ P10  main_app           (8KB INT)          │    │ P12  audio_input  (历史命名)     │
+│ P8   audio_input        (✅ Pin)           │    │ P10  audio_output (历史命名)     │
+│ P7   opus_codec         (24KB)             │    │ P8   AFE processor (✅ Pin)      │
+│ P5   ml307_net          (✅ Pin)           │    │ P5   audio_detection (✅ Pin)    │
+│ P5   status_assets/OTA  (✅ Pin)           │    │ P5   LVGL                        │
+│ P4   wifi/modem/lwip                       │    │ P5   blufi_wifi (✅ Pin)         │
+│ P3   tcpip                                 │    │ P5   config_done (✅ Pin)        │
+│ P2   activation         (✅ Pin)           │    │ P3   config_switch (✅ Pin)      │
+│ P2   LedEvent           (✅ Pin)           │    │ P3   audio_communication         │
+│ P1   stt_post(INT,P0修) / mp3_dl(PSRAM)    │    │ P2   encode_wake_word (✅ Pin)   │
+│                                            │    │ P2   headset_detect              │
+└────────────────────────────────────────────┘    └──────────────────────────────────┘
 ```
 
-**任务清单**（关键 17 个）：
+**任务清单**（main/ 应用层核心 21 个 + ESP-IDF 内置 4 个 = 25 个；全 SDK 完整 28 个见 § 四.1）：
 
 | 任务名 | 文件 | 栈 (字节) | 优先级 | 核心 | 生命周期 | 功能 |
 |-------|------|----------|--------|------|---------|------|
 | `main_app` | `main.cc:14` | 8192 | 10 | Core 0 | 永久 | `Application::Run()` 主事件循环 |
-| `audio_input` | `audio_service.cc:133` | 6144 (P_USE_PROC) / 4096 | 8 | Core 0 | Start→Stop | I2S 采集 + 唤醒词 |
-| `audio_output` | `audio_service.cc:140` | 4096 | 4 | **Core 0** | Start→Stop | PCM → DAC DMA（✅ 2026-04-28 显式 Pin Core 0：与 audio_input 同核 codec I2S 同位） |
-| `opus_codec` | `audio_service.cc:147` | 24576 | 7 | Core 0 | Start→Stop | Opus 编/解码 |
-| `audio_communication` | `processors/afe_audio_processor.cc:74` | 4096 | 3 | Core 1 | Start→Stop | AFE 回声消除 |
-| `audio_detection` | `audio/wake_words/afe_wake_word.cc:87` | 4096 | **5** | **Core 1** | 永久 | 唤醒词检测主循环（✅ 2026-04-28 修：P3→P5 提优先级 + 显式 Pin Core 1，与 AFE 同核） |
-| `encode_wake_word` | `audio/wake_words/afe_wake_word.cc:179` | 24KB, **INTERNAL 栈** | 2 | **Core 1** | 一次性（栈复用） | 唤醒词 Opus 编码上报（✅ 2026-04-28 修：栈 PSRAM→INTERNAL + Pin Core 1） |
-| `activation` | `application.cc:297` | 8192 | 2 | **Core 0** | 网络上线→完成 | OTA 激活 + 协议初始化（✅ 2026-04-28 显式 Pin Core 0：HTTP + 主循环同核） |
-| `stt_post` | `remote_cmd.cc` | 4096 | 1 | Core 0 | 触发→完成 | STT 文本回调 HTTP POST |
-| `flow_load` | `flow_engine.cc` | 6144 | 1 | Core 0 | 触发→完成 | FlowEngine HTTP 脚本加载（一次性任务，加载完成自删） |
+| `audio_input` | `audio_service.cc:133` | 6144/4096 | 8 | **Core 0 ✅** | Start→Stop | I2S 采集 + 唤醒词预处理（2026-04-29 P1 修：显式 Pin Core 0） |
+| `audio_output` | `audio_service.cc:140/179` | 4096 | 4 | **Core 0 ✅** | Start→Stop | PCM → DAC DMA（2026-04-29 P1 修：AFE+无AFE 两分支均显式 Pin Core 0，与 audio_input 同核 codec I2S 同位） |
+| `opus_codec` | `audio_service.cc:147` | 24576 | 7 | Core 0 | Start→Stop | Opus 编/解码（24KB 栈刻意保留不动 · review § 5.2 已验证） |
+| `audio_communication` | `processors/afe_audio_processor.cc:74` | 4096 | 3 | Core 1 | Start→Stop | AFE 回声消除（既有 Pin） |
+| `audio_detection` | `audio/wake_words/afe_wake_word.cc:87` | 4096 | **5** | **Core 1 ✅** | 永久 | 唤醒词检测主循环（2026-04-28 P0：P3→P5 + Pin Core 1） |
+| `encode_wake_word` (AFE) | `audio/wake_words/afe_wake_word.cc:179` | 24KB INT | 2 | **Core 1 ✅** | 一次性（栈复用） | AFE 路径唤醒词 Opus 编码上报（2026-04-28 P0：PSRAM→INT + Pin Core 1） |
+| `encode_wake_word` (Custom) | `audio/wake_words/custom_wake_word.cc` | 24KB INT | 2 | **Core 1 ✅** | 一次性（栈复用） | Custom 路径同上（2026-04-29 P1 修：StaticPin Core 1，PSRAM 红线消除） |
+| `activation` | `application.cc:304` | 8192 | 2 | **Core 0 ✅** | 网络上线→完成 | OTA 激活 + 协议初始化（2026-04-29 P1 修：显式 Pin Core 0，HTTP + 主循环同核） |
+| `status_assets` | `ota.cc` | 4096 | 4 | **Core 0 ✅** | 触发→完成 | OTA 状态上报 + 资源拉取（2026-04-29 P1 修：显式 Pin Core 0） |
+| `stt_post` | `remote_cmd.cc` | 4096 INT | 1 | **Core 1 ✅** | 触发→完成 | STT 文本回调 HTTP POST（2026-04-28 P0：PSRAM/Core0 红线 → INT/Core 1） |
+| `flow_load` | `flow_engine.cc` | 6144 | 1 | Core 0 | 触发→完成 | FlowEngine HTTP 脚本加载（既有 Pin · 一次性自删） |
+| `ml307_net` | `boards/common/ml307_board.cc:148` | 4096 | 5 | **Core 0 ✅** | 网络启动→停止 | 4G modem AT/PPP 网络任务（2026-04-29 P1 修：显式 Pin Core 0） |
+| `LedEvent` | `led/gpio_led.cc:86` | 2048 | 2 | **Core 0 ✅** | 永久 | LED 渐变事件循环（2026-04-29 P1 修：显式 Pin Core 0，GPIO 操作集中） |
+| `blufi_wifi` | `blufi/blufi.cc` | 4096 | 5 | **Core 1 ✅** | BluFi 配网中 | BluFi WiFi 协议任务（2026-04-29 P1 修：显式 Pin Core 1，BLE+WiFi 同核） |
+| `config_done` | `boards/common/wifi_board.cc:444` | 8192 | 5 | **Core 1 ✅** | 配网成功→重启 | 配网完成清理 + Reboot（2026-04-29 P1 修：显式 Pin Core 1） |
+| `config_switch` (4G/WiFi) | `boards/mydazy-p30-{4g,wifi}/...:570/569` | 4096 | 3 | **Core 1 ✅** | 双击触发→完成 | BLUFI ↔ AP 配网模式切换（2026-04-29 P1 修：两板均显式 Pin Core 1） |
+| `wifi_ap` ×4 | `wifi/wifi_ap.cc` | 配置项 | - | Core 1 | AP 模式中 | AP 配网协议栈（既有 Pin） |
+| `dns_server` | `wifi/dns_server.cc` | 2048 | 5 | Core 1 | AP 模式中 | 配网 DNS（既有 Pin） |
+| `headset_detect` | `boards/common/typec_headset.cc` | 3072 | 3 | Core 0 | Init→Destroy | Type-C 耳机检测（既有 Pin） |
+| `alarm_manager` | `alarm_manager.cc` | 4096 | - | Core 0 | 永久 | 闹钟调度（既有 Pin） |
 | `lvgl_task` | (esp_idf 内置) | 配置项 | 5 | Core 1 | 永久 | LVGL 图形引擎 |
 | `wifi_task` | (esp_idf 内置) | 配置项 | 23 | Core 0 | 网络启动→停止 | WiFi 驱动 |
 | `tcpip_thread` | (esp_idf 内置) | 配置项 | 18 | Core 0 | 永久 | LWIP TCP/IP |
-| `modem_task` | `boards/common/ml307_board.cc` | 4096 | 5 | Core 0 | 网络启动→停止 | 4G AT 命令 |
-| `LedEvent` | `led/gpio_led.cc:85` | 2048 | 5 | **Core 0** | 永久 | LED 状态机（✅ 2026-04-28 显式 Pin Core 0：GPIO 操作集中） |
-| `dns_server` | `wifi/dns_server.cc` | 2048 | 5 | Core 1 | AP 模式中 | 配网 DNS |
-| `headset_detect` | `boards/common/typec_headset.cc` | 3072 | 3 | Core 0 | Init→Destroy | Type-C 耳机 |
 | `clock_timer` | esp_timer 服务 | 3584 | 22 | Core 0 | 永久 | 周期 tick |
+
+**Core 落位统计**（main/ 32 处 Pin 调用 · grep 验收 0 漂移）：
+
+- **Core 0**（网络/modem/codec/主循环 = 7 task）：audio_input、audio_output ×2、activation、status_assets、LedEvent、ml307_net
+- **Core 1**（音频实时/AFE/BLE+WiFi 协议 = 7 task）：audio_detection、encode_wake_word ×2、blufi_wifi、config_done、config_switch ×2
+- **既有 Pin**（未在本轮 P1 中修改 · 18 处）：audio_communication、stt_post（P0 修）、flow_engine、alarm_manager、dns_server、wifi_ap ×4、typec_headset、p31 ×2、afe_audio_processor 等
 
 **任务间通信**：
 - 跨任务事件：`xEventGroup`（`event_group_` 在 Application 与 AudioService 各一份）

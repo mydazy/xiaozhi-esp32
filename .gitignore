@@ -16,6 +16,7 @@ main/mmap_generate_emoji.h
 *.bin
 mmap_generate_*.h
 .clangd
-.idea/
+.idea/*
+!.idea/tools/
 .claude/settings.local.json
 .claude/worktrees/

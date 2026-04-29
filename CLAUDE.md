@@ -53,10 +53,19 @@
 - RemoteCmd 14 个 on_*；McpServer 20+ 注册工具
 - ESP32-S3：16MB Flash + 8MB PSRAM；内部 RAM 红线 60KB
 
+## FreeRTOS 任务纪律（2026-04-29 P1 整改后）
+- **main/ 下 0 裸 `xTaskCreate`**：grep `xTaskCreate\b` 必须 0 命中（每个 task 必须 Pin Core 或 Static Pin）
+- **Core 0**（网络/codec/主循环）：audio_input/output、opus_codec、main_app、ml307_net、activation、status_assets、LedEvent、stt_post（P0 修后）等
+- **Core 1**（音频实时/AFE/BLE+WiFi 协议/LVGL）：audio_detection、encode_wake_word ×2、audio_communication、blufi_wifi、config_done、config_switch、wifi_ap、LVGL 等
+- **PSRAM 栈红线**：禁止 PSRAM 栈 + Core 0 组合（cache 共享 SPI · NVS/OTA flash op 触发 Double exception）
+- 新增任务必须在 § 四.1 落位表登记（栈/优先级/Core/生命周期）
+
 ## 量产前 P1 修复清单（review § 5.2）
-- [ ] `wake_encode` PSRAM 栈 + Core 0 红线（必修）
+- [x] `wake_encode` PSRAM 栈 + Core 0 红线 ✅（custom_wake_word + afe_wake_word 双修 · 2026-04-28/29）
+- [x] 14 处任意 Core 漂移任务 ✅（grep 0 命中 · 2026-04-29）
 - [ ] 单击响应 1.5s 阻塞（OTA 改异步）
 - [ ] 欢迎音自动 ToggleChatState（产品评估后修）
+- [ ] 临时任务静态栈（activation/flow_load/status_assets 改 xTaskCreateStatic · 减堆碎片）
 
 ## 架构文档双源同步
 - markdown 是权威源：`docs/p30-architecture.md` · `docs/p30-architecture-review.md`
@@ -85,13 +94,6 @@
 - 新增模块尽量挂在 RemoteCmd / MCP Tool / LiveCompanion / 新文件中，不动 Application / UiDisplay 主结构
 - 每次 rebase 上游前看 § 十"上游 vs 自研"对照表
 
-## 禁区（绝对不动 · review § 5.2）
-- 蓝牙配网 BluFi（`main/boards/common/blufi.cpp`）
-- WiFi 热点配网（`wifi_board.cc::EnterWifiConfigMode`）
-- 下拉手势切换控制中心（`UiDisplay` 手势层）
-- 基础绑定 / OTA / MQTT 首次握手
-- 分区表 `partitions/v2/`
-- 协议兼容层 `BinaryProtocol2/3`
 
 ## 代码任务流程（覆盖全局规则）
 量产期紧张，简化为：
