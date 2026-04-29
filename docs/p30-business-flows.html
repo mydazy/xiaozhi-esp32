@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>P30-4G 主流程架构图 · 上电→稳态→业务分支</title>
+<meta name="description" content="P30-4G 单页主流程大图：从上电到 Idle 稳态、6 大业务分支、每节点标 RAM/Core/任务。" />
+<style>
+:root{
+  --brand:#C62828; --brand-deep:#8E1C1C; --brand-soft:#FCE8E8;
+  --bg:#FAFAFA; --paper:#FFFFFF; --ink:#1F1F1F; --ink-soft:#555;
+  --line:#E5E5E5;
+  --core0:#E0F2F1; --core0-line:#00897B;
+  --core1:#FFF3E0; --core1-line:#EF6C00;
+  --psram:#FFEBEE; --psram-line:#C62828;
+  --any:#FFF8E1; --any-line:#F9A825;
+  --ok:#2E7D32; --warn:#F57C00;
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:15px;line-height:1.7}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+code{font-family:"SF Mono",Menlo,Consolas,monospace;background:#F5F5F5;border-radius:4px;padding:1px 6px;font-size:.9em}
+
+.topbar{position:sticky;top:0;z-index:50;background:var(--brand);color:#fff;
+  padding:10px 28px;display:flex;align-items:center;gap:18px;box-shadow:var(--shadow)}
+.topbar .logo{font-weight:700}
+.topbar .meta{opacity:.85;font-size:13px}
+.topbar .spacer{flex:1}
+.topbar a{color:#fff;border-bottom:1px dashed rgba(255,255,255,.5)}
+
+.shell{max-width:1200px;margin:0 auto;padding:24px}
+.section{background:var(--paper);border:1px solid var(--line);border-radius:10px;
+  padding:24px 28px;margin-bottom:24px;box-shadow:var(--shadow)}
+.section h2{font-size:22px;margin:0 0 4px;color:var(--brand-deep)}
+.section .sub{color:var(--ink-soft);margin:0 0 16px;font-size:13.5px}
+
+.hero{background:linear-gradient(135deg,var(--brand),var(--brand-deep));color:#fff;
+  border-radius:10px;padding:32px 36px;margin-bottom:24px;box-shadow:var(--shadow)}
+.hero h1{margin:0 0 6px;font-size:28px}
+.hero p{margin:0;opacity:.9;font-size:14px}
+.hero .badges{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.hero .badge{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);
+  border-radius:14px;padding:3px 10px;font-size:12px}
+
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--ink-soft);margin:8px 0 12px}
+.legend .item{display:flex;align-items:center;gap:6px}
+.legend .swatch{width:14px;height:14px;border-radius:3px;border:1px solid #999}
+
+.svgwrap{background:#FCFCFC;border:1px solid var(--line);border-radius:8px;
+  padding:14px;overflow:auto}
+.svgwrap svg{display:block;margin:0 auto;max-width:100%;height:auto}
+
+table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}
+th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#FAFAFA;color:var(--ink-soft);font-weight:600;font-size:12.5px}
+
+.callout{border-left:4px solid var(--brand);background:var(--brand-soft);
+  padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:14px}
+.callout.ok{border-left-color:var(--ok);background:#E8F5E9}
+.callout.warn{border-left-color:var(--warn);background:#FFF8E1}
+.callout strong{color:var(--brand-deep)}
+
+footer{color:var(--ink-soft);font-size:12.5px;text-align:center;padding:24px 0 40px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="logo">MyDazy P30-4G · 主流程架构图</span>
+  <span class="meta">v2.0 · 单图全览 · 2026-04-28</span>
+  <span class="spacer"></span>
+  <span class="meta"><a href="p30-architecture.html">主架构剖析</a></span>
+</div>
+
+<div class="shell">
+
+<section class="hero">
+  <h1>P30-4G 主流程架构图</h1>
+  <p>一张图看清：从上电到 Idle 稳态、6 大业务分支、每节点标 <strong>状态 / 任务 / RAM / Core</strong>。规划层文档——后续项目按此优化。</p>
+  <div class="badges">
+    <span class="badge">单图全览</span>
+    <span class="badge">28 任务事实化</span>
+    <span class="badge">RAM 任务级</span>
+    <span class="badge">Core 0 / Core 1 / 任意 / PSRAM 4 类</span>
+    <span class="badge">类 § 三 状态机风格</span>
+  </div>
+</section>
+
+<section class="section">
+  <h2>主流程图 · 上电 → 稳态 → 6 业务分支</h2>
+  <p class="sub">自上而下读：① 启动 5 步同步 ② 网络异步上线 ③ 激活 ④ Idle 稳态 ⑤ 6 业务分支（用户事件触发） ⑥ 各分支可回 Idle 或进深睡。</p>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:#F3E5F5;border-color:#6A1B9A"></span>启动步骤</span>
+    <span class="item"><span class="swatch" style="background:#FFF8E1;border-color:#F9A825"></span>异步段</span>
+    <span class="item"><span class="swatch" style="background:#FFEBEE;border-color:#C62828"></span>稳态 Idle 中枢</span>
+    <span class="item"><span class="swatch" style="background:#E3F2FD;border-color:#1976D2"></span>业务分支</span>
+    <span class="item"><span class="swatch" style="background:#FFF3E0;border-color:#E65100"></span>升级 / 终态</span>
+  </div>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 1080 1480" xmlns="http://www.w3.org/2000/svg" aria-label="P30-4G 主流程架构图">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+        </marker>
+        <marker id="arRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#C62828"/>
+        </marker>
+        <marker id="arOrg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#E65100"/>
+        </marker>
+      </defs>
+
+      <text x="540" y="26" font-size="16" font-weight="700" fill="#8E1C1C" text-anchor="middle">P30-4G 主流程架构 · 状态 × 任务 × RAM × Core 一图全览</text>
+
+      <!-- ═══════ 启动 5 步（紫色）═══════ -->
+      <text x="100" y="60" font-size="12" font-weight="700" fill="#6A1B9A">▎启动同步段</text>
+
+      <!-- 步骤 1 上电 -->
+      <rect x="380" y="70" width="320" height="50" rx="8" fill="#F3E5F5" stroke="#6A1B9A" stroke-width="1.5"/>
+      <text x="540" y="90" font-size="13" font-weight="700" fill="#4A148C" text-anchor="middle">① POWERON · app_main()</text>
+      <text x="540" y="106" font-size="11" fill="#666" text-anchor="middle">esp_event_loop · nvs_flash_init · 状态：Unknown</text>
+      <text x="540" y="118" font-size="10" fill="#888" text-anchor="middle">RAM 占用：0（构造默认）</text>
+
+      <path d="M540,120 L540,140" stroke="#666" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <!-- 步骤 2 Initialize -->
+      <rect x="320" y="140" width="440" height="68" rx="8" fill="#F3E5F5" stroke="#6A1B9A" stroke-width="1.5"/>
+      <text x="540" y="160" font-size="13" font-weight="700" fill="#4A148C" text-anchor="middle">② Initialize · 11 个基线任务起飞</text>
+      <text x="340" y="178" font-size="10" fill="#444">audio_input 6K · audio_output 4K · opus_codec 24K · audio_communication 4K · audio_detection 4K</text>
+      <text x="340" y="192" font-size="10" fill="#444">alarm_nvs 3.5K · LedEvent 2K · gfx_core 4K · main_app 8K · ml307_net 4K · afe_mase 8K</text>
+      <text x="540" y="206" font-size="10.5" fill="#C62828" font-weight="600" text-anchor="middle">INT 累积：~64 KB · 状态：Starting · 80ms 背光延迟</text>
+
+      <path d="M540,208 L540,228" stroke="#666" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <!-- 步骤 3 注册 -->
+      <rect x="320" y="228" width="440" height="50" rx="8" fill="#F3E5F5" stroke="#6A1B9A" stroke-width="1.5"/>
+      <text x="540" y="248" font-size="13" font-weight="700" fill="#4A148C" text-anchor="middle">③ 注册 callback + clock_timer + MCP Tools</text>
+      <text x="540" y="264" font-size="11" fill="#666" text-anchor="middle">SetCallbacks · AddStateChangeListener · esp_timer_start(1Hz) · AddCommonTools</text>
+      <text x="540" y="276" font-size="10" fill="#888" text-anchor="middle">RAM 增量：~5 KB（堆）· 不增任务</text>
+
+      <path d="M540,278 L540,298" stroke="#666" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <!-- 步骤 4 StartNetwork 异步 -->
+      <rect x="320" y="298" width="440" height="60" rx="8" fill="#FFF8E1" stroke="#F9A825" stroke-width="1.5"/>
+      <text x="540" y="318" font-size="13" font-weight="700" fill="#E65100" text-anchor="middle">④ board.StartNetwork() · 异步立即返回</text>
+      <text x="540" y="336" font-size="11" fill="#444" text-anchor="middle">→ ml307_net 任务 NetworkTask 启动（独立 xTask）</text>
+      <text x="540" y="350" font-size="10" fill="#888" text-anchor="middle">内部等 1500ms（GPIO9 级联三负载 + ML307R boot）→ AT detect 30 重试 · register 6 重试</text>
+
+      <path d="M540,358 L540,378" stroke="#666" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <!-- 步骤 5 ActivationTask -->
+      <rect x="320" y="378" width="440" height="68" rx="8" fill="#FFF8E1" stroke="#F9A825" stroke-width="1.5"/>
+      <text x="540" y="398" font-size="13" font-weight="700" fill="#E65100" text-anchor="middle">⑤ NetworkConnected → ActivationTask（异步 8KB 临时）</text>
+      <text x="540" y="416" font-size="11" fill="#444" text-anchor="middle">CheckAssetsVersion → CheckNewVersion(Ota) → InitializeProtocol</text>
+      <text x="540" y="430" font-size="11" fill="#666" text-anchor="middle">状态：Activating · INT +8 KB 临时 · PSRAM +50 KB（assets）</text>
+      <text x="540" y="442" font-size="10" fill="#888" text-anchor="middle">激活完成自删 · 协议 MQTT/WS/JoyAI 三选一就位</text>
+
+      <path d="M540,446 L540,476" stroke="#C62828" stroke-width="2.5" marker-end="url(#arRed)"/>
+      <text x="555" y="464" font-size="11" fill="#C62828" font-weight="600">激活完成</text>
+
+      <!-- ═══════ Idle 稳态中枢（红色，最显著）═══════ -->
+      <rect x="280" y="476" width="520" height="74" rx="10" fill="#FFEBEE" stroke="#C62828" stroke-width="3"/>
+      <text x="540" y="498" font-size="18" font-weight="700" fill="#B71C1C" text-anchor="middle">⭐ Idle 稳态中枢</text>
+      <text x="540" y="518" font-size="12" fill="#444" text-anchor="middle">DeviceState=Idle · ActivityType=kNone · Scene=Clock</text>
+      <text x="540" y="534" font-size="12" fill="#C62828" font-weight="600" text-anchor="middle">INT 总占用 ~145 KB · PSRAM ~5.5 MB · 距 60KB 红线余 ~75 KB ✅</text>
+      <text x="540" y="548" font-size="10" fill="#888" text-anchor="middle">(应用层 64K 任务栈 + IDF 框架 35K + 堆 50K + 系统)</text>
+
+      <!-- 6 业务分支射线 -->
+      <!-- 唤醒对话（左上）-->
+      <path d="M310,500 L100,610" stroke="#1976D2" stroke-width="2" marker-end="url(#ar)"/>
+      <text x="200" y="555" font-size="11" fill="#1976D2" font-weight="600">唤醒/单击</text>
+
+      <!-- MP3（左下） -->
+      <path d="M310,540 L100,840" stroke="#1976D2" stroke-width="2" marker-end="url(#ar)"/>
+      <text x="200" y="700" font-size="11" fill="#1976D2" font-weight="600">music_play</text>
+
+      <!-- Flow（左中下）-->
+      <path d="M310,540 L100,1050" stroke="#1976D2" stroke-width="2" marker-end="url(#ar)"/>
+      <text x="200" y="850" font-size="11" fill="#1976D2" font-weight="600">flow.start</text>
+
+      <!-- OTA（右上）-->
+      <path d="M770,500 L980,610" stroke="#E65100" stroke-width="2" marker-end="url(#arOrg)"/>
+      <text x="880" y="555" font-size="11" fill="#E65100" font-weight="600">OTA 检查</text>
+
+      <!-- 配网（右中）-->
+      <path d="M770,540 L980,840" stroke="#1976D2" stroke-width="2" marker-end="url(#ar)"/>
+      <text x="880" y="700" font-size="11" fill="#1976D2" font-weight="600">三连击</text>
+
+      <!-- 深睡（右下）-->
+      <path d="M770,540 L980,1050" stroke="#E65100" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#arOrg)"/>
+      <text x="880" y="850" font-size="11" fill="#E65100" font-weight="600">5min 无操作</text>
+
+      <!-- ═══════ 6 业务分支节点 ═══════ -->
+
+      <!-- 1. 唤醒对话循环 -->
+      <rect x="20" y="610" width="280" height="160" rx="8" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.8"/>
+      <text x="160" y="630" font-size="13" font-weight="700" fill="#0D47A1" text-anchor="middle">① 唤醒对话循环 · ActivityType=kChat</text>
+      <text x="35" y="652" font-size="11" font-weight="600" fill="#0D47A1">状态环：Idle→Connecting→Listening⇄Speaking</text>
+      <text x="35" y="672" font-size="10.5" fill="#444">+wake_word_encode 24K INT 临时（Core 0）</text>
+      <text x="35" y="688" font-size="10.5" fill="#444">+Protocol 实例 ~10K INT（堆）</text>
+      <text x="35" y="704" font-size="10.5" fill="#444">+接收 buffer ~500K PSRAM</text>
+      <text x="35" y="720" font-size="10.5" fill="#444">+OPUS 编码 16kHz 60ms · 解码 24kHz</text>
+      <text x="35" y="740" font-size="11" font-weight="600" fill="#C62828">⚠ 临时高峰 INT ~199 KB · 余 ~30 KB</text>
+      <text x="35" y="758" font-size="10" fill="#888">完成 → TTS 完 → 回 Idle</text>
+
+      <!-- 2. MP3 播放 -->
+      <rect x="20" y="840" width="280" height="180" rx="8" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.8"/>
+      <text x="160" y="860" font-size="13" font-weight="700" fill="#0D47A1" text-anchor="middle">② MP3 播放 · ActivityType=kMusic</text>
+      <text x="35" y="882" font-size="11" font-weight="600" fill="#0D47A1">状态：仍 Idle（CloseAudioChannel 关通道）</text>
+      <text x="35" y="902" font-size="10.5" fill="#444">+mp3_dec 10K INT · Core 0 P7</text>
+      <text x="35" y="918" font-size="10.5" fill="#444">+mp3_out 4K INT · Core 1 P10</text>
+      <text x="35" y="934" font-size="10.5" fill="#C62828" font-weight="600">⚠ +mp3_dl 6K PSRAM · Core 0 P1（红线 1）</text>
+      <text x="35" y="950" font-size="10.5" fill="#444">+pcm_ring ~200K PSRAM 解码缓冲</text>
+      <text x="35" y="970" font-size="11" font-weight="600" fill="#0D47A1">总占用 INT ~159 KB · PSRAM 5.7MB</text>
+      <text x="35" y="988" font-size="10" fill="#888">退出：唤醒 / 单击 / music_stop · 三任务自删</text>
+      <text x="35" y="1004" font-size="10" fill="#888">+ FlowEngine.Suspend（如运行中）</text>
+
+      <!-- 3. Flow 流程脚本 -->
+      <rect x="20" y="1050" width="280" height="170" rx="8" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.8"/>
+      <text x="160" y="1070" font-size="13" font-weight="700" fill="#0D47A1" text-anchor="middle">③ Flow 流程脚本 · ActivityType=kFlow</text>
+      <text x="35" y="1092" font-size="11" font-weight="600" fill="#0D47A1">状态：Speaking⇄Listening 循环</text>
+      <text x="35" y="1112" font-size="10.5" fill="#444">+flow_load 6K INT 临时（HTTP 下载）</text>
+      <text x="35" y="1128" font-size="10.5" fill="#444">+脚本 JSON ~50K 堆</text>
+      <text x="35" y="1144" font-size="10.5" fill="#444">FlowEngine 内部 4 子态：</text>
+      <text x="35" y="1158" font-size="10" fill="#888">  kIdle / kPlaying / kDelay / kSuspended</text>
+      <text x="35" y="1178" font-size="11" font-weight="600" fill="#0D47A1">总占用 INT ~155 KB</text>
+      <text x="35" y="1196" font-size="10" fill="#888">OnAudioChannelClosed 5s 自重连</text>
+      <text x="35" y="1212" font-size="10" fill="#888">用户唤醒 → Suspend</text>
+
+      <!-- 4. OTA 升级 -->
+      <rect x="780" y="610" width="280" height="160" rx="8" fill="#FFF3E0" stroke="#E65100" stroke-width="1.8"/>
+      <text x="920" y="630" font-size="13" font-weight="700" fill="#BF360C" text-anchor="middle">④ OTA 升级 · 释放型场景</text>
+      <text x="795" y="652" font-size="11" font-weight="600" fill="#BF360C">状态：Activating→Upgrading→Reboot</text>
+      <text x="795" y="672" font-size="10.5" fill="#444">audio_service.Stop（释放 -38K INT）</text>
+      <text x="795" y="688" font-size="10.5" fill="#444">+ota_response 临时 ~5K</text>
+      <text x="795" y="704" font-size="10.5" fill="#444">SetPowerSaveLevel(PERFORMANCE)</text>
+      <text x="795" y="724" font-size="11" font-weight="600" fill="#1B5E20">总占用 INT ~112 KB（释放 33K）✅</text>
+      <text x="795" y="744" font-size="10" fill="#888">成功：esp_restart 全部释放</text>
+      <text x="795" y="760" font-size="10" fill="#888">失败：audio_service.Start 恢复 + Alert</text>
+
+      <!-- 5. 配网模式 -->
+      <rect x="780" y="840" width="280" height="180" rx="8" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.8"/>
+      <text x="920" y="860" font-size="13" font-weight="700" fill="#0D47A1" text-anchor="middle">⑤ 配网模式 · BluFi/AP 双击切换</text>
+      <text x="795" y="882" font-size="11" font-weight="600" fill="#0D47A1">状态：WifiConfiguring</text>
+      <text x="795" y="902" font-size="10.5" fill="#444">+dns_server 4K INT · Core 0</text>
+      <text x="795" y="918" font-size="10.5" fill="#444">+wifi_ap × 4（3 PSRAM Core1 + 1 INT Core1）</text>
+      <text x="795" y="934" font-size="10.5" fill="#444">+blufi 4K INT · 任意 Core</text>
+      <text x="795" y="950" font-size="10.5" fill="#444">+wifi_board "config_done" 8K INT</text>
+      <text x="795" y="970" font-size="11" font-weight="600" fill="#0D47A1">总占用 INT ~165 KB · PSRAM +12K</text>
+      <text x="795" y="988" font-size="10" fill="#666">PSRAM 在 Core 1 不构成红线 ✅</text>
+      <text x="795" y="1006" font-size="10" fill="#888">配网完成 → Activating → Idle</text>
+
+      <!-- 6. 深睡眠 -->
+      <rect x="780" y="1050" width="280" height="170" rx="8" fill="#FFF3E0" stroke="#E65100" stroke-width="1.8" stroke-dasharray="5 3"/>
+      <text x="920" y="1070" font-size="13" font-weight="700" fill="#BF360C" text-anchor="middle">⑥ 深睡 / 唤醒 · 5 分钟无操作</text>
+      <text x="795" y="1092" font-size="11" font-weight="600" fill="#BF360C">触发：PowerSaveTimer / 长按 5s 关机</text>
+      <text x="795" y="1112" font-size="10.5" fill="#444">EnterDeepSleep 4 步：</text>
+      <text x="795" y="1128" font-size="10" fill="#666">  ① ShutdownTouchAndAudio</text>
+      <text x="795" y="1142" font-size="10" fill="#666">  ② ConfigureWakeupSources</text>
+      <text x="795" y="1156" font-size="10" fill="#666">  ③ ResetAllGpios</text>
+      <text x="795" y="1170" font-size="10" fill="#666">  ④ esp_deep_sleep_start</text>
+      <text x="795" y="1188" font-size="11" font-weight="600" fill="#1B5E20">RAM 释放：-50K INT · -3MB PSRAM</text>
+      <text x="795" y="1206" font-size="10" fill="#888">唤醒源 4 种：POWERON/EXT0/EXT1/TIMER</text>
+
+      <!-- ═══════ 业务分支返回 Idle 汇聚 ═══════ -->
+      <path d="M160,770 L160,1280" stroke="#1976D2" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+      <path d="M160,1020 L160,1280" stroke="#1976D2" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+      <path d="M160,1220 L160,1280" stroke="#1976D2" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+      <path d="M920,770 L920,1280" stroke="#E65100" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#arOrg)"/>
+      <path d="M920,1020 L920,1280" stroke="#1976D2" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+
+      <!-- 回 Idle / Reboot / 深睡 三汇聚点 -->
+      <rect x="80" y="1280" width="200" height="44" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="1.5"/>
+      <text x="180" y="1300" font-size="12" font-weight="600" fill="#B71C1C" text-anchor="middle">回 Idle 稳态</text>
+      <text x="180" y="1316" font-size="10" fill="#666" text-anchor="middle">对话 / MP3 / Flow / 配网完成</text>
+
+      <rect x="440" y="1280" width="200" height="44" rx="6" fill="#FFF3E0" stroke="#E65100" stroke-width="1.5"/>
+      <text x="540" y="1300" font-size="12" font-weight="600" fill="#BF360C" text-anchor="middle">esp_restart Reboot</text>
+      <text x="540" y="1316" font-size="10" fill="#666" text-anchor="middle">OTA 成功 / 9 连击恢复出厂</text>
+
+      <rect x="800" y="1280" width="200" height="44" rx="6" fill="#FFF3E0" stroke="#E65100" stroke-width="1.5" stroke-dasharray="5 3"/>
+      <text x="900" y="1300" font-size="12" font-weight="600" fill="#BF360C" text-anchor="middle">DeepSleep · ROM 唤醒</text>
+      <text x="900" y="1316" font-size="10" fill="#666" text-anchor="middle">EXT0/EXT1/TIMER → ① 重启</text>
+
+      <!-- Reboot 回 ① -->
+      <path d="M540,1324 Q540,1380 280,1380 Q40,1380 40,90 L380,90" stroke="#E65100" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#arOrg)" fill="none"/>
+      <text x="50" y="700" font-size="10" fill="#E65100" font-weight="600" transform="rotate(-90 50 700)">Reboot 回 ① POWERON</text>
+
+      <path d="M900,1324 Q900,1390 1060,1390 Q1075,1390 1075,90 L700,90" stroke="#E65100" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#arOrg)" fill="none"/>
+      <text x="1070" y="700" font-size="10" fill="#E65100" font-weight="600" transform="rotate(-90 1070 700)">DeepSleep 唤醒回 ① POWERON</text>
+
+      <!-- 回 Idle -->
+      <path d="M180,1324 Q180,1410 540,1410 Q540,1410 540,560" stroke="#C62828" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arRed)" fill="none"/>
+
+      <!-- 底部说明 -->
+      <text x="540" y="1450" font-size="11" fill="#666" text-anchor="middle" font-style="italic">
+        基线 4G Idle ~145 KB INT · 加各业务分支 Δ = 任意时刻总占用 · 详见下方综合表
+      </text>
+    </svg>
+  </div>
+</section>
+
+<!-- ═══════ 综合 RAM 表 ═══════ -->
+<section class="section">
+  <h2>综合 RAM 占用表（基线 + 业务流 Δ）</h2>
+  <p class="sub">基线 4G Idle = 145 KB INT；任意时刻总占用 = 基线 + 该业务流 Δ。</p>
+
+  <table>
+    <thead><tr><th>业务流</th><th>状态</th><th>新增任务（精确栈）</th><th>INT Δ</th><th>PSRAM Δ</th><th>总 INT</th><th>距 60K 红线</th></tr></thead>
+    <tbody>
+      <tr><td><strong>4G Idle 基线</strong></td><td>Idle</td><td>—</td><td>—</td><td>—</td><td>~145 KB</td><td>余 75K ✅</td></tr>
+      <tr><td>① 唤醒对话循环</td><td>Listen⇄Speak</td><td>+wake_word_encode 24K INT 临时</td><td>+24K</td><td>+500K</td><td>~199 KB</td><td>余 30K 🟡</td></tr>
+      <tr><td>② MP3 播放</td><td>Idle (Music)</td><td>+mp3_dec 10K + mp3_out 4K + <strong>mp3_dl 6K PSRAM 红线</strong></td><td>+14K</td><td>+6K + 200K ring</td><td>~159 KB</td><td>余 65K ✅</td></tr>
+      <tr><td>③ Flow 脚本</td><td>Speak⇄Listen</td><td>+flow_load 6K INT 临时</td><td>+6K</td><td>+50K JSON</td><td>~155 KB</td><td>余 70K ✅</td></tr>
+      <tr><td>④ OTA 升级</td><td>Upgrading</td><td>audio_service.Stop 释放 38K + ota_response 5K</td><td>-33K</td><td>+0</td><td>~112 KB</td><td>余 110K ✅</td></tr>
+      <tr><td>⑤ 配网模式</td><td>WifiConfiguring</td><td>+dns_server 4K + wifi_ap × 4 (3 PSRAM Core1) + blufi + wifi_board 8K</td><td>+12K</td><td>+12K</td><td>~165 KB</td><td>余 60K 🟡</td></tr>
+      <tr><td>⑥ 深睡</td><td>DeepSleep</td><td>所有任务释放</td><td>-50K</td><td>-3MB</td><td>~95 KB</td><td>余 130K ✅</td></tr>
+      <tr style="background:#FFEBEE"><td><strong>三事件叠加（最高峰）</strong></td><td>—</td><td>对话 + MP3 + 双网切换</td><td>+43K</td><td>+6K</td><td><strong>~205 KB</strong></td><td><strong>余 25K 🔴</strong></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ═══════ 任务 Core 分配总表 ═══════ -->
+<section class="section">
+  <h2>任务 Core 分配总表（28 应用层任务）</h2>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:#E0F2F1;border-color:#00897B"></span>Core 0 Pinned（11 个）</span>
+    <span class="item"><span class="swatch" style="background:#FFF3E0;border-color:#EF6C00"></span>Core 1 Pinned（5 个）</span>
+    <span class="item"><span class="swatch" style="background:#FFF8E1;border-color:#F9A825"></span>任意 Core 漂移（9 个）</span>
+    <span class="item"><span class="swatch" style="background:#FFEBEE;border-color:#C62828"></span>PSRAM 红线（3 个）</span>
+  </div>
+
+  <table>
+    <thead><tr><th>分组</th><th>任务（栈）</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Core 0 Pinned 持久</strong></td><td>audio_input(6K) · opus_codec(24K) · alarm_nvs(3.5K) · dns_server(4K) · headset(3K · P31) · mp3_dec(10K) · mp3_play(?) · nfc(P31) · flow_load(6K 临时) · ml307_net(4K) · main_app(8K)</td></tr>
+      <tr><td><strong>Core 1 Pinned 持久</strong></td><td>audio_communication AFE(4K) · mp3_out(4K) · wifi_ap × 3 PSRAM(4K) · wifi_ap restart(4K INT)</td></tr>
+      <tr><td><strong>任意 Core 漂移</strong></td><td>audio_output(4K) · audio_detection(4K) · wake_word_encode_afe(24K INT 已修) · activation(8K 临时) · ota_response(?) · LedEvent(2K) · blufi(?) · wifi_board(8K)</td></tr>
+      <tr style="background:#FFEBEE"><td><strong>⚠ PSRAM 红线 3 项</strong></td><td><strong>wake_word_encode_custom(28K PSRAM Core 0)</strong> · <strong>stt_post(4K PSRAM Core 0)</strong> · <strong>mp3_dl(6K PSRAM Core 0)</strong></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ═══════ 关键事实 + checklist ═══════ -->
+<section class="section">
+  <h2>关键事实速查 + 量产 P0 checklist</h2>
+
+  <h3 style="margin-top:14px;font-size:15px;color:var(--brand-deep)">P30-4G 关键事实</h3>
+  <table>
+    <tbody>
+      <tr><td>状态机</td><td><strong>11 态</strong>（不是 12 态）· FatalError 不可达 bug 待修</td></tr>
+      <tr><td>应用层任务</td><td><strong>28 个</strong>（main + components + managed_components）</td></tr>
+      <tr><td>红线任务</td><td><strong>3 个</strong>（custom_wake_word + stt_post + mp3_dl 全部 PSRAM + Core 0）</td></tr>
+      <tr><td>音频参数</td><td>编码 16 kHz 60 ms 固定 · 解码 24 kHz · VBR + DTX · FEC 关</td></tr>
+      <tr><td>RemoteCmd</td><td><strong>15 个</strong> on_*（其中 6 个业务调度类待收拢）</td></tr>
+      <tr><td>1500ms 延迟</td><td>已迁移到 ml307_board.cc::NetworkTask（GPIO9 级联三负载 + ML307R boot）</td></tr>
+      <tr><td>三板差异</td><td>P30-4G 无 NFC/iBeacon/Headset · 有双网+加速计+触摸+GNSS</td></tr>
+    </tbody>
+  </table>
+
+  <h3 style="margin-top:14px;font-size:15px;color:var(--brand-deep)">P0 量产前必修</h3>
+  <table>
+    <tbody>
+      <tr><td>① 修红线 3 项</td><td>custom_wake_word PSRAM→INT（同 wake_encode 修法）+ stt_post + mp3_dl 评估</td></tr>
+      <tr><td>② 修 FatalError 不可达 bug</td><td>IsValidTransition 各 case 加 → FatalError 路径</td></tr>
+      <tr><td>③ 三事件叠加场景实测</td><td>已加 <code>Application::MonitorMemoryHealth()</code> 周期监控 · 跑 24h 看 min_free</td></tr>
+      <tr><td>④ 文档全文事实纠正</td><td>11 态 / 28 任务 / 16kHz / 60ms 固定（markdown + HTML + CLAUDE.md）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>项目流程合理性结论</strong> · 主流程图反映的 6 业务分支 + Idle 中枢架构 <strong>整体合理</strong>。RAM 分配在 320 KB 上限内，PSRAM 5.5MB 充裕。<strong>主要风险</strong>：(a) 红线 3 项必修 (b) 对话+唤醒词叠加场景距 60K 红线最紧 30K (c) FatalError 设计与实现不一致。<em>这三项修完，整套架构进入"量产可控"状态</em>。
+  </div>
+
+  <div class="callout warn">
+    <strong>后续项目对齐原则</strong> · ① 任意新业务流必须能落进上图某个分支或新增分支 ② 新业务流必须填 RAM Δ + Core 分配 ③ 不动 Idle 中枢架构 ④ 业务流互斥关系参照 § 9 矩阵 ⑤ 新功能优先复用现有 11 个基线任务，不轻易加新任务。
+  </div>
+</section>
+
+</div>
+
+<footer>
+  MyDazy P30-4G · 主流程架构图 v2.0 · 单图全览 · 2026-04-28
+  <br/>
+  与 <a href="p30-architecture.html">主架构剖析</a> 互补 · markdown 权威源 <a href="p30-architecture.md">p30-architecture.md</a>
+</footer>
+
+</body>
+</html>
