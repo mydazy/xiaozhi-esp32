@@ -365,16 +365,38 @@ bool AtUart::ParseResponse() {
         std::string item;
         while (std::getline(iss, item, ',')) {
             AtArgumentValue argument;
-            if (item.front() == '"') {
+            // 🔴 修崩溃：std::stod / std::stoi 在解析非法字符串时会抛 std::invalid_argument，
+            // 项目启用 CONFIG_COMPILER_CXX_EXCEPTIONS=y 但 caller 未 try-catch
+            // → 异常上抛触发 std::terminate → __cxa_throw → abort() 重启循环。
+            // 已知触发场景：
+            //   - 空字段（连续两个逗号 ",,"，item="" → stod/stoi 都崩）
+            //   - 含 "." 但不是合法浮点（IP 地址 "10.0.0.1" 第一段合法，但 "v.1" 类不合法）
+            //   - URC 字段含特殊字符（如 GPS 模糊数据）
+            // 修法：try-catch 兜底 + ESP_LOGW 输出原始 item / command，便于下次崩溃前定位。
+            if (!item.empty() && item.front() == '"') {
                 argument.type = AtArgumentValue::Type::String;
-                argument.string_value = item.substr(1, item.size() - 2);
+                argument.string_value = (item.size() >= 2) ? item.substr(1, item.size() - 2) : "";
             } else if (item.find(".") != std::string::npos) {
-                argument.type = AtArgumentValue::Type::Double;
-                argument.double_value = std::stod(item);
+                try {
+                    argument.double_value = std::stod(item);
+                    argument.type = AtArgumentValue::Type::Double;
+                } catch (const std::exception& e) {
+                    ESP_LOGW(TAG, "stod failed for cmd=%s item='%s' (%s) → 降级字符串",
+                             command.c_str(), item.c_str(), e.what());
+                    argument.type = AtArgumentValue::Type::String;
+                    argument.string_value = item;
+                }
             } else if (is_number(item)) {
-                argument.type = AtArgumentValue::Type::Int;
-                argument.int_value = std::stoi(item);
-                argument.string_value = std::move(item);
+                try {
+                    argument.int_value = std::stoi(item);
+                    argument.string_value = item;
+                    argument.type = AtArgumentValue::Type::Int;
+                } catch (const std::exception& e) {
+                    ESP_LOGW(TAG, "stoi failed for cmd=%s item='%s' (%s) → 降级字符串",
+                             command.c_str(), item.c_str(), e.what());
+                    argument.type = AtArgumentValue::Type::String;
+                    argument.string_value = std::move(item);
+                }
             } else {
                 argument.type = AtArgumentValue::Type::String;
                 argument.string_value = std::move(item);
