@@ -49,23 +49,25 @@ public:
      * 通用二维码显示页（覆盖所有场景：配网 BLUFI/AP / 设备绑定 / 未来付费二维码 等）
      * 仅支持显示二维码的 Display 实现会覆盖；其他 Display 子类回退到空实现。
      *
+     * 参数按"使用频率"排序：bottom（最常用）→ top → 配网色条 → highlight（特殊场景）
+     *
      * @param qr_content    完整二维码内容（调用方拼好：URL / WIFI:T:...;S:xxx;; / 任意字符串）
+     * @param bottom        底部辅助文字（如设备名、操作说明）— 几乎所有场景都用
      * @param top           顶部提示词（如"微信扫码配网"/"绑定设备"/"扫码支付"）
-     * @param bottom        底部辅助文字（如设备名、操作说明）
-     * @param highlight     高亮大字号文字（如激活码 / 付款金额，nullptr=不显示）
      * @param left_label    左色条标签（nullptr=不显示色条 → 简单二维码场景）
      * @param right_label   右色条标签
      * @param active_left   true=左色条高亮，false=右色条高亮（仅显示色条时生效）
      * @param on_double_click  整页双击 callback（仅显示色条时生效，用于切换模式）
+     * @param highlight     高亮大字号文字（如激活码 / 付款金额，nullptr=不显示）
      */
     virtual void ShowQrCode(const char* qr_content,
-                            const char* top = nullptr,
                             const char* bottom = nullptr,
-                            const char* highlight = nullptr,
+                            const char* top = nullptr,
                             const char* left_label = nullptr,
                             const char* right_label = nullptr,
                             bool active_left = true,
-                            std::function<void()> on_double_click = nullptr) {}
+                            std::function<void()> on_double_click = nullptr,
+                            const char* highlight = nullptr) {}
     virtual void HideQrCode() {}
 
     inline int width() const { return width_; }

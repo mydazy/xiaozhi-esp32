@@ -37,13 +37,13 @@ public:
 
     // ===== 通用二维码页（覆盖配网/绑定/付费等所有场景） =====
     void ShowQrCode(const char* qr_content,
-                    const char* top = nullptr,
                     const char* bottom = nullptr,
-                    const char* highlight = nullptr,
+                    const char* top = nullptr,
                     const char* left_label = nullptr,
                     const char* right_label = nullptr,
                     bool active_left = true,
-                    std::function<void()> on_double_click = nullptr) override;
+                    std::function<void()> on_double_click = nullptr,
+                    const char* highlight = nullptr) override;
     void HideQrCode() override;
 
     // ===== 主屏切换 =====

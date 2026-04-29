@@ -440,10 +440,11 @@ void UiDisplay::FinishBootAndShowClock() {
 // ============================================================
 
 void UiDisplay::ShowQrCode(const char* qr_content,
-                            const char* top, const char* bottom, const char* highlight,
+                            const char* bottom, const char* top,
                             const char* left_label, const char* right_label,
                             bool active_left,
-                            std::function<void()> on_double_click) {
+                            std::function<void()> on_double_click,
+                            const char* highlight) {
     DisplayLockGuard lock(this);
     HideQrCode();
 
