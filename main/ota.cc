@@ -613,7 +613,8 @@ bool Ota::ReportStatus() {
 
     if (!resp.empty()) {
         auto *resp_ptr = new std::string(std::move(resp));
-        BaseType_t task_created = xTaskCreate([](void* p) {
+        // P1 修：Pin Core 0（HTTP + 服务器时间同步 · 与 Application 主循环同核）
+        BaseType_t task_created = xTaskCreatePinnedToCore([](void* p) {
             std::unique_ptr<std::string> holder(static_cast<std::string*>(p));
             cJSON* root = cJSON_Parse(holder->c_str());
             if (!root) { vTaskDelete(NULL); return; }
@@ -661,7 +662,7 @@ bool Ota::ReportStatus() {
 
             cJSON_Delete(root);
             vTaskDelete(NULL);
-        }, "status_assets", 4096, resp_ptr, 4, NULL);
+        }, "status_assets", 4096, resp_ptr, 4, NULL, 0);
 
         if (task_created != pdPASS) {
             delete resp_ptr;

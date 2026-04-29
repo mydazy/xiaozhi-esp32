@@ -555,7 +555,8 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
     // ⭐ 异步执行WiFi连接，避免阻塞NimBLE host task
     // TryConnectAndSave 最多阻塞10s，超过BLE supervision timeout(6s)会导致
     // BLE断连，小程序收不到配网结果→显示"配网超时"而实际WiFi已连接成功
-    xTaskCreate([](void *arg) {
+    // P1 修：Pin Core 1（BLE/WiFi 协议任务 · 与 wifi_ap 同核 · 避 Core 0 NVS 死锁）
+    xTaskCreatePinnedToCore([](void *arg) {
       auto &self = Blufi::GetInstance();
       std::string error;
       if (self.credential_validator_(self.ssid_, self.password_, error)) {
@@ -586,7 +587,7 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
                                         nullptr);
       }
       vTaskDelete(NULL);
-    }, "blufi_wifi", 4096, NULL, 5, NULL);
+    }, "blufi_wifi", 4096, NULL, 5, NULL, 1);
     break;
   }
 

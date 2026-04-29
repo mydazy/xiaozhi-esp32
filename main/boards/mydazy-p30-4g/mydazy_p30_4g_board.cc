@@ -567,7 +567,8 @@ private:
         if (status == kDeviceStateWifiConfiguring) {
             static std::atomic_flag switching = ATOMIC_FLAG_INIT;
             if (!switching.test_and_set()) {
-                xTaskCreate([](void* arg) {
+                // P1 修：Pin Core 1（与 wifi_ap / blufi_wifi / config_done 同核 · 配网切换任务）
+                xTaskCreatePinnedToCore([](void* arg) {
                     auto* self = static_cast<MyDazyP30_4GBoard*>(arg);
                     auto* wifi = dynamic_cast<WifiBoard*>(&self->GetCurrentBoard());
                     if (wifi != nullptr) {
@@ -577,7 +578,7 @@ private:
                     }
                     switching.clear();
                     vTaskDelete(nullptr);
-                }, "config_switch", 4096, this, 3, nullptr);
+                }, "config_switch", 4096, this, 3, nullptr, 1);
             }
             return;
         }

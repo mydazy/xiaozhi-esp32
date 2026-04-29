@@ -301,12 +301,13 @@ void Application::HandleNetworkConnectedEvent() {
             return;
         }
 
-        xTaskCreate([](void* arg) {
+        // P1 修：Pin Core 0（HTTP + Application 主循环同核 · 避免漂移）
+        xTaskCreatePinnedToCore([](void* arg) {
             Application* app = static_cast<Application*>(arg);
             app->ActivationTask();
             app->activation_task_handle_ = nullptr;
             vTaskDelete(NULL);
-        }, "activation", 4096 * 2, this, 2, &activation_task_handle_);
+        }, "activation", 4096 * 2, this, 2, &activation_task_handle_, 0);
     }
 
     // Update the status bar immediately to show the network state

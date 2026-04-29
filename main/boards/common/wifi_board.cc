@@ -441,7 +441,8 @@ void WifiBoard::OnConfigSuccess() {
 
     app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "", "", Lang::Sounds::OGG_SUCCESS);
 
-    xTaskCreate([](void* arg) {
+    // P1 修：Pin Core 1（与 wifi_ap / blufi_wifi 同核 · 配网清理任务）
+    xTaskCreatePinnedToCore([](void* arg) {
         auto* self = static_cast<WifiBoard*>(arg);
 
         // 1. 等待提示音 + BLE数据发送完成
@@ -466,7 +467,7 @@ void WifiBoard::OnConfigSuccess() {
         Application::GetInstance().Reboot();  // 内部 esp_restart() 不返回
 
         vTaskDelete(NULL);
-    }, "config_done", 8192, this, 5, NULL);
+    }, "config_done", 8192, this, 5, NULL, 1);
 }
 
 // ============ 其他方法 ============
