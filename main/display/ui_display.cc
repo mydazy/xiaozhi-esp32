@@ -531,12 +531,8 @@ void UiDisplay::ShowQrCode(const char* qr_content,
         return lbl;
     };
 
-    // 配网模式顶部固定提示（仅在显示左右色条时有效）
-    if (has_bars) {
-        make_label("双击切换模式", lv_color_hex(0xAAAAAA), LV_ALIGN_TOP_MID, 2);
-    }
-    // 顶部业务提示词（配网模式下移避开"双击切换"提示）
-    make_label(top, lv_color_hex(0x333333), LV_ALIGN_TOP_MID, has_bars ? 22 : 6);
+    // 顶部一行（调用方传什么显什么：配网传"双击切换模式"，激活传"绑定设备"...）
+    make_label(top, lv_color_hex(0x333333), LV_ALIGN_TOP_MID, 6);
 
     // 中央二维码（调用方拼好内容，内部不做格式判断）
 #if CONFIG_LV_USE_QRCODE
