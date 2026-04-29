@@ -297,6 +297,19 @@ bool AtUart::ParseResponse() {
             return true;
         }
 
+        // Patch B · HTTP Binary Receive Mode（来自 189 v3.5.3 验证版）
+        // 必须在 find("\r\n") 之前拦截：binary content 内可能包含 \r\n 字节，
+        // 走默认分支会被截断。仅在 http_binary_mode_=true 时启用，默认 false 不改变 HEX 行为。
+        // EC801E 不调 SetHttpBinaryMode，此分支为 dead code 不影响 +QHTTP*/+QIURC 解析。
+        if (http_binary_mode_ && rx_buffer_.size() > 22 &&
+            memcmp(rx_buffer_.c_str(), "+MHTTPURC: \"header\"", 19) == 0) {
+            return ParseBinaryHttpHeader();
+        }
+        if (http_binary_mode_ && rx_buffer_.size() > 24 &&
+            memcmp(rx_buffer_.c_str(), "+MHTTPURC: \"content\"", 20) == 0) {
+            return ParseBinaryHttpContent();
+        }
+
         end_pos = rx_buffer_.find("\r\n");
         if (end_pos == std::string::npos) {
             // FIXME: for +MHTTPURC: "ind", missing newline
@@ -409,6 +422,176 @@ bool AtUart::ParseResponse() {
     }
     
     return false;
+}
+
+// Patch B · HTTP Binary Receive Mode parsers
+// 来自 189 v3.5.3（小智 fork）已经线上验证。仅 ML307 模组生效（EC801E HTTP 走 TCP-socket 路径不触发）。
+// 注意：本函数在 ParseResponse() 持 rx_buffer_mutex_ 期间调用，并在持锁期间调用 HandleUrc()。
+// HandleUrc 内部用 urc_mutex_ 保护，与 rx_buffer_mutex_ 无锁序冲突；callback 不应反向调 ParseResponse。
+//
+// 二进制模式解析 +MHTTPURC: "header",<httpid>,<status_code>,<header_len>,<header_text>\r\n
+// header_text 是 ASCII（HTTP 响应头），但作为整体走二进制读取避免被 \r\n 截断。
+bool AtUart::ParseBinaryHttpHeader() {
+    const char* buf = rx_buffer_.c_str();
+    size_t buf_len = rx_buffer_.size();
+
+    // 跳过 +MHTTPURC: "header" 前缀（19字节）
+    size_t pos = 19;
+    if (pos >= buf_len || buf[pos] != ',') {
+        return false;
+    }
+    pos++;  // 跳过 "header" 后的逗号
+
+    // 解析 httpid, status_code, header_len（3个整数字段）
+    int fields[3] = {0, 0, 0};
+    for (int i = 0; i < 3; i++) {
+        int value = 0;
+        bool found_digit = false;
+        while (pos < buf_len && buf[pos] >= '0' && buf[pos] <= '9') {
+            value = value * 10 + (buf[pos] - '0');
+            found_digit = true;
+            pos++;
+        }
+        if (!found_digit || pos >= buf_len) {
+            return false;  // 数据不完整
+        }
+        fields[i] = value;
+
+        if (buf[pos] != ',') {
+            return false;
+        }
+        pos++;
+    }
+
+    int header_len = fields[2];
+
+    // 检查是否有足够的数据: 前缀 + header_len + \r\n
+    size_t total_needed = pos + header_len + 2;
+    if (buf_len < total_needed) {
+        return false;  // 数据不完整，等待更多数据
+    }
+
+    // 提取完整的 header 文本数据
+    std::string header_data(buf + pos, header_len);
+
+    // 构造参数（与 HEX 模式保持相同的参数结构）
+    std::vector<AtArgumentValue> arguments;
+
+    AtArgumentValue arg0;
+    arg0.type = AtArgumentValue::Type::String;
+    arg0.string_value = "header";
+    arguments.push_back(arg0);
+
+    AtArgumentValue arg1;
+    arg1.type = AtArgumentValue::Type::Int;
+    arg1.int_value = fields[0];  // httpid
+    arguments.push_back(arg1);
+
+    AtArgumentValue arg2;
+    arg2.type = AtArgumentValue::Type::Int;
+    arg2.int_value = fields[1];  // status_code
+    arguments.push_back(arg2);
+
+    AtArgumentValue arg3;
+    arg3.type = AtArgumentValue::Type::Int;
+    arg3.int_value = header_len;
+    arguments.push_back(arg3);
+
+    AtArgumentValue arg4;
+    arg4.type = AtArgumentValue::Type::String;
+    arg4.string_value = std::move(header_data);
+    arguments.push_back(arg4);
+
+    rx_buffer_.erase(0, total_needed);
+    HandleUrc("MHTTPURC", arguments);
+    return true;
+}
+
+// 二进制模式解析 +MHTTPURC: "content",<httpid>,<content_len>,<sum_len>,<cur_len>,<binary_data>\r\n
+// 前缀部分是 ASCII，<binary_data> 是原始二进制（可能包含 \r\n、逗号等）
+bool AtUart::ParseBinaryHttpContent() {
+    const char* buf = rx_buffer_.c_str();
+    size_t buf_len = rx_buffer_.size();
+
+    // 跳过 +MHTTPURC: "content", 前缀（20字节）
+    size_t pos = 20;
+    if (pos >= buf_len || buf[pos] != ',') {
+        return false;
+    }
+    pos++;  // 跳过 "content" 后的逗号
+
+    // 解析 httpid, content_len, sum_len, cur_len（4个整数字段）
+    int fields[4] = {0, 0, 0, 0};
+    for (int i = 0; i < 4; i++) {
+        int value = 0;
+        bool found_digit = false;
+        while (pos < buf_len && buf[pos] >= '0' && buf[pos] <= '9') {
+            value = value * 10 + (buf[pos] - '0');
+            found_digit = true;
+            pos++;
+        }
+        if (!found_digit || pos >= buf_len) {
+            return false;
+        }
+        fields[i] = value;
+
+        if (i < 3) {
+            if (buf[pos] != ',') {
+                return false;
+            }
+            pos++;
+        }
+    }
+
+    int cur_len = fields[3];
+
+    // cur_len=0 时（chunked EOF），模组不发尾部逗号和数据，直接跟 \r\n
+    if (cur_len == 0) {
+        if (pos + 2 > buf_len) {
+            return false;
+        }
+        std::vector<AtArgumentValue> arguments;
+
+        AtArgumentValue arg0;
+        arg0.type = AtArgumentValue::Type::String;
+        arg0.string_value = "content";
+        arguments.push_back(arg0);
+
+        AtArgumentValue arg1; arg1.type = AtArgumentValue::Type::Int; arg1.int_value = fields[0]; arguments.push_back(arg1);
+        AtArgumentValue arg2; arg2.type = AtArgumentValue::Type::Int; arg2.int_value = fields[1]; arguments.push_back(arg2);
+        AtArgumentValue arg3; arg3.type = AtArgumentValue::Type::Int; arg3.int_value = fields[2]; arguments.push_back(arg3);
+        AtArgumentValue arg4; arg4.type = AtArgumentValue::Type::Int; arg4.int_value = 0;         arguments.push_back(arg4);
+
+        rx_buffer_.erase(0, pos + 2);
+        HandleUrc("MHTTPURC", arguments);
+        return true;
+    }
+
+    // cur_len > 0: 第4个字段后面是逗号 + 二进制数据
+    if (pos >= buf_len || buf[pos] != ',') {
+        return false;
+    }
+    pos++;
+
+    size_t total_needed = pos + cur_len + 2;  // +2 for trailing \r\n
+    if (buf_len < total_needed) {
+        return false;
+    }
+
+    std::string binary_data(buf + pos, cur_len);
+
+    std::vector<AtArgumentValue> arguments;
+
+    AtArgumentValue arg0; arg0.type = AtArgumentValue::Type::String; arg0.string_value = "content"; arguments.push_back(arg0);
+    AtArgumentValue arg1; arg1.type = AtArgumentValue::Type::Int;    arg1.int_value = fields[0];    arguments.push_back(arg1);
+    AtArgumentValue arg2; arg2.type = AtArgumentValue::Type::Int;    arg2.int_value = fields[1];    arguments.push_back(arg2);
+    AtArgumentValue arg3; arg3.type = AtArgumentValue::Type::Int;    arg3.int_value = fields[2];    arguments.push_back(arg3);
+    AtArgumentValue arg4; arg4.type = AtArgumentValue::Type::Int;    arg4.int_value = cur_len;      arguments.push_back(arg4);
+    AtArgumentValue arg5; arg5.type = AtArgumentValue::Type::String; arg5.string_value = std::move(binary_data); arguments.push_back(arg5);
+
+    rx_buffer_.erase(0, total_needed);
+    HandleUrc("MHTTPURC", arguments);
+    return true;
 }
 
 void AtUart::HandleUrc(const std::string& command, const std::vector<AtArgumentValue>& arguments) {

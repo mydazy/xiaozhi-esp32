@@ -10,15 +10,11 @@ set(COMMON_SRCS
 )
 
 # Additional source files for non-ESP32 targets (uart-uhci not supported on ESP32)
+# EC801E / NT26K 模组支持已精简（mydazy 三 SKU 全部使用 ML307R · 2026-04-29）
 if(NOT IDF_TARGET STREQUAL "esp32")
     list(APPEND COMMON_SRCS
         "src/at_uart.cc"
         "src/at_modem.cc"
-        "src/ec801e/ec801e_at_modem.cc"
-        "src/ec801e/ec801e_tcp.cc"
-        "src/ec801e/ec801e_ssl.cc"
-        "src/ec801e/ec801e_udp.cc"
-        "src/ec801e/ec801e_mqtt.cc"
         "src/ml307/ml307_at_modem.cc"
         "src/ml307/ml307_tcp.cc"
         "src/ml307/ml307_ssl.cc"

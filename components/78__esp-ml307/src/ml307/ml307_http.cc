@@ -17,9 +17,16 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
                     eof_ = false;
                     body_offset_ = 0;
                     body_.clear();
+                    body_consumed_ = 0;       // Patch B
+                    content_lost_ = false;    // Patch B
                     status_code_ = arguments[2].int_value;
                     if (arguments.size() >= 5) {
-                        ParseResponseHeaders(at_uart_->DecodeHex(arguments[4].string_value));
+                        // Patch B · binary 模式: ParseBinaryHttpHeader 已按长度读取完整 header 文本，无需 hex 解码
+                        if (binary_receive_) {
+                            ParseResponseHeaders(arguments[4].string_value);
+                        } else {
+                            ParseResponseHeaders(at_uart_->DecodeHex(arguments[4].string_value));
+                        }
                     } else {
                         // FIXME: <header> 被分包发送
                         ESP_LOGE(TAG, "Missing header");
@@ -29,10 +36,22 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
                     // +MHTTPURC: "content",<httpid>,<content_len>,<sum_len>,<cur_len>,<data>
                     std::string decoded_data;
                     if (arguments.size() >= 6) {
-                        at_uart_->DecodeHexAppend(decoded_data, arguments[5].string_value.c_str(), arguments[5].string_value.length());
+                        // Patch B · binary 模式: arguments[5] 已经是 raw bytes，零开销 move
+                        if (binary_receive_) {
+                            decoded_data = std::move(arguments[5].string_value);
+                        } else {
+                            at_uart_->DecodeHexAppend(decoded_data, arguments[5].string_value.c_str(), arguments[5].string_value.length());
+                        }
+                    } else if (arguments.size() >= 5 && arguments[4].int_value == 0) {
+                        // Patch B · cur_len=0: chunked EOF 标记，无数据
                     } else {
                         // FIXME: <data> 被分包发送
-                        ESP_LOGE(TAG, "Missing content");
+                        ESP_LOGE(TAG, "Missing content (args=%d)", (int)arguments.size());
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        content_lost_ = true;
+                        eof_ = true;
+                        cv_.notify_one();
+                        return;
                     }
 
                     std::lock_guard<std::mutex> lock(mutex_);
@@ -46,12 +65,15 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
                             eof_ = arguments[3].int_value >= arguments[2].int_value;
                         }
                     }
-                    
+
                     body_offset_ += arguments[4].int_value;
                     if (arguments[3].int_value > body_offset_) {
-                        ESP_LOGE(TAG, "body_offset_: %u, arguments[3].int_value: %d", body_offset_, arguments[3].int_value);
-                        Close();
-                        return;
+                        // Patch B · 数据丢失警示（不再 Close，让上层 Read 拿到 -1 判断）
+                        ESP_LOGE(TAG, "Data loss: expected offset %d, got %u (%d bytes lost)",
+                                 arguments[3].int_value, body_offset_,
+                                 arguments[3].int_value - (int)body_offset_);
+                        content_lost_ = true;
+                        eof_ = true;
                     }
                     cv_.notify_one();  // 使用条件变量通知
                 } else if (type == "err") {
@@ -68,6 +90,7 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
             instance_active_ = true;
             xEventGroupSetBits(event_group_handle_, ML307_HTTP_EVENT_INITIALIZED);
         } else if (command == "FIFO_OVERFLOW") {
+            // V2 独有 · DMA 缓冲溢出，强制关闭释放资源
             xEventGroupSetBits(event_group_handle_, ML307_HTTP_EVENT_ERROR);
             Close();
         }
@@ -76,30 +99,46 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
 
 int Ml307Http::Read(char* buffer, size_t buffer_size) {
     std::unique_lock<std::mutex> lock(mutex_);
-    
-    if (eof_ && body_.empty()) {
-        return 0;
+
+    // Patch B · 用 body_consumed_ 偏移量代替反复 erase，减少内存拷贝（189 16KB 阈值优化）
+    size_t available = body_.size() - body_consumed_;
+
+    if (available == 0) {
+        if (eof_) {
+            return content_lost_ ? -1 : 0;
+        }
+
+        // 使用条件变量等待数据
+        auto timeout = std::chrono::milliseconds(timeout_ms_);
+        bool received = cv_.wait_for(lock, timeout, [this] {
+            return body_.size() > body_consumed_ || eof_;
+        });
+
+        if (!received) {
+            ESP_LOGE(TAG, "Read timeout (%dms), body_offset: %u, eof: %d",
+                     timeout_ms_, body_offset_, eof_);
+            return -1;
+        }
+        if (!instance_active_) {
+            return -1;
+        }
+
+        available = body_.size() - body_consumed_;
+        if (available == 0) {
+            return content_lost_ ? -1 : 0;
+        }
     }
-    
-    // 使用条件变量等待数据
-    auto timeout = std::chrono::milliseconds(timeout_ms_);
-    bool received = cv_.wait_for(lock, timeout, [this] { 
-        return !body_.empty() || eof_; 
-    });
-    
-    if (!received) {
-        ESP_LOGE(TAG, "Timeout waiting for HTTP content to be received, body_offset: %u, eof: %d", 
-                 body_offset_, eof_);
-        return -1;
+
+    size_t bytes_to_read = std::min(available, buffer_size);
+    std::memcpy(buffer, body_.data() + body_consumed_, bytes_to_read);
+    body_consumed_ += bytes_to_read;
+
+    // 累计消费超过 16KB 时回收内存（减少 erase 频率，单次 erase O(n) 改为 16KB 一次）
+    if (body_consumed_ > 16384) {
+        body_.erase(0, body_consumed_);
+        body_consumed_ = 0;
     }
-    if (!instance_active_) {
-        return -1;
-    }
-    
-    size_t bytes_to_read = std::min(body_.size(), buffer_size);
-    std::memcpy(buffer, body_.data(), bytes_to_read);
-    body_.erase(0, bytes_to_read);
-    
+
     return bytes_to_read;
 }
 
@@ -250,9 +289,18 @@ bool Ml307Http::Open(const std::string& method, const std::string& url) {
         content_ = std::nullopt;
     }
 
-    // Set HEX encoding ON
-    command = "AT+MHTTPCFG=\"encoding\"," + std::to_string(http_id_) + ",1,1";
-    at_uart_->SendCommand(command);
+    // Patch B · 编码协商：发送方仍 HEX（避免发送侧 0xFF 等控制字符干扰 AT），接收方优先 Binary
+    // ML307R 老固件不支持 binary（encoding=1,0）时 SendCommand 返回 false，回退到 HEX 模式（吞吐折半但兼容）
+    command = "AT+MHTTPCFG=\"encoding\"," + std::to_string(http_id_) + ",1,0";
+    if (at_uart_->SendCommand(command)) {
+        binary_receive_ = true;
+        at_uart_->SetHttpBinaryMode(true);
+        ESP_LOGI(TAG, "Binary receive mode enabled (UART raw passthrough)");
+    } else {
+        command = "AT+MHTTPCFG=\"encoding\"," + std::to_string(http_id_) + ",1,1";
+        at_uart_->SendCommand(command);
+        ESP_LOGW(TAG, "Binary mode unsupported, fallback to HEX (throughput halved)");
+    }
 
     // Send request
     // method to value: 1. GET 2. POST 3. PUT 4. DELETE 5. HEAD
@@ -281,8 +329,15 @@ bool Ml307Http::Open(const std::string& method, const std::string& url) {
 }
 
 bool Ml307Http::FetchHeaders() {
+    // Patch B · 守卫：避免 GetStatusCode/GetBodyLength 多次调用 wait_bits
+    if (headers_fetched_) {
+        return status_code_ != -1;
+    }
+
     // Wait for headers
     auto bits = xEventGroupWaitBits(event_group_handle_, ML307_HTTP_EVENT_HEADERS_RECEIVED | ML307_HTTP_EVENT_ERROR, pdTRUE, pdFALSE, pdMS_TO_TICKS(timeout_ms_));
+    headers_fetched_ = true;
+
     if (bits & ML307_HTTP_EVENT_ERROR) {
         ESP_LOGE(TAG, "HTTP request error: %s", ErrorCodeToString(error_code_).c_str());
         return false;
@@ -297,7 +352,8 @@ bool Ml307Http::FetchHeaders() {
         content_length_ = std::stoul(it->second);
     }
 
-    ESP_LOGI(TAG, "HTTP request successful, status code: %d", status_code_);
+    ESP_LOGI(TAG, "HTTP request successful, status code: %d, Content-Length: %u",
+             status_code_, (unsigned int)content_length_);
     return true;
 }
 
@@ -321,18 +377,27 @@ size_t Ml307Http::GetBodyLength() {
 
 std::string Ml307Http::ReadAll() {
     std::unique_lock<std::mutex> lock(mutex_);
-    
+
     auto timeout = std::chrono::milliseconds(timeout_ms_);
-    bool received = cv_.wait_for(lock, timeout, [this] { 
-        return eof_; 
+    bool received = cv_.wait_for(lock, timeout, [this] {
+        return eof_;
     });
-    
+
     if (!received) {
         ESP_LOGE(TAG, "Timeout waiting for HTTP content to be received");
-        return body_;
+        // 注意：超时也返回当前已收的 body_，与 V2 原行为一致
     }
 
-    return body_;
+    if (content_lost_) {
+        ESP_LOGW(TAG, "ReadAll: data was lost during transfer");
+    }
+
+    // Patch B · 如果 Read 已消费部分数据，先 erase 已消费部分，避免 ReadAll 重复返回
+    if (body_consumed_ > 0) {
+        body_.erase(0, body_consumed_);
+        body_consumed_ = 0;
+    }
+    return std::move(body_);
 }
 
 int Ml307Http::GetLastError() {
@@ -346,7 +411,16 @@ void Ml307Http::Close() {
     std::string command = "AT+MHTTPDEL=" + std::to_string(http_id_);
     at_uart_->SendCommand(command);
 
+    // Patch B · 50ms 排空残留 binary URC 后再关闭 binary 解析
+    // 否则下条 AT 命令可能误把残留 binary 字节当作命令前缀解析
+    if (binary_receive_) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        at_uart_->SetHttpBinaryMode(false);
+        binary_receive_ = false;
+    }
+
     instance_active_ = false;
+    headers_fetched_ = false;  // Patch B · 复位以便下次 Open 重新等 headers
     eof_ = true;
     cv_.notify_all();
     ESP_LOGI(TAG, "HTTP connection closed, ID: %d", http_id_);

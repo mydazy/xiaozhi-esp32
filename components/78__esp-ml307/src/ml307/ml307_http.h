@@ -67,6 +67,12 @@ private:
     bool response_chunked_ = false;
     bool keep_alive_ = false;
 
+    // Patch B · HTTP Binary Receive Mode（来自 189 v3.5.3 验证版）
+    bool binary_receive_ = false;
+    bool headers_fetched_ = false;
+    size_t body_consumed_ = 0;
+    bool content_lost_ = false;
+
     bool FetchHeaders();
     void ParseResponseHeaders(const std::string& headers);
     std::string ErrorCodeToString(int error_code);

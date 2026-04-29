@@ -90,6 +90,12 @@ public:
     void EncodeHexAppend(std::string& dest, const char* data, size_t length);
     void DecodeHexAppend(std::string& dest, const char* data, size_t length);
 
+    // HTTP Binary Receive Mode (Patch B · 2026-04-29 · 来自 189 v3.5.3 验证版)
+    // 启用后，rx 解析器识别 +MHTTPURC: "header"/"content" 前缀并按二进制长度直读，
+    // 跳过 HEX 解码，UART raw 字节直传，吞吐理论翻倍。仅 ML307 模组生效，EC801E 不受影响。
+    void SetHttpBinaryMode(bool enabled) { http_binary_mode_ = enabled; }
+    bool GetHttpBinaryMode() const { return http_binary_mode_; }
+
 private:
     gpio_num_t tx_pin_;
     gpio_num_t rx_pin_;
@@ -122,14 +128,20 @@ private:
     
     std::string rx_buffer_;
     std::mutex rx_buffer_mutex_;  // Mutex to protect rx_buffer_ access
-    
+
+    // HTTP Binary Receive Mode flag (Patch B)
+    bool http_binary_mode_ = false;
+
     // Callback Functions
     std::list<UrcCallback> urc_callbacks_;
-    
+
     // Internal Methods
     void ReceiveTask();   // Task for receiving data from DMA queue
     void EventTask();     // Task for parsing response and handling events
     bool ParseResponse();
+    // Binary HTTP URC parsers (Patch B · 在 rx_buffer_mutex_ 持锁期间调用)
+    bool ParseBinaryHttpHeader();
+    bool ParseBinaryHttpContent();
     bool DetectBaudRate(int timeout_ms = -1);
     // Handle URC
     void HandleUrc(const std::string& command, const std::vector<AtArgumentValue>& arguments);

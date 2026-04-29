@@ -5,6 +5,8 @@
 #include <sstream>
 #include <iomanip>
 #include <cstring>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "ml307_tcp.h"
 #include "ml307_ssl.h"
 #include "ml307_udp.h"
@@ -14,11 +16,19 @@
 
 #define TAG "Ml307AtModem"
 
+namespace {
+// Patch A · Radio profile 命令重试参数（来自 189 v3.5.3 验证版）
+constexpr int kRadioCommandTimeoutMs   = 1500;
+constexpr int kRadioCommandRetryDelayMs = 200;
+}
+
 
 Ml307AtModem::Ml307AtModem(std::shared_ptr<AtUart> at_uart) : AtModem(at_uart) {
     // 子类特定的初始化在这里
     // Reset HTTP instances
     ResetConnections();
+    // Patch A · 开机锁 LTE-only（弱信号区不再 2G/3G 反复回退）
+    ConfigureRadioProfile();
 }
 
 void Ml307AtModem::ResetConnections() {
@@ -26,6 +36,36 @@ void Ml307AtModem::ResetConnections() {
     at_uart_->SendCommand("AT+MHTTPDEL=1");
     at_uart_->SendCommand("AT+MHTTPDEL=2");
     at_uart_->SendCommand("AT+MHTTPDEL=3");
+}
+
+// Patch A · AT 命令重试包装（弱网下单次失败不立即视为模组挂掉）
+bool Ml307AtModem::SendRadioCommandWithRetry(const char* command, const char* description, int max_attempts) {
+    for (int attempt = 1; attempt <= max_attempts; ++attempt) {
+        if (at_uart_->SendCommand(command, kRadioCommandTimeoutMs)) {
+            ESP_LOGI(TAG, "%s ok (%d/%d)", description, attempt, max_attempts);
+            return true;
+        }
+        ESP_LOGW(TAG, "%s failed (%d/%d), cme=%d",
+                 description, attempt, max_attempts, at_uart_->GetCmeErrorCode());
+        vTaskDelay(pdMS_TO_TICKS(kRadioCommandRetryDelayMs));
+    }
+    ESP_LOGW(TAG, "%s not applied, keep modem default strategy", description);
+    return false;
+}
+
+// Patch A · 锁 LTE-only · 频段维持模组默认自动选择（弱网地区不锁 Band 更安全）
+void Ml307AtModem::ConfigureRadioProfile() {
+    // 稳定优先：固定 LTE-only，避免 2G/3G 兜底拖慢注册时间
+    SendRadioCommandWithRetry("AT+MRATLIST=\"LTE\"", "Set LTE-only RAT");
+    // SendRadioCommandWithRetry("AT+MBAND=3,1,8", "Lock LTE bands to B1/B3/B8");
+
+    // 查询当前配置，写入日志便于量产期排查
+    if (at_uart_->SendCommand("AT+MRATLIST?", 1000)) {
+        ESP_LOGI(TAG, "MRATLIST: %s", at_uart_->GetResponse().c_str());
+    }
+    if (at_uart_->SendCommand("AT+MBAND?", 1000)) {
+        ESP_LOGI(TAG, "MBAND: %s", at_uart_->GetResponse().c_str());
+    }
 }
 
 void Ml307AtModem::HandleUrc(const std::string& command, const std::vector<AtArgumentValue>& arguments) {
