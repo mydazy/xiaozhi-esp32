@@ -453,6 +453,15 @@ private:
     void EnterDeepSleep(bool enable_gyro_wakeup = true) {
         ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
 
+        if (power_save_timer_) {
+            power_save_timer_->SetEnabled(false);
+        }
+        gpio_set_level(DISPLAY_BACKLIGHT, 0);
+
+        ESP_LOGI(TAG, "主动断开 MQTT/WS 长连接（优雅 close）");
+        Application::GetInstance().ResetProtocol();
+        vTaskDelay(pdMS_TO_TICKS(500));
+
         if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
             Settings settings("status", false);
             int32_t pickup_wake = settings.GetInt("pickupWake", 1);
@@ -470,11 +479,6 @@ private:
         WifiStation::GetInstance().Stop();
         // STA_STOP 事件链（典型 ~150-300ms），再断电源。
         vTaskDelay(pdMS_TO_TICKS(300));
-
-        if (power_save_timer_) {
-            power_save_timer_->SetEnabled(false);
-        }
-        gpio_set_level(DISPLAY_BACKLIGHT, 0);
 
         ResetAllGpiosForSleep();
 

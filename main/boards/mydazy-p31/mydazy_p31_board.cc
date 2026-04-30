@@ -444,6 +444,15 @@ private:
     void EnterDeepSleep(bool enable_gyro_wakeup = true) {
         ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
 
+        if (power_save_timer_) {
+            power_save_timer_->SetEnabled(false);
+        }
+        gpio_set_level(DISPLAY_BACKLIGHT, 0);
+
+        ESP_LOGI(TAG, "主动断开 MQTT/WS 长连接（优雅 close）");
+        Application::GetInstance().ResetProtocol();
+        vTaskDelay(pdMS_TO_TICKS(500));
+
         // 闹钟定时唤醒功能
 //        int intervalue = alarm_clock_get_next_task();
 //        if(intervalue > 0){
