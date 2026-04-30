@@ -766,9 +766,18 @@ private:
             return;
         }
 
+        // 精简后上报：电量 + 音量 + 亮度 + theme + 网络信号（P30-WiFi 无定位）
         int battery = power_manager_ ? power_manager_->GetBatteryLevel() : -1;
         bool charging = power_manager_ ? power_manager_->IsCharging() : false;
-        size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        auto* codec = GetAudioCodec();
+        int volume = codec ? codec->output_volume() : -1;
+        auto* bl = GetBacklight();
+        int brightness = bl ? bl->brightness() : -1;
+        std::string theme;
+        auto* disp = GetDisplay();
+        if (disp && disp->GetTheme()) {
+            theme = disp->GetTheme()->name();
+        }
 
         // WiFi RSSI（连接时获取信号强度）
         int rssi = 0;
@@ -778,17 +787,19 @@ private:
         }
 
         Application::GetInstance().Schedule(
-            [battery, charging, free_heap, rssi]() {
+            [battery, charging, volume, brightness, theme, rssi]() {
             cJSON* p = cJSON_CreateObject();
             cJSON_AddNumberToObject(p, "battery", battery);
             cJSON_AddBoolToObject(p, "charging", charging);
+            if (volume >= 0)     cJSON_AddNumberToObject(p, "volume", volume);
+            if (brightness >= 0) cJSON_AddNumberToObject(p, "brightness", brightness);
+            if (!theme.empty())  cJSON_AddStringToObject(p, "theme", theme.c_str());
 
             cJSON* net = cJSON_CreateObject();
             cJSON_AddStringToObject(net, "type", "wifi");
             if (rssi != 0) cJSON_AddNumberToObject(net, "rssi", rssi);
             cJSON_AddItemToObject(p, "network", net);
 
-            cJSON_AddNumberToObject(p, "free_heap", (double)free_heap);
             Ota::ReportStatus(p);
         });
     }

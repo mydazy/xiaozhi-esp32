@@ -84,6 +84,7 @@ public:
     virtual std::string GetDeviceStatusJson() = 0;
     virtual std::string GetBrandName() { return "MyDazy"; }
     virtual void EnterDeepSleep(bool enable_gyro_wakeup = true) { (void)enable_gyro_wakeup; }
+    virtual void OnNetworkConnected() {}
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

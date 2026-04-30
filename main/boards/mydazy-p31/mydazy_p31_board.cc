@@ -982,13 +982,22 @@ private:
             return;
         }
 
+        // 精简后上报：电量 + 音量 + 亮度 + theme + 网络信号 + 定位（P31 唯一带 GNSS 的板）
         int battery = power_manager_ ? power_manager_->GetBatteryLevel() : -1;
         bool charging = power_manager_ ? power_manager_->IsCharging() : false;
+        auto* codec = GetAudioCodec();
+        int volume = codec ? codec->output_volume() : -1;
+        auto* bl = GetBacklight();
+        int brightness = bl ? bl->brightness() : -1;
+        std::string theme;
+        auto* disp = GetDisplay();
+        if (disp && disp->GetTheme()) {
+            theme = disp->GetTheme()->name();
+        }
         bool fixed = gnss_fixed_.load();
         int sats = gnss_satellites_.load();
         auto pos = GetGnssPos();
         double lat = pos.lat, lon = pos.lon;
-        size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
 
         // 网络信息
         int csq = -1;
@@ -1003,11 +1012,14 @@ private:
         }
 
         Application::GetInstance().Schedule(
-            [battery, charging, fixed, sats, lat, lon, free_heap, csq, carrier]() {
+            [battery, charging, volume, brightness, theme, fixed, sats, lat, lon, csq, carrier]() {
             cJSON* p = cJSON_CreateObject();
 
             cJSON_AddNumberToObject(p, "battery", battery);
             cJSON_AddBoolToObject(p, "charging", charging);
+            if (volume >= 0)     cJSON_AddNumberToObject(p, "volume", volume);
+            if (brightness >= 0) cJSON_AddNumberToObject(p, "brightness", brightness);
+            if (!theme.empty())  cJSON_AddStringToObject(p, "theme", theme.c_str());
 
             cJSON* gps = cJSON_CreateObject();
             cJSON_AddBoolToObject(gps, "fixed", fixed);
@@ -1023,8 +1035,6 @@ private:
             if (!carrier.empty()) cJSON_AddStringToObject(net, "carrier", carrier.c_str());
             if (csq >= 0) cJSON_AddNumberToObject(net, "csq", csq);
             cJSON_AddItemToObject(p, "network", net);
-
-            cJSON_AddNumberToObject(p, "free_heap", (double)free_heap);
 
             Ota::ReportStatus(p);
         });

@@ -160,6 +160,8 @@ void Application::Initialize() {
                 msg += data;
                 display->ShowNotification(msg.c_str(), 30000);
                 xEventGroupSetBits(event_group_, MAIN_EVENT_NETWORK_CONNECTED);
+                // 状态上报触发点：联网成功打一次（替代周期轮询）
+                Board::GetInstance().OnNetworkConnected();
                 break;
             }
             case NetworkEvent::Disconnected:
