@@ -34,6 +34,7 @@ struct IHttpClient {
     virtual int    Read(char* buf, size_t size) = 0;
     virtual void   Close() = 0;
     virtual void   SetTimeout(int ms) = 0;
+    virtual void   SetHeader(const std::string& key, const std::string& value) {}
 };
 
 struct IHttpFactory {
@@ -113,6 +114,7 @@ private:
     std::atomic<bool> download_done_{false};
     std::atomic<bool> decode_done_{false};
     std::atomic<int>  active_tasks_{0};
+    std::atomic<bool> prebuffered_{false};
 
     // 进度跟踪：OutputLoop 每次 OutputData() 累加输出 PCM 时长到 position_ms_
     std::atomic<int>     position_ms_{0};
@@ -129,11 +131,14 @@ private:
     // "single-task pipeline" underrun pattern.
     RingbufHandle_t compressed_ring_ = nullptr;       // MP3 byte stream from HTTP
     RingbufHandle_t pcm_ring_ = nullptr;              // resampled int16 PCM bytes
-    static constexpr size_t kCompressedRingSize = 128 * 1024;  // ~8 s @ 128 kbps
+    static constexpr size_t kCompressedRingSize = 512 * 1024;  // ~32-64 s 缓冲
     static constexpr size_t kPcmRingSize = 32 * 1024;          // ~340 ms @ 24 kHz mono
     static constexpr size_t kOutputChunkBytes = 4 * 1024;      // ~85 ms @ 24 kHz mono
+    static constexpr size_t kPrebufferThreshold = 32 * 1024;
     static constexpr int    kHttpTimeoutMs = 15000;
     static constexpr int    kPauseTimeoutMs = 50000;           // 50s（小于 OSS 默认 keepalive 60s）
+    static constexpr int    kHttpRetryMax = 3;
+    static constexpr int    kPauseCloseConnMs = 5000;
 
     // 暂停超时定时器（懒创建，one-shot；Pause 启动 / Resume / Stop 取消）
     void* pause_timeout_timer_ = nullptr;   // 实际类型 esp_timer_handle_t（避免污染头文件 esp_timer.h 依赖）

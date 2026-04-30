@@ -142,6 +142,7 @@ bool Mp3Player::Play(const std::string& url, const std::string& title, std::stri
     paused_.store(false, std::memory_order_release);
     download_done_.store(false, std::memory_order_release);
     decode_done_.store(false, std::memory_order_release);
+    prebuffered_.store(false, std::memory_order_release);
     active_tasks_.store(0, std::memory_order_release);
     position_ms_.store(0, std::memory_order_release);
     total_duration_ms_.store(0, std::memory_order_release);
@@ -270,84 +271,200 @@ void Mp3Player::DownloadLoop() {
         url = current_url_;
     }
 
-    auto http = http_->CreateHttp();
-    if (!http) {
-        ESP_LOGE(TAG, "Download failed: http factory returned null");
-        EmitError("Playback failed", "HTTP transport unavailable");
-        download_done_.store(true, std::memory_order_release);
-        return;
-    }
-    http->SetTimeout(kHttpTimeoutMs);
-
-    if (!http->Open("GET", url)) {
-        ESP_LOGE(TAG, "Download failed: HTTP open failed %s", url.c_str());
-        EmitError("Playback failed", "Failed to connect to server");
-        download_done_.store(true, std::memory_order_release);
-        return;
-    }
-
-    int status = http->GetStatusCode();
-    if (status != 200) {
-        ESP_LOGE(TAG, "Download failed: HTTP %d", status);
-        char buf[64];
-        if (status == 404)      snprintf(buf, sizeof(buf), "Audio file not found (404)");
-        else if (status == 403) snprintf(buf, sizeof(buf), "Forbidden (403)");
-        else if (status >= 500) snprintf(buf, sizeof(buf), "Server error (%d)", status);
-        else                    snprintf(buf, sizeof(buf), "HTTP error (%d)", status);
-        EmitError("Playback failed", buf);
-        http->Close();
-        download_done_.store(true, std::memory_order_release);
-        return;
-    }
-
-    size_t total_len = http->GetBodyLength();
-    ESP_LOGI(TAG, "Download started: %u bytes", (unsigned)total_len);
-    body_length_.store(total_len, std::memory_order_release);
-
     // Read scratch in PSRAM — TLS handshake leaves limited stack room.
+    // 用途：HTTP 下行临时读 buffer；生命周期：DownloadLoop；申请方：本函数
     constexpr size_t kReadChunk = 2048;
     char* buf = static_cast<char*>(heap_caps_malloc(kReadChunk, MALLOC_CAP_SPIRAM));
     if (!buf) {
         ESP_LOGE(TAG, "Download buffer alloc failed");
         EmitError("Playback failed", "PSRAM exhausted");
-        http->Close();
         download_done_.store(true, std::memory_order_release);
         return;
     }
-    size_t total_read = 0;
 
-    while (!abort_.load(std::memory_order_acquire) &&
-           running_.load(std::memory_order_acquire)) {
-        // Pause 闸口：让出 CPU，保持 HTTP 长连接（OSS 默认 keepalive 60s）
-        if (paused_.load(std::memory_order_acquire)) {
-            vTaskDelay(pdMS_TO_TICKS(100));
+    size_t total_read = 0;        // 已成功写入 ringbuffer 的字节数（也是 Range 续传起点）
+    bool   eof_reached = false;   // 正常 EOF 标记
+    int    last_status = 0;       // 末次 HTTP status，用于错误归因
+    bool   header_emitted_total = false;  // body_length 仅首次（200）赋值，后续 206 不重置
+    // 速率统计窗口：每 kStatLogIntervalMs 打一次 [DL速度 | ring占用 | 进度]
+    constexpr int64_t kStatLogIntervalMs = 2000;
+    int64_t stat_window_start_us = esp_timer_get_time();
+    size_t  stat_window_bytes = 0;
+
+    for (int retry = 0; retry <= kHttpRetryMax && !eof_reached; retry++) {
+        if (abort_.load(std::memory_order_acquire) ||
+            !running_.load(std::memory_order_acquire)) break;
+
+        auto http = http_->CreateHttp();
+        if (!http) {
+            ESP_LOGE(TAG, "Download: http factory returned null (retry %d)", retry);
+            if (retry == kHttpRetryMax) {
+                EmitError("Playback failed", "HTTP transport unavailable");
+                abort_.store(true, std::memory_order_release);
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                continue;
+            }
+            break;
+        }
+        http->SetTimeout(kHttpTimeoutMs);
+
+        // 续传：从 total_read 字节开始
+        if (total_read > 0) {
+            char range_buf[64];
+            snprintf(range_buf, sizeof(range_buf), "bytes=%u-", (unsigned)total_read);
+            http->SetHeader("Range", range_buf);
+            ESP_LOGI(TAG, "Download retry %d: Range %s (resume from %u)",
+                     retry, range_buf, (unsigned)total_read);
+        }
+
+        if (!http->Open("GET", url)) {
+            ESP_LOGW(TAG, "Download: HTTP open failed (retry %d)", retry);
+            http->Close();
+            if (retry == kHttpRetryMax) {
+                EmitError("Playback failed", "Failed to connect to server");
+                abort_.store(true, std::memory_order_release);
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
-        int n = http->Read(buf, kReadChunk);
-        if (n < 0) {
-            // W5 修（2026-04-29）· 弱网/网络断不能静默 break（会被下游误判为正常 EOS）
-            // 必须 EmitError 让 UI 退出 Player 模式 + Alert 用户 + 强制 abort 让 Decode/Output 立刻退出
-            ESP_LOGW(TAG, "Download: Read error %d (network broken or timeout)", n);
+
+        int status = http->GetStatusCode();
+        last_status = status;
+        // 首次允许 200；续传期望 206（Partial Content），但部分 server 仍返 200 + 全文，
+        // 此时 total_read 对齐失效——保险起见直接 abort（避免数据错位导致解码崩）
+        bool ok_status = (total_read == 0 && status == 200) ||
+                         (total_read > 0 && status == 206);
+        if (!ok_status) {
+            ESP_LOGE(TAG, "Download: HTTP %d (retry %d, resume offset %u)",
+                     status, retry, (unsigned)total_read);
+            http->Close();
+            // 4xx 永久错误立即退出，5xx / 网络错误才重试
+            if (status >= 400 && status < 500) {
+                char err[64];
+                if (status == 404)      snprintf(err, sizeof(err), "Audio file not found (404)");
+                else if (status == 403) snprintf(err, sizeof(err), "Forbidden (403)");
+                else if (status == 416) snprintf(err, sizeof(err), "Range not satisfiable (416)");
+                else                    snprintf(err, sizeof(err), "HTTP error (%d)", status);
+                EmitError("Playback failed", err);
+                abort_.store(true, std::memory_order_release);
+                break;
+            }
+            if (retry == kHttpRetryMax) {
+                char err[64];
+                snprintf(err, sizeof(err), "Server error (%d)", status);
+                EmitError("Playback failed", err);
+                abort_.store(true, std::memory_order_release);
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
+
+        if (!header_emitted_total) {
+            size_t total_len = http->GetBodyLength();
+            ESP_LOGI(TAG, "Download started: %u bytes", (unsigned)total_len);
+            body_length_.store(total_len, std::memory_order_release);
+            header_emitted_total = true;
+        }
+
+        // 内层：read loop
+        int64_t pause_started_us = 0;
+        bool    inner_break_for_retry = false;
+        while (!abort_.load(std::memory_order_acquire) &&
+               running_.load(std::memory_order_acquire)) {
+            // Pause 闸口：>= 5s 主动关连接，触发外层 Range 重连
+            if (paused_.load(std::memory_order_acquire)) {
+                if (pause_started_us == 0) pause_started_us = esp_timer_get_time();
+                int64_t elapsed_ms = (esp_timer_get_time() - pause_started_us) / 1000;
+                if (elapsed_ms >= kPauseCloseConnMs) {
+                    ESP_LOGI(TAG, "Pause >= %dms, closing socket (will Range-resume)",
+                             kPauseCloseConnMs);
+                    inner_break_for_retry = true;
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));
+                continue;
+            }
+            pause_started_us = 0;  // 已 Resume，复位
+
+            int n = http->Read(buf, kReadChunk);
+            if (n < 0) {
+                ESP_LOGW(TAG, "Download: Read error %d at offset %u (will retry)",
+                         n, (unsigned)total_read);
+                inner_break_for_retry = true;
+                break;
+            }
+            if (n == 0) {
+                eof_reached = true;
+                break;
+            }
+
+            size_t written = 0;
+            while (written < (size_t)n && !abort_.load(std::memory_order_acquire)) {
+                size_t chunk = (size_t)n - written;
+                BaseType_t ok = xRingbufferSend(compressed_ring_, buf + written, chunk,
+                                                 pdMS_TO_TICKS(200));
+                if (ok == pdTRUE) written += chunk;
+                // else: ring full, retry next iteration
+            }
+            total_read += written;
+            stat_window_bytes += written;
+
+            // 首帧预热闸口：累计 >= 32KB 放行 OutputLoop 起播
+            if (!prebuffered_.load(std::memory_order_acquire) &&
+                total_read >= kPrebufferThreshold) {
+                prebuffered_.store(true, std::memory_order_release);
+                ESP_LOGI(TAG, "Prebuffer ready: %u bytes", (unsigned)total_read);
+            }
+
+            // 周期性速率日志：[DL速度 | comp占用 | pcm占用 | 已下/总 | 播放进度]
+            // 4G 弱网调试命脉——脱网时 DL 速度归零、comp 占用线性下降可一眼看出
+            int64_t now_us = esp_timer_get_time();
+            if ((now_us - stat_window_start_us) / 1000 >= kStatLogIntervalMs) {
+                int64_t elapsed_ms = (now_us - stat_window_start_us) / 1000;
+                int kbps = (int)((stat_window_bytes * 1000) / (elapsed_ms * 1024 + 1));
+                size_t comp_free = compressed_ring_
+                    ? xRingbufferGetCurFreeSize(compressed_ring_) : 0;
+                size_t comp_used = kCompressedRingSize - comp_free;
+                size_t pcm_free = pcm_ring_
+                    ? xRingbufferGetCurFreeSize(pcm_ring_) : 0;
+                size_t pcm_used = kPcmRingSize - pcm_free;
+                size_t total_len = body_length_.load(std::memory_order_acquire);
+                int pos_ms = position_ms_.load(std::memory_order_acquire);
+                int dur_ms = total_duration_ms_.load(std::memory_order_acquire);
+                ESP_LOGI(TAG,
+                         "DL %d KB/s | comp %u/%u KB | pcm %u/%u KB | %u/%u B | %d.%ds/%d.%ds",
+                         kbps,
+                         (unsigned)(comp_used / 1024), (unsigned)(kCompressedRingSize / 1024),
+                         (unsigned)(pcm_used / 1024),  (unsigned)(kPcmRingSize / 1024),
+                         (unsigned)total_read, (unsigned)total_len,
+                         pos_ms / 1000, (pos_ms % 1000) / 100,
+                         dur_ms / 1000, (dur_ms % 1000) / 100);
+                stat_window_start_us = now_us;
+                stat_window_bytes = 0;
+            }
+        }
+
+        http->Close();
+        if (eof_reached) break;
+        if (!inner_break_for_retry) break;  // abort 或 running 转 false
+        if (retry == kHttpRetryMax) {
+            ESP_LOGE(TAG, "Download: retry exhausted at offset %u", (unsigned)total_read);
             EmitError("网络中断", "音乐流读取失败");
             abort_.store(true, std::memory_order_release);
             break;
         }
-        if (n == 0) break;  // EOF
-
-        size_t written = 0;
-        while (written < (size_t)n && !abort_.load(std::memory_order_acquire)) {
-            size_t chunk = (size_t)n - written;
-            BaseType_t ok = xRingbufferSend(compressed_ring_, buf + written, chunk,
-                                             pdMS_TO_TICKS(200));
-            if (ok == pdTRUE) written += chunk;
-            // else: ring full, retry next iteration
-        }
-        total_read += written;
+        // retry 间隔：指数退避（500ms / 1s / 2s）防止瞬时风暴
+        vTaskDelay(pdMS_TO_TICKS(500 << retry));
     }
 
-    http->Close();
     heap_caps_free(buf);
-    ESP_LOGI(TAG, "Download done: %u bytes read", (unsigned)total_read);
+    // 起播闸口兜底放行（无论成功 / 失败 / abort），防止 OutputLoop 永久阻塞
+    prebuffered_.store(true, std::memory_order_release);
+    ESP_LOGI(TAG, "Download done: %u bytes read (status=%d, eof=%d)",
+             (unsigned)total_read, last_status, eof_reached);
     download_done_.store(true, std::memory_order_release);
 }
 
@@ -580,6 +697,15 @@ void Mp3Player::OutputThunk(void* arg) {
 void Mp3Player::OutputLoop() {
     if (audio_ && !audio_->output_enabled()) {
         audio_->EnableOutput(true);
+    }
+
+    // 首帧预热闸口：等 DownloadLoop 累积 ≥ kPrebufferThreshold 字节再开始消费 PCM。
+    // 避免 TLS 握手刚结束 / 4G PPP 抖动期就起播 → pcm_ring 见底 → I2S DMA underrun。
+    // DownloadLoop 在成功累积或失败兜底时都会置 prebuffered_，OutputLoop 不会永久阻塞。
+    while (!prebuffered_.load(std::memory_order_acquire) &&
+           !abort_.load(std::memory_order_acquire) &&
+           running_.load(std::memory_order_acquire)) {
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 
     while (running_.load(std::memory_order_acquire) &&
