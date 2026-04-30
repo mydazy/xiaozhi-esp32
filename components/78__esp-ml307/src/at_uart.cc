@@ -688,6 +688,32 @@ bool AtUart::SendData(const char* data, size_t length) {
 }
 
 bool AtUart::SendCommandWithData(const std::string& command, size_t timeout_ms, bool add_crlf, const char* data, size_t data_length) {
+    // HTTP binary mode 防御（2026-04-30 · v2 扩展白名单到 MQTT）
+    // 根因：ML307 进入 HTTP binary receive mode 后 UART 下行 raw 透传 HTTP body。
+    //       此时若发"查询型" AT 命令（如 GetCsq → AT+CSQ）每 5s 一次持续注入，
+    //       回应字节会混入下行 binary 流，mp3 解码器连续 16 次报
+    //       "Not supported format" 后退出。
+    // 策略：白名单 = 自管理 + 业务上行
+    //   ① AT+MHTTP*  HTTP 自管理（含 AT+MHTTPCLOSE 必须能发，否则 binary 卡死）
+    //   ② AT+MQTT*   MQTT 业务上行（listen state / device-server 通知，业务必发）
+    //   ③ AT+MMQTT*  MQTT 多 ID 命令族（部分固件版本前缀）
+    //   ④ AT+MIPSEND TCP/UDP 上行（保留兜底）
+    // 业务命令的回应字节（OK/ERROR）量级很小（<10 字节），mp3 解码器有重同步
+    // 能力可吞掉一帧损坏；但低频查询命令（AT+CSQ 周期 5s）持续注入会致命。
+    // 其他纯查询命令（AT+CSQ / AT+CREG / AT+CCLK / AT+CGPSINFO 等）直接 fail，
+    // 调用方拿 false 自行兜底（缓存上次值）。
+    if (http_binary_mode_count_.load(std::memory_order_acquire) > 0) {
+        bool allowed =
+            command.compare(0, 8, "AT+MHTTP")  == 0 ||
+            command.compare(0, 7, "AT+MQTT")   == 0 ||
+            command.compare(0, 8, "AT+MMQTT")  == 0 ||
+            command.compare(0, 10, "AT+MIPSEND") == 0;
+        if (!allowed) {
+            ESP_LOGW(TAG, "Reject AT in HTTP binary mode: %.32s", command.data());
+            return false;
+        }
+    }
+
     std::lock_guard<std::mutex> lock(command_mutex_);
     if (debug_) {
         ESP_LOGI(TAG, ">> %.64s (%u bytes)", command.data(), command.length());
