@@ -291,37 +291,37 @@ void Mp3Player::DownloadLoop() {
     int64_t stat_window_start_us = esp_timer_get_time();
     size_t  stat_window_bytes = 0;
 
-    for (int retry = 0; retry <= kHttpRetryMax && !eof_reached; retry++) {
+    int  error_retry = 0;        // 仅错误重连消耗，proactive 不计数
+    while (!eof_reached) {
         if (abort_.load(std::memory_order_acquire) ||
             !running_.load(std::memory_order_acquire)) break;
 
         auto http = http_->CreateHttp();
         if (!http) {
-            ESP_LOGE(TAG, "Download: http factory returned null (retry %d)", retry);
-            if (retry == kHttpRetryMax) {
+            ESP_LOGE(TAG, "Download: http factory returned null (error_retry %d)", error_retry);
+            if (++error_retry > kHttpRetryMax) {
                 EmitError("Playback failed", "HTTP transport unavailable");
                 abort_.store(true, std::memory_order_release);
-            } else {
-                vTaskDelay(pdMS_TO_TICKS(500));
-                continue;
+                break;
             }
-            break;
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
         }
         http->SetTimeout(kHttpTimeoutMs);
 
-        // 续传：从 total_read 字节开始
+        // 续传：从 total_read 字节开始（首次 total_read=0 不带 Range）
         if (total_read > 0) {
             char range_buf[64];
             snprintf(range_buf, sizeof(range_buf), "bytes=%u-", (unsigned)total_read);
             http->SetHeader("Range", range_buf);
-            ESP_LOGI(TAG, "Download retry %d: Range %s (resume from %u)",
-                     retry, range_buf, (unsigned)total_read);
+            ESP_LOGI(TAG, "Download Range %s (resume from %u, error_retry %d)",
+                     range_buf, (unsigned)total_read, error_retry);
         }
 
         if (!http->Open("GET", url)) {
-            ESP_LOGW(TAG, "Download: HTTP open failed (retry %d)", retry);
+            ESP_LOGW(TAG, "Download: HTTP open failed (error_retry %d)", error_retry);
             http->Close();
-            if (retry == kHttpRetryMax) {
+            if (++error_retry > kHttpRetryMax) {
                 EmitError("Playback failed", "Failed to connect to server");
                 abort_.store(true, std::memory_order_release);
                 break;
@@ -337,8 +337,8 @@ void Mp3Player::DownloadLoop() {
         bool ok_status = (total_read == 0 && status == 200) ||
                          (total_read > 0 && status == 206);
         if (!ok_status) {
-            ESP_LOGE(TAG, "Download: HTTP %d (retry %d, resume offset %u)",
-                     status, retry, (unsigned)total_read);
+            ESP_LOGE(TAG, "Download: HTTP %d (error_retry %d, resume offset %u)",
+                     status, error_retry, (unsigned)total_read);
             http->Close();
             // 4xx 永久错误立即退出，5xx / 网络错误才重试
             if (status >= 400 && status < 500) {
@@ -351,7 +351,7 @@ void Mp3Player::DownloadLoop() {
                 abort_.store(true, std::memory_order_release);
                 break;
             }
-            if (retry == kHttpRetryMax) {
+            if (++error_retry > kHttpRetryMax) {
                 char err[64];
                 snprintf(err, sizeof(err), "Server error (%d)", status);
                 EmitError("Playback failed", err);
@@ -369,19 +369,21 @@ void Mp3Player::DownloadLoop() {
             header_emitted_total = true;
         }
 
-        // 内层：read loop
+        // 内层：read loop · 区分 proactive（不计 retry）vs error（计 retry）
         int64_t pause_started_us = 0;
-        bool    inner_break_for_retry = false;
+        size_t  bytes_since_open = 0;
+        bool    inner_break_error     = false;
+        bool    inner_break_proactive = false;
         while (!abort_.load(std::memory_order_acquire) &&
                running_.load(std::memory_order_acquire)) {
-            // Pause 闸口：>= 5s 主动关连接，触发外层 Range 重连
+            // Pause >= 5s：主动关连接（归类 proactive，不消耗 retry）
             if (paused_.load(std::memory_order_acquire)) {
                 if (pause_started_us == 0) pause_started_us = esp_timer_get_time();
                 int64_t elapsed_ms = (esp_timer_get_time() - pause_started_us) / 1000;
                 if (elapsed_ms >= kPauseCloseConnMs) {
                     ESP_LOGI(TAG, "Pause >= %dms, closing socket (will Range-resume)",
                              kPauseCloseConnMs);
-                    inner_break_for_retry = true;
+                    inner_break_proactive = true;
                     break;
                 }
                 vTaskDelay(pdMS_TO_TICKS(100));
@@ -389,11 +391,19 @@ void Mp3Player::DownloadLoop() {
             }
             pause_started_us = 0;  // 已 Resume，复位
 
+            // 主动周期断流：每 2MB 主动 Close + Range 重连（治 NAT 老化 / OSS LB 切节点）
+            if (bytes_since_open >= kProactiveReconnectBytes) {
+                ESP_LOGI(TAG, "Proactive reconnect at offset %u (after %u KB on this socket)",
+                         (unsigned)total_read, (unsigned)(bytes_since_open / 1024));
+                inner_break_proactive = true;
+                break;
+            }
+
             int n = http->Read(buf, kReadChunk);
             if (n < 0) {
                 ESP_LOGW(TAG, "Download: Read error %d at offset %u (will retry)",
                          n, (unsigned)total_read);
-                inner_break_for_retry = true;
+                inner_break_error = true;
                 break;
             }
             if (n == 0) {
@@ -410,6 +420,7 @@ void Mp3Player::DownloadLoop() {
                 // else: ring full, retry next iteration
             }
             total_read += written;
+            bytes_since_open += written;
             stat_window_bytes += written;
 
             // 首帧预热闸口：累计 >= 32KB 放行 OutputLoop 起播
@@ -449,15 +460,21 @@ void Mp3Player::DownloadLoop() {
 
         http->Close();
         if (eof_reached) break;
-        if (!inner_break_for_retry) break;  // abort 或 running 转 false
-        if (retry == kHttpRetryMax) {
+        if (!inner_break_error && !inner_break_proactive) break;  // abort 或 running 转 false
+
+        if (inner_break_proactive) {
+            // 主动关连接（Pause 5s / 2MB 周期）→ 立即 Range 重连，不计 retry / 不延迟
+            continue;
+        }
+
+        // 错误重连：递增计数 + 指数退避（500ms / 1s / 2s）防止瞬时风暴
+        if (++error_retry > kHttpRetryMax) {
             ESP_LOGE(TAG, "Download: retry exhausted at offset %u", (unsigned)total_read);
             EmitError("网络中断", "音乐流读取失败");
             abort_.store(true, std::memory_order_release);
             break;
         }
-        // retry 间隔：指数退避（500ms / 1s / 2s）防止瞬时风暴
-        vTaskDelay(pdMS_TO_TICKS(500 << retry));
+        vTaskDelay(pdMS_TO_TICKS(500 << (error_retry - 1)));
     }
 
     heap_caps_free(buf);

@@ -139,6 +139,13 @@ private:
     static constexpr int    kPauseTimeoutMs = 50000;           // 50s（小于 OSS 默认 keepalive 60s）
     static constexpr int    kHttpRetryMax = 3;
     static constexpr int    kPauseCloseConnMs = 5000;
+    // 主动周期断流重连：每下载满 N 字节主动 Close + Range 续传，治 OSS 长连接被 NAT 切。
+    // 2026-04-30 v2：2MB → 10MB
+    // 理由：4G 实测 2MB 重连后 OSS 频繁 15s timeout（疑似反爬虫限流 + ML307 modem
+    //       HTTP context 复用慢），快速重连反致 retry 用尽。NAT 老化通常 2-5 分钟
+    //       才发生，10MB ≈ 4-7 分钟刚好规避，且大幅减少 modem context 切换压力。
+    // 主动重连不消耗 kHttpRetryMax 计数（仅错误重连消耗）。
+    static constexpr size_t kProactiveReconnectBytes = 10 * 1024 * 1024;
 
     // 暂停超时定时器（懒创建，one-shot；Pause 启动 / Resume / Stop 取消）
     void* pause_timeout_timer_ = nullptr;   // 实际类型 esp_timer_handle_t（避免污染头文件 esp_timer.h 依赖）
