@@ -1058,11 +1058,6 @@ private:
         esp_timer_start_periodic(status_timer_, 90 * 1000000ULL);
     }
 
-    // 联网成功钩子：每次网络（重）连成功时上报一次状态（替代周期轮询）
-    void OnNetworkConnected() override {
-        ReportStatus();
-    }
-
     void InitializeNfc() {
         if (!i2c_bus_) return;
 
