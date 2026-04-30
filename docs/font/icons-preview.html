@@ -1,0 +1,2145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>P30 图标库索引 · Phosphor Bold + FA emoji</title>
+
+<link href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/bold/style.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css" rel="stylesheet">
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  padding: 20px 24px;
+}
+h1 { font-size: 22px; margin-bottom: 4px; color: #58a6ff; }
+.subtitle { color: #8b949e; font-size: 13px; margin-bottom: 16px; }
+
+.toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 24px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 12px 16px;
+  position: sticky;
+  top: 12px;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+}
+.toolbar input[type="text"] {
+  flex: 1;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #c9d1d9;
+  font-size: 13px;
+  font-family: "SF Mono", monospace;
+}
+.toolbar input[type="text"]:focus { outline: none; border-color: #58a6ff; }
+.toolbar .stats {
+  font-size: 12px;
+  color: #8b949e;
+}
+.toolbar .stats b { color: #58a6ff; }
+
+.section {
+  margin-bottom: 32px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.section h2 {
+  background: #21262d;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #58a6ff;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  justify-content: space-between;
+}
+.section h2 .count { color: #8b949e; font-weight: 400; font-size: 12px; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1px;
+  background: #21262d;
+}
+.card {
+  background: #161b22;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s;
+}
+.card:hover { background: #1f2937; }
+
+.icon-big { font-size: 30px; color: #c9d1d9; }
+.icon-big.emoji-placeholder {
+  width: 30px;
+  height: 30px;
+  background: repeating-linear-gradient(45deg, #30363d, #30363d 4px, #21262d 4px, #21262d 8px);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: #6e7681;
+}
+
+.fa-name {
+  font-family: "SF Mono", monospace;
+  font-size: 11px;
+  color: #f97316;
+  font-weight: 600;
+  text-align: center;
+  word-break: break-all;
+}
+.ph-name {
+  font-family: "SF Mono", monospace;
+  font-size: 10px;
+  color: #6e7681;
+  text-align: center;
+  word-break: break-all;
+}
+.cp {
+  font-family: "SF Mono", monospace;
+  font-size: 10px;
+  color: #94a3b8;
+}
+.scales {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  border-top: 1px dashed #30363d;
+  padding-top: 8px;
+  margin-top: 4px;
+  width: 100%;
+  justify-content: center;
+}
+.scales .label { font-size: 9px; color: #6e7681; }
+
+.copy-hint {
+  font-size: 9px;
+  color: #6e7681;
+  font-style: italic;
+}
+.copyable { cursor: pointer; }
+.copyable:hover { background: #30363d; border-radius: 3px; padding: 1px 3px; margin: -1px -3px; color: #58a6ff; }
+
+#cdn-warning {
+  display: none;
+  background: #7f1d1d;
+  color: #fee2e2;
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+footer {
+  margin-top: 32px;
+  padding: 16px;
+  text-align: center;
+  color: #6e7681;
+  font-size: 11px;
+}
+</style>
+</head>
+
+<body>
+<div id="cdn-warning">⚠️ Phosphor CDN 加载失败 · 检查网络</div>
+
+<h1>P30 图标库索引 · Phosphor Bold + FA emoji</h1>
+<div class="subtitle">点击 <code style="color:#f97316">FONT_AWESOME_*</code> 宏名复制 · 共 124 个 UI 图标 + 21 个 emoji = 145 个</div>
+
+<div class="toolbar">
+  <input type="text" id="search" placeholder="🔍 搜索：输入 wifi / battery / bluetooth / signal / FONT_AWESOME_... 等">
+  <div class="stats">总 <b>145</b> · 显示 <b id="visible-count">145</b></div>
+</div>
+
+
+<div class="section" data-cat="📡 网络与通信">
+  <h2>📡 网络与通信<span class="count">21 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="wifi font_awesome_wifi wifi-high 0xe4ea">
+        <i class="ph-bold ph-wifi-high icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_WIFI')" title="点击复制">FONT_AWESOME_WIFI</div>
+        <div class="ph-name">wifi-high</div>
+        <div class="cp">0xe4ea</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-wifi-high" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-wifi-high" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-wifi-high" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-wifi-high" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="wifi_fair font_awesome_wifi_fair wifi-medium 0xe4ee">
+        <i class="ph-bold ph-wifi-medium icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_WIFI_FAIR')" title="点击复制">FONT_AWESOME_WIFI_FAIR</div>
+        <div class="ph-name">wifi-medium</div>
+        <div class="cp">0xe4ee</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-wifi-medium" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-wifi-medium" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-wifi-medium" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-wifi-medium" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="wifi_weak font_awesome_wifi_weak wifi-low 0xe4ec">
+        <i class="ph-bold ph-wifi-low icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_WIFI_WEAK')" title="点击复制">FONT_AWESOME_WIFI_WEAK</div>
+        <div class="ph-name">wifi-low</div>
+        <div class="cp">0xe4ec</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-wifi-low" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-wifi-low" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-wifi-low" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-wifi-low" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="wifi_slash font_awesome_wifi_slash wifi-slash 0xe4f2">
+        <i class="ph-bold ph-wifi-slash icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_WIFI_SLASH')" title="点击复制">FONT_AWESOME_WIFI_SLASH</div>
+        <div class="ph-name">wifi-slash</div>
+        <div class="cp">0xe4f2</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-wifi-slash" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-wifi-slash" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-wifi-slash" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-wifi-slash" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="signal font_awesome_signal cell-signal-full 0xe142">
+        <i class="ph-bold ph-cell-signal-full icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SIGNAL')" title="点击复制">FONT_AWESOME_SIGNAL</div>
+        <div class="ph-name">cell-signal-full</div>
+        <div class="cp">0xe142</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cell-signal-full" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cell-signal-full" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cell-signal-full" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cell-signal-full" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="signal_strong font_awesome_signal_strong cell-signal-full 0xe142">
+        <i class="ph-bold ph-cell-signal-full icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SIGNAL_STRONG')" title="点击复制">FONT_AWESOME_SIGNAL_STRONG</div>
+        <div class="ph-name">cell-signal-full</div>
+        <div class="cp">0xe142</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cell-signal-full" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cell-signal-full" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cell-signal-full" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cell-signal-full" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="signal_good font_awesome_signal_good cell-signal-high 0xe144">
+        <i class="ph-bold ph-cell-signal-high icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SIGNAL_GOOD')" title="点击复制">FONT_AWESOME_SIGNAL_GOOD</div>
+        <div class="ph-name">cell-signal-high</div>
+        <div class="cp">0xe144</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cell-signal-high" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cell-signal-high" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cell-signal-high" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cell-signal-high" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="signal_fair font_awesome_signal_fair cell-signal-medium 0xe148">
+        <i class="ph-bold ph-cell-signal-medium icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SIGNAL_FAIR')" title="点击复制">FONT_AWESOME_SIGNAL_FAIR</div>
+        <div class="ph-name">cell-signal-medium</div>
+        <div class="cp">0xe148</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cell-signal-medium" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cell-signal-medium" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cell-signal-medium" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cell-signal-medium" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="signal_weak font_awesome_signal_weak cell-signal-low 0xe146">
+        <i class="ph-bold ph-cell-signal-low icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SIGNAL_WEAK')" title="点击复制">FONT_AWESOME_SIGNAL_WEAK</div>
+        <div class="ph-name">cell-signal-low</div>
+        <div class="cp">0xe146</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cell-signal-low" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cell-signal-low" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cell-signal-low" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cell-signal-low" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="signal_off font_awesome_signal_off cell-signal-slash 0xe14c">
+        <i class="ph-bold ph-cell-signal-slash icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SIGNAL_OFF')" title="点击复制">FONT_AWESOME_SIGNAL_OFF</div>
+        <div class="ph-name">cell-signal-slash</div>
+        <div class="cp">0xe14c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cell-signal-slash" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cell-signal-slash" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cell-signal-slash" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cell-signal-slash" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="gps font_awesome_gps gps 0xedd8">
+        <i class="ph-bold ph-gps icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_GPS')" title="点击复制">FONT_AWESOME_GPS</div>
+        <div class="ph-name">gps</div>
+        <div class="cp">0xedd8</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-gps" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-gps" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-gps" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-gps" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="gps_fix font_awesome_gps_fix gps-fix 0xedd6">
+        <i class="ph-bold ph-gps-fix icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_GPS_FIX')" title="点击复制">FONT_AWESOME_GPS_FIX</div>
+        <div class="ph-name">gps-fix</div>
+        <div class="cp">0xedd6</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-gps-fix" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-gps-fix" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-gps-fix" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-gps-fix" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="gps_slash font_awesome_gps_slash gps-slash 0xedd4">
+        <i class="ph-bold ph-gps-slash icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_GPS_SLASH')" title="点击复制">FONT_AWESOME_GPS_SLASH</div>
+        <div class="ph-name">gps-slash</div>
+        <div class="cp">0xedd4</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-gps-slash" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-gps-slash" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-gps-slash" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-gps-slash" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="nfc font_awesome_nfc broadcast 0xe0f2">
+        <i class="ph-bold ph-broadcast icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_NFC')" title="点击复制">FONT_AWESOME_NFC</div>
+        <div class="ph-name">broadcast</div>
+        <div class="cp">0xe0f2</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-broadcast" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-broadcast" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-broadcast" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-broadcast" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="ibeacon font_awesome_ibeacon broadcast 0xe0f2">
+        <i class="ph-bold ph-broadcast icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_IBEACON')" title="点击复制">FONT_AWESOME_IBEACON</div>
+        <div class="ph-name">broadcast</div>
+        <div class="cp">0xe0f2</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-broadcast" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-broadcast" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-broadcast" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-broadcast" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="broadcast font_awesome_broadcast broadcast 0xe0f2">
+        <i class="ph-bold ph-broadcast icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BROADCAST')" title="点击复制">FONT_AWESOME_BROADCAST</div>
+        <div class="ph-name">broadcast</div>
+        <div class="cp">0xe0f2</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-broadcast" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-broadcast" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-broadcast" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-broadcast" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cell_tower font_awesome_cell_tower cell-tower 0xebaa">
+        <i class="ph-bold ph-cell-tower icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CELL_TOWER')" title="点击复制">FONT_AWESOME_CELL_TOWER</div>
+        <div class="ph-name">cell-tower</div>
+        <div class="cp">0xebaa</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cell-tower" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cell-tower" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cell-tower" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cell-tower" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="bluetooth font_awesome_bluetooth bluetooth 0xe0da">
+        <i class="ph-bold ph-bluetooth icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BLUETOOTH')" title="点击复制">FONT_AWESOME_BLUETOOTH</div>
+        <div class="ph-name">bluetooth</div>
+        <div class="cp">0xe0da</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-bluetooth" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-bluetooth" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-bluetooth" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-bluetooth" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="bluetooth_connected font_awesome_bluetooth_connected bluetooth-connected 0xe0dc">
+        <i class="ph-bold ph-bluetooth-connected icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BLUETOOTH_CONNECTED')" title="点击复制">FONT_AWESOME_BLUETOOTH_CONNECTED</div>
+        <div class="ph-name">bluetooth-connected</div>
+        <div class="cp">0xe0dc</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-bluetooth-connected" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-bluetooth-connected" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-bluetooth-connected" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-bluetooth-connected" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="bluetooth_slash font_awesome_bluetooth_slash bluetooth-slash 0xe0de">
+        <i class="ph-bold ph-bluetooth-slash icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BLUETOOTH_SLASH')" title="点击复制">FONT_AWESOME_BLUETOOTH_SLASH</div>
+        <div class="ph-name">bluetooth-slash</div>
+        <div class="cp">0xe0de</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-bluetooth-slash" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-bluetooth-slash" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-bluetooth-slash" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-bluetooth-slash" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="bluetooth_x font_awesome_bluetooth_x bluetooth-x 0xe0e0">
+        <i class="ph-bold ph-bluetooth-x icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BLUETOOTH_X')" title="点击复制">FONT_AWESOME_BLUETOOTH_X</div>
+        <div class="ph-name">bluetooth-x</div>
+        <div class="cp">0xe0e0</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-bluetooth-x" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-bluetooth-x" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-bluetooth-x" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-bluetooth-x" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="🔋 电池与电源">
+  <h2>🔋 电池与电源<span class="count">8 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="battery_full font_awesome_battery_full battery-full 0xe0c0">
+        <i class="ph-bold ph-battery-full icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BATTERY_FULL')" title="点击复制">FONT_AWESOME_BATTERY_FULL</div>
+        <div class="ph-name">battery-full</div>
+        <div class="cp">0xe0c0</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-battery-full" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-battery-full" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-battery-full" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-battery-full" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="battery_three_quarters font_awesome_battery_three_quarters battery-high 0xe0c2">
+        <i class="ph-bold ph-battery-high icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BATTERY_THREE_QUARTERS')" title="点击复制">FONT_AWESOME_BATTERY_THREE_QUARTERS</div>
+        <div class="ph-name">battery-high</div>
+        <div class="cp">0xe0c2</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-battery-high" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-battery-high" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-battery-high" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-battery-high" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="battery_half font_awesome_battery_half battery-medium 0xe0c6">
+        <i class="ph-bold ph-battery-medium icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BATTERY_HALF')" title="点击复制">FONT_AWESOME_BATTERY_HALF</div>
+        <div class="ph-name">battery-medium</div>
+        <div class="cp">0xe0c6</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-battery-medium" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-battery-medium" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-battery-medium" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-battery-medium" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="battery_quarter font_awesome_battery_quarter battery-low 0xe0c4">
+        <i class="ph-bold ph-battery-low icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BATTERY_QUARTER')" title="点击复制">FONT_AWESOME_BATTERY_QUARTER</div>
+        <div class="ph-name">battery-low</div>
+        <div class="cp">0xe0c4</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-battery-low" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-battery-low" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-battery-low" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-battery-low" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="battery_empty font_awesome_battery_empty battery-empty 0xe0be">
+        <i class="ph-bold ph-battery-empty icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BATTERY_EMPTY')" title="点击复制">FONT_AWESOME_BATTERY_EMPTY</div>
+        <div class="ph-name">battery-empty</div>
+        <div class="cp">0xe0be</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-battery-empty" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-battery-empty" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-battery-empty" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-battery-empty" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="battery_bolt font_awesome_battery_bolt battery-charging 0xe0ba">
+        <i class="ph-bold ph-battery-charging icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BATTERY_BOLT')" title="点击复制">FONT_AWESOME_BATTERY_BOLT</div>
+        <div class="ph-name">battery-charging</div>
+        <div class="cp">0xe0ba</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-battery-charging" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-battery-charging" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-battery-charging" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-battery-charging" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="battery_slash font_awesome_battery_slash battery-warning 0xe0c8">
+        <i class="ph-bold ph-battery-warning icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BATTERY_SLASH')" title="点击复制">FONT_AWESOME_BATTERY_SLASH</div>
+        <div class="ph-name">battery-warning</div>
+        <div class="cp">0xe0c8</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-battery-warning" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-battery-warning" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-battery-warning" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-battery-warning" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="power_off font_awesome_power_off power 0xe3da">
+        <i class="ph-bold ph-power icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_POWER_OFF')" title="点击复制">FONT_AWESOME_POWER_OFF</div>
+        <div class="ph-name">power</div>
+        <div class="cp">0xe3da</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-power" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-power" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-power" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-power" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="🔊 音量与音频">
+  <h2>🔊 音量与音频<span class="count">7 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="volume_high font_awesome_volume_high speaker-high 0xe44a">
+        <i class="ph-bold ph-speaker-high icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_VOLUME_HIGH')" title="点击复制">FONT_AWESOME_VOLUME_HIGH</div>
+        <div class="ph-name">speaker-high</div>
+        <div class="cp">0xe44a</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-speaker-high" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-speaker-high" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-speaker-high" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-speaker-high" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="volume font_awesome_volume speaker-low 0xe44c">
+        <i class="ph-bold ph-speaker-low icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_VOLUME')" title="点击复制">FONT_AWESOME_VOLUME</div>
+        <div class="ph-name">speaker-low</div>
+        <div class="cp">0xe44c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-speaker-low" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-speaker-low" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-speaker-low" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-speaker-low" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="volume_low font_awesome_volume_low speaker-low 0xe44c">
+        <i class="ph-bold ph-speaker-low icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_VOLUME_LOW')" title="点击复制">FONT_AWESOME_VOLUME_LOW</div>
+        <div class="ph-name">speaker-low</div>
+        <div class="cp">0xe44c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-speaker-low" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-speaker-low" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-speaker-low" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-speaker-low" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="volume_xmark font_awesome_volume_xmark speaker-x 0xe45c">
+        <i class="ph-bold ph-speaker-x icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_VOLUME_XMARK')" title="点击复制">FONT_AWESOME_VOLUME_XMARK</div>
+        <div class="ph-name">speaker-x</div>
+        <div class="cp">0xe45c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-speaker-x" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-speaker-x" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-speaker-x" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-speaker-x" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="headphones font_awesome_headphones headphones 0xe2a6">
+        <i class="ph-bold ph-headphones icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_HEADPHONES')" title="点击复制">FONT_AWESOME_HEADPHONES</div>
+        <div class="ph-name">headphones</div>
+        <div class="cp">0xe2a6</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-headphones" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-headphones" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-headphones" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-headphones" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="microphone font_awesome_microphone microphone 0xe326">
+        <i class="ph-bold ph-microphone icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_MICROPHONE')" title="点击复制">FONT_AWESOME_MICROPHONE</div>
+        <div class="ph-name">microphone</div>
+        <div class="cp">0xe326</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-microphone" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-microphone" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-microphone" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-microphone" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="microphone_slash font_awesome_microphone_slash microphone-slash 0xe328">
+        <i class="ph-bold ph-microphone-slash icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_MICROPHONE_SLASH')" title="点击复制">FONT_AWESOME_MICROPHONE_SLASH</div>
+        <div class="ph-name">microphone-slash</div>
+        <div class="cp">0xe328</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-microphone-slash" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-microphone-slash" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-microphone-slash" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-microphone-slash" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="⏯ 媒体控制">
+  <h2>⏯ 媒体控制<span class="count">6 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="music font_awesome_music music-note 0xe33c">
+        <i class="ph-bold ph-music-note icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_MUSIC')" title="点击复制">FONT_AWESOME_MUSIC</div>
+        <div class="ph-name">music-note</div>
+        <div class="cp">0xe33c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-music-note" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-music-note" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-music-note" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-music-note" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="play font_awesome_play play 0xe3d0">
+        <i class="ph-bold ph-play icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_PLAY')" title="点击复制">FONT_AWESOME_PLAY</div>
+        <div class="ph-name">play</div>
+        <div class="cp">0xe3d0</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-play" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-play" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-play" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-play" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="pause font_awesome_pause pause 0xe39e">
+        <i class="ph-bold ph-pause icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_PAUSE')" title="点击复制">FONT_AWESOME_PAUSE</div>
+        <div class="ph-name">pause</div>
+        <div class="cp">0xe39e</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-pause" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-pause" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-pause" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-pause" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="stop font_awesome_stop stop 0xe46c">
+        <i class="ph-bold ph-stop icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_STOP')" title="点击复制">FONT_AWESOME_STOP</div>
+        <div class="ph-name">stop</div>
+        <div class="cp">0xe46c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-stop" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-stop" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-stop" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-stop" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="backward_step font_awesome_backward_step skip-back 0xe5a4">
+        <i class="ph-bold ph-skip-back icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BACKWARD_STEP')" title="点击复制">FONT_AWESOME_BACKWARD_STEP</div>
+        <div class="ph-name">skip-back</div>
+        <div class="cp">0xe5a4</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-skip-back" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-skip-back" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-skip-back" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-skip-back" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="forward_step font_awesome_forward_step skip-forward 0xe5a6">
+        <i class="ph-bold ph-skip-forward icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_FORWARD_STEP')" title="点击复制">FONT_AWESOME_FORWARD_STEP</div>
+        <div class="ph-name">skip-forward</div>
+        <div class="cp">0xe5a6</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-skip-forward" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-skip-forward" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-skip-forward" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-skip-forward" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="🎛 UI 控制">
+  <h2>🎛 UI 控制<span class="count">10 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="check font_awesome_check check 0xe182">
+        <i class="ph-bold ph-check icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CHECK')" title="点击复制">FONT_AWESOME_CHECK</div>
+        <div class="ph-name">check</div>
+        <div class="cp">0xe182</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-check" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-check" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-check" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-check" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="xmark font_awesome_xmark x 0xe4f6">
+        <i class="ph-bold ph-x icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_XMARK')" title="点击复制">FONT_AWESOME_XMARK</div>
+        <div class="ph-name">x</div>
+        <div class="cp">0xe4f6</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-x" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-x" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-x" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-x" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="gear font_awesome_gear gear 0xe270">
+        <i class="ph-bold ph-gear icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_GEAR')" title="点击复制">FONT_AWESOME_GEAR</div>
+        <div class="ph-name">gear</div>
+        <div class="cp">0xe270</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-gear" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-gear" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-gear" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-gear" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="trash font_awesome_trash trash 0xe4a6">
+        <i class="ph-bold ph-trash icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_TRASH')" title="点击复制">FONT_AWESOME_TRASH</div>
+        <div class="ph-name">trash</div>
+        <div class="cp">0xe4a6</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-trash" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-trash" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-trash" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-trash" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="house font_awesome_house house 0xe2c2">
+        <i class="ph-bold ph-house icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_HOUSE')" title="点击复制">FONT_AWESOME_HOUSE</div>
+        <div class="ph-name">house</div>
+        <div class="cp">0xe2c2</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-house" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-house" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-house" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-house" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="image font_awesome_image image 0xe2ca">
+        <i class="ph-bold ph-image icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_IMAGE')" title="点击复制">FONT_AWESOME_IMAGE</div>
+        <div class="ph-name">image</div>
+        <div class="cp">0xe2ca</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-image" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-image" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-image" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-image" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="pen_to_square font_awesome_pen_to_square pencil-simple-line 0xebc6">
+        <i class="ph-bold ph-pencil-simple-line icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_PEN_TO_SQUARE')" title="点击复制">FONT_AWESOME_PEN_TO_SQUARE</div>
+        <div class="ph-name">pencil-simple-line</div>
+        <div class="cp">0xebc6</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-pencil-simple-line" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-pencil-simple-line" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-pencil-simple-line" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-pencil-simple-line" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="comment font_awesome_comment chat-circle 0xe168">
+        <i class="ph-bold ph-chat-circle icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_COMMENT')" title="点击复制">FONT_AWESOME_COMMENT</div>
+        <div class="ph-name">chat-circle</div>
+        <div class="cp">0xe168</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-chat-circle" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-chat-circle" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-chat-circle" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-chat-circle" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="comment_question font_awesome_comment_question chat-circle-text 0xe16e">
+        <i class="ph-bold ph-chat-circle-text icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_COMMENT_QUESTION')" title="点击复制">FONT_AWESOME_COMMENT_QUESTION</div>
+        <div class="ph-name">chat-circle-text</div>
+        <div class="cp">0xe16e</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-chat-circle-text" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-chat-circle-text" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-chat-circle-text" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-chat-circle-text" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="spinner font_awesome_spinner circle-notch 0xeb44">
+        <i class="ph-bold ph-circle-notch icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SPINNER')" title="点击复制">FONT_AWESOME_SPINNER</div>
+        <div class="ph-name">circle-notch</div>
+        <div class="cp">0xeb44</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-circle-notch" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-circle-notch" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-circle-notch" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-circle-notch" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="⬅ 箭头与方向">
+  <h2>⬅ 箭头与方向<span class="count">15 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="arrow_left font_awesome_arrow_left arrow-left 0xe058">
+        <i class="ph-bold ph-arrow-left icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ARROW_LEFT')" title="点击复制">FONT_AWESOME_ARROW_LEFT</div>
+        <div class="ph-name">arrow-left</div>
+        <div class="cp">0xe058</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-arrow-left" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-arrow-left" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-arrow-left" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-arrow-left" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="arrow_right font_awesome_arrow_right arrow-right 0xe06c">
+        <i class="ph-bold ph-arrow-right icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ARROW_RIGHT')" title="点击复制">FONT_AWESOME_ARROW_RIGHT</div>
+        <div class="ph-name">arrow-right</div>
+        <div class="cp">0xe06c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-arrow-right" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-arrow-right" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-arrow-right" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-arrow-right" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="arrow_up font_awesome_arrow_up arrow-up 0xe08e">
+        <i class="ph-bold ph-arrow-up icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ARROW_UP')" title="点击复制">FONT_AWESOME_ARROW_UP</div>
+        <div class="ph-name">arrow-up</div>
+        <div class="cp">0xe08e</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-arrow-up" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-arrow-up" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-arrow-up" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-arrow-up" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="arrow_down font_awesome_arrow_down arrow-down 0xe03e">
+        <i class="ph-bold ph-arrow-down icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ARROW_DOWN')" title="点击复制">FONT_AWESOME_ARROW_DOWN</div>
+        <div class="ph-name">arrow-down</div>
+        <div class="cp">0xe03e</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-arrow-down" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-arrow-down" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-arrow-down" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-arrow-down" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="angle_left font_awesome_angle_left caret-left 0xe138">
+        <i class="ph-bold ph-caret-left icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ANGLE_LEFT')" title="点击复制">FONT_AWESOME_ANGLE_LEFT</div>
+        <div class="ph-name">caret-left</div>
+        <div class="cp">0xe138</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-caret-left" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-caret-left" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-caret-left" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-caret-left" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="angle_right font_awesome_angle_right caret-right 0xe13a">
+        <i class="ph-bold ph-caret-right icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ANGLE_RIGHT')" title="点击复制">FONT_AWESOME_ANGLE_RIGHT</div>
+        <div class="ph-name">caret-right</div>
+        <div class="cp">0xe13a</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-caret-right" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-caret-right" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-caret-right" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-caret-right" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="angle_up font_awesome_angle_up caret-up 0xe13c">
+        <i class="ph-bold ph-caret-up icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ANGLE_UP')" title="点击复制">FONT_AWESOME_ANGLE_UP</div>
+        <div class="ph-name">caret-up</div>
+        <div class="cp">0xe13c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-caret-up" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-caret-up" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-caret-up" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-caret-up" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="angle_down font_awesome_angle_down caret-down 0xe136">
+        <i class="ph-bold ph-caret-down icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ANGLE_DOWN')" title="点击复制">FONT_AWESOME_ANGLE_DOWN</div>
+        <div class="ph-name">caret-down</div>
+        <div class="cp">0xe136</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-caret-down" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-caret-down" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-caret-down" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-caret-down" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="angles_left font_awesome_angles_left caret-double-left 0xe128">
+        <i class="ph-bold ph-caret-double-left icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ANGLES_LEFT')" title="点击复制">FONT_AWESOME_ANGLES_LEFT</div>
+        <div class="ph-name">caret-double-left</div>
+        <div class="cp">0xe128</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-caret-double-left" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-caret-double-left" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-caret-double-left" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-caret-double-left" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="angles_right font_awesome_angles_right caret-double-right 0xe12a">
+        <i class="ph-bold ph-caret-double-right icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ANGLES_RIGHT')" title="点击复制">FONT_AWESOME_ANGLES_RIGHT</div>
+        <div class="ph-name">caret-double-right</div>
+        <div class="cp">0xe12a</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-caret-double-right" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-caret-double-right" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-caret-double-right" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-caret-double-right" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="angles_up font_awesome_angles_up caret-double-up 0xe12c">
+        <i class="ph-bold ph-caret-double-up icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ANGLES_UP')" title="点击复制">FONT_AWESOME_ANGLES_UP</div>
+        <div class="ph-name">caret-double-up</div>
+        <div class="cp">0xe12c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-caret-double-up" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-caret-double-up" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-caret-double-up" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-caret-double-up" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="angles_down font_awesome_angles_down caret-double-down 0xe126">
+        <i class="ph-bold ph-caret-double-down icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ANGLES_DOWN')" title="点击复制">FONT_AWESOME_ANGLES_DOWN</div>
+        <div class="ph-name">caret-double-down</div>
+        <div class="cp">0xe126</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-caret-double-down" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-caret-double-down" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-caret-double-down" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-caret-double-down" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="arrows_repeat font_awesome_arrows_repeat arrows-clockwise 0xe094">
+        <i class="ph-bold ph-arrows-clockwise icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ARROWS_REPEAT')" title="点击复制">FONT_AWESOME_ARROWS_REPEAT</div>
+        <div class="ph-name">arrows-clockwise</div>
+        <div class="cp">0xe094</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-arrows-clockwise" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-arrows-clockwise" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-arrows-clockwise" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-arrows-clockwise" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="arrows_rotate font_awesome_arrows_rotate arrows-counter-clockwise 0xe096">
+        <i class="ph-bold ph-arrows-counter-clockwise icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ARROWS_ROTATE')" title="点击复制">FONT_AWESOME_ARROWS_ROTATE</div>
+        <div class="ph-name">arrows-counter-clockwise</div>
+        <div class="cp">0xe096</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-arrows-counter-clockwise" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-arrows-counter-clockwise" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-arrows-counter-clockwise" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-arrows-counter-clockwise" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="location_arrow font_awesome_location_arrow navigation-arrow 0xeade">
+        <i class="ph-bold ph-navigation-arrow icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_LOCATION_ARROW')" title="点击复制">FONT_AWESOME_LOCATION_ARROW</div>
+        <div class="ph-name">navigation-arrow</div>
+        <div class="cp">0xeade</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-navigation-arrow" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-navigation-arrow" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-navigation-arrow" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-navigation-arrow" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="☁ 天气">
+  <h2>☁ 天气<span class="count">24 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="sun font_awesome_sun sun 0xe472">
+        <i class="ph-bold ph-sun icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SUN')" title="点击复制">FONT_AWESOME_SUN</div>
+        <div class="ph-name">sun</div>
+        <div class="cp">0xe472</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-sun" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-sun" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-sun" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-sun" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="moon font_awesome_moon moon 0xe330">
+        <i class="ph-bold ph-moon icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_MOON')" title="点击复制">FONT_AWESOME_MOON</div>
+        <div class="ph-name">moon</div>
+        <div class="cp">0xe330</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-moon" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-moon" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-moon" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-moon" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud font_awesome_cloud cloud 0xe1aa">
+        <i class="ph-bold ph-cloud icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD')" title="点击复制">FONT_AWESOME_CLOUD</div>
+        <div class="ph-name">cloud</div>
+        <div class="cp">0xe1aa</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="clouds font_awesome_clouds cloud 0xe1aa">
+        <i class="ph-bold ph-cloud icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUDS')" title="点击复制">FONT_AWESOME_CLOUDS</div>
+        <div class="ph-name">cloud</div>
+        <div class="cp">0xe1aa</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_sun font_awesome_cloud_sun cloud-sun 0xe540">
+        <i class="ph-bold ph-cloud-sun icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_SUN')" title="点击复制">FONT_AWESOME_CLOUD_SUN</div>
+        <div class="ph-name">cloud-sun</div>
+        <div class="cp">0xe540</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-sun" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-sun" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-sun" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-sun" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_moon font_awesome_cloud_moon cloud-moon 0xe53e">
+        <i class="ph-bold ph-cloud-moon icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_MOON')" title="点击复制">FONT_AWESOME_CLOUD_MOON</div>
+        <div class="ph-name">cloud-moon</div>
+        <div class="cp">0xe53e</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-moon" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-moon" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-moon" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-moon" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_sun_rain font_awesome_cloud_sun_rain cloud-rain 0xe1b4">
+        <i class="ph-bold ph-cloud-rain icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_SUN_RAIN')" title="点击复制">FONT_AWESOME_CLOUD_SUN_RAIN</div>
+        <div class="ph-name">cloud-rain</div>
+        <div class="cp">0xe1b4</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-rain" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-rain" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-rain" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-rain" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_bolt font_awesome_cloud_bolt cloud-lightning 0xe1b2">
+        <i class="ph-bold ph-cloud-lightning icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_BOLT')" title="点击复制">FONT_AWESOME_CLOUD_BOLT</div>
+        <div class="ph-name">cloud-lightning</div>
+        <div class="cp">0xe1b2</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-lightning" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-lightning" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-lightning" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-lightning" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_hail font_awesome_cloud_hail cloud-snow 0xe1b8">
+        <i class="ph-bold ph-cloud-snow icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_HAIL')" title="点击复制">FONT_AWESOME_CLOUD_HAIL</div>
+        <div class="ph-name">cloud-snow</div>
+        <div class="cp">0xe1b8</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-snow" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-snow" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-snow" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-snow" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_sleet font_awesome_cloud_sleet cloud-snow 0xe1b8">
+        <i class="ph-bold ph-cloud-snow icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_SLEET')" title="点击复制">FONT_AWESOME_CLOUD_SLEET</div>
+        <div class="ph-name">cloud-snow</div>
+        <div class="cp">0xe1b8</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-snow" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-snow" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-snow" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-snow" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_drizzle font_awesome_cloud_drizzle cloud-rain 0xe1b4">
+        <i class="ph-bold ph-cloud-rain icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_DRIZZLE')" title="点击复制">FONT_AWESOME_CLOUD_DRIZZLE</div>
+        <div class="ph-name">cloud-rain</div>
+        <div class="cp">0xe1b4</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-rain" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-rain" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-rain" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-rain" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_fog font_awesome_cloud_fog cloud-fog 0xe53c">
+        <i class="ph-bold ph-cloud-fog icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_FOG')" title="点击复制">FONT_AWESOME_CLOUD_FOG</div>
+        <div class="ph-name">cloud-fog</div>
+        <div class="cp">0xe53c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-fog" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-fog" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-fog" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-fog" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_rain font_awesome_cloud_rain cloud-rain 0xe1b4">
+        <i class="ph-bold ph-cloud-rain icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_RAIN')" title="点击复制">FONT_AWESOME_CLOUD_RAIN</div>
+        <div class="ph-name">cloud-rain</div>
+        <div class="cp">0xe1b4</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-rain" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-rain" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-rain" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-rain" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_showers font_awesome_cloud_showers cloud-rain 0xe1b4">
+        <i class="ph-bold ph-cloud-rain icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_SHOWERS')" title="点击复制">FONT_AWESOME_CLOUD_SHOWERS</div>
+        <div class="ph-name">cloud-rain</div>
+        <div class="cp">0xe1b4</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-rain" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-rain" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-rain" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-rain" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_showers_heavy font_awesome_cloud_showers_heavy cloud-rain 0xe1b4">
+        <i class="ph-bold ph-cloud-rain icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_SHOWERS_HEAVY')" title="点击复制">FONT_AWESOME_CLOUD_SHOWERS_HEAVY</div>
+        <div class="ph-name">cloud-rain</div>
+        <div class="cp">0xe1b4</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-rain" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-rain" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-rain" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-rain" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="snowflake font_awesome_snowflake snowflake 0xe5aa">
+        <i class="ph-bold ph-snowflake icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SNOWFLAKE')" title="点击复制">FONT_AWESOME_SNOWFLAKE</div>
+        <div class="ph-name">snowflake</div>
+        <div class="cp">0xe5aa</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-snowflake" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-snowflake" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-snowflake" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-snowflake" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="snowflakes font_awesome_snowflakes snowflake 0xe5aa">
+        <i class="ph-bold ph-snowflake icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SNOWFLAKES')" title="点击复制">FONT_AWESOME_SNOWFLAKES</div>
+        <div class="ph-name">snowflake</div>
+        <div class="cp">0xe5aa</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-snowflake" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-snowflake" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-snowflake" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-snowflake" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="smog font_awesome_smog cloud-fog 0xe53c">
+        <i class="ph-bold ph-cloud-fog icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SMOG')" title="点击复制">FONT_AWESOME_SMOG</div>
+        <div class="ph-name">cloud-fog</div>
+        <div class="cp">0xe53c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-fog" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-fog" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-fog" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-fog" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="wind font_awesome_wind wind 0xe5d2">
+        <i class="ph-bold ph-wind icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_WIND')" title="点击复制">FONT_AWESOME_WIND</div>
+        <div class="ph-name">wind</div>
+        <div class="cp">0xe5d2</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-wind" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-wind" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-wind" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-wind" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="hurricane font_awesome_hurricane spiral 0xe9fa">
+        <i class="ph-bold ph-spiral icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_HURRICANE')" title="点击复制">FONT_AWESOME_HURRICANE</div>
+        <div class="ph-name">spiral</div>
+        <div class="cp">0xe9fa</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-spiral" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-spiral" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-spiral" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-spiral" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="tornado font_awesome_tornado tornado 0xe88c">
+        <i class="ph-bold ph-tornado icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_TORNADO')" title="点击复制">FONT_AWESOME_TORNADO</div>
+        <div class="ph-name">tornado</div>
+        <div class="cp">0xe88c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-tornado" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-tornado" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-tornado" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-tornado" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_arrow_down font_awesome_cloud_arrow_down cloud-arrow-down 0xe1ac">
+        <i class="ph-bold ph-cloud-arrow-down icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_ARROW_DOWN')" title="点击复制">FONT_AWESOME_CLOUD_ARROW_DOWN</div>
+        <div class="ph-name">cloud-arrow-down</div>
+        <div class="cp">0xe1ac</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-arrow-down" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-arrow-down" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-arrow-down" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-arrow-down" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_arrow_up font_awesome_cloud_arrow_up cloud-arrow-up 0xe1ae">
+        <i class="ph-bold ph-cloud-arrow-up icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_ARROW_UP')" title="点击复制">FONT_AWESOME_CLOUD_ARROW_UP</div>
+        <div class="ph-name">cloud-arrow-up</div>
+        <div class="cp">0xe1ae</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-arrow-up" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-arrow-up" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-arrow-up" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-arrow-up" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cloud_slash font_awesome_cloud_slash cloud-x 0xea96">
+        <i class="ph-bold ph-cloud-x icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOUD_SLASH')" title="点击复制">FONT_AWESOME_CLOUD_SLASH</div>
+        <div class="ph-name">cloud-x</div>
+        <div class="cp">0xea96</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cloud-x" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cloud-x" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cloud-x" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cloud-x" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="⏰ 时间与日历">
+  <h2>⏰ 时间与日历<span class="count">4 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="clock font_awesome_clock clock 0xe19a">
+        <i class="ph-bold ph-clock icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CLOCK')" title="点击复制">FONT_AWESOME_CLOCK</div>
+        <div class="ph-name">clock</div>
+        <div class="cp">0xe19a</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-clock" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-clock" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-clock" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-clock" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="alarm_clock font_awesome_alarm_clock alarm 0xe006">
+        <i class="ph-bold ph-alarm icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ALARM_CLOCK')" title="点击复制">FONT_AWESOME_ALARM_CLOCK</div>
+        <div class="ph-name">alarm</div>
+        <div class="cp">0xe006</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-alarm" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-alarm" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-alarm" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-alarm" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="calendar font_awesome_calendar calendar 0xe108">
+        <i class="ph-bold ph-calendar icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CALENDAR')" title="点击复制">FONT_AWESOME_CALENDAR</div>
+        <div class="ph-name">calendar</div>
+        <div class="cp">0xe108</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-calendar" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-calendar" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-calendar" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-calendar" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="temperature_half font_awesome_temperature_half thermometer-simple 0xe5cc">
+        <i class="ph-bold ph-thermometer-simple icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_TEMPERATURE_HALF')" title="点击复制">FONT_AWESOME_TEMPERATURE_HALF</div>
+        <div class="ph-name">thermometer-simple</div>
+        <div class="cp">0xe5cc</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-thermometer-simple" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-thermometer-simple" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-thermometer-simple" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-thermometer-simple" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="🚨 警示与圆形指示">
+  <h2>🚨 警示与圆形指示<span class="count">6 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="triangle_exclamation font_awesome_triangle_exclamation warning 0xe4e0">
+        <i class="ph-bold ph-warning icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_TRIANGLE_EXCLAMATION')" title="点击复制">FONT_AWESOME_TRIANGLE_EXCLAMATION</div>
+        <div class="ph-name">warning</div>
+        <div class="cp">0xe4e0</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-warning" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-warning" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-warning" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-warning" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="bell font_awesome_bell bell 0xe0ce">
+        <i class="ph-bold ph-bell icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BELL')" title="点击复制">FONT_AWESOME_BELL</div>
+        <div class="ph-name">bell</div>
+        <div class="cp">0xe0ce</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-bell" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-bell" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-bell" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-bell" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="circle_info font_awesome_circle_info info 0xe2ce">
+        <i class="ph-bold ph-info icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CIRCLE_INFO')" title="点击复制">FONT_AWESOME_CIRCLE_INFO</div>
+        <div class="ph-name">info</div>
+        <div class="cp">0xe2ce</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-info" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-info" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-info" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-info" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="circle_question font_awesome_circle_question question 0xe3e8">
+        <i class="ph-bold ph-question icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CIRCLE_QUESTION')" title="点击复制">FONT_AWESOME_CIRCLE_QUESTION</div>
+        <div class="ph-name">question</div>
+        <div class="cp">0xe3e8</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-question" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-question" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-question" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-question" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="circle_check font_awesome_circle_check check-circle 0xe184">
+        <i class="ph-bold ph-check-circle icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CIRCLE_CHECK')" title="点击复制">FONT_AWESOME_CIRCLE_CHECK</div>
+        <div class="ph-name">check-circle</div>
+        <div class="cp">0xe184</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-check-circle" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-check-circle" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-check-circle" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-check-circle" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="circle_xmark font_awesome_circle_xmark x-circle 0xe4f8">
+        <i class="ph-bold ph-x-circle icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CIRCLE_XMARK')" title="点击复制">FONT_AWESOME_CIRCLE_XMARK</div>
+        <div class="ph-name">x-circle</div>
+        <div class="cp">0xe4f8</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-x-circle" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-x-circle" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-x-circle" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-x-circle" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="👤 身份与定位">
+  <h2>👤 身份与定位<span class="count">4 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="user font_awesome_user user 0xe4c2">
+        <i class="ph-bold ph-user icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_USER')" title="点击复制">FONT_AWESOME_USER</div>
+        <div class="ph-name">user</div>
+        <div class="cp">0xe4c2</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-user" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-user" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-user" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-user" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="user_robot font_awesome_user_robot robot 0xe762">
+        <i class="ph-bold ph-robot icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_USER_ROBOT')" title="点击复制">FONT_AWESOME_USER_ROBOT</div>
+        <div class="ph-name">robot</div>
+        <div class="cp">0xe762</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-robot" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-robot" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-robot" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-robot" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="globe font_awesome_globe globe 0xe288">
+        <i class="ph-bold ph-globe icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_GLOBE')" title="点击复制">FONT_AWESOME_GLOBE</div>
+        <div class="ph-name">globe</div>
+        <div class="cp">0xe288</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-globe" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-globe" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-globe" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-globe" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="location_dot font_awesome_location_dot map-pin 0xe316">
+        <i class="ph-bold ph-map-pin icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_LOCATION_DOT')" title="点击复制">FONT_AWESOME_LOCATION_DOT</div>
+        <div class="ph-name">map-pin</div>
+        <div class="cp">0xe316</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-map-pin" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-map-pin" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-map-pin" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-map-pin" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="📱 设备与配件">
+  <h2>📱 设备与配件<span class="count">6 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="phone font_awesome_phone phone 0xe3b8">
+        <i class="ph-bold ph-phone icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_PHONE')" title="点击复制">FONT_AWESOME_PHONE</div>
+        <div class="ph-name">phone</div>
+        <div class="cp">0xe3b8</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-phone" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-phone" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-phone" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-phone" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="envelope font_awesome_envelope envelope 0xe214">
+        <i class="ph-bold ph-envelope icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ENVELOPE')" title="点击复制">FONT_AWESOME_ENVELOPE</div>
+        <div class="ph-name">envelope</div>
+        <div class="cp">0xe214</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-envelope" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-envelope" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-envelope" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-envelope" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="camera font_awesome_camera camera 0xe10e">
+        <i class="ph-bold ph-camera icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CAMERA')" title="点击复制">FONT_AWESOME_CAMERA</div>
+        <div class="ph-name">camera</div>
+        <div class="cp">0xe10e</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-camera" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-camera" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-camera" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-camera" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="sd_card font_awesome_sd_card sim-card 0xe664">
+        <i class="ph-bold ph-sim-card icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SD_CARD')" title="点击复制">FONT_AWESOME_SD_CARD</div>
+        <div class="ph-name">sim-card</div>
+        <div class="cp">0xe664</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-sim-card" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-sim-card" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-sim-card" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-sim-card" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="microchip_ai font_awesome_microchip_ai cpu 0xe610">
+        <i class="ph-bold ph-cpu icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_MICROCHIP_AI')" title="点击复制">FONT_AWESOME_MICROCHIP_AI</div>
+        <div class="ph-name">cpu</div>
+        <div class="cp">0xe610</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-cpu" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-cpu" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-cpu" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-cpu" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="download font_awesome_download download-simple 0xe20c">
+        <i class="ph-bold ph-download-simple icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_DOWNLOAD')" title="点击复制">FONT_AWESOME_DOWNLOAD</div>
+        <div class="ph-name">download-simple</div>
+        <div class="cp">0xe20c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-download-simple" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-download-simple" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-download-simple" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-download-simple" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="🔒 锁与链接">
+  <h2>🔒 锁与链接<span class="count">4 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="lock font_awesome_lock lock 0xe2fa">
+        <i class="ph-bold ph-lock icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_LOCK')" title="点击复制">FONT_AWESOME_LOCK</div>
+        <div class="ph-name">lock</div>
+        <div class="cp">0xe2fa</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-lock" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-lock" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-lock" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-lock" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="unlock font_awesome_unlock lock-open 0xe306">
+        <i class="ph-bold ph-lock-open icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_UNLOCK')" title="点击复制">FONT_AWESOME_UNLOCK</div>
+        <div class="ph-name">lock-open</div>
+        <div class="cp">0xe306</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-lock-open" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-lock-open" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-lock-open" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-lock-open" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="key font_awesome_key key 0xe2d6">
+        <i class="ph-bold ph-key icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_KEY')" title="点击复制">FONT_AWESOME_KEY</div>
+        <div class="ph-name">key</div>
+        <div class="cp">0xe2d6</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-key" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-key" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-key" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-key" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="link font_awesome_link link 0xe2e2">
+        <i class="ph-bold ph-link icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_LINK')" title="点击复制">FONT_AWESOME_LINK</div>
+        <div class="ph-name">link</div>
+        <div class="cp">0xe2e2</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-link" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-link" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-link" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-link" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="❤ 生活与娱乐">
+  <h2>❤ 生活与娱乐<span class="count">9 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="heart font_awesome_heart heart 0xe2a8">
+        <i class="ph-bold ph-heart icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_HEART')" title="点击复制">FONT_AWESOME_HEART</div>
+        <div class="ph-name">heart</div>
+        <div class="cp">0xe2a8</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-heart" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-heart" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-heart" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-heart" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="star font_awesome_star star 0xe46a">
+        <i class="ph-bold ph-star icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_STAR')" title="点击复制">FONT_AWESOME_STAR</div>
+        <div class="ph-name">star</div>
+        <div class="cp">0xe46a</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-star" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-star" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-star" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-star" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="gamepad font_awesome_gamepad game-controller 0xe26e">
+        <i class="ph-bold ph-game-controller icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_GAMEPAD')" title="点击复制">FONT_AWESOME_GAMEPAD</div>
+        <div class="ph-name">game-controller</div>
+        <div class="cp">0xe26e</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-game-controller" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-game-controller" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-game-controller" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-game-controller" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="watch font_awesome_watch watch 0xe4e6">
+        <i class="ph-bold ph-watch icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_WATCH')" title="点击复制">FONT_AWESOME_WATCH</div>
+        <div class="ph-name">watch</div>
+        <div class="cp">0xe4e6</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-watch" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-watch" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-watch" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-watch" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="brightness font_awesome_brightness sun-dim 0xe474">
+        <i class="ph-bold ph-sun-dim icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_BRIGHTNESS')" title="点击复制">FONT_AWESOME_BRIGHTNESS</div>
+        <div class="ph-name">sun-dim</div>
+        <div class="cp">0xe474</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-sun-dim" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-sun-dim" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-sun-dim" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-sun-dim" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="compass font_awesome_compass compass 0xe1c8">
+        <i class="ph-bold ph-compass icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_COMPASS')" title="点击复制">FONT_AWESOME_COMPASS</div>
+        <div class="ph-name">compass</div>
+        <div class="cp">0xe1c8</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-compass" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-compass" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-compass" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-compass" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="calculator font_awesome_calculator calculator 0xe538">
+        <i class="ph-bold ph-calculator icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CALCULATOR')" title="点击复制">FONT_AWESOME_CALCULATOR</div>
+        <div class="ph-name">calculator</div>
+        <div class="cp">0xe538</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-calculator" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-calculator" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-calculator" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-calculator" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="glasses font_awesome_glasses eyeglasses 0xe7ba">
+        <i class="ph-bold ph-eyeglasses icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_GLASSES')" title="点击复制">FONT_AWESOME_GLASSES</div>
+        <div class="ph-name">eyeglasses</div>
+        <div class="cp">0xe7ba</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-eyeglasses" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-eyeglasses" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-eyeglasses" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-eyeglasses" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+    <div class="card" data-search="magnifying_glass font_awesome_magnifying_glass magnifying-glass 0xe30c">
+        <i class="ph-bold ph-magnifying-glass icon-big"></i>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_MAGNIFYING_GLASS')" title="点击复制">FONT_AWESOME_MAGNIFYING_GLASS</div>
+        <div class="ph-name">magnifying-glass</div>
+        <div class="cp">0xe30c</div>
+        <div class="scales">
+            <span class="label">14:</span><i class="ph-bold ph-magnifying-glass" style="font-size:14px"></i>
+            <span class="label">16:</span><i class="ph-bold ph-magnifying-glass" style="font-size:16px"></i>
+            <span class="label">20:</span><i class="ph-bold ph-magnifying-glass" style="font-size:20px"></i>
+            <span class="label">30:</span><i class="ph-bold ph-magnifying-glass" style="font-size:30px"></i>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="section" data-cat="emoji">
+  <h2>😊 表情 emoji（FA Regular fallback）<span class="count">21 个</span></h2>
+  <div class="grid">
+    
+    <div class="card" data-search="neutral font_awesome_neutral emoji 0xf5a4">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_NEUTRAL')" title="点击复制">FONT_AWESOME_NEUTRAL</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xf5a4</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="happy font_awesome_happy emoji 0xf118">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_HAPPY')" title="点击复制">FONT_AWESOME_HAPPY</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xf118</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="laughing font_awesome_laughing emoji 0xf59b">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_LAUGHING')" title="点击复制">FONT_AWESOME_LAUGHING</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xf59b</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="funny font_awesome_funny emoji 0xf588">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_FUNNY')" title="点击复制">FONT_AWESOME_FUNNY</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xf588</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="sad font_awesome_sad emoji 0xe384">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SAD')" title="点击复制">FONT_AWESOME_SAD</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xe384</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="angry font_awesome_angry emoji 0xf556">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_ANGRY')" title="点击复制">FONT_AWESOME_ANGRY</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xf556</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="crying font_awesome_crying emoji 0xf5b3">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CRYING')" title="点击复制">FONT_AWESOME_CRYING</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xf5b3</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="loving font_awesome_loving emoji 0xf584">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_LOVING')" title="点击复制">FONT_AWESOME_LOVING</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xf584</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="embarrassed font_awesome_embarrassed emoji 0xf579">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_EMBARRASSED')" title="点击复制">FONT_AWESOME_EMBARRASSED</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xf579</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="surprised font_awesome_surprised emoji 0xe36b">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SURPRISED')" title="点击复制">FONT_AWESOME_SURPRISED</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xe36b</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="shocked font_awesome_shocked emoji 0xe375">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SHOCKED')" title="点击复制">FONT_AWESOME_SHOCKED</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xe375</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="thinking font_awesome_thinking emoji 0xe39b">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_THINKING')" title="点击复制">FONT_AWESOME_THINKING</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xe39b</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="winking font_awesome_winking emoji 0xf4da">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_WINKING')" title="点击复制">FONT_AWESOME_WINKING</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xf4da</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="cool font_awesome_cool emoji 0xe398">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_COOL')" title="点击复制">FONT_AWESOME_COOL</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xe398</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="relaxed font_awesome_relaxed emoji 0xe392">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_RELAXED')" title="点击复制">FONT_AWESOME_RELAXED</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xe392</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="delicious font_awesome_delicious emoji 0xe372">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_DELICIOUS')" title="点击复制">FONT_AWESOME_DELICIOUS</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xe372</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="kissy font_awesome_kissy emoji 0xf598">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_KISSY')" title="点击复制">FONT_AWESOME_KISSY</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xf598</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="confident font_awesome_confident emoji 0xe409">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CONFIDENT')" title="点击复制">FONT_AWESOME_CONFIDENT</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xe409</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="sleepy font_awesome_sleepy emoji 0xe38d">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SLEEPY')" title="点击复制">FONT_AWESOME_SLEEPY</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xe38d</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="silly font_awesome_silly emoji 0xe3a4">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_SILLY')" title="点击复制">FONT_AWESOME_SILLY</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xe3a4</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+    <div class="card" data-search="confused font_awesome_confused emoji 0xe36d">
+        <div class="icon-big emoji-placeholder">😊</div>
+        <div class="fa-name copyable" onclick="copyText('FONT_AWESOME_CONFUSED')" title="点击复制">FONT_AWESOME_CONFUSED</div>
+        <div class="ph-name">FA Regular fallback</div>
+        <div class="cp">0xe36d</div>
+        <div class="scales">
+            <span class="copy-hint">浏览器无法预览（emoji 子集走 FA Pro 字体）</span>
+        </div>
+    </div>
+    
+  </div>
+</div>
+
+<footer>
+  字体：Phosphor Bold（114 UI 图标 + 10 硬件状态扩展）+ FA Regular（21 emoji）<br>
+  调用：业务代码 #include "font_awesome.h" 后 lv_label_set_text(label, FONT_AWESOME_WIFI) 即可<br>
+  字号 14/16/20/30 由 BUILTIN_ICON_FONT 宏路由（main/CMakeLists.txt:100）<br>
+  ESP32 渲染走 LVGL fallback 链：phosphor X_Y → font_awesome X_Y（emoji 自动回退）
+</footer>
+
+<script>
+// 字体加载检测
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    const probe = document.createElement('i');
+    probe.className = 'ph-bold ph-wifi-high';
+    probe.style.cssText = 'position:absolute;visibility:hidden;font-size:24px;';
+    document.body.appendChild(probe);
+    if (probe.offsetWidth < 5) {
+      document.getElementById('cdn-warning').style.display = 'block';
+    }
+    document.body.removeChild(probe);
+  }, 1500);
+});
+
+// 搜索
+const search = document.getElementById('search');
+const visibleCount = document.getElementById('visible-count');
+const allCards = document.querySelectorAll('.card');
+search.addEventListener('input', e => {
+  const q = e.target.value.trim().toLowerCase();
+  let cnt = 0;
+  allCards.forEach(c => {
+    const data = c.getAttribute('data-search').toLowerCase();
+    const visible = !q || data.includes(q);
+    c.style.display = visible ? '' : 'none';
+    if (visible) cnt++;
+  });
+  visibleCount.textContent = cnt;
+  // 隐藏空 section
+  document.querySelectorAll('.section').forEach(s => {
+    const has = s.querySelectorAll('.card:not([style*="none"])').length > 0;
+    s.style.display = has ? '' : 'none';
+  });
+});
+
+// 复制宏名
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    console.log('Copied:', text);
+  });
+}
+</script>
+
+</body>
+</html>
