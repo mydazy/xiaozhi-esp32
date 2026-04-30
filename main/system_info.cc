@@ -1,5 +1,6 @@
 #include "system_info.h"
 
+#include <cstring>
 #include <freertos/task.h>
 #include <esp_log.h>
 #include <esp_flash.h>
@@ -151,24 +152,98 @@ void SystemInfo::PrintTaskList() {
     ESP_LOGI(TAG, "Task list: \n%s", buffer);
 }
 
-void SystemInfo::PrintHeapStats() {
-    // 第1行：内存统计
-    ESP_LOGW(TAG, "SRAM: %.1f KB (min: %.1f KB) | PSRAM: %.1f KB (min: %.1f KB)",
-             heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024.0f,
-             heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024.0f,
-             heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024.0f,
-             heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM) / 1024.0f);
+esp_err_t SystemInfo::GetCpuUsage(uint32_t& cpu0_percent, uint32_t& cpu1_percent) {
+    // 通过两次 IDLE0 / IDLE1 任务运行时间差分反推双核占用率，避免 vTaskDelay 阻塞调用方
+    static TaskStatus_t* last_array = nullptr;
+    static UBaseType_t last_size = 0;
+    static configRUN_TIME_COUNTER_TYPE last_total = 0;
 
-    // 第3行：芯片温度
-    float temperature = 0.0f;
-    if (GetChipTemperature(temperature) == ESP_OK) {
-        if (temperature > 75.0f) {
-            ESP_LOGE(TAG, "Temp: %.1f°C (Overheat!)", temperature);
-        } else if (temperature > 65.0f) {
-            ESP_LOGW(TAG, "Temp: %.1f°C (High)", temperature);
-        } else {
-            ESP_LOGI(TAG, "Temp: %.1f°C", temperature);
+    cpu0_percent = 0;
+    cpu1_percent = 0;
+
+    UBaseType_t size = uxTaskGetNumberOfTasks() + 5;
+    TaskStatus_t* array = (TaskStatus_t*)malloc(sizeof(TaskStatus_t) * size);
+    if (array == nullptr) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    configRUN_TIME_COUNTER_TYPE total = 0;
+    size = uxTaskGetSystemState(array, size, &total);
+    if (size == 0) {
+        free(array);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    // 首次调用：保存基准并返回 INVALID_STATE，下次调用得到真实差值
+    if (last_array == nullptr || last_total == 0) {
+        if (last_array) free(last_array);
+        last_array = array;
+        last_size = size;
+        last_total = total;
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint32_t elapsed = total - last_total;
+    if (elapsed == 0) {
+        free(array);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint32_t idle_elapsed[2] = {0, 0};
+    for (UBaseType_t i = 0; i < size; i++) {
+        const char* name = array[i].pcTaskName;
+        int core = -1;
+        if (strcmp(name, "IDLE0") == 0) core = 0;
+        else if (strcmp(name, "IDLE1") == 0) core = 1;
+        if (core < 0) continue;
+
+        for (UBaseType_t j = 0; j < last_size; j++) {
+            if (last_array[j].xHandle == array[i].xHandle) {
+                idle_elapsed[core] = array[i].ulRunTimeCounter - last_array[j].ulRunTimeCounter;
+                break;
+            }
         }
+    }
+
+    cpu0_percent = idle_elapsed[0] >= elapsed ? 0 : 100 - (idle_elapsed[0] * 100UL / elapsed);
+    cpu1_percent = idle_elapsed[1] >= elapsed ? 0 : 100 - (idle_elapsed[1] * 100UL / elapsed);
+
+    free(last_array);
+    last_array = array;
+    last_size = size;
+    last_total = total;
+    return ESP_OK;
+}
+
+void SystemInfo::PrintHeapStats() {
+    float sram_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024.0f;
+    float sram_min = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024.0f;
+    float psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024.0f;
+    float psram_min = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM) / 1024.0f;
+
+    float temperature = 0.0f;
+    bool has_temp = (GetChipTemperature(temperature) == ESP_OK);
+
+    uint32_t cpu0 = 0, cpu1 = 0;
+    bool has_cpu = (GetCpuUsage(cpu0, cpu1) == ESP_OK);
+
+    char temp_buf[24] = {0};
+    if (has_temp) snprintf(temp_buf, sizeof(temp_buf), " | T %.1f°C", temperature);
+    char cpu_buf[32] = {0};
+    if (has_cpu) snprintf(cpu_buf, sizeof(cpu_buf), " | C0 %lu%% C1 %lu%%", (unsigned long)cpu0, (unsigned long)cpu1);
+
+    // 单行汇总：SRAM 当前/最小 | PSRAM 当前/最小 | 温度 | CPU C0/C1
+    // 日志级别按温度阈值决策（>75 ERROR / >65 WARN / 其他 INFO）
+    // ESP-IDF 5.5 log 宏要求 format 必须是字面量，因此三分支重复字面量（编译期会去重）
+    if (has_temp && temperature > 75.0f) {
+        ESP_LOGE(TAG, "SRAM %.1f/%.1fK | PSRAM %.1f/%.1fK%s%s",
+                 sram_free, sram_min, psram_free, psram_min, temp_buf, cpu_buf);
+    } else if (has_temp && temperature > 65.0f) {
+        ESP_LOGW(TAG, "SRAM %.1f/%.1fK | PSRAM %.1f/%.1fK%s%s",
+                 sram_free, sram_min, psram_free, psram_min, temp_buf, cpu_buf);
+    } else {
+        ESP_LOGI(TAG, "SRAM %.1f/%.1fK | PSRAM %.1f/%.1fK%s%s",
+                 sram_free, sram_min, psram_free, psram_min, temp_buf, cpu_buf);
     }
 }
 

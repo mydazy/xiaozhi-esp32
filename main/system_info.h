@@ -15,6 +15,7 @@ public:
     static std::string GetChipModelName();
     static std::string GetUserAgent();
     static esp_err_t PrintTaskCpuUsage(TickType_t xTicksToWait);
+    static esp_err_t GetCpuUsage(uint32_t& cpu0_percent, uint32_t& cpu1_percent);
     static esp_err_t GetChipTemperature(float& temperature);
     static void PrintTaskList();
     static void PrintHeapStats();
