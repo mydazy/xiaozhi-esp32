@@ -1,25 +1,3 @@
-"""
-font_awesome.py — 单字体合并生成器（v3 · 2026-04-30 用户拍板：合并 phosphor + emoji）
-
-原本是 FA 6 Free 字体生成器，重构为"FA 名 → Phosphor / FA-Free 双源合并"：
-  - 21 个 emoji（informational 宏 FONT_AWESOME_HAPPY 等）→ FA Free Regular 字形
-  - 124 个 UI 图标（FONT_AWESOME_WIFI / SIGNAL_* / BATTERY_* 等）→ Phosphor Bold 字形
-
-输出：单一字体 font_awesome_X_Y.c，包含 145 个字形，业务代码 #include "font_awesome.h" 即可。
-不再有 font_phosphor.* 双源结构。
-
-emoji 重映射（11 个 FA Pro 专属字符 → FA Free 可用 codepoint）：
-  sad/surprised/shocked/thinking/cool/relaxed/delicious/confident/sleepy/silly/confused
-  → 全部映射到 face-* 系列（U+F119 / U+1F60x / U+1F62x），视觉略有差异但语义相近
-
-字体源（./ttf/）：
-  - Phosphor-Bold.ttf       → 124 UI 图标（codepoint 在 0xE000-0xEDFF 区段）
-  - fa-regular-400.ttf      → 21 emoji（codepoint 散布在 0xF118-0xF5A4 + U+1F60x）
-
-调用：
-  python3 font_awesome.py lvgl --font-size 20 --bpp 4
-  python3 font_awesome.py generate
-"""
 import os
 import sys
 import argparse
@@ -34,15 +12,13 @@ emoji_mapping = {
     "happy":       0xf118,  # face-smile-beam
     "laughing":    0xf59b,  # face-laugh-squint
     "funny":       0xf588,  # face-grin-tears
+    "sad":         0x1f622,  # [remapped] U+E384 → face-sad-tear（流泪脸）
     "angry":       0xf556,  # face-angry
     "crying":      0xf5b3,  # face-sad-cry
     "loving":      0xf584,  # face-grin-hearts
     "embarrassed": 0xf579,  # face-flushed
     "winking":     0xf4da,  # face-grin-wink
     "kissy":       0xf598,  # face-kiss-wink-heart
-
-    # FA Pro 专属 → FA Free 替代（11 个 · [remapped] 标记）
-    "sad":         0x1f622,  # [remapped] U+E384 → face-sad-tear（流泪脸）
     "surprised":   0x1f62e,  # [remapped] U+E36B → face-surprise
     "shocked":     0x1f633,  # [remapped] U+E375 → face-flushed
     "thinking":    0x1f644,  # [remapped] U+E39B → face-rolling-eyes（翻白眼）

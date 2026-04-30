@@ -107,7 +107,7 @@ public:
      * Stop listening (event-based, thread-safe)
      * Sends MAIN_EVENT_STOP_LISTENING to be handled in Run()
      */
-    void StopListening();
+    void StopListening(bool play_sound = false);
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
@@ -164,9 +164,10 @@ private:
     bool aborted_ = false;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
+    // PTT 松手路径标志：StopListening(true) 设置，HandleStopListeningEvent 消费一次
+    // true 时不切 Idle、改 listening_mode_ 为默认（AutoStop/Realtime）保持 Listening 等待 TTS
+    std::atomic<bool> stop_listening_play_sound_{false};
 
-    // 说话结束提示音（来自 189 移植 · 2026-04-30）
-    // 触发：收到服务器 stt 文本回包时（确认服务器已收到+识别用户语音）
     // 跳过：① stt_popup_enabled_=false 关闭 ② PTT 模式（用户已知响应）③ 唤醒词首条 STT
     // Settings 字段："audio.stt_popup"（默认 1=开）
     bool stt_popup_enabled_ = true;

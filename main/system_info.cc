@@ -233,12 +233,21 @@ void SystemInfo::PrintHeapStats() {
     if (has_cpu) snprintf(cpu_buf, sizeof(cpu_buf), " | C0 %lu%% C1 %lu%%", (unsigned long)cpu0, (unsigned long)cpu1);
 
     // 单行汇总：SRAM 当前/最小 | PSRAM 当前/最小 | 温度 | CPU C0/C1
-    // 日志级别按温度阈值决策（>75 ERROR / >65 WARN / 其他 INFO）
+    // 日志级别按 SRAM + 温度双阈值判级，取最严重者：
+    //   ERROR : SRAM < 30K (临近 OOM)        | 温度 > 75°C
+    //   WARN  : SRAM < 50K (低于项目红线)    | 温度 > 65°C
+    //   INFO  : 其他
+    // 项目红线（CLAUDE.md）："对话时可用内部 RAM > 60KB"，50K 触发 WARN 提前预警
     // ESP-IDF 5.5 log 宏要求 format 必须是字面量，因此三分支重复字面量（编译期会去重）
-    if (has_temp && temperature > 75.0f) {
+    bool sram_critical = sram_free < 30.0f;
+    bool sram_low      = sram_free < 50.0f;
+    bool temp_critical = has_temp && temperature > 75.0f;
+    bool temp_high     = has_temp && temperature > 65.0f;
+
+    if (sram_critical || temp_critical) {
         ESP_LOGE(TAG, "SRAM %.1f/%.1fK | PSRAM %.1f/%.1fK%s%s",
                  sram_free, sram_min, psram_free, psram_min, temp_buf, cpu_buf);
-    } else if (has_temp && temperature > 65.0f) {
+    } else if (sram_low || temp_high) {
         ESP_LOGW(TAG, "SRAM %.1f/%.1fK | PSRAM %.1f/%.1fK%s%s",
                  sram_free, sram_min, psram_free, psram_min, temp_buf, cpu_buf);
     } else {

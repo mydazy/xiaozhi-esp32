@@ -20,7 +20,6 @@
 #include "lvgl_theme.h"
 #include "lvgl_display.h"
 #include "audio/music_player.h"
-#include "audio/acoustic_profile.h"
 
 #define TAG "MCP"
 
@@ -73,91 +72,6 @@ void McpServer::AddCommonTools() {
             AecMode aec_mode = (mode == "device") ? kAecOnDeviceSide : kAecOff;
             app.SetAecMode(aec_mode);
             return "AEC set to " + mode;
-        });
-
-    // ============================================================
-    // 声学档位（推荐使用 · AcousticProfile 三档预设 + 实音/回采诊断）
-    // 参考 xiaozhi-esp32-189/main/audio/acoustic_calibration.cc 简化版
-    // ============================================================
-    AddTool("self.audio.set_profile",
-        "Set acoustic profile (microphone sensitivity preset). "
-        "Three profiles available: "
-        "'robust' (mic_gain=15dB · for noisy environment / loud playback / frequent false wake), "
-        "'standard' (mic_gain=21dB · DEFAULT · for typical home use 30-80cm), "
-        "'sensitive' (mic_gain=27dB · for distant speech >1.5m / quiet bedroom / poor mic isolation). "
-        "Higher sensitivity = better at hearing faint speech BUT raises AEC residual risk (echo leaks into STT). "
-        "Persists across reboots. "
-        "Use when user says: 听不见我说话/咪头不灵敏/调灵敏/调大麦克风/环境太吵/总是误识别/远讲不行.",
-        PropertyList({
-            Property("profile", kPropertyTypeString)
-        }),
-        [](const PropertyList& properties) -> ReturnValue {
-            std::string name = properties["profile"].value<std::string>();
-            bool ok = AcousticProfile::GetInstance().SetProfileByName(name);
-            if (!ok) {
-                return std::string("{\"success\":false,\"error\":\"unknown profile (use robust/standard/sensitive)\"}");
-            }
-            const auto& preset = AcousticProfile::GetInstance().GetCurrentPreset();
-            return std::string("{\"success\":true,\"profile\":\"") + preset.name +
-                "\",\"mic_gain_db\":" + std::to_string((int)preset.mic_gain) +
-                ",\"tradeoff\":\"" + preset.tradeoff + "\"}";
-        });
-
-    AddTool("self.audio.get_profile",
-        "Get current acoustic profile. Returns JSON with name, description, mic_gain_db, and tradeoff hint.",
-        PropertyList(),
-        [](const PropertyList& properties) -> ReturnValue {
-            const auto& preset = AcousticProfile::GetInstance().GetCurrentPreset();
-            char buf[256];
-            snprintf(buf, sizeof(buf),
-                "{\"profile\":\"%s\",\"description\":\"%s\",\"mic_gain_db\":%d,\"tradeoff\":\"%s\"}",
-                preset.name, preset.desc, (int)preset.mic_gain, preset.tradeoff);
-            return std::string(buf);
-        });
-
-    AddTool("self.audio.diagnose_acoustic",
-        "Run acoustic diagnostic: capture 200ms of MIC vs REF (loopback) PCM, "
-        "compute RMS ratio in dB to detect 'AEC cannot remove echo' vs 'AEC eats user voice'. "
-        "Best when device is in Speaking state (REF channel has signal). "
-        "Returns JSON with mic_rms, ref_rms, ratio_db, judgment, and recommended profile change. "
-        "Use when user reports: 设备听不见我/服务器没回应/有回声/喇叭声音漏到识别.",
-        PropertyList(),
-        [](const PropertyList& properties) -> ReturnValue {
-            return AcousticProfile::GetInstance().Diagnose(200);
-        });
-
-    // ============================================================
-    // 底层 mic_gain 调试接口（保留 · AcousticProfile 内部使用 + 高级调试）
-    // 普通用户场景请用 self.audio.set_profile（自带预设和提示）
-    // ============================================================
-    AddTool("self.audio.set_mic_gain",
-        "Set microphone input gain (sensitivity) in dB. Range 0-30. "
-        "Default 18. Higher = more sensitive (better for distant or quiet voice, but picks up more noise). "
-        "Lower = less sensitive (better in noisy environment, reduces false wake). "
-        "Persists across reboots. Use when user says: 麦克风不灵敏/听不见/调大灵敏度/调小灵敏度/咪头声音小.",
-        PropertyList({
-            Property("gain", kPropertyTypeInteger, 0, 30)
-        }),
-        [&board](const PropertyList& properties) -> ReturnValue {
-            auto codec = board.GetAudioCodec();
-            if (!codec) {
-                return std::string("{\"success\":false,\"error\":\"audio codec not ready\"}");
-            }
-            int gain = properties["gain"].value<int>();
-            codec->SetInputGain(static_cast<float>(gain));
-            return std::string("{\"success\":true,\"gain\":") + std::to_string(gain) + "}";
-        });
-
-    AddTool("self.audio.get_mic_gain",
-        "Get current microphone input gain (sensitivity) in dB. Returns JSON {\"gain\":int}.",
-        PropertyList(),
-        [&board](const PropertyList& properties) -> ReturnValue {
-            auto codec = board.GetAudioCodec();
-            if (!codec) {
-                return std::string("{\"gain\":0}");
-            }
-            int gain = static_cast<int>(codec->input_gain());
-            return std::string("{\"gain\":") + std::to_string(gain) + "}";
         });
 
     // 说话结束提示音开关（确认服务器已收到+识别用户语音 · 持久化 audio.stt_popup · 默认开启）

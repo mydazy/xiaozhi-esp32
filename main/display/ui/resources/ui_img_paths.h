@@ -29,7 +29,4 @@
 #define IMG_FILE_BUTTON_LEFT        "button_left.bin"
 #define IMG_FILE_BUTTON_RIGHT       "button_right.bin"
 
-// 电池/信号/铃铛图标已迁至 FontAwesome 字体（见 ui_display.cc · CreateGlobalStatusBar）
-// 不再消耗 assets 分区与 PSRAM 解码缓冲，启动期永不空白。
-
 #endif // UI_IMG_PATHS_H

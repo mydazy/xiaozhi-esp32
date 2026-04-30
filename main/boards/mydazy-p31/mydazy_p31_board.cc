@@ -1334,7 +1334,8 @@ private:
             codec->SetOutputVolume(volume);
             char volume_text[64];
             snprintf(volume_text, sizeof(volume_text), "%s %d", Lang::Strings::VOLUME, volume);
-            GetDisplay()->SetStatus(volume_text);
+            // 改用 ShowNotification（1.5s 自动消失） · clock/player 模式下也能可见
+            GetDisplay()->ShowNotification(volume_text, 1500);
             WakeUp();
         }
     }
@@ -1357,7 +1358,8 @@ private:
                     codec->SetOutputVolume(v);
                     char volume_text[64];
                     snprintf(volume_text, sizeof(volume_text), "%s %d", Lang::Strings::VOLUME, v);
-                    Board::GetInstance().GetDisplay()->SetStatus(volume_text);
+                    // 改用 ShowNotification（1.5s 自动消失） · clock/player 模式下也能可见
+                    Board::GetInstance().GetDisplay()->ShowNotification(volume_text, 1500);
                     static_cast<MyDazyP31Board&>(Board::GetInstance()).WakeUp();
                 }
                 vTaskDelay(pdMS_TO_TICKS(200)); // 200ms间隔，每秒调节5次

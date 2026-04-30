@@ -85,9 +85,6 @@ void MusicPlayer::Initialize(AudioCodec* codec) {
     mydazy::Mp3Player::Callbacks cb;
     // Async error → hop back to the main task before touching UI.
     cb.on_error = [](const char* status, const char* message) {
-        // W5 修（2026-04-29）· 错误时除 Alert 外还要：
-        // ① 主动 Stop（清理 download/decode/output 三任务，避免残留 abort 后野指针）
-        // ② 退出 Player UI 模式（参考 cb.on_pause_timeout 的写法）
         std::string s = status ? status : "";
         std::string m = message ? message : "";
         Application::GetInstance().Schedule([s = std::move(s), m = std::move(m)]() {
@@ -132,19 +129,9 @@ bool MusicPlayer::Play(const std::string& url, const std::string& title, std::st
         return false;
     }
 
-    // 🔴 2026-04-30 v3：mp3 Play 前主动关闭 protocol（MQTT / WebSocket）
-    // 根因：4G ML307 进入 HTTP binary mode 后，所有 AT 命令回应字节会污染下行流。
-    //       即便 SendCommand 已加白名单允许 MQTT/MIPSEND 通过，业务层的 publish
-    //       仍可能触发 modem 回应（OK/ERROR）混入 mp3 流；更糟的是失败 publish
-    //       会触发用户可见 Alert（"发送失败，请检查网络"）。
-    // 策略：mp3 启动前关 protocol → IsAudioChannelOpened()=false → 业务层
-    //       所有 SendStartListening/publish 自动 silent fail，无 Alert，无污染。
-    //       下次唤醒时 HandleWakeWordDetectedEvent 自动 OpenAudioChannel 重连。
     Application::GetInstance().CloseAudioChannel();
 
     // 播放期间切 PERFORMANCE（关 WiFi 省电 MIN_MODEM）
-    // 根因：MIN_MODEM 在 beacon 间隔关 RF，OSS 长下载 socket 易抖动 → SSL -76 频发
-    // Stop / on_error / on_finished / on_pause_timeout 路径都会经过 MusicPlayer::Stop 恢复
     Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
     bool ok = mydazy::Mp3Player::GetInstance().Play(url, title, err_msg);
     if (!ok) {

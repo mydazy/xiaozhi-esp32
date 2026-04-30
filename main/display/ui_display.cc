@@ -72,24 +72,16 @@ void UiDisplay::SetupUI() {
     }
     if (emoji_box_) lv_obj_set_style_opa(emoji_box_, LV_OPA_TRANSP, 0);
 
-    // 2. 状态栏完全沿用父类 SpiLcdDisplay top_bar_（透明背景已在 lcd_display.cc 改为 TRANSP）
-    //    network/battery 图标走父类 LvglDisplay::UpdateStatusBar 自动维护 · 子类不再创建自家 status bar
-
     // 3. 开机动画
     StartBootAnimation();
 }
 
-void UiDisplay::LoadPuhuiCommonFont() {
-    // 空实现，保留签名以免改 .h
-}
-
 // ============================================================
-// 状态栏：完全沿用父类 SpiLcdDisplay top_bar_（已透明 · 已含 network_label_/battery_label_）
 // 子类只 override UpdateStatusBar 用来 1s tick 刷时钟，不再自建 status bar
 // ============================================================
 
 void UiDisplay::UpdateStatusBar(bool update_all) {
-    LvglDisplay::UpdateStatusBar(update_all);  // 父类自动维护 top_bar_ 内 network/battery label
+    LvglDisplay::UpdateStatusBar(update_all);
     DisplayLockGuard lock(this);
 
     // clock 模式：1s tick 刷新时钟（cbin 字体尚未就绪时延迟加载）
@@ -201,9 +193,6 @@ void UiDisplay::SwitchToClockMode() {
     DisplayLockGuard lock(this);
     if (is_clock_mode_) return;
     if (!setup_ui_called_) return;
-    // P0 修复：MP3 播放期间 OnMusicPlay 流程会先 CloseAudioChannel → 触发 STATE_CHANGED(Idle)
-    // → HandleStateChangedEvent::kDeviceStateIdle → FinishBootAndShowClock → SwitchToClockMode，
-    // 会盖住刚切好的 Player UI。Player 模式下拒绝切时钟，由 SwitchOutPlayerMode 显式退出。
     if (is_player_mode_) return;
 
     if (!clock_container_) CreateClockPage();
@@ -217,7 +206,6 @@ void UiDisplay::SwitchToClockMode() {
         lv_obj_remove_flag(clock_container_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(clock_container_);
     }
-    // 父类 top_bar_ 与 clock_container_ 同为 screen 子元素 · 提顶让信号/电池浮在时钟主屏之上
     if (top_bar_) {
         lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(top_bar_);
@@ -546,36 +534,6 @@ void UiDisplay::HideControlCenter() {
 
 bool UiDisplay::IsControlCenterVisible() const {
     return control_center_ && control_center_->IsVisible();
-}
-
-// ============================================================
-// 三维心智模型 · UI 场景维度（C）查询
-// 详见 docs/p30-architecture.html § 一.5
-//
-// 阶段 0 实现：基于现有 mode flag + DeviceState 推断，不引入新成员变量。
-// 优先级：ConfigQr（互斥独占）> Player > ControlCenter > Clock > Emoji
-// ============================================================
-SceneType UiDisplay::GetCurrentScene() const {
-    // 配网 / 激活 QR 互斥独占（L5 全屏）
-    auto state = Application::GetInstance().GetDeviceState();
-    if (state == kDeviceStateWifiConfiguring ||
-        state == kDeviceStateActivating) {
-        return SceneType::kConfigQr;
-    }
-    // MP3 播放器页（is_player_mode_ 标志）
-    if (is_player_mode_) {
-        return SceneType::kPlayer;
-    }
-    // 控制中心（懒加载 + IsVisible）
-    if (control_center_ && control_center_->IsVisible()) {
-        return SceneType::kControlCenter;
-    }
-    // 时钟主屏（Idle 默认显示）
-    if (is_clock_mode_) {
-        return SceneType::kClock;
-    }
-    // 默认对话表情（Listening / Speaking 期）
-    return SceneType::kEmoji;
 }
 
 // ============================================================

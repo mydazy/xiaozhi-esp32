@@ -625,8 +625,6 @@ bool Ota::ReportStatus() {
 
     if (!resp.empty()) {
         auto *resp_ptr = new std::string(std::move(resp));
-        // P0c 修：静态栈（xTaskCreateStatic）减堆碎片
-        // P1 修：Pin Core 0（HTTP + 服务器时间同步 · 与 Application 主循环同核）
         // 重入保护：CheckVersion 由 Activation 串行调用，物理不可能两次同时跑（依赖时序）
         constexpr uint32_t kStatusAssetsStackSize = 4096;
         static StackType_t s_status_assets_stack[kStatusAssetsStackSize / sizeof(StackType_t)];

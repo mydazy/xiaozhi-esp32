@@ -1,23 +1,11 @@
 #ifndef FONT_AWESOME_H
 #define FONT_AWESOME_H
 
-/*
- * FA 兼容宏（v3 · 2026-04-30 合并字体后）
- *
- * 21 个 emoji 来自 FA Free Regular（11 个 codepoint 重映射到可用字符）
- * 124 个 UI 图标来自 Phosphor Bold
- * 145 个字形全部编入 font_awesome_X_Y.c · 业务代码 lv_label_set_text(label, FONT_AWESOME_WIFI) 即可
- *
- * 字体路由（main/CMakeLists.txt）：
- *   BUILTIN_ICON_FONT = font_awesome_30_4 (P30 三 SKU 状态栏)
- *   large_icon_font   = font_awesome_30_4 (LCD 表情大图标)
- *   OLED 30_1 走 font_awesome_30_1（emoji + UI 单色 1bpp）
- */
-
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 
+// 符号结构体
 typedef struct {
     const char* name;
     const char* utf8_string;
@@ -169,12 +157,14 @@ typedef struct {
 #define FONT_AWESOME_GAMEPAD "\xee\x89\xae"
 #define FONT_AWESOME_WATCH "\xee\x93\xa6"
 
+// 符号数据表声明
 extern const font_awesome_symbol_t font_awesome_symbols[];
 extern const size_t font_awesome_symbol_count;
 
-// emoji 名 → UTF-8 串（lcd/oled SetEmotion 调用 · 仅查 emoji 子集）
+// 内联函数实现
 static inline const char* font_awesome_get_utf8(const char* name) {
     if (!name) return NULL;
+    
     for (size_t i = 0; i < font_awesome_symbol_count; i++) {
         if (strcmp(font_awesome_symbols[i].name, name) == 0) {
             return font_awesome_symbols[i].utf8_string;

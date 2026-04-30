@@ -82,8 +82,8 @@ GpioLed::GpioLed(gpio_num_t gpio, int output_invert, ledc_timer_t timer_num, led
     };
     ESP_ERROR_CHECK(esp_timer_create(&blink_timer_args, &blink_timer_));
 
-    xTaskCreatePinnedToCore(EventTask, "LedEvent", 2048, this,
-            tskIDLE_PRIORITY + 2, &event_task_handle_, 0);
+    xTaskCreate(EventTask, "LedEvent", 2048, this, 
+            tskIDLE_PRIORITY + 2, &event_task_handle_);
 
     ledc_initialized_ = true;
 }

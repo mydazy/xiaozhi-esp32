@@ -15,9 +15,8 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     input_channels_ = input_reference_ ? 2 : 1; // 输入通道数
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
-    // 麦克风增益（NVS audio.input_gain · 默认 18 dB · 可通过 MCP self.audio.set_mic_gain 调节）
     Settings settings("audio", false);
-    input_gain_ = static_cast<float>(settings.GetInt("input_gain", 18));
+    input_gain_ = static_cast<float>(settings.GetInt("input_gain", 24));
 
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 

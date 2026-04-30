@@ -224,78 +224,7 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     audio_debugger_->Feed(data);
 #endif
 
-    // 声学诊断旁路（轻量 · 仅在 acoustic_profile::Diagnose() 调用期间 active）
-    if (diag_tap_.active) {
-        DispatchDiagnosticTap(data);
-    }
-
     return true;
-}
-
-void AudioService::DispatchDiagnosticTap(const std::vector<int16_t>& data) {
-    std::lock_guard<std::mutex> lock(diag_tap_.mutex);
-    if (!diag_tap_.active) return;
-
-    int channels = codec_->input_channels();
-    // 预期 P30/P31 三板都是 2 通道 ("MR" interleaved)
-    // 其它配置（无 REF 或 4 通道未合并）→ 直接结束诊断，避免误读
-    if (channels != 2) {
-        diag_tap_.active = false;
-        if (diag_tap_.done_sem) xSemaphoreGive(diag_tap_.done_sem);
-        return;
-    }
-
-    // [MIC0, REF0, MIC1, REF1, ...] 交错布局（与 AFE feed 顺序一致）
-    for (size_t i = 0; i + 1 < data.size(); i += 2) {
-        int32_t mic = data[i];
-        int32_t ref = data[i + 1];
-        diag_tap_.sum_mic += mic * mic;
-        diag_tap_.sum_ref += ref * ref;
-        diag_tap_.sample_count++;
-    }
-
-    int64_t now_us = esp_timer_get_time();
-    // 截止时间到 / 样本数超过 1 秒 16k = 16000（防御性上限）
-    if (now_us >= diag_tap_.deadline_us || diag_tap_.sample_count >= 16000) {
-        diag_tap_.active = false;
-        if (diag_tap_.done_sem) xSemaphoreGive(diag_tap_.done_sem);
-    }
-}
-
-bool AudioService::SnoopInputForDiagnose(int max_ms, int64_t& sum_mic, int64_t& sum_ref, int& sample_count) {
-    if (!codec_ || codec_->input_channels() < 2) {
-        sum_mic = sum_ref = 0;
-        sample_count = 0;
-        return false;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(diag_tap_.mutex);
-        if (!diag_tap_.done_sem) {
-            diag_tap_.done_sem = xSemaphoreCreateBinary();
-            if (!diag_tap_.done_sem) return false;
-        }
-        // 清空旧信号量（如果上次诊断给过但没人 take）
-        xSemaphoreTake(diag_tap_.done_sem, 0);
-        diag_tap_.sum_mic = 0;
-        diag_tap_.sum_ref = 0;
-        diag_tap_.sample_count = 0;
-        diag_tap_.deadline_us = esp_timer_get_time() + (int64_t)max_ms * 1000;
-        diag_tap_.active = true;
-    }
-
-    // 等待 deadline 后再额外给 500ms 缓冲（如果设备 idle 没 ReadAudioData 被调用）
-    BaseType_t got = xSemaphoreTake(diag_tap_.done_sem, pdMS_TO_TICKS(max_ms + 500));
-
-    {
-        std::lock_guard<std::mutex> lock(diag_tap_.mutex);
-        diag_tap_.active = false;  // 强制收尾（即使超时）
-        sum_mic = diag_tap_.sum_mic;
-        sum_ref = diag_tap_.sum_ref;
-        sample_count = diag_tap_.sample_count;
-    }
-
-    return got == pdTRUE && sample_count > 0;
 }
 
 void AudioService::AudioInputTask() {
@@ -425,10 +354,6 @@ void AudioService::OpusCodecTask() {
                     .buffer = (uint8_t *)(packet->payload.data()),
                     .len = (uint32_t)(packet->payload.size()),
                     .consumed = 0,
-                    // TODO(audio-pop-fix #3): frame_recover 是逐帧标志（"这一帧是丢包恢复帧"），
-                    // 不能常开 PLC，否则 Opus 把每帧都当丢包处理，质量退化。
-                    // 正确修法需先加丢包检测（timestamp/seq gap），仅检测到丢包时喂空 raw + PLC。
-                    // 当前协议层无 seq 号，需先在协议层加序号或用 timestamp gap 推断。
                     .frame_recover = ESP_AUDIO_DEC_RECOVERY_NONE,
                 };
                 esp_audio_dec_out_frame_t out_frame = {

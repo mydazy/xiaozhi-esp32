@@ -19,15 +19,10 @@ LvglDisplay::LvglDisplay() {
     // Notification timer
     esp_timer_create_args_t notification_timer_args = {
         .callback = [](void *arg) {
-            lv_async_call([](void *a) {
-                LvglDisplay *display = static_cast<LvglDisplay*>(a);
-                if (display->notification_label_ != nullptr) {
-                    lv_obj_add_flag(display->notification_label_, LV_OBJ_FLAG_HIDDEN);
-                }
-                if (display->status_label_ != nullptr) {
-                    lv_obj_remove_flag(display->status_label_, LV_OBJ_FLAG_HIDDEN);
-                }
-            }, arg);
+            LvglDisplay *display = static_cast<LvglDisplay*>(arg);
+            DisplayLockGuard lock(display);
+            lv_obj_add_flag(display->notification_label_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(display->status_label_, LV_OBJ_FLAG_HIDDEN);
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,

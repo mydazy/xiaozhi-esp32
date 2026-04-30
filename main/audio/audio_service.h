@@ -135,18 +135,6 @@ public:
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);
 
-    /**
-     * 声学诊断旁路（acoustic_profile.cc 调用）
-     * 在接下来 max_ms 内累加双通道 PCM 的 RMS 平方和（不打扰主流程）
-     * 仅当 codec.input_channels()>=2 时有效
-     * @param max_ms     最大采样窗口（建议 200ms）
-     * @param sum_mic    输出：MIC 通道平方和
-     * @param sum_ref    输出：REF 通道平方和
-     * @param sample_count 输出：累计样本数
-     * @return false 如果硬件不支持双通道或超时无数据
-     */
-    bool SnoopInputForDiagnose(int max_ms, int64_t& sum_mic, int64_t& sum_ref, int& sample_count);
-
 private:
     AudioCodec* codec_ = nullptr;
     AudioServiceCallbacks callbacks_;
@@ -192,19 +180,6 @@ private:
     bool voice_detected_ = false;
     bool service_stopped_ = true;
     bool audio_input_need_warmup_ = false;
-
-    // 声学诊断旁路（acoustic_profile.cc 用 · 不打扰主流程）
-    // ReadAudioData 末尾会检查 diag_active_，仅在 active 期间累加 RMS²
-    struct DiagnosticTap {
-        std::mutex mutex;
-        bool active = false;
-        int64_t deadline_us = 0;
-        int64_t sum_mic = 0;
-        int64_t sum_ref = 0;
-        int sample_count = 0;
-        SemaphoreHandle_t done_sem = nullptr;
-    } diag_tap_;
-    void DispatchDiagnosticTap(const std::vector<int16_t>& data);
 
     esp_timer_handle_t audio_power_timer_ = nullptr;
     std::chrono::steady_clock::time_point last_input_time_;

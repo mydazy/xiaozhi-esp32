@@ -236,7 +236,6 @@ private:
         gpio_set_direction(AUDIO_CODEC_PA_PIN, GPIO_MODE_OUTPUT);
         gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
 
-        // P1-4 修复：先 gpio_config(OUTPUT) + 立刻 set_level(0) 锁住低电平，再 hold_dis
         // 避免 hold_dis 释放后到 gpio_set_level 之间 GPIO 浮动 → LDO 接通毛刺 → LCD GRAM 闪烁
         gpio_config_t output_conf = {
             .pin_bit_mask = (1ULL << AUDIO_PWR_EN_GPIO),
@@ -306,6 +305,10 @@ private:
         self->WakeUp();
         if (g == AXS5106L_GESTURE_SINGLE_CLICK) {
             self->HandleTouchSingleClick();
+        } else if (g == AXS5106L_GESTURE_LONG_PRESS) {
+            self->HandleTouchLongPress();
+        } else if (g == AXS5106L_GESTURE_LONG_PRESS_RELEASE) {
+            self->HandleTouchLongPressRelease();
         }
     }
 
@@ -348,6 +351,39 @@ private:
         } else if (state == kDeviceStateSpeaking) {
             ESP_LOGI(TAG, "单击打断TTS");
             app.AbortSpeaking(kAbortReasonNone);
+        }
+    }
+
+    // 长按 PTT：仅 MQTT 协议下启用（WebSocket 走流式 VAD/AEC 语义，不需要 PTT）
+    // 行为：打断 TTS → 启动 ManualStop 录音（手不松开持续录音）
+    // MP3 播放由屏幕暂停键独占控制，长按 PTT 在 Player 模式下不响应，避免冲突
+    void HandleTouchLongPress() {
+        auto& app = Application::GetInstance();
+
+        // MP3 播放中：让位给屏幕暂停键，长按不触发 PTT
+        if (MusicPlayer::GetInstance().IsPlaying()) {
+            ESP_LOGD(TAG, "Player 模式忽略长按 PTT");
+            return;
+        }
+
+        auto state = app.GetDeviceState();
+        // HandleStartListeningEvent 内部会处理 Speaking→Abort+ManualStop / Idle→Connecting+ManualStop
+        if (state == kDeviceStateIdle || state == kDeviceStateSpeaking) {
+            ESP_LOGI(TAG, "长按PTT：开始录音(ManualStop), state=%u", state);
+            app.StartListening();
+        } else {
+            ESP_LOGD(TAG, "长按PTT忽略：state=%u 不在 Idle/Speaking", state);
+        }
+    }
+
+    // 松开 PTT：停止录音 + 发送提示音
+    void HandleTouchLongPressRelease() {
+        auto& app = Application::GetInstance();
+        if (app.GetDeviceState() == kDeviceStateListening) {
+            ESP_LOGI(TAG, "PTT松开：停止录音 + 发送提示音");
+            // play_sound=true：脱离 ManualStop、保持 Listening 等服务端 TTS（不切 Idle 不闪主屏）
+            app.StopListening(true);
+            app.PlaySound(Lang::Sounds::OGG_POPUP);
         }
     }
 
@@ -418,7 +454,6 @@ private:
 
     void ConfigureDeepSleepWakeupSources(bool enable_gyro_wakeup) {
         // 等用户松开 BOOT 键（带 5 秒兜底，避免硬件按死时永远卡住）。
-        // 不等的话：esp_deep_sleep_start 进入瞬间 ext0 条件已满足 → 硬件立即唤醒 →
         // CheckBootHoldOnWakeup 看到仍按住 → 误判为新一次开机长按 → 关机失败。
         const int kReleaseWaitMaxMs = 5000;
         const int kStepMs = 50;
@@ -851,7 +886,9 @@ private:
         codec->SetOutputVolume(v);
         char buf[32];
         snprintf(buf, sizeof(buf), "%s %d", Lang::Strings::VOLUME, v);
-        GetDisplay()->SetStatus(buf);
+        // 改用 ShowNotification（1.5s 自动消失） · clock/player 模式下也能可见
+        // 见 LvglDisplay::ShowNotification: 临时浮起 status_bar_ + timer 还原原状态
+        GetDisplay()->ShowNotification(buf, 1500);
         WakeUp();
     }
 
@@ -968,8 +1005,6 @@ public:
         StartStatusTimer();
 
         GetAudioCodec();
-        // 背光开启移至 Application::Initialize（SetupUI 之后），
-        // 避免 LVGL 首帧到达 GRAM 之前打开背光导致的开机白屏闪现。
 
         ApplyDefaultSettings();
 
@@ -978,8 +1013,6 @@ public:
         StartWelcomeTask();
     }
 
-    // Board 实例由 DECLARE_BOARD 单例持有，进程生命周期 = 设备运行周期
-    // → 不写析构（与上游 70+ board 一致）。下电流程由 ShutdownHandler 接管。
 
     virtual AudioCodec* GetAudioCodec() override {
         if (audio_codec_ == nullptr) {

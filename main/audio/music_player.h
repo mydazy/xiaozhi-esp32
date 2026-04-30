@@ -9,7 +9,6 @@ class AudioCodec;
  * MusicPlayer — 项目侧 adapter，对外保持原有 API 兼容。
  *
  *
- * 调用点（mydazy_p30_board.cc / remote_cmd.cc 等）继续用 GetInstance() 单例。
  */
 class MusicPlayer {
 public:

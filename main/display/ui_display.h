@@ -70,19 +70,7 @@ public:
     void HideControlCenter();
     bool IsControlCenterVisible() const;
 
-    /**
-     * 三维心智模型 · UI 场景维度（C）查询入口
-     * 详见 docs/p30-architecture.html § 一.5
-     *
-     * 替代 IsClockMode() / IsPlayerMode() / IsControlCenterVisible() 等散落判断。
-     * 优先级：ConfigQr（互斥独占） > Player > ControlCenter > Clock > Emoji。
-     */
-    SceneType GetCurrentScene() const;
-
 private:
-    // 状态栏：完全沿用父类 SpiLcdDisplay top_bar_（已透明背景 · 已含 network_label_/battery_label_）
-    // SwitchToClockMode 时 top_bar_ remove HIDDEN + move_foreground 浮在 clock_container_ 之上；
-    // SwitchToChatMode 时 top_bar_ HIDDEN（chat 期间 emoji 满屏不要状态栏）。
 
     // 时钟主屏（内联实现，无独立页面类）
     lv_obj_t* clock_container_  = nullptr;
@@ -130,7 +118,6 @@ private:
     void CreateClockPage();
     void UpdateClockTime();
     void LoadClockFonts();          // cbin 字体延迟加载（assets 就绪后）
-    void LoadPuhuiCommonFont();     // puhui_common 补字字体加载 + 注入 BUILTIN_TEXT_FONT.fallback
     static void ClockTickCb(lv_timer_t* t);
 
     // 音乐播放器页内部方法

@@ -16,7 +16,6 @@
 #include "flow_engine.h"
 #include "device_state_event.h"
 #include "audio/music_player.h"
-#include "audio/acoustic_profile.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -98,10 +97,6 @@ void Application::Initialize() {
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
     audio_service_.Start();
-
-    // 声学档位（参考 189 acoustic_calibration 简化版 · 3 档预设 + 实音/回采诊断）
-    // 必须在 codec 创建后、AudioService 已启动后初始化，确保 SetInputGain 能下发到硬件
-    AcousticProfile::GetInstance().Initialize();
 
     // MP3 流式播放器（远程 music_play 命令触发）
     MusicPlayer::GetInstance().Initialize(codec);
@@ -547,7 +542,6 @@ void Application::InitializeProtocol() {
         if (GetDeviceState() == kDeviceStateSpeaking) {
             // wait=true: decode_queue 满时阻塞协议任务，让 TCP 反压自然流控；
             // 避免弱网时静默丢包导致音节缺失（破音根因 #1）。队列上限 40 帧=2.4s，
-            // 正常下游 decoder 消费 >> 网络到达速度，不会触发等待。
             audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
         }
     });
@@ -682,16 +676,15 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
 
     auto display = Board::GetInstance().GetDisplay();
     std::string mac = SystemInfo::GetMacAddress();
-    ESP_LOGI(TAG, "Activation: mac=%s code=%s", mac.c_str(), code.c_str());
+    ESP_LOGI(TAG, "Activation: scene=%s code=%s", mac.c_str(), code.c_str());
 
     // 通用 ShowQrCode：扫码跳转 H5/小程序绑定页，URL 携带 MAC 用于设备识别
-    // 参数：(qr_content, highlight, top, bottom, ...)
-    std::string bind_url = "https://mydazy.cn/ota/bind?mac=" + mac;
-    display->ShowQrCode(bind_url.c_str(),
-                        code.c_str(),              // highlight：6 位激活码（蓝色大字）
-                        "绑定设备",                // top
-                        "扫码或输入激活码");       // bottom
+//    std::string bind_url = "https://mydazy.cn/ota/bind?scene=" + mac;
+    std::string bind_url = "https://mydazy.cn/ota/code?code=" + code;
+    display->ShowQrCode(bind_url.c_str(), code.c_str(), "请绑定设备", "微信扫码绑定");       // bottom
     display->SetChatMessage("system", message.c_str());
+
+
 
     display->SetStatus(Lang::Strings::ACTIVATION);
     audio_service_.PlaySound(Lang::Sounds::OGG_ACTIVATION);
@@ -732,7 +725,8 @@ void Application::StartListening() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING);
 }
 
-void Application::StopListening() {
+void Application::StopListening(bool play_sound) {
+    if (play_sound) stop_listening_play_sound_ = true;
     xEventGroupSetBits(event_group_, MAIN_EVENT_STOP_LISTENING);
 }
 
@@ -830,6 +824,7 @@ void Application::HandleStartListeningEvent() {
 }
 
 void Application::HandleStopListeningEvent() {
+    bool play_sound = stop_listening_play_sound_.exchange(false);
     auto state = GetDeviceState();
     
     if (state == kDeviceStateAudioTesting) {
@@ -840,7 +835,13 @@ void Application::HandleStopListeningEvent() {
         if (protocol_) {
             protocol_->SendStopListening();
         }
-        SetDeviceState(kDeviceStateIdle);
+        if (play_sound) {
+            audio_service_.EnableVoiceProcessing(false);
+            ESP_LOGI(TAG, "PTT 松手：关录音上送，保持 Listening 等服务端 TTS（mode=ManualStop）");
+        } else {
+            // 普通 Stop（Audio Testing 退出等）：切 Idle 走原路径
+            SetDeviceState(kDeviceStateIdle);
+        }
     }
 }
 
@@ -952,10 +953,10 @@ void Application::HandleStateChangedEvent() {
         case kDeviceStateIdle:
             display->SetStatus(Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
-            display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
+//            display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
-            if (lcd) lcd->SwitchToClockMode();   // idle 回时钟主屏
+            if (lcd) lcd->SwitchToClockMode();   // idle 立即回时钟主屏
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -964,7 +965,8 @@ void Application::HandleStateChangedEvent() {
             if (lcd) lcd->SwitchToChatMode();    // 对话开始，表情/消息可见
             break;
         case kDeviceStateListening:
-            display->SetStatus(Lang::Strings::LISTENING);
+            // 录音中显示麦克风图标（依赖 BUILTIN_TEXT_FONT.fallback → BUILTIN_ICON_FONT）
+            display->SetStatus(FONT_AWESOME_MICROPHONE);
             display->SetEmotion("neutral");
 
             // Make sure the audio processor is running

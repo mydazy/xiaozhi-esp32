@@ -25,6 +25,7 @@ protected:
 
 public:
     Ml307Board(gpio_num_t tx_pin, gpio_num_t rx_pin, gpio_num_t dtr_pin = GPIO_NUM_NC);
+    /// 获取 AT modem（用于 GNSS 等扩展功能）
     AtModem* GetModem() { return modem_.get(); }
     virtual std::string GetBoardType() override;
     virtual void StartNetwork() override;

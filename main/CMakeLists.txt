@@ -1,7 +1,6 @@
 # Define source files
 set(SOURCES "audio/audio_codec.cc"
             "audio/audio_service.cc"
-            "audio/acoustic_profile.cc"
             "audio/music_player.cc"
             "audio/demuxer/ogg_demuxer.cc"
             "audio/codecs/no_audio_codec.cc"
@@ -24,12 +23,7 @@ set(SOURCES "audio/audio_codec.cc"
             "display/lvgl_display/gif/gifdec.c"
             "display/lvgl_display/jpg/image_to_jpeg.cpp"
             "display/lvgl_display/jpg/jpeg_to_image.c"
-            # UiDisplay（p30-4g / p30-wifi / p31 专用）：内联三页面 + 状态栏 + 开机动画 + 控制中心
             "display/ui_display.cc"
-            # 开机 logo 由各板级目录提供 ui_img_start_logo_png.c（file(GLOB BOARD_SOURCES) 自动加入）
-            #   P30-4G  : SquareLine 80×83 解码后 C 数组
-            #   P30-WiFi: PNG 字节嵌入（main/assets/twemoji_64/logo3.png）+ LVGL lodepng 运行时解码
-            #   P31     : SquareLine 80×83 解码后 C 数组
             "display/ui/resources/ui_image_manager.cc"
             "display/ui/widgets/control_center.cc"
             "protocols/protocol.cc"
@@ -63,8 +57,6 @@ set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg"
     "audio" "audio/demuxer" "protocols" "blufi" "wifi")
 
 # Add board common files
-# 注：本仓库（P30-4G / P30-WiFi / P31）实际使用的通用文件
-# 已剔除 nt26_board / adc_battery_monitor / axp2101 / knob —— 这些类没有任何 board 实例化
 list(APPEND SOURCES
     "boards/common/board.cc"
     "boards/common/wifi_board.cc"
@@ -96,10 +88,8 @@ function(find_component_by_pattern PATTERN COMPONENT_VAR PATH_VAR)
 endfunction()
 
 # Set default BUILTIN_TEXT_FONT and BUILTIN_ICON_FONT
-# 2026-04-30: BUILTIN_ICON_FONT 由 font_awesome_20_4 → font_phosphor_20_4
-# Phosphor 主字体，emoji 通过 LVGL fallback 链回退到 font_awesome_20_4（见 font_phosphor_*.c .fallback 字段）
-set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
-set(BUILTIN_ICON_FONT font_phosphor_20_4)
+set(BUILTIN_TEXT_FONT font_mydazy_text_20_4)
+set(BUILTIN_ICON_FONT font_awesome_20_4)
 
 set(EMOTE_RESOLUTION "284_240")
 
@@ -107,20 +97,20 @@ set(EMOTE_RESOLUTION "284_240")
 # Set default assets if the board uses partition table V2
 if(CONFIG_BOARD_TYPE_MYDAZY_P31)
     set(BOARD_TYPE "mydazy-p31")
-    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
-    set(BUILTIN_ICON_FONT font_phosphor_20_4)
+    set(BUILTIN_TEXT_FONT font_mydazy_text_20_4)
+    set(BUILTIN_ICON_FONT font_awesome_30_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
 elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_4G)
     set(BOARD_TYPE "mydazy-p30-4g")
-    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
-    set(BUILTIN_ICON_FONT font_phosphor_20_4)
+    set(BUILTIN_TEXT_FONT font_mydazy_text_20_4)
+    set(BUILTIN_ICON_FONT font_awesome_30_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
     # UI 资源（状态栏 PNG 图标 + maru 88/30 大字号时钟字体）→ assets 分区
     set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons")
 elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
     set(BOARD_TYPE "mydazy-p30-wifi")
-    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
-    set(BUILTIN_ICON_FONT font_phosphor_20_4)
+    set(BUILTIN_TEXT_FONT font_mydazy_text_20_4)
+    set(BUILTIN_ICON_FONT font_awesome_30_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
 
     # UI 资源（状态栏 PNG 图标 + maru 88/30 大字号时钟字体）→ assets 分区
@@ -140,19 +130,6 @@ else()
 endif()
 list(APPEND SOURCES ${BOARD_SOURCES})
 
-# UI 资源 .c —— 精确列表（不用 GLOB 兜底，避免误编未重构功能）
-# ─────────────────────────────────────────────────────────────────
-# 当前重构进度：仅「主屏时间 + 配网切换 + 音乐播放」走代码层，
-# 其他 UI 功能（教学卡 / 番茄钟 / 待办 / 闹钟 / 主页 logo 等）暂未重构。
-# 已重构功能用到的编译期符号显式列出，未重构的 .c 留在源码但不编：
-#
-# 路径分工：
-#  - 字体 (assets/fonts/*.c)：✗ 不编  · 走运行时 cbin_font_create("font_xxx.bin")
-#                              .bin 由 build_default_assets.py 打到 assets 分区
-#  - 图标小（状态栏频繁刷新）：✓ 编  · control_center.cc 直接 &ui_img_xxx 取址
-#  - 图标大（其他 UI 一次性显示）：✗ 不编 · 走运行时 ui_image_manager
-#  - 板级 logo (boards/*/ui_img_start_logo_png.c)：✓ 编（BOARD_SOURCES 自动加）
-#
 # 后续逐个 UI 功能重构时，把对应图标显式追加到此列表 + 在 .cc 加 LV_IMG_DECLARE。
 list(APPEND SOURCES
     "assets/icons/ui_img_icon_signal_wifi_png.c"     # 状态栏 WiFi 图标 (control_center.cc:91)
@@ -294,10 +271,6 @@ if(CONFIG_IDF_TARGET_ESP32)
                              )
 endif()
 
-# 注：本仓库已删除 esp_video / rndis_board / esp32_camera / nt26_board，
-# 对应的 esp32-camera / esp_video / iot_usbh_rndis / uart-eth-modem 远程组件依赖也已从
-# idf_component.yml 中移除。如未来 board 复用，需同时恢复源文件 + 远程依赖。
-
 if(CONFIG_BOARD_TYPE_MYDAZY_P30_4G OR CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
     # 远程 component manager 在 main/idf_component.yml 中以 mydazy/<name> 声明，
     # IDF 在 build graph 中以 mydazy__<name> 注册，PRIV_REQUIRES 必须用注册名
@@ -336,7 +309,6 @@ idf_component_register(SRCS ${SOURCES}
                         efuse
                         bt
                         fatfs
-                        # main/wifi、main/blufi 自维护后补全的 IDF 组件依赖
                         nvs_flash
                         esp_wifi
                         esp_event
@@ -346,9 +318,6 @@ idf_component_register(SRCS ${SOURCES}
                         esp_lcd_touch_axs5106l
                         esp_nfc_ws1850s
                         mydazy__esp_mp3_player
-                        # esp-ml307 的 PUBLIC include at_uart.h 引用 uart_uhci.h，
-                        # 而 esp-ml307 本身只把 uart-uhci 列在 idf_component.yml 而非 CMake REQUIRES，
-                        # 所以这里必须由 main 显式 PRIV_REQUIRES 才能让头文件路径可见。
                         78__uart-uhci
                     )
 
