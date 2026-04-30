@@ -53,12 +53,36 @@
 - RemoteCmd 14 个 on_*；McpServer 20+ 注册工具
 - ESP32-S3：16MB Flash + 8MB PSRAM；内部 RAM 红线 60KB
 
-## FreeRTOS 任务纪律（2026-04-29 P1 整改后）
+## FreeRTOS 任务纪律（2026-04-29 双核重平衡后）
 - **main/ 下 0 裸 `xTaskCreate`**：grep `xTaskCreate\b` 必须 0 命中（每个 task 必须 Pin Core 或 Static Pin）
-- **Core 0**（网络/codec/主循环）：audio_input/output、opus_codec、main_app、ml307_net、activation、status_assets、LedEvent、stt_post（P0 修后）等
-- **Core 1**（音频实时/AFE/BLE+WiFi 协议/LVGL）：audio_detection、encode_wake_word ×2、audio_communication、blufi_wifi、config_done、config_switch、wifi_ap、LVGL 等
 - **PSRAM 栈红线**：禁止 PSRAM 栈 + Core 0 组合（cache 共享 SPI · NVS/OTA flash op 触发 Double exception）
 - 新增任务必须在 § 四.1 落位表登记（栈/优先级/Core/生命周期）
+
+### 双核分配（2026-04-29 重平衡 · 解决 Task WDT reboot）
+
+**Core 0**（网络协议栈 + 主循环 + 编解码 + 实时 DAC · 占 ~50%）
+- 强制（IDF 框架）：WiFi/LWIP/NimBLE/esp_timer/app_main
+- 主循环：main_app(P10)
+- 编解码：**opus_codec**(P7 · 24K 栈 · 必须留 Core 0 否则 Core 1 爆)
+- 实时 DAC：**audio_output**(P10 · 与 codec 写同核)
+- 网络/Modem：ml307_net(P5)、MQTT/WS
+- 控制 IO：LedEvent(P2)、alarm_manager(P2)、headset_detect/typec_headset/nfc(P31)
+- 临时（HTTP）：activation(P2)、flow_load(P1)、status_assets(P4)
+- 配网期：dns_server(P5)
+
+**Core 1**（实时音频 AEC + UI + 唤醒 · 占 ~63%）
+- 实时音频输入：**audio_input**(P10 · AEC 计算密集 · 高于 LVGL P5)
+- AFE 唤醒：audio_communication(P7)、audio_detection(P5 · WakeNet)
+- 唤醒上报：encode_wake_word ×2(P2 · 24K INT 静态)
+- UI：LVGL(P5)、gfx_core(P4)
+- MP3 播放：mp3_dec(P7)、mp3_play/mp3_out(P10)、mp3_dl(P1 PSRAM)
+- 临时（HTTP）：stt_post(P1 · INT 静态 · 红线已修)
+- 配网期：blufi_wifi(P5)、config_done(P5)、config_switch ×2(P3)、wifi_ap ×4
+
+### 关键设计原则
+- **audio_input + AFE Feed 必须 Core 1**（AEC VOIP_HIGH_PERF 30-50ms/帧 · Core 0 装不下）
+- **opus_codec 必须 Core 0**（同核会让 Core 1 总占用爆 88% · 跨核通过 mutex queue 0 开销）
+- **优先级 P10 高于 LVGL P5**（实时音频抢占 UI · LVGL 帧率 30→25fps 用户无感）
 
 ## 量产前 P1 修复清单（review § 5.2）
 - [x] `wake_encode` PSRAM 栈 + Core 0 红线 ✅（custom_wake_word + afe_wake_word 双修 · 2026-04-28/29）
