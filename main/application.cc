@@ -42,6 +42,13 @@ Application::Application() {
     aec_mode_ = kAecOff;
 #endif
 
+    // 说话结束提示音配置（从 NVS 读 · 默认开启）
+    {
+        Settings audio_settings("audio", false);
+        stt_popup_enabled_ = audio_settings.GetInt("stt_popup", 1) != 0;
+        ESP_LOGI(TAG, "STT 提示音: %s", stt_popup_enabled_ ? "开启" : "关闭");
+    }
+
     esp_timer_create_args_t clock_timer_args = {
         .callback = [](void* arg) {
             Application* app = (Application*)arg;
@@ -590,8 +597,15 @@ void Application::InitializeProtocol() {
             auto text = cJSON_GetObjectItem(root, "text");
             if (cJSON_IsString(text)) {
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
-                Schedule([display, message = std::string(text->valuestring)]() {
+                Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
+                    // 触发：服务器 stt 文本回包 = 用户语音已被服务器收到+识别
+                    // 跳过：① stt_popup_enabled_=false ② PTT 模式（用户已知响应）③ 唤醒词首条 STT
+                    if (stt_popup_enabled_ &&
+                        listening_mode_ != kListeningModeManualStop &&
+                        !skip_next_stt_popup_.exchange(false)) {
+                        audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
+                    }
                 });
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
@@ -846,6 +860,9 @@ void Application::HandleWakeWordDetectedEvent() {
     if (state == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
         auto wake_word = audio_service_.GetLastWakeWord();
+
+        // 跳过下一条 STT 提示音 · 避免唤醒词音频被 ASR 识别后立刻响（唤醒已有 OGG_WAKEUP 提示）
+        skip_next_stt_popup_.store(true);
 
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
@@ -1149,9 +1166,12 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     }
 
     auto state = GetDeviceState();
-    
+
     if (state == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
+
+        // 跳过下一条 STT 提示音 · 唤醒词音频会被 ASR 识别（与 HandleWakeWordDetectedEvent 对称）
+        skip_next_stt_popup_.store(true);
 
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
@@ -1242,6 +1262,15 @@ void Application::SetAecMode(AecMode mode) {
 
 void Application::PlaySound(const std::string_view& sound) {
     audio_service_.PlaySound(sound);
+}
+
+// 说话结束提示音开关 · 持久化到 NVS（audio.stt_popup）
+// MCP 工具 self.audio.set_stt_popup 调用入口
+void Application::SetSttPopupEnabled(bool enabled) {
+    stt_popup_enabled_ = enabled;
+    Settings audio_settings("audio", true);
+    audio_settings.SetInt("stt_popup", enabled ? 1 : 0);
+    ESP_LOGI(TAG, "STT 提示音: %s（已持久化）", enabled ? "开启" : "关闭");
 }
 
 void Application::ResetProtocol() {

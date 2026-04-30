@@ -1,4 +1,5 @@
 #include "box_audio_codec.h"
+#include "settings.h"
 
 #include <esp_log.h>
 #include <driver/i2c_master.h>
@@ -14,7 +15,9 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     input_channels_ = input_reference_ ? 2 : 1; // 输入通道数
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
-    input_gain_ = 18;
+    // 麦克风增益（NVS audio.input_gain · 默认 18 dB · 可通过 MCP self.audio.set_mic_gain 调节）
+    Settings settings("audio", false);
+    input_gain_ = static_cast<float>(settings.GetInt("input_gain", 18));
 
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
@@ -184,6 +187,27 @@ void BoxAudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_
 void BoxAudioCodec::SetOutputVolume(int volume) {
     ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, volume));
     AudioCodec::SetOutputVolume(volume);
+}
+
+void BoxAudioCodec::SetInputGain(float gain) {
+    // 麦克风灵敏度 / ADC 增益（dB · ES7210 范围 0~37.5 · 项目限制 0~30）
+    // 触发：MCP self.audio.set_mic_gain / 远程命令 codec.set_input_gain
+    // 持久化：NVS audio.input_gain（构造时回读 · 默认 18 dB）
+    if (gain < 0) gain = 0;
+    if (gain > 30) gain = 30;
+    {
+        std::lock_guard<std::mutex> lock(data_if_mutex_);
+        input_gain_ = gain;
+        if (input_enabled_) {
+            // 仅在 input_dev_ 已 open 时才能下发；否则等下次 EnableInput 自动应用
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_set_in_channel_gain(
+                input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
+        }
+    }
+    Settings settings("audio", true);
+    settings.SetInt("input_gain", static_cast<int>(input_gain_));
+    ESP_LOGI(TAG, "麦克风增益: %.0f dB（已持久化 · %s）",
+             input_gain_, input_enabled_ ? "已实时下发" : "下次开麦生效");
 }
 
 void BoxAudioCodec::EnableInput(bool enable) {

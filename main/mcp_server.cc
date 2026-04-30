@@ -74,6 +74,60 @@ void McpServer::AddCommonTools() {
             return "AEC set to " + mode;
         });
 
+    // 麦克风灵敏度（ADC 增益 dB · 持久化到 NVS audio.input_gain · 默认 18 dB · 范围 0-30）
+    // 用户场景：「咪头不灵敏 / 听不见我说话」→ 调高（22-28）；「环境噪音大误唤醒」→ 调低（10-15）
+    AddTool("self.audio.set_mic_gain",
+        "Set microphone input gain (sensitivity) in dB. Range 0-30. "
+        "Default 18. Higher = more sensitive (better for distant or quiet voice, but picks up more noise). "
+        "Lower = less sensitive (better in noisy environment, reduces false wake). "
+        "Persists across reboots. Use when user says: 麦克风不灵敏/听不见/调大灵敏度/调小灵敏度/咪头声音小.",
+        PropertyList({
+            Property("gain", kPropertyTypeInteger, 0, 30)
+        }),
+        [&board](const PropertyList& properties) -> ReturnValue {
+            auto codec = board.GetAudioCodec();
+            if (!codec) {
+                return std::string("{\"success\":false,\"error\":\"audio codec not ready\"}");
+            }
+            int gain = properties["gain"].value<int>();
+            codec->SetInputGain(static_cast<float>(gain));
+            return std::string("{\"success\":true,\"gain\":") + std::to_string(gain) + "}";
+        });
+
+    AddTool("self.audio.get_mic_gain",
+        "Get current microphone input gain (sensitivity) in dB. Returns JSON {\"gain\":int}.",
+        PropertyList(),
+        [&board](const PropertyList& properties) -> ReturnValue {
+            auto codec = board.GetAudioCodec();
+            if (!codec) {
+                return std::string("{\"gain\":0}");
+            }
+            int gain = static_cast<int>(codec->input_gain());
+            return std::string("{\"gain\":") + std::to_string(gain) + "}";
+        });
+
+    // 说话结束提示音开关（确认服务器已收到+识别用户语音 · 持久化 audio.stt_popup · 默认开启）
+    AddTool("self.audio.set_stt_popup",
+        "Enable or disable the 'pop' sound that plays after server recognizes user speech (STT confirmation). "
+        "Default enabled. Persists across reboots. "
+        "Use when user says: 关闭说话结束提示音/打开说话结束提示音/不要那个咚的声音.",
+        PropertyList({
+            Property("enabled", kPropertyTypeBoolean)
+        }),
+        [](const PropertyList& properties) -> ReturnValue {
+            bool enabled = properties["enabled"].value<bool>();
+            Application::GetInstance().SetSttPopupEnabled(enabled);
+            return std::string("{\"success\":true,\"enabled\":") + (enabled ? "true" : "false") + "}";
+        });
+
+    AddTool("self.audio.get_stt_popup",
+        "Get current STT confirmation popup sound state. Returns JSON {\"enabled\":bool}.",
+        PropertyList(),
+        [](const PropertyList& properties) -> ReturnValue {
+            bool enabled = Application::GetInstance().IsSttPopupEnabled();
+            return std::string("{\"enabled\":") + (enabled ? "true" : "false") + "}";
+        });
+
     AddTool("self.audio_speaker.set_volume",
         "Set the volume of the audio speaker. If the current volume is unknown, you must call `self.get_device_status` tool first and then call this tool.",
         PropertyList({

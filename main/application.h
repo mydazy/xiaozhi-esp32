@@ -10,6 +10,7 @@
 #include <mutex>
 #include <deque>
 #include <memory>
+#include <atomic>
 
 #include "protocol.h"
 #include "ota.h"
@@ -121,6 +122,10 @@ public:
     void ScheduleDelayedWake(const std::string& wake_text, uint64_t delay_us);
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
+
+    // 说话结束提示音开关（持久化到 NVS · audio.stt_popup）
+    void SetSttPopupEnabled(bool enabled);
+    bool IsSttPopupEnabled() const { return stt_popup_enabled_; }
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
 
@@ -159,6 +164,13 @@ private:
     bool aborted_ = false;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
+
+    // 说话结束提示音（来自 189 移植 · 2026-04-30）
+    // 触发：收到服务器 stt 文本回包时（确认服务器已收到+识别用户语音）
+    // 跳过：① stt_popup_enabled_=false 关闭 ② PTT 模式（用户已知响应）③ 唤醒词首条 STT
+    // Settings 字段："audio.stt_popup"（默认 1=开）
+    bool stt_popup_enabled_ = true;
+    std::atomic<bool> skip_next_stt_popup_{false};
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 
