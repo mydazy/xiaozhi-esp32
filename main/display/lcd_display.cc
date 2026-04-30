@@ -395,7 +395,7 @@ void LcdDisplay::SetupUI() {
     top_bar_ = lv_obj_create(container_);
     lv_obj_set_size(top_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
     lv_obj_set_style_radius(top_bar_, 0, 0);
-    lv_obj_set_style_bg_opa(top_bar_, LV_OPA_50, 0);  // 50% opacity background
+    lv_obj_set_style_bg_opa(top_bar_, LV_OPA_TRANSP, 0);  // 全透明 · 不挡 emoji/clock 主屏
     lv_obj_set_style_bg_color(top_bar_, lvgl_theme->background_color(), 0);
     lv_obj_set_style_border_width(top_bar_, 0, 0);
     lv_obj_set_style_pad_all(top_bar_, 0, 0);
@@ -865,7 +865,7 @@ void LcdDisplay::SetupUI() {
     top_bar_ = lv_obj_create(screen);
     lv_obj_set_size(top_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
     lv_obj_set_style_radius(top_bar_, 0, 0);
-    lv_obj_set_style_bg_opa(top_bar_, LV_OPA_50, 0);  // 50% opacity background
+    lv_obj_set_style_bg_opa(top_bar_, LV_OPA_TRANSP, 0);  // 全透明 · 不挡 emoji/clock 主屏
     lv_obj_set_style_bg_color(top_bar_, lvgl_theme->background_color(), 0);
     lv_obj_set_style_border_width(top_bar_, 0, 0);
     lv_obj_set_style_pad_all(top_bar_, 0, 0);
@@ -1195,9 +1195,9 @@ void LcdDisplay::SetTheme(Theme* theme) {
         lv_obj_set_style_bg_color(container_, lvgl_theme->background_color(), 0);
     }
     
-    // Update top bar background color with 50% opacity
+    // Update top bar：bg 保持全透明（与 SetupUI 一致）
     if (top_bar_ != nullptr) {
-        lv_obj_set_style_bg_opa(top_bar_, LV_OPA_50, 0);
+        lv_obj_set_style_bg_opa(top_bar_, LV_OPA_TRANSP, 0);
         lv_obj_set_style_bg_color(top_bar_, lvgl_theme->background_color(), 0);
     }
     

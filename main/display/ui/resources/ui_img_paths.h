@@ -29,24 +29,7 @@
 #define IMG_FILE_BUTTON_LEFT        "button_left.bin"
 #define IMG_FILE_BUTTON_RIGHT       "button_right.bin"
 
-// 电池图标（按电量等级映射到实际文件名）
-#define IMG_FILE_ICON_BATTERY_0     "icon_battery_10.bin"   // 0-20%
-#define IMG_FILE_ICON_BATTERY_1     "icon_battery_20.bin"   // 20-40%
-#define IMG_FILE_ICON_BATTERY_2     "icon_battery_40.bin"   // 40-60%
-#define IMG_FILE_ICON_BATTERY_3     "icon_battery_60.bin"   // 60-80%
-#define IMG_FILE_ICON_BATTERY_4     "icon_battery.bin"      // 80-100%
-#define IMG_FILE_ICON_BATTERY_CHARGE "icon_battery_80.bin"  // 充电中
-#define IMG_FILE_ICON_BELL          "icon_bell.bin"
-
-// 信号图标
-#define IMG_FILE_SIGNAL_WIFI        "icon_signal_wifi.bin"
-#define IMG_FILE_SIGNAL_WIFI_0      "icon_signal_wifi_0.bin"
-#define IMG_FILE_SIGNAL_WIFI_1      "icon_signal_wifi_1.bin"
-#define IMG_FILE_SIGNAL_WIFI_2      "icon_signal_wifi_2.bin"
-#define IMG_FILE_SIGNAL_4G          "icon_signal_4g.bin"
-#define IMG_FILE_SIGNAL_4G_1        "icon_signal_4g_1.bin"
-#define IMG_FILE_SIGNAL_4G_2        "icon_signal_4g_2.bin"
-#define IMG_FILE_SIGNAL_4G_3        "icon_signal_4g_3.bin"
-#define IMG_FILE_SIGNAL_4G_4        "icon_signal_4g_4.bin"
+// 电池/信号/铃铛图标已迁至 FontAwesome 字体（见 ui_display.cc · CreateGlobalStatusBar）
+// 不再消耗 assets 分区与 PSRAM 解码缓冲，启动期永不空白。
 
 #endif // UI_IMG_PATHS_H

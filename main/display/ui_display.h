@@ -80,19 +80,9 @@ public:
     SceneType GetCurrentScene() const;
 
 private:
-    // 全局状态栏（常驻 screen 顶部，clock / chat 共享）
-    lv_obj_t* global_status_bar_   = nullptr;
-    lv_obj_t* status_network_icon_ = nullptr;
-    lv_obj_t* status_battery_icon_ = nullptr;
-    bool cached_battery_charging_  = false;
-
-    // 节流状态栏刷新（2026-04-29 · 时间秒级，电池/网络降频）
-    // 时间：每 1s（保持，UpdateClockTime 单独调）
-    // 电池：每 10s（PowerManager 1Hz ADC 已采样，UI 更频繁无意义；图标 6 档变化粒度 ~分钟级）
-    // 网络：每 5s（4G CSQ 每次发 AT+CSQ 阻塞 100ms，避免与业务 AT 命令冲突；信号变化感知粒度 1-3s）
-    int64_t last_battery_query_us_ = 0;
-    int64_t last_network_query_us_ = 0;
-    const char* cached_network_fa_icon_ = nullptr;  // 失败时保持上次值（不闪 SIGNAL_OFF）
+    // 状态栏：完全沿用父类 SpiLcdDisplay top_bar_（已透明背景 · 已含 network_label_/battery_label_）
+    // SwitchToClockMode 时 top_bar_ remove HIDDEN + move_foreground 浮在 clock_container_ 之上；
+    // SwitchToChatMode 时 top_bar_ HIDDEN（chat 期间 emoji 满屏不要状态栏）。
 
     // 时钟主屏（内联实现，无独立页面类）
     lv_obj_t* clock_container_  = nullptr;
@@ -137,9 +127,6 @@ private:
     bool is_clock_mode_ = false;
 
     // ===== 内部方法 =====
-    void CreateGlobalStatusBar();
-    void UpdateGlobalStatusIcons();
-
     void CreateClockPage();
     void UpdateClockTime();
     void LoadClockFonts();          // cbin 字体延迟加载（assets 就绪后）

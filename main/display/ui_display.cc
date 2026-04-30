@@ -33,35 +33,6 @@
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 #include <cbin_font.h>
 
-// FontAwesome 网络图标 → PNG 资源映射。
-// 同时作为 4G/WiFi 默认图区分入口：
-//   P30-4G（modem 未 ready） → board.GetNetworkStateIcon() == SIGNAL_OFF → 返回 4G_1（4G 无信号）
-//   P30-WiFi（未连）          → board.GetNetworkStateIcon() == WIFI_SLASH → 返回 WIFI_0（WiFi 无信号）
-//   未知 fa：兜底 WIFI_0（不丢屏，但代码里所有 WiFi/4G 状态都已枚举）
-static const lv_image_dsc_t* MapNetworkIconFa(const char* fa_icon) {
-    if (!fa_icon) return UI_IMG(IMG_FILE_SIGNAL_WIFI_0);
-    if (strcmp(fa_icon, FONT_AWESOME_WIFI) == 0)          return UI_IMG(IMG_FILE_SIGNAL_WIFI);
-    if (strcmp(fa_icon, FONT_AWESOME_WIFI_FAIR) == 0)     return UI_IMG(IMG_FILE_SIGNAL_WIFI_1);
-    if (strcmp(fa_icon, FONT_AWESOME_WIFI_WEAK) == 0)     return UI_IMG(IMG_FILE_SIGNAL_WIFI_0);
-    if (strcmp(fa_icon, FONT_AWESOME_WIFI_SLASH) == 0)    return UI_IMG(IMG_FILE_SIGNAL_WIFI_0);
-    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL) == 0)        return UI_IMG(IMG_FILE_SIGNAL_4G);
-    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_STRONG) == 0) return UI_IMG(IMG_FILE_SIGNAL_4G_4);
-    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_GOOD) == 0)   return UI_IMG(IMG_FILE_SIGNAL_4G_3);
-    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_FAIR) == 0)   return UI_IMG(IMG_FILE_SIGNAL_4G_2);
-    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_WEAK) == 0)   return UI_IMG(IMG_FILE_SIGNAL_4G_1);
-    if (strcmp(fa_icon, FONT_AWESOME_SIGNAL_OFF) == 0)    return UI_IMG(IMG_FILE_SIGNAL_4G_1);
-    return UI_IMG(IMG_FILE_SIGNAL_WIFI_0);
-}
-
-// 电量档位 → PNG 图标（5 档）。充电不影响档位选择（充电靠 recolor 染色区分）。
-static const char* MapBatteryFile(int level) {
-    if (level > 80) return IMG_FILE_ICON_BATTERY_4;
-    if (level > 60) return IMG_FILE_ICON_BATTERY_3;
-    if (level > 40) return IMG_FILE_ICON_BATTERY_2;
-    if (level > 20) return IMG_FILE_ICON_BATTERY_1;
-    return IMG_FILE_ICON_BATTERY_0;
-}
-
 #define TAG "UiDisplay"
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
@@ -101,8 +72,8 @@ void UiDisplay::SetupUI() {
     }
     if (emoji_box_) lv_obj_set_style_opa(emoji_box_, LV_OPA_TRANSP, 0);
 
-    // 2. 全局状态栏（clock / chat 共享）
-    CreateGlobalStatusBar();
+    // 2. 状态栏完全沿用父类 SpiLcdDisplay top_bar_（透明背景已在 lcd_display.cc 改为 TRANSP）
+    //    network/battery 图标走父类 LvglDisplay::UpdateStatusBar 自动维护 · 子类不再创建自家 status bar
 
     // 3. 开机动画
     StartBootAnimation();
@@ -113,122 +84,15 @@ void UiDisplay::LoadPuhuiCommonFont() {
 }
 
 // ============================================================
-// 全局状态栏（挂 screen 常驻）
+// 状态栏：完全沿用父类 SpiLcdDisplay top_bar_（已透明 · 已含 network_label_/battery_label_）
+// 子类只 override UpdateStatusBar 用来 1s tick 刷时钟，不再自建 status bar
 // ============================================================
 
-void UiDisplay::CreateGlobalStatusBar() {
-    auto* screen = lv_screen_active();
-    if (!screen) return;
-
-    // 父类 top_bar_ 里的 FontAwesome label 隐藏（父类 UpdateStatusBar 仍继续 set_text 无副作用）
-    if (network_label_) lv_obj_add_flag(network_label_, LV_OBJ_FLAG_HIDDEN);
-    if (battery_label_) lv_obj_add_flag(battery_label_, LV_OBJ_FLAG_HIDDEN);
-
-    global_status_bar_ = lv_obj_create(screen);
-    lv_obj_set_size(global_status_bar_, LV_HOR_RES, 36);
-    lv_obj_align(global_status_bar_, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_opa(global_status_bar_, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(global_status_bar_, 0, 0);
-    lv_obj_set_style_pad_all(global_status_bar_, 0, 0);
-    lv_obj_remove_flag(global_status_bar_, LV_OBJ_FLAG_SCROLLABLE);
-
-    status_network_icon_ = lv_image_create(global_status_bar_);
-    // 初始 src 按 board 类型自动区分（4G 板 → 4G 无信号图；WiFi 板 → WiFi 无信号图）
-    // 注：SetupUI 阶段 assets 分区还未挂载（UiImageManager.LoadAll 在 ActivationTask 才跑），
-    //     UI_IMG 此时返回 nullptr —— 没关系，UpdateGlobalStatusIcons 每秒重试，assets 就绪后自动显示。
-    const char* init_fa = Board::GetInstance().GetNetworkStateIcon();
-    if (auto* init = MapNetworkIconFa(init_fa)) lv_image_set_src(status_network_icon_, init);
-    lv_obj_align(status_network_icon_, LV_ALIGN_LEFT_MID, 16, 0);
-
-    status_battery_icon_ = lv_image_create(global_status_bar_);
-    // 初始 src 用 board 真实电量（PowerManager 在 board 构造里已读 ADC，此时已可用）
-    int init_level = 100; bool init_charging = false, init_dis = false;
-    Board::GetInstance().GetBatteryLevel(init_level, init_charging, init_dis);
-    if (auto* init = UI_IMG(MapBatteryFile(init_level))) lv_image_set_src(status_battery_icon_, init);
-    // 充电时染黄（LVGL recolor），实时标识充电状态，无需新图素材
-    if (init_charging) {
-        lv_obj_set_style_image_recolor(status_battery_icon_, lv_color_hex(0x4CAF50), 0);
-        lv_obj_set_style_image_recolor_opa(status_battery_icon_, LV_OPA_70, 0);
-    }
-    cached_battery_charging_ = init_charging;
-    lv_obj_align(status_battery_icon_, LV_ALIGN_RIGHT_MID, -16, 0);
-
-    lv_obj_move_foreground(global_status_bar_);
-}
-
-void UiDisplay::UpdateGlobalStatusIcons() {
-    if (!status_network_icon_ || !status_battery_icon_) return;
-    // chat 模式已隐藏全局状态栏（SwitchToChatMode 主动 add HIDDEN），早退避免空跑
-    if (global_status_bar_ && lv_obj_has_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN)) return;
-
-    // 2026-04-29 节流：时间 1s（外层调用频率） · 电池 10s · 网络 5s
-    // 理由：① 4G GetCsq 每次发 AT+CSQ 阻塞 100ms · 1s 频率会与业务 AT 命令冲突
-    //       ② 电池 PowerManager 1Hz ADC 采样 · UI 更频繁无意义（图标 6 档分钟级变化）
-    //       ③ 时间秒级用户敏感 · 由 UpdateClockTime 单独 1s 刷新
-    constexpr int64_t kBatteryQueryIntervalUs = 10 * 1000 * 1000;  // 10s
-    constexpr int64_t kNetworkQueryIntervalUs = 5  * 1000 * 1000;  // 5s
-    int64_t now_us = esp_timer_get_time();
-
-    auto& board = Board::GetInstance();
-
-    // ───── 网络图标（5s 一次 · 失败保持上次值不闪 SIGNAL_OFF）─────
-    // 启动期 cached_network_fa_icon_ = nullptr · 必须立即刷新一次
-    if (cached_network_fa_icon_ == nullptr ||
-        now_us - last_network_query_us_ >= kNetworkQueryIntervalUs) {
-        const char* fa_icon = board.GetNetworkStateIcon();
-        if (fa_icon) {
-            cached_network_fa_icon_ = fa_icon;
-            last_network_query_us_ = now_us;
-            if (auto* net_img = MapNetworkIconFa(fa_icon)) {
-                lv_image_set_src(status_network_icon_, net_img);
-            }
-        }
-        // fa_icon == nullptr（AT 失败）→ 保持上次值不变 · 下次循环再试
-    }
-
-    // ───── 电池图标（10s 一次 · GetBatteryLevel 是 PowerManager 缓存值不阻塞）─────
-    // 启动期 last_battery_query_us_ = 0 · 必须立即刷新一次
-    if (last_battery_query_us_ == 0 ||
-        now_us - last_battery_query_us_ >= kBatteryQueryIntervalUs) {
-        int level = 0;
-        bool charging = false, discharging = false;
-        if (board.GetBatteryLevel(level, charging, discharging)) {
-            last_battery_query_us_ = now_us;
-            // 电量档位图：按 level 走，充电不切换档位（保留档位信息）
-            if (auto* img = UI_IMG(MapBatteryFile(level))) {
-                lv_image_set_src(status_battery_icon_, img);
-            }
-            // 充电状态：用 LVGL recolor 染黄，替代"独占充电图"方案 —— 档位 + 充电同时可见
-            // 充电状态变化是事件驱动，必须实时检查（不和 10s 周期绑定）
-            if (charging != cached_battery_charging_) {
-                cached_battery_charging_ = charging;
-                lv_obj_set_style_image_recolor(status_battery_icon_,
-                                               charging ? lv_color_hex(0x4CAF50) : lv_color_white(), 0);
-                lv_obj_set_style_image_recolor_opa(status_battery_icon_,
-                                                   charging ? LV_OPA_70 : LV_OPA_0, 0);
-            }
-        }
-    } else {
-        // 未到 10s 周期，但充电状态可能瞬时变化（拔/插 USB）→ 单独检查
-        // 注意：这里不更新 last_battery_query_us_，下次仍按 10s 节奏来
-        int level = 0;
-        bool charging = false, discharging = false;
-        if (board.GetBatteryLevel(level, charging, discharging) &&
-            charging != cached_battery_charging_) {
-            cached_battery_charging_ = charging;
-            lv_obj_set_style_image_recolor(status_battery_icon_,
-                                           charging ? lv_color_hex(0x4CAF50) : lv_color_white(), 0);
-            lv_obj_set_style_image_recolor_opa(status_battery_icon_,
-                                               charging ? LV_OPA_70 : LV_OPA_0, 0);
-        }
-    }
-}
-
 void UiDisplay::UpdateStatusBar(bool update_all) {
-    LvglDisplay::UpdateStatusBar(update_all);
+    LvglDisplay::UpdateStatusBar(update_all);  // 父类自动维护 top_bar_ 内 network/battery label
     DisplayLockGuard lock(this);
-    UpdateGlobalStatusIcons();
-    // clock 模式下每秒触发，顺便刷新时间（assets 字体尚未就绪时延迟加载）
+
+    // clock 模式：1s tick 刷新时钟（cbin 字体尚未就绪时延迟加载）
     if (is_clock_mode_ && clock_time_label_) {
         if (!clock_big_font_ || !clock_text_font_) LoadClockFonts();
         UpdateClockTime();
@@ -353,9 +217,10 @@ void UiDisplay::SwitchToClockMode() {
         lv_obj_remove_flag(clock_container_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(clock_container_);
     }
-    if (global_status_bar_) {
-        lv_obj_remove_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN);  // clock 模式主动显示
-        lv_obj_move_foreground(global_status_bar_);
+    // 父类 top_bar_ 与 clock_container_ 同为 screen 子元素 · 提顶让信号/电池浮在时钟主屏之上
+    if (top_bar_) {
+        lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(top_bar_);
     }
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
@@ -390,8 +255,8 @@ void UiDisplay::SwitchToChatMode() {
     // 被 move_foreground(container_) 盖住 —— SetChatMessage 即使 remove HIDDEN 也看不见。
     if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
 
-    // chat 模式主动隐藏全局状态栏（信号 + 电池）—— 不依赖 z-order 巧合，语义明确且 UpdateGlobalStatusIcons 能早退省 CPU
-    if (global_status_bar_)  lv_obj_add_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN);
+    // chat 模式主动隐藏父类 top_bar_（信号 + 电池）—— emoji 满屏，语义明确，UpdateStatusBar 仍可正常跑
+    if (top_bar_) lv_obj_add_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
     is_clock_mode_ = false;
@@ -851,10 +716,10 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
     lv_obj_remove_flag(player_container_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(player_container_);
 
-    // 全局状态栏保持显示（顶部 36px），与时钟模式一致
-    if (global_status_bar_) {
-        lv_obj_remove_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(global_status_bar_);
+    // 父类 top_bar_ 保持显示并提顶，与时钟模式一致
+    if (top_bar_) {
+        lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(top_bar_);
     }
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
