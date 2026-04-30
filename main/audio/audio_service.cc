@@ -134,28 +134,28 @@ void AudioService::Start() {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
         vTaskDelete(NULL);
-    }, "audio_input", 2048 * 3, this, 8, &audio_input_task_handle_, 0);
+    }, "audio_input", 2048 * 3, this, 10, &audio_input_task_handle_, 1);  // 2026-04-29 优先级 P8→P10（高于 LVGL P5 · 抢占以保实时）
 
-    /* Start the audio output task — P1 修：Pin Core 0（与 audio_input 同核 codec I2S 同位） */
+    /* Start the audio output task — Pin Core 0 P10（实时 DAC · 与 codec 写同核 · 计算量小不会过载） */
     xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioOutputTask();
         vTaskDelete(NULL);
-    }, "audio_output", 2048 * 2, this, 4, &audio_output_task_handle_, 0);
+    }, "audio_output", 2048 * 2, this, 10, &audio_output_task_handle_, 0);  // 2026-04-29 优先级 P4→P10（实时 DAC）
 #else
-    /* Start the audio input task — P1 修：Pin Core 0 */
+    /* Start the audio input task — 同上 · Pin Core 1 P10 */
     xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
         vTaskDelete(NULL);
-    }, "audio_input", 2048 * 2, this, 8, &audio_input_task_handle_, 0);
+    }, "audio_input", 2048 * 2, this, 10, &audio_input_task_handle_, 1);  // 2026-04-29 优先级 P8→P10
 
-    /* Start the audio output task — P1 修：Pin Core 0 */
+    /* Start the audio output task — Pin Core 0 P10 */
     xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioOutputTask();
         vTaskDelete(NULL);
-    }, "audio_output", 2048, this, 4, &audio_output_task_handle_, 0);
+    }, "audio_output", 2048, this, 10, &audio_output_task_handle_, 0);  // 2026-04-29 优先级 P4→P10
 #endif
 
     /* Start the opus codec task */
@@ -354,6 +354,10 @@ void AudioService::OpusCodecTask() {
                     .buffer = (uint8_t *)(packet->payload.data()),
                     .len = (uint32_t)(packet->payload.size()),
                     .consumed = 0,
+                    // TODO(audio-pop-fix #3): frame_recover 是逐帧标志（"这一帧是丢包恢复帧"），
+                    // 不能常开 PLC，否则 Opus 把每帧都当丢包处理，质量退化。
+                    // 正确修法需先加丢包检测（timestamp/seq gap），仅检测到丢包时喂空 raw + PLC。
+                    // 当前协议层无 seq 号，需先在协议层加序号或用 timestamp gap 推断。
                     .frame_recover = ESP_AUDIO_DEC_RECOVERY_NONE,
                 };
                 esp_audio_dec_out_frame_t out_frame = {

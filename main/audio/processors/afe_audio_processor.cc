@@ -71,7 +71,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         auto this_ = (AfeAudioProcessor*)arg;
         this_->AudioProcessorTask();
         vTaskDelete(NULL);
-    }, "audio_communication", 4096, this, 3, NULL, 1);
+    }, "audio_communication", 4096, this, 7, NULL, 1);  // 2026-04-29 优先级 P3→P7（AFE 计算密集 · 高于 LVGL P5）
 }
 
 AfeAudioProcessor::~AfeAudioProcessor() {
