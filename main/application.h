@@ -70,17 +70,6 @@ public:
 
     DeviceState GetDeviceState() const { return state_machine_.GetState(); }
     bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
-
-    /**
-     * 三维心智模型查询 API（详见 docs/p30-architecture.html § 一.5）
-     *
-     * GetCurrentActivity()    — 业务活动维度（B），收拢 IsPlaying/IsRunning 等散落判断
-     * GetCurrentAudioSource() — 音频源标识，Speaking 态下分支用（LED/UI/打断）
-     *
-     * 阶段 0 实现：基于现有 flag 推断；后续阶段由各 Activity 模块显式 Set。
-     */
-    ActivityType GetCurrentActivity() const;
-    AudioSource  GetCurrentAudioSource() const;
     
     /**
      * Request state transition
@@ -166,23 +155,12 @@ private:
     esp_timer_handle_t delayed_wake_timer_ = nullptr;
     std::string pending_wake_text_;
 
-    // W4 弱网修复（2026-04-29）· Listening/Speaking 期等待服务端响应超时
-    // 用户说完话进 Listening → 等 STT+LLM+TTS 响应 → 进 Speaking 播放 TTS → 回 Idle
-    // 弱网下任何一个环节卡死都需要主动 timeout 回 Idle + Alert，避免用户感知"屏幕停在 Speaking 没响应"
-    esp_timer_handle_t response_timeout_timer_ = nullptr;
-
     bool has_server_time_ = false;
     bool aborted_ = false;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
-
-    // 内存监控（详见 docs/p30-architecture.html § 四.3 碎片管理策略）
-    size_t boot_free_int_size_ = 0;          // 启动期基线
-    size_t boot_largest_int_block_ = 0;
-    bool memory_red_line_alerted_ = false;
-    bool fragmentation_alerted_ = false;
 
 
     // Event handlers
@@ -199,19 +177,6 @@ private:
 
     // Activation task (runs in background)
     void ActivationTask();
-
-    // 内存监控（详见 docs/p30-architecture.html § 四.3）
-    void RecordBootMemoryBaseline();
-    void MonitorMemoryHealth();
-
-    // W4 弱网修复（2026-04-29）· Listening/Speaking 期响应超时管理
-    // StartResponseTimeout: 进 Listening 启动 timer（默认 15s 等 STT+LLM+TTS 首帧）
-    //                       进 Speaking 重置 timer（默认 30s 等 TTS 流播完）
-    // StopResponseTimeout : 离开 Listening/Speaking 进 Idle/其他态时停 timer
-    // OnResponseTimeout   : timer 触发回调（在 esp_timer task 执行 · 必须 Schedule(lambda) 切回 main）
-    void StartResponseTimeout(int timeout_ms);
-    void StopResponseTimeout();
-    void OnResponseTimeout();
 
     // Helper methods
     void CheckAssetsVersion();

@@ -60,10 +60,6 @@ Application::~Application() {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
     }
-    if (response_timeout_timer_ != nullptr) {
-        esp_timer_stop(response_timeout_timer_);
-        esp_timer_delete(response_timeout_timer_);
-    }
     vEventGroupDelete(event_group_);
 }
 
@@ -187,9 +183,6 @@ void Application::Initialize() {
 
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
-
-    // 启动期内存基线打点（§ 四.3 策略 1）
-    RecordBootMemoryBaseline();
 }
 
 void Application::Run() {
@@ -279,15 +272,10 @@ void Application::Run() {
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
-
+        
             // Print debug info every 10 seconds
             if (clock_ticks_ % 10 == 0) {
                 SystemInfo::PrintHeapStats();
-            }
-
-            // 周期内存监控 + 碎片告警（§ 四.3 策略 2/3 · 每 60 秒）
-            if (clock_ticks_ % 60 == 0) {
-                MonitorMemoryHealth();
             }
         }
     }
@@ -305,19 +293,12 @@ void Application::HandleNetworkConnectedEvent() {
             return;
         }
 
-        // P0c 修：静态栈（xTaskCreateStatic）减堆碎片
-        // P1 修：Pin Core 0（HTTP + Application 主循环同核 · 避免漂移）
-        // 重入保护：activation_task_handle_ 检查 + lambda 内部 nullptr 复位（保证 buffer 复用安全）
-        constexpr uint32_t kActivationStackSize = 8192;  // 4096 * 2
-        static StackType_t s_activation_stack[kActivationStackSize / sizeof(StackType_t)];
-        static StaticTask_t s_activation_tcb;
-        activation_task_handle_ = xTaskCreateStaticPinnedToCore([](void* arg) {
+        xTaskCreate([](void* arg) {
             Application* app = static_cast<Application*>(arg);
             app->ActivationTask();
             app->activation_task_handle_ = nullptr;
             vTaskDelete(NULL);
-        }, "activation", kActivationStackSize / sizeof(StackType_t), this, 2,
-           s_activation_stack, &s_activation_tcb, 0);
+        }, "activation", 4096 * 2, this, 2, &activation_task_handle_);
     }
 
     // Update the status bar immediately to show the network state
@@ -941,10 +922,6 @@ void Application::HandleStateChangedEvent() {
     auto led = board.GetLed();
     led->OnStateChanged();
 
-    // W4 弱网修复 · 状态切换统一停 timer，避免上一态的 timer 误触发
-    // Listening/Speaking 在各自 case 末尾按需重启
-    StopResponseTimeout();
-
     // UI 页面切换：idle 切时钟主屏，对话/配网切 chat 模式（显示表情/emoji/提示）
     auto* lcd = dynamic_cast<UiDisplay*>(display);
 
@@ -956,8 +933,7 @@ void Application::HandleStateChangedEvent() {
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
-            // 首次 Idle：logo fade_out 后切到时钟主屏；后续 Idle 由 SwitchToClockMode 内部幂等早退
-            if (lcd) lcd->FinishBootAndShowClock();
+            if (lcd) lcd->SwitchToClockMode();   // idle 回时钟主屏
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -995,8 +971,6 @@ void Application::HandleStateChangedEvent() {
                 play_popup_on_listening_ = false;
                 audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
             }
-            // W4 · 启动 15s 等服务端首帧响应（STT+LLM+TTS 链路）
-            StartResponseTimeout(15000);
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
@@ -1007,18 +981,6 @@ void Application::HandleStateChangedEvent() {
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
             audio_service_.ResetDecoder();
-            // W4 修复 · 2026-04-30 · 删除 speaking 期 30s timer
-            //
-            // 历史 bug：MP3 播放期（speaking 状态持续 3-5 分钟）被 30s timer 误杀
-            // 实测日志：194542 进 speaking → 224572 timer 触发（正好 30s · 一首歌只播一半）
-            //
-            // 设计修正：speaking 期长度由 server 推送的 TTS/MP3 流自然结束控制 · client 不应误杀。
-            // 真正的弱网保护已经覆盖：
-            //   ① listening 15s timer（在 listening case 启动）→ 保护"用户说话后 server 无响应"
-            //   ② OnAudioChannelClosed 5s 自动重连 → 保护"speaking 期网络断"
-            //   ③ MQTT keep-alive → 保护协议层卡死
-            //   ④ W5 MP3 EmitError → 保护流式下载失败
-            // StopResponseTimeout() 已在 switch 前统一调用 · 进 speaking 后 timer 已停。
             break;
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
@@ -1290,160 +1252,6 @@ void Application::ResetProtocol() {
         }
         // Reset protocol
         protocol_.reset();
-    });
-}
-
-// ============================================================================
-// 三维心智模型查询 API（详见 docs/p30-architecture.html § 一.5）
-//
-// 阶段 0：基于现有 flag 推断，不引入新成员变量、不改任何现有逻辑。
-// 后续阶段：由各 Activity 模块显式调 SetActivity() / SetAudioSource()。
-// ============================================================================
-
-ActivityType Application::GetCurrentActivity() const {
-    // Music 优先级最高（占用音频通道，CloseAudioChannel 实现独占）
-    if (MusicPlayer::GetInstance().IsPlaying()) {
-        return ActivityType::kMusic;
-    }
-    // Flow（原 LiveCompanion / 已重命名为 FlowEngine）：脚本驱动的会话型业务
-    if (flow_engine_ && flow_engine_->IsRunning()) {
-        return ActivityType::kFlow;
-    }
-    // Chat：当处于对话相关状态时认为是 Chat 业务
-    auto state = GetDeviceState();
-    if (state == kDeviceStateConnecting ||
-        state == kDeviceStateListening  ||
-        state == kDeviceStateSpeaking) {
-        return ActivityType::kChat;
-    }
-    // 其余（Unknown / Starting / WifiConfiguring / Idle / Activating /
-    //       Upgrading / AudioTesting / FatalError）= 无业务活动
-    return ActivityType::kNone;
-}
-
-// ============================================================================
-// 内存监控（详见 docs/p30-architecture.html § 四.3 碎片管理策略）
-//
-// 策略 1：启动期基线打点（Initialize 末尾调用一次）
-// 策略 2：周期内存监控（clock_tick 每 60 秒调用一次）
-// 策略 3：碎片告警阈值（free<60KB 红线 / largest<8KB 但 free>30KB）
-// ============================================================================
-
-void Application::RecordBootMemoryBaseline() {
-    boot_free_int_size_ = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    boot_largest_int_block_ = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-    size_t boot_free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    ESP_LOGI(TAG, "Boot memory baseline: INT free=%zu KB · largest=%zu KB · PSRAM free=%zu KB",
-             boot_free_int_size_ / 1024,
-             boot_largest_int_block_ / 1024,
-             boot_free_psram / 1024);
-}
-
-void Application::MonitorMemoryHealth() {
-    size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    size_t min_free_int = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-    size_t largest_int = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-
-    ESP_LOGI(TAG, "Memory[60s]: INT free=%zu/min=%zu/largest=%zu KB · PSRAM free=%zu KB",
-             free_int / 1024, min_free_int / 1024, largest_int / 1024, free_psram / 1024);
-
-    // 阈值定义（§ 四.3 策略 3）
-    constexpr size_t kSafeFreeIntMin    = 60 * 1024;   // CLAUDE.md 内部 RAM 红线
-    constexpr size_t kFragFreeIntMin    = 30 * 1024;   // 碎片化指标：free 大但 largest 小
-    constexpr size_t kFragLargestMin    = 8  * 1024;
-
-    // 红线告警：free 跌破 60KB
-    if (free_int < kSafeFreeIntMin && !memory_red_line_alerted_) {
-        ESP_LOGW(TAG, "⚠ INT free %zu KB 跌破 60KB 红线（CLAUDE.md）",
-                 free_int / 1024);
-        memory_red_line_alerted_ = true;
-    } else if (free_int >= kSafeFreeIntMin) {
-        memory_red_line_alerted_ = false;  // 恢复后允许再次告警
-    }
-
-    // 碎片化告警：free 仍多但 largest_block 已小（碎片明显）
-    if (free_int > kFragFreeIntMin && largest_int < kFragLargestMin && !fragmentation_alerted_) {
-        ESP_LOGW(TAG, "⚠ INT 碎片化: free=%zu KB / largest=%zu KB（碎片严重，建议重启）",
-                 free_int / 1024, largest_int / 1024);
-        fragmentation_alerted_ = true;
-    }
-}
-
-AudioSource Application::GetCurrentAudioSource() const {
-    // 仅 Speaking 态下才有音频源（其他态音频管线静默或仅做唤醒采集）
-    if (GetDeviceState() != kDeviceStateSpeaking) {
-        return AudioSource::kNone;
-    }
-    // MP3 播放期间通常走 Idle 态（CloseAudioChannel），但以防万一
-    if (MusicPlayer::GetInstance().IsPlaying()) {
-        return AudioSource::kMp3;
-    }
-    // 默认 Speaking = TTS（Chat / Flow 都走 TTS 输出）
-    // 注：AlarmBell / PomodoroBell / Reminder 等待对应模块加入后由模块显式设置
-    return AudioSource::kTts;
-}
-
-// ============================================================================
-// W4 弱网修复（2026-04-29）· Listening/Speaking 期响应超时管理
-//
-// 场景：弱网下用户说话 → Listening → 等服务端 STT+LLM+TTS → Speaking → 回 Idle
-// 任何一个环节卡死（4G 假连接、TLS 握手失败、TCP 半开等）都会让设备停在
-// Listening/Speaking 屏幕，用户无感知。本 timer 主动 timeout 回 Idle + Alert。
-//
-// 时长定义：
-//   - Listening 15s：等服务端首帧 tts.start（STT 200ms + LLM 5s + 网络 10s 余量）
-//   - Speaking  30s：等 TTS 流播完（典型 TTS 一句 5-10s + 网络抖动 + 多句续播缓冲）
-//
-// 实现要点：
-//   - esp_timer 跑在 esp_timer task（默认 Core 0），callback 不能直接调 SetDeviceState
-//   - 必须 Schedule(lambda) 切回 main task 执行
-//   - 状态切换时先 Stop（避免上一态 timer 误触发）再按需 Start
-// ============================================================================
-
-void Application::StartResponseTimeout(int timeout_ms) {
-    // Lazy 创建 timer（只在第一次需要时创建，省启动期资源）
-    if (response_timeout_timer_ == nullptr) {
-        esp_timer_create_args_t args = {
-            .callback = [](void* arg) {
-                static_cast<Application*>(arg)->OnResponseTimeout();
-            },
-            .arg = this,
-            .dispatch_method = ESP_TIMER_TASK,
-            .name = "response_timeout",
-            .skip_unhandled_events = false,
-        };
-        ESP_ERROR_CHECK(esp_timer_create(&args, &response_timeout_timer_));
-    }
-    // 幂等：之前如果在跑就先停（Listening→Speaking 重置场景）
-    esp_timer_stop(response_timeout_timer_);
-    esp_timer_start_once(response_timeout_timer_, (uint64_t)timeout_ms * 1000);
-}
-
-void Application::StopResponseTimeout() {
-    if (response_timeout_timer_ != nullptr) {
-        esp_timer_stop(response_timeout_timer_);
-    }
-}
-
-void Application::OnResponseTimeout() {
-    // 在 esp_timer task 执行 · 必须 Schedule(lambda) 切回 main 任务
-    Schedule([this]() {
-        DeviceState state = state_machine_.GetState();
-        // Race 守卫：状态可能在 timer 触发与本 lambda 执行之间已经变化（例如服务端最后一刻回包）
-        if (state != kDeviceStateListening && state != kDeviceStateSpeaking) {
-            ESP_LOGI(TAG, "W4 · Response timeout fired but state already %d, ignoring", (int)state);
-            return;
-        }
-        ESP_LOGW(TAG, "⚠ W4 · Response timeout in state %d (network stuck or server unreachable), abort and back to idle", (int)state);
-        // Speaking 态需要先 abort（通知服务端停止 TTS 推流），Listening 态无 active speaking
-        if (state == kDeviceStateSpeaking) {
-            AbortSpeaking(kAbortReasonNone);
-        }
-        SetDeviceState(kDeviceStateIdle);
-        // 复用现有 SERVER_TIMEOUT 字符串（locales/zh-CN/language.json:29 = "等待响应超时"）
-        Alert(Lang::Strings::ERROR, Lang::Strings::SERVER_TIMEOUT,
-              "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
     });
 }
 
