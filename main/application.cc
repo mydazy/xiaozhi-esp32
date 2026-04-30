@@ -552,7 +552,10 @@ void Application::InitializeProtocol() {
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
         if (GetDeviceState() == kDeviceStateSpeaking) {
-            audio_service_.PushPacketToDecodeQueue(std::move(packet));
+            // wait=true: decode_queue 满时阻塞协议任务，让 TCP 反压自然流控；
+            // 避免弱网时静默丢包导致音节缺失（破音根因 #1）。队列上限 40 帧=2.4s，
+            // 正常下游 decoder 消费 >> 网络到达速度，不会触发等待。
+            audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
         }
     });
     
@@ -1004,8 +1007,18 @@ void Application::HandleStateChangedEvent() {
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
             audio_service_.ResetDecoder();
-            // W4 · 启动 30s 等 TTS 流播完（覆盖典型 TTS 句长 + 网络抖动）
-            StartResponseTimeout(30000);
+            // W4 修复 · 2026-04-30 · 删除 speaking 期 30s timer
+            //
+            // 历史 bug：MP3 播放期（speaking 状态持续 3-5 分钟）被 30s timer 误杀
+            // 实测日志：194542 进 speaking → 224572 timer 触发（正好 30s · 一首歌只播一半）
+            //
+            // 设计修正：speaking 期长度由 server 推送的 TTS/MP3 流自然结束控制 · client 不应误杀。
+            // 真正的弱网保护已经覆盖：
+            //   ① listening 15s timer（在 listening case 启动）→ 保护"用户说话后 server 无响应"
+            //   ② OnAudioChannelClosed 5s 自动重连 → 保护"speaking 期网络断"
+            //   ③ MQTT keep-alive → 保护协议层卡死
+            //   ④ W5 MP3 EmitError → 保护流式下载失败
+            // StopResponseTimeout() 已在 switch 前统一调用 · 进 speaking 后 timer 已停。
             break;
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
@@ -1155,7 +1168,7 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
         ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
         audio_service_.Start(); // Restart audio service
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER); // Restore power save level
-        Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+        Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "", Lang::Sounds::OGG_EXCLAMATION);
         vTaskDelay(pdMS_TO_TICKS(3000));
         return false;
     } else {

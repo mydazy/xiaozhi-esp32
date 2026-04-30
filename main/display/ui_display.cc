@@ -161,26 +161,60 @@ void UiDisplay::UpdateGlobalStatusIcons() {
     // chat 模式已隐藏全局状态栏（SwitchToChatMode 主动 add HIDDEN），早退避免空跑
     if (global_status_bar_ && lv_obj_has_flag(global_status_bar_, LV_OBJ_FLAG_HIDDEN)) return;
 
+    // 2026-04-29 节流：时间 1s（外层调用频率） · 电池 10s · 网络 5s
+    // 理由：① 4G GetCsq 每次发 AT+CSQ 阻塞 100ms · 1s 频率会与业务 AT 命令冲突
+    //       ② 电池 PowerManager 1Hz ADC 采样 · UI 更频繁无意义（图标 6 档分钟级变化）
+    //       ③ 时间秒级用户敏感 · 由 UpdateClockTime 单独 1s 刷新
+    constexpr int64_t kBatteryQueryIntervalUs = 10 * 1000 * 1000;  // 10s
+    constexpr int64_t kNetworkQueryIntervalUs = 5  * 1000 * 1000;  // 5s
+    int64_t now_us = esp_timer_get_time();
+
     auto& board = Board::GetInstance();
-    const char* fa_icon = board.GetNetworkStateIcon();
-    // 不缓存 fa_icon 指针：CreateGlobalStatusBar 时 assets 未就绪，UI_IMG 返回 nullptr，
-    // 必须每秒重试直到 assets 加载完成才能显示。lv_image_set_src 内部对相同 src 短路，开销可忽略。
-    // （电池图标也是同样无缓存逻辑，二者对齐。）
-    if (fa_icon) {
-        if (auto* net_img = MapNetworkIconFa(fa_icon)) {
-            lv_image_set_src(status_network_icon_, net_img);
+
+    // ───── 网络图标（5s 一次 · 失败保持上次值不闪 SIGNAL_OFF）─────
+    // 启动期 cached_network_fa_icon_ = nullptr · 必须立即刷新一次
+    if (cached_network_fa_icon_ == nullptr ||
+        now_us - last_network_query_us_ >= kNetworkQueryIntervalUs) {
+        const char* fa_icon = board.GetNetworkStateIcon();
+        if (fa_icon) {
+            cached_network_fa_icon_ = fa_icon;
+            last_network_query_us_ = now_us;
+            if (auto* net_img = MapNetworkIconFa(fa_icon)) {
+                lv_image_set_src(status_network_icon_, net_img);
+            }
         }
+        // fa_icon == nullptr（AT 失败）→ 保持上次值不变 · 下次循环再试
     }
 
-    int level = 0;
-    bool charging = false, discharging = false;
-    if (board.GetBatteryLevel(level, charging, discharging)) {
-        // 电量档位图：按 level 走，充电不切换档位（保留档位信息）
-        if (auto* img = UI_IMG(MapBatteryFile(level))) {
-            lv_image_set_src(status_battery_icon_, img);
+    // ───── 电池图标（10s 一次 · GetBatteryLevel 是 PowerManager 缓存值不阻塞）─────
+    // 启动期 last_battery_query_us_ = 0 · 必须立即刷新一次
+    if (last_battery_query_us_ == 0 ||
+        now_us - last_battery_query_us_ >= kBatteryQueryIntervalUs) {
+        int level = 0;
+        bool charging = false, discharging = false;
+        if (board.GetBatteryLevel(level, charging, discharging)) {
+            last_battery_query_us_ = now_us;
+            // 电量档位图：按 level 走，充电不切换档位（保留档位信息）
+            if (auto* img = UI_IMG(MapBatteryFile(level))) {
+                lv_image_set_src(status_battery_icon_, img);
+            }
+            // 充电状态：用 LVGL recolor 染黄，替代"独占充电图"方案 —— 档位 + 充电同时可见
+            // 充电状态变化是事件驱动，必须实时检查（不和 10s 周期绑定）
+            if (charging != cached_battery_charging_) {
+                cached_battery_charging_ = charging;
+                lv_obj_set_style_image_recolor(status_battery_icon_,
+                                               charging ? lv_color_hex(0x4CAF50) : lv_color_white(), 0);
+                lv_obj_set_style_image_recolor_opa(status_battery_icon_,
+                                                   charging ? LV_OPA_70 : LV_OPA_0, 0);
+            }
         }
-        // 充电状态：用 LVGL recolor 染黄，替代"独占充电图"方案 —— 档位 + 充电同时可见
-        if (charging != cached_battery_charging_) {
+    } else {
+        // 未到 10s 周期，但充电状态可能瞬时变化（拔/插 USB）→ 单独检查
+        // 注意：这里不更新 last_battery_query_us_，下次仍按 10s 节奏来
+        int level = 0;
+        bool charging = false, discharging = false;
+        if (board.GetBatteryLevel(level, charging, discharging) &&
+            charging != cached_battery_charging_) {
             cached_battery_charging_ = charging;
             lv_obj_set_style_image_recolor(status_battery_icon_,
                                            charging ? lv_color_hex(0x4CAF50) : lv_color_white(), 0);

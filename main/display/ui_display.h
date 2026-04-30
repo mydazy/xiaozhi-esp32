@@ -86,6 +86,14 @@ private:
     lv_obj_t* status_battery_icon_ = nullptr;
     bool cached_battery_charging_  = false;
 
+    // 节流状态栏刷新（2026-04-29 · 时间秒级，电池/网络降频）
+    // 时间：每 1s（保持，UpdateClockTime 单独调）
+    // 电池：每 10s（PowerManager 1Hz ADC 已采样，UI 更频繁无意义；图标 6 档变化粒度 ~分钟级）
+    // 网络：每 5s（4G CSQ 每次发 AT+CSQ 阻塞 100ms，避免与业务 AT 命令冲突；信号变化感知粒度 1-3s）
+    int64_t last_battery_query_us_ = 0;
+    int64_t last_network_query_us_ = 0;
+    const char* cached_network_fa_icon_ = nullptr;  // 失败时保持上次值（不闪 SIGNAL_OFF）
+
     // 时钟主屏（内联实现，无独立页面类）
     lv_obj_t* clock_container_  = nullptr;
     lv_obj_t* clock_time_label_ = nullptr;

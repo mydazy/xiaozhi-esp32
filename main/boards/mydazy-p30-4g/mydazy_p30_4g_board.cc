@@ -730,10 +730,10 @@ private:
     // ========================================================
 
     void ReportStatus() {
-        // 仅在 idle / listening 时上报；瞬态/Speaking 跳过
+        // 仅在 idle 上报；对话期让位给音频上传和 TTS，避免 HTTPS/TLS 抢资源。
         auto state = Application::GetInstance().GetDeviceState();
-        if (state != kDeviceStateIdle && state != kDeviceStateListening) {
-            ESP_LOGD(TAG, "skip status report, state=%d (仅 idle/listening 上报)", (int)state);
+        if (state != kDeviceStateIdle) {
+            ESP_LOGD(TAG, "skip status report, state=%d (仅 idle 上报)", (int)state);
             return;
         }
 
