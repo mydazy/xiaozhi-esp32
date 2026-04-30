@@ -96,8 +96,10 @@ function(find_component_by_pattern PATTERN COMPONENT_VAR PATH_VAR)
 endfunction()
 
 # Set default BUILTIN_TEXT_FONT and BUILTIN_ICON_FONT
+# 2026-04-30: BUILTIN_ICON_FONT 由 font_awesome_20_4 → font_phosphor_20_4
+# Phosphor 主字体，emoji 通过 LVGL fallback 链回退到 font_awesome_20_4（见 font_phosphor_*.c .fallback 字段）
 set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
-set(BUILTIN_ICON_FONT font_awesome_20_4)
+set(BUILTIN_ICON_FONT font_phosphor_20_4)
 
 set(EMOTE_RESOLUTION "284_240")
 
@@ -106,19 +108,19 @@ set(EMOTE_RESOLUTION "284_240")
 if(CONFIG_BOARD_TYPE_MYDAZY_P31)
     set(BOARD_TYPE "mydazy-p31")
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
-    set(BUILTIN_ICON_FONT font_awesome_20_4)
+    set(BUILTIN_ICON_FONT font_phosphor_20_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
 elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_4G)
     set(BOARD_TYPE "mydazy-p30-4g")
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
-    set(BUILTIN_ICON_FONT font_awesome_20_4)
+    set(BUILTIN_ICON_FONT font_phosphor_20_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
     # UI 资源（状态栏 PNG 图标 + maru 88/30 大字号时钟字体）→ assets 分区
     set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons")
 elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
     set(BOARD_TYPE "mydazy-p30-wifi")
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
-    set(BUILTIN_ICON_FONT font_awesome_20_4)
+    set(BUILTIN_ICON_FONT font_phosphor_20_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
 
     # UI 资源（状态栏 PNG 图标 + maru 88/30 大字号时钟字体）→ assets 分区

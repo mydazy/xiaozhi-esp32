@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Phosphor 6 字重对比 · P30 状态栏</title>
+
+<!-- Phosphor 全 6 字重 -->
+<link href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/thin/style.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/light/style.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/bold/style.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/fill/style.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/duotone/style.css" rel="stylesheet">
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  padding: 24px 16px;
+}
+h1 { font-size: 22px; margin-bottom: 4px; color: #58a6ff; }
+.sub { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+
+.choice-block {
+  background: #0f2027;
+  border: 2px solid #10b981;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 0 0 24px 0;
+}
+.choice-block h2 { color: #10b981; font-size: 16px; margin-bottom: 8px; }
+.choice-block p { font-size: 13px; line-height: 1.6; color: #cbd5e0; }
+.choice-block code { background: #0d1117; padding: 2px 6px; border-radius: 3px; color: #f97316; }
+
+.section {
+  margin-bottom: 24px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.section-title {
+  background: #21262d;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  border-bottom: 1px solid #30363d;
+}
+
+.grid-row {
+  display: grid;
+  grid-template-columns: 180px repeat(6, 1fr);
+  gap: 0;
+}
+.grid-row > div {
+  padding: 14px 8px;
+  border-right: 1px solid #21262d;
+  border-bottom: 1px solid #21262d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.grid-row > div:first-child {
+  font-family: "SF Mono", monospace;
+  font-size: 11px;
+  color: #8b949e;
+  justify-content: flex-start;
+  padding: 14px 12px;
+  background: #0d1117;
+}
+.grid-row .header {
+  background: #161b22;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 6px;
+}
+.grid-row .header .sub-label { font-size: 10px; color: #8b949e; font-weight: 400; }
+.grid-row .header.recommend { color: #10b981; background: #0f2027; }
+
+.icon-cell { font-size: 28px; line-height: 1; color: #c9d1d9; }
+
+.scale-row {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  padding: 10px 14px;
+  background: #0d1117;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+.scale-row .label { width: 160px; font-size: 11px; color: #8b949e; }
+.scale-row .icons { display: flex; gap: 16px; align-items: baseline; flex: 1; }
+
+.weight-card {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin: 8px 0;
+}
+.weight-card.recommend { border: 2px solid #10b981; background: #0f2027; }
+.weight-card.thin { border-left: 3px solid #6b7280; }
+.weight-card.light { border-left: 3px solid #94a3b8; }
+.weight-card.regular { border-left: 3px solid #fbbf24; }
+.weight-card.bold { border-left: 3px solid #10b981; }
+.weight-card.fill { border-left: 3px solid #f97316; }
+.weight-card.duotone { border-left: 3px solid #a855f7; }
+
+.weight-card .label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.weight-card .icons {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+#cdn-warning {
+  display: none;
+  background: #7f1d1d;
+  color: #fee2e2;
+  padding: 14px 18px;
+  border-radius: 6px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+</style>
+</head>
+
+<body>
+
+<div id="cdn-warning">
+  ⚠️ <strong>Phosphor CDN 加载失败</strong> — 检查网络/广告拦截，或告诉我换镜像。
+</div>
+
+<h1>Phosphor 6 字重对比 · P30 状态栏</h1>
+<div class="sub">Regular 太细 → 这页列 Phosphor 全 6 个字重，挑一个粗细合适的</div>
+
+<!-- ============ 决策块 ============ -->
+<div class="choice-block">
+  <h2>★ 字重粗细从细到粗排序</h2>
+  <p>
+    <code>Thin → Light → Regular（你说太细） → Bold（推荐？） → Fill（实心粗） → Duotone（双色）</code><br>
+    <strong>Regular 太细的话，最可能想要 Bold</strong> — 它仍是线条风格，但笔画更粗。<br>
+    Fill 是实心填充（更胖），与 Bold 风格不同。<br>
+    回我答复格式：<code>"用 Bold"</code> 或 <code>"用 Bold + 电池用 Fill"</code> 等组合。
+  </p>
+</div>
+
+<!-- ============ ① WiFi 4 档 × 6 字重 ============ -->
+<div class="section">
+  <div class="section-title">① WiFi 4 档 × 6 字重对比</div>
+  <div class="grid-row">
+    <div></div>
+    <div class="header">Thin<div class="sub-label">最细</div></div>
+    <div class="header">Light<div class="sub-label">细</div></div>
+    <div class="header">Regular<div class="sub-label">标准（你说太细）</div></div>
+    <div class="header recommend">Bold<div class="sub-label">粗（推荐？）</div></div>
+    <div class="header">Fill<div class="sub-label">实心</div></div>
+    <div class="header">Duotone<div class="sub-label">双色</div></div>
+  </div>
+  <div class="grid-row">
+    <div>wifi · 满格</div>
+    <div><i class="ph-thin ph-wifi-high icon-cell"></i></div>
+    <div><i class="ph-light ph-wifi-high icon-cell"></i></div>
+    <div><i class="ph ph-wifi-high icon-cell"></i></div>
+    <div><i class="ph-bold ph-wifi-high icon-cell"></i></div>
+    <div><i class="ph-fill ph-wifi-high icon-cell"></i></div>
+    <div><i class="ph-duotone ph-wifi-high icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>wifi · 中等</div>
+    <div><i class="ph-thin ph-wifi-medium icon-cell"></i></div>
+    <div><i class="ph-light ph-wifi-medium icon-cell"></i></div>
+    <div><i class="ph ph-wifi-medium icon-cell"></i></div>
+    <div><i class="ph-bold ph-wifi-medium icon-cell"></i></div>
+    <div><i class="ph-fill ph-wifi-medium icon-cell"></i></div>
+    <div><i class="ph-duotone ph-wifi-medium icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>wifi · 弱</div>
+    <div><i class="ph-thin ph-wifi-low icon-cell"></i></div>
+    <div><i class="ph-light ph-wifi-low icon-cell"></i></div>
+    <div><i class="ph ph-wifi-low icon-cell"></i></div>
+    <div><i class="ph-bold ph-wifi-low icon-cell"></i></div>
+    <div><i class="ph-fill ph-wifi-low icon-cell"></i></div>
+    <div><i class="ph-duotone ph-wifi-low icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>wifi · 断网</div>
+    <div><i class="ph-thin ph-wifi-slash icon-cell"></i></div>
+    <div><i class="ph-light ph-wifi-slash icon-cell"></i></div>
+    <div><i class="ph ph-wifi-slash icon-cell"></i></div>
+    <div><i class="ph-bold ph-wifi-slash icon-cell"></i></div>
+    <div><i class="ph-fill ph-wifi-slash icon-cell"></i></div>
+    <div><i class="ph-duotone ph-wifi-slash icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>wifi-x · 异常</div>
+    <div><i class="ph-thin ph-wifi-x icon-cell"></i></div>
+    <div><i class="ph-light ph-wifi-x icon-cell"></i></div>
+    <div><i class="ph ph-wifi-x icon-cell"></i></div>
+    <div><i class="ph-bold ph-wifi-x icon-cell"></i></div>
+    <div><i class="ph-fill ph-wifi-x icon-cell"></i></div>
+    <div><i class="ph-duotone ph-wifi-x icon-cell"></i></div>
+  </div>
+</div>
+
+<!-- ============ ② 蜂窝信号 6 档 × 6 字重 ============ -->
+<div class="section">
+  <div class="section-title">② 蜂窝信号 6 档 × 6 字重对比</div>
+  <div class="grid-row">
+    <div></div>
+    <div class="header">Thin</div>
+    <div class="header">Light</div>
+    <div class="header">Regular</div>
+    <div class="header recommend">Bold</div>
+    <div class="header">Fill</div>
+    <div class="header">Duotone</div>
+  </div>
+  <div class="grid-row">
+    <div>cell · 满格</div>
+    <div><i class="ph-thin ph-cell-signal-full icon-cell"></i></div>
+    <div><i class="ph-light ph-cell-signal-full icon-cell"></i></div>
+    <div><i class="ph ph-cell-signal-full icon-cell"></i></div>
+    <div><i class="ph-bold ph-cell-signal-full icon-cell"></i></div>
+    <div><i class="ph-fill ph-cell-signal-full icon-cell"></i></div>
+    <div><i class="ph-duotone ph-cell-signal-full icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>cell · 良</div>
+    <div><i class="ph-thin ph-cell-signal-high icon-cell"></i></div>
+    <div><i class="ph-light ph-cell-signal-high icon-cell"></i></div>
+    <div><i class="ph ph-cell-signal-high icon-cell"></i></div>
+    <div><i class="ph-bold ph-cell-signal-high icon-cell"></i></div>
+    <div><i class="ph-fill ph-cell-signal-high icon-cell"></i></div>
+    <div><i class="ph-duotone ph-cell-signal-high icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>cell · 中</div>
+    <div><i class="ph-thin ph-cell-signal-medium icon-cell"></i></div>
+    <div><i class="ph-light ph-cell-signal-medium icon-cell"></i></div>
+    <div><i class="ph ph-cell-signal-medium icon-cell"></i></div>
+    <div><i class="ph-bold ph-cell-signal-medium icon-cell"></i></div>
+    <div><i class="ph-fill ph-cell-signal-medium icon-cell"></i></div>
+    <div><i class="ph-duotone ph-cell-signal-medium icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>cell · 弱</div>
+    <div><i class="ph-thin ph-cell-signal-low icon-cell"></i></div>
+    <div><i class="ph-light ph-cell-signal-low icon-cell"></i></div>
+    <div><i class="ph ph-cell-signal-low icon-cell"></i></div>
+    <div><i class="ph-bold ph-cell-signal-low icon-cell"></i></div>
+    <div><i class="ph-fill ph-cell-signal-low icon-cell"></i></div>
+    <div><i class="ph-duotone ph-cell-signal-low icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>cell · 空塔</div>
+    <div><i class="ph-thin ph-cell-signal-none icon-cell"></i></div>
+    <div><i class="ph-light ph-cell-signal-none icon-cell"></i></div>
+    <div><i class="ph ph-cell-signal-none icon-cell"></i></div>
+    <div><i class="ph-bold ph-cell-signal-none icon-cell"></i></div>
+    <div><i class="ph-fill ph-cell-signal-none icon-cell"></i></div>
+    <div><i class="ph-duotone ph-cell-signal-none icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>cell · 断网</div>
+    <div><i class="ph-thin ph-cell-signal-slash icon-cell"></i></div>
+    <div><i class="ph-light ph-cell-signal-slash icon-cell"></i></div>
+    <div><i class="ph ph-cell-signal-slash icon-cell"></i></div>
+    <div><i class="ph-bold ph-cell-signal-slash icon-cell"></i></div>
+    <div><i class="ph-fill ph-cell-signal-slash icon-cell"></i></div>
+    <div><i class="ph-duotone ph-cell-signal-slash icon-cell"></i></div>
+  </div>
+</div>
+
+<!-- ============ ③ 电池 横向 5 档 + 充电 + 警告 × 6 字重 ============ -->
+<div class="section">
+  <div class="section-title">③ 横向电池 7 档 × 6 字重对比</div>
+  <div class="grid-row">
+    <div></div>
+    <div class="header">Thin</div>
+    <div class="header">Light</div>
+    <div class="header">Regular</div>
+    <div class="header recommend">Bold</div>
+    <div class="header">Fill</div>
+    <div class="header">Duotone</div>
+  </div>
+  <div class="grid-row">
+    <div>battery · 满</div>
+    <div><i class="ph-thin ph-battery-full icon-cell"></i></div>
+    <div><i class="ph-light ph-battery-full icon-cell"></i></div>
+    <div><i class="ph ph-battery-full icon-cell"></i></div>
+    <div><i class="ph-bold ph-battery-full icon-cell"></i></div>
+    <div><i class="ph-fill ph-battery-full icon-cell"></i></div>
+    <div><i class="ph-duotone ph-battery-full icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>battery · 高</div>
+    <div><i class="ph-thin ph-battery-high icon-cell"></i></div>
+    <div><i class="ph-light ph-battery-high icon-cell"></i></div>
+    <div><i class="ph ph-battery-high icon-cell"></i></div>
+    <div><i class="ph-bold ph-battery-high icon-cell"></i></div>
+    <div><i class="ph-fill ph-battery-high icon-cell"></i></div>
+    <div><i class="ph-duotone ph-battery-high icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>battery · 中</div>
+    <div><i class="ph-thin ph-battery-medium icon-cell"></i></div>
+    <div><i class="ph-light ph-battery-medium icon-cell"></i></div>
+    <div><i class="ph ph-battery-medium icon-cell"></i></div>
+    <div><i class="ph-bold ph-battery-medium icon-cell"></i></div>
+    <div><i class="ph-fill ph-battery-medium icon-cell"></i></div>
+    <div><i class="ph-duotone ph-battery-medium icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>battery · 低</div>
+    <div><i class="ph-thin ph-battery-low icon-cell"></i></div>
+    <div><i class="ph-light ph-battery-low icon-cell"></i></div>
+    <div><i class="ph ph-battery-low icon-cell"></i></div>
+    <div><i class="ph-bold ph-battery-low icon-cell"></i></div>
+    <div><i class="ph-fill ph-battery-low icon-cell"></i></div>
+    <div><i class="ph-duotone ph-battery-low icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>battery · 空</div>
+    <div><i class="ph-thin ph-battery-empty icon-cell"></i></div>
+    <div><i class="ph-light ph-battery-empty icon-cell"></i></div>
+    <div><i class="ph ph-battery-empty icon-cell"></i></div>
+    <div><i class="ph-bold ph-battery-empty icon-cell"></i></div>
+    <div><i class="ph-fill ph-battery-empty icon-cell"></i></div>
+    <div><i class="ph-duotone ph-battery-empty icon-cell"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>充电 ⚡</div>
+    <div><i class="ph-thin ph-battery-charging icon-cell" style="color:#fbbf24"></i></div>
+    <div><i class="ph-light ph-battery-charging icon-cell" style="color:#fbbf24"></i></div>
+    <div><i class="ph ph-battery-charging icon-cell" style="color:#fbbf24"></i></div>
+    <div><i class="ph-bold ph-battery-charging icon-cell" style="color:#fbbf24"></i></div>
+    <div><i class="ph-fill ph-battery-charging icon-cell" style="color:#fbbf24"></i></div>
+    <div><i class="ph-duotone ph-battery-charging icon-cell" style="color:#fbbf24"></i></div>
+  </div>
+  <div class="grid-row">
+    <div>警告 ⚠</div>
+    <div><i class="ph-thin ph-battery-warning icon-cell" style="color:#f87171"></i></div>
+    <div><i class="ph-light ph-battery-warning icon-cell" style="color:#f87171"></i></div>
+    <div><i class="ph ph-battery-warning icon-cell" style="color:#f87171"></i></div>
+    <div><i class="ph-bold ph-battery-warning icon-cell" style="color:#f87171"></i></div>
+    <div><i class="ph-fill ph-battery-warning icon-cell" style="color:#f87171"></i></div>
+    <div><i class="ph-duotone ph-battery-warning icon-cell" style="color:#f87171"></i></div>
+  </div>
+</div>
+
+<!-- ============ ④ 同字重整套状态栏（推荐 Bold） ============ -->
+<div class="section" style="border-color:#10b981">
+  <div class="section-title" style="color:#10b981">④ 同字重整套状态栏渲染（按字重分组 · 直观对比 P30 实际效果）</div>
+  <div style="padding:16px 20px">
+
+    <div class="weight-card thin">
+      <div class="label">Thin · 极细线</div>
+      <div class="icons">
+        <i class="ph-thin ph-wifi-high"></i>
+        <i class="ph-thin ph-wifi-medium"></i>
+        <i class="ph-thin ph-wifi-low"></i>
+        <i class="ph-thin ph-wifi-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph-thin ph-cell-signal-full"></i>
+        <i class="ph-thin ph-cell-signal-high"></i>
+        <i class="ph-thin ph-cell-signal-medium"></i>
+        <i class="ph-thin ph-cell-signal-low"></i>
+        <i class="ph-thin ph-cell-signal-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph-thin ph-battery-full"></i>
+        <i class="ph-thin ph-battery-high"></i>
+        <i class="ph-thin ph-battery-medium"></i>
+        <i class="ph-thin ph-battery-low"></i>
+        <i class="ph-thin ph-battery-empty"></i>
+        <i class="ph-thin ph-battery-charging" style="color:#fbbf24"></i>
+      </div>
+    </div>
+
+    <div class="weight-card light">
+      <div class="label">Light · 细</div>
+      <div class="icons">
+        <i class="ph-light ph-wifi-high"></i>
+        <i class="ph-light ph-wifi-medium"></i>
+        <i class="ph-light ph-wifi-low"></i>
+        <i class="ph-light ph-wifi-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph-light ph-cell-signal-full"></i>
+        <i class="ph-light ph-cell-signal-high"></i>
+        <i class="ph-light ph-cell-signal-medium"></i>
+        <i class="ph-light ph-cell-signal-low"></i>
+        <i class="ph-light ph-cell-signal-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph-light ph-battery-full"></i>
+        <i class="ph-light ph-battery-high"></i>
+        <i class="ph-light ph-battery-medium"></i>
+        <i class="ph-light ph-battery-low"></i>
+        <i class="ph-light ph-battery-empty"></i>
+        <i class="ph-light ph-battery-charging" style="color:#fbbf24"></i>
+      </div>
+    </div>
+
+    <div class="weight-card regular">
+      <div class="label">Regular · 标准（你说太细）</div>
+      <div class="icons">
+        <i class="ph ph-wifi-high"></i>
+        <i class="ph ph-wifi-medium"></i>
+        <i class="ph ph-wifi-low"></i>
+        <i class="ph ph-wifi-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph ph-cell-signal-full"></i>
+        <i class="ph ph-cell-signal-high"></i>
+        <i class="ph ph-cell-signal-medium"></i>
+        <i class="ph ph-cell-signal-low"></i>
+        <i class="ph ph-cell-signal-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph ph-battery-full"></i>
+        <i class="ph ph-battery-high"></i>
+        <i class="ph ph-battery-medium"></i>
+        <i class="ph ph-battery-low"></i>
+        <i class="ph ph-battery-empty"></i>
+        <i class="ph ph-battery-charging" style="color:#fbbf24"></i>
+      </div>
+    </div>
+
+    <div class="weight-card bold recommend">
+      <div class="label">★ Bold · 粗（推荐，仍线条但更粗）</div>
+      <div class="icons">
+        <i class="ph-bold ph-wifi-high"></i>
+        <i class="ph-bold ph-wifi-medium"></i>
+        <i class="ph-bold ph-wifi-low"></i>
+        <i class="ph-bold ph-wifi-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph-bold ph-cell-signal-full"></i>
+        <i class="ph-bold ph-cell-signal-high"></i>
+        <i class="ph-bold ph-cell-signal-medium"></i>
+        <i class="ph-bold ph-cell-signal-low"></i>
+        <i class="ph-bold ph-cell-signal-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph-bold ph-battery-full"></i>
+        <i class="ph-bold ph-battery-high"></i>
+        <i class="ph-bold ph-battery-medium"></i>
+        <i class="ph-bold ph-battery-low"></i>
+        <i class="ph-bold ph-battery-empty"></i>
+        <i class="ph-bold ph-battery-charging" style="color:#fbbf24"></i>
+      </div>
+    </div>
+
+    <div class="weight-card fill">
+      <div class="label">Fill · 实心填充（最重，不再是线条风）</div>
+      <div class="icons">
+        <i class="ph-fill ph-wifi-high"></i>
+        <i class="ph-fill ph-wifi-medium"></i>
+        <i class="ph-fill ph-wifi-low"></i>
+        <i class="ph-fill ph-wifi-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph-fill ph-cell-signal-full"></i>
+        <i class="ph-fill ph-cell-signal-high"></i>
+        <i class="ph-fill ph-cell-signal-medium"></i>
+        <i class="ph-fill ph-cell-signal-low"></i>
+        <i class="ph-fill ph-cell-signal-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph-fill ph-battery-full"></i>
+        <i class="ph-fill ph-battery-high"></i>
+        <i class="ph-fill ph-battery-medium"></i>
+        <i class="ph-fill ph-battery-low"></i>
+        <i class="ph-fill ph-battery-empty"></i>
+        <i class="ph-fill ph-battery-charging" style="color:#fbbf24"></i>
+      </div>
+    </div>
+
+    <div class="weight-card duotone">
+      <div class="label">Duotone · 双色（线条 + 半透明填充）</div>
+      <div class="icons">
+        <i class="ph-duotone ph-wifi-high"></i>
+        <i class="ph-duotone ph-wifi-medium"></i>
+        <i class="ph-duotone ph-wifi-low"></i>
+        <i class="ph-duotone ph-wifi-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph-duotone ph-cell-signal-full"></i>
+        <i class="ph-duotone ph-cell-signal-high"></i>
+        <i class="ph-duotone ph-cell-signal-medium"></i>
+        <i class="ph-duotone ph-cell-signal-low"></i>
+        <i class="ph-duotone ph-cell-signal-slash"></i>
+        <span style="color:#444">|</span>
+        <i class="ph-duotone ph-battery-full"></i>
+        <i class="ph-duotone ph-battery-high"></i>
+        <i class="ph-duotone ph-battery-medium"></i>
+        <i class="ph-duotone ph-battery-low"></i>
+        <i class="ph-duotone ph-battery-empty"></i>
+        <i class="ph-duotone ph-battery-charging" style="color:#fbbf24"></i>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============ ⑤ ESP32 实际字号（14 / 16 / 20 / 30 px） ============ -->
+<div class="section">
+  <div class="section-title">⑤ ESP32 实际字号渲染对比</div>
+  <div style="padding:16px 20px">
+    <div class="scale-row">
+      <div class="label">Regular · WiFi/电池</div>
+      <div class="icons">
+        <i class="ph ph-wifi-high" style="font-size:14px"></i>
+        <i class="ph ph-wifi-high" style="font-size:16px"></i>
+        <i class="ph ph-wifi-high" style="font-size:20px"></i>
+        <i class="ph ph-wifi-high" style="font-size:30px"></i>
+        <i class="ph ph-battery-full" style="font-size:14px"></i>
+        <i class="ph ph-battery-full" style="font-size:16px"></i>
+        <i class="ph ph-battery-full" style="font-size:20px"></i>
+        <i class="ph ph-battery-full" style="font-size:30px"></i>
+      </div>
+    </div>
+    <div class="scale-row" style="background:#0f2027;border-left:3px solid #10b981">
+      <div class="label" style="color:#10b981">★ Bold · WiFi/电池</div>
+      <div class="icons">
+        <i class="ph-bold ph-wifi-high" style="font-size:14px"></i>
+        <i class="ph-bold ph-wifi-high" style="font-size:16px"></i>
+        <i class="ph-bold ph-wifi-high" style="font-size:20px"></i>
+        <i class="ph-bold ph-wifi-high" style="font-size:30px"></i>
+        <i class="ph-bold ph-battery-full" style="font-size:14px"></i>
+        <i class="ph-bold ph-battery-full" style="font-size:16px"></i>
+        <i class="ph-bold ph-battery-full" style="font-size:20px"></i>
+        <i class="ph-bold ph-battery-full" style="font-size:30px"></i>
+      </div>
+    </div>
+    <div class="scale-row">
+      <div class="label">Fill · WiFi/电池</div>
+      <div class="icons">
+        <i class="ph-fill ph-wifi-high" style="font-size:14px"></i>
+        <i class="ph-fill ph-wifi-high" style="font-size:16px"></i>
+        <i class="ph-fill ph-wifi-high" style="font-size:20px"></i>
+        <i class="ph-fill ph-wifi-high" style="font-size:30px"></i>
+        <i class="ph-fill ph-battery-full" style="font-size:14px"></i>
+        <i class="ph-fill ph-battery-full" style="font-size:16px"></i>
+        <i class="ph-fill ph-battery-full" style="font-size:20px"></i>
+        <i class="ph-fill ph-battery-full" style="font-size:30px"></i>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer style="text-align:center;color:#6e7681;font-size:11px;padding:16px">
+  Phosphor Icons · MIT · 6 字重相同 1543 个图标 · 仅笔画粗细/填充不同
+</footer>
+
+<script>
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    const probe = document.createElement('i');
+    probe.className = 'ph-bold ph-wifi-high';
+    probe.style.cssText = 'position:absolute;visibility:hidden;font-size:24px;';
+    document.body.appendChild(probe);
+    const w = probe.offsetWidth;
+    document.body.removeChild(probe);
+    if (w < 5) {
+      document.getElementById('cdn-warning').style.display = 'block';
+      console.warn('Phosphor Bold 加载失败 · width=' + w);
+    } else {
+      console.log('✅ Phosphor 加载 OK · width=' + w);
+    }
+  }, 1500);
+});
+</script>
+
+</body>
+</html>

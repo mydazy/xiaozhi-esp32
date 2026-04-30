@@ -20,12 +20,14 @@
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
-LV_FONT_DECLARE(font_awesome_30_4);
+// 2026-04-30: large_icon_font 由 font_awesome_30_4 → font_phosphor_30_4
+// Phosphor Bold 主字体（v2 · 用户拍板线条粗版），emoji 通过 .fallback → font_awesome_30_4 自动回退
+LV_FONT_DECLARE(font_phosphor_30_4);
 
 void LcdDisplay::InitializeLcdThemes() {
     auto text_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_TEXT_FONT);
     auto icon_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_ICON_FONT);
-    auto large_icon_font = std::make_shared<LvglBuiltInFont>(&font_awesome_30_4);
+    auto large_icon_font = std::make_shared<LvglBuiltInFont>(&font_phosphor_30_4);
 
     // light theme
     auto light_theme = new LvglTheme("light");
