@@ -59,6 +59,26 @@ inline void AbortIfSpeaking() {
         app.AbortSpeaking(kAbortReasonNone);
     }
 }
+
+// 切换网络前统一暂停：① 停 MP3 播放（含退 Player UI）② 打断对话（Speaking/Listening）
+// 避免重启或进配网时音频任务/协议通道未释放导致的资源残留与异响
+inline void PauseAudioAndChatBeforeSwitch() {
+    auto& app = Application::GetInstance();
+
+    if (MusicPlayer::GetInstance().IsPlaying()) {
+        ESP_LOGI(TAG, "切网前停止 MP3 播放");
+        MusicPlayer::GetInstance().Stop();
+        if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+            ui->SwitchOutPlayerMode();
+        }
+    }
+
+    auto state = app.GetDeviceState();
+    if (state == kDeviceStateSpeaking || state == kDeviceStateListening) {
+        ESP_LOGI(TAG, "切网前打断对话 (state=%d)", (int)state);
+        app.AbortSpeaking(kAbortReasonNone);
+    }
+}
 }  // namespace
 
 class MyDazyP30_WifiBoard : public WifiBoard {
@@ -593,6 +613,10 @@ private:
 
     void HandleBootMultiClick3_EnterWifiConfig() {
         auto& app = Application::GetInstance();
+
+        // 任何分支切换前都先暂停音频和对话（覆盖 MP3 播放 + Speaking/Listening 对话）
+        PauseAudioAndChatBeforeSwitch();
+
         if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
             // 已在配网态：再次三击 = 退出配网，重启回到正常联网流程
             // 设 force_ap=0 显式取消 reboot 后再次进配网
@@ -603,7 +627,6 @@ private:
             app.Reboot();
             return;
         }
-        AbortIfSpeaking();
         app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "进入配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
         vTaskDelay(pdMS_TO_TICKS(1500));
         ResetWifiConfiguration();  // 内部：设 force_ap=1 + skip_welcome=1 + Reboot

@@ -656,10 +656,25 @@ private:
         boot_button_.OnMultipleClick([this]() {
             ESP_LOGI(TAG, "连按3次进入配网模式");
             auto& app = Application::GetInstance();
-            if (app.GetDeviceState() != kDeviceStateWifiConfiguring){
-                if (app.GetDeviceState() == kDeviceStateSpeaking) {
+
+            // 切网前统一暂停：① 停 MP3 播放（含退 Player UI）② 打断对话（Speaking/Listening）
+            // 避免重启或进配网时音频任务/协议通道未释放导致的资源残留与异响
+            if (MusicPlayer::GetInstance().IsPlaying()) {
+                ESP_LOGI(TAG, "切网前停止 MP3 播放");
+                MusicPlayer::GetInstance().Stop();
+                if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+                    ui->SwitchOutPlayerMode();
+                }
+            }
+            {
+                auto state = app.GetDeviceState();
+                if (state == kDeviceStateSpeaking || state == kDeviceStateListening) {
+                    ESP_LOGI(TAG, "切网前打断对话 (state=%d)", (int)state);
                     app.AbortSpeaking(kAbortReasonNone);
                 }
+            }
+
+            if (app.GetDeviceState() != kDeviceStateWifiConfiguring){
                 if (GetNetworkType() == NetworkType::ML307) {
                     ESP_LOGI(TAG, "当前是4G模式,切换到WiFi板卡");
                     app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到WiFi", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
