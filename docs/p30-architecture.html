@@ -1670,21 +1670,38 @@ namespace ActivityCoordinator {
 <!-- ==================== § 四 任务拓扑 ==================== -->
 <section class="section" id="sec4">
   <h2><span class="num">§ 四</span> FreeRTOS 任务拓扑</h2>
-  <p class="sub">按 CLAUDE.md 规范：网络/OTA 上 Core 0，音频实时/LVGL 上 Core 1。优先级 P12（最高）→ P1（后台）。✅ <strong>2026-04-29 P1 整改完成 · 漂移清零</strong>：<code>main/</code> 下全部 32 处 <code>xTaskCreate*</code> 调用确认 Pin 到指定核（grep <code>xTaskCreate\b</code> = 0 命中）；本轮修 14 处历史漂移任务 + 2 处 PSRAM/Core0 红线（详见下方红框 callout）。</p>
+  <p class="sub">按 CLAUDE.md 规范：网络/编解码/主循环上 Core 0，实时音频/AEC/UI 上 Core 1。优先级 P10（最高实时）→ P1（后台）。✅ <strong>2026-04-29 双核重平衡 + P1 整改双完成</strong>：<code>main/</code> 下全部 32 处 <code>xTaskCreate*</code> 显式 Pin（grep <code>xTaskCreate\b</code> = 0 命中）；4 处任务的 Core/优先级整体重平衡，解决 Core 0 占用 ~100% 触发 Task WDT reboot 的根因（详见下方蓝框）。</p>
+
+  <div class="callout" style="border-left-color:#1976D2">
+    <strong>🔄 双核重平衡 · 解决 Task WDT reboot</strong>（2026-04-29 · 实测占用 Core 0 ~50% / Core 1 ~63%）
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px">
+      <thead style="background:#F5F5F5">
+        <tr><th style="padding:6px;text-align:left;border:1px solid #ddd">任务</th><th style="padding:6px;text-align:left;border:1px solid #ddd">旧 Core/Prio</th><th style="padding:6px;text-align:left;border:1px solid #ddd">新 Core/Prio</th><th style="padding:6px;text-align:left;border:1px solid #ddd">理由</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:6px;border:1px solid #ddd"><code>audio_input</code></td><td style="padding:6px;border:1px solid #ddd">Core 0 / P8</td><td style="padding:6px;border:1px solid #ddd"><strong>Core 1 / P10</strong></td><td style="padding:6px;border:1px solid #ddd">AEC VOIP_HIGH_PERF 30~50ms/帧 · Core 0 装不下（WDT 根因）</td></tr>
+        <tr><td style="padding:6px;border:1px solid #ddd"><code>audio_output</code></td><td style="padding:6px;border:1px solid #ddd">Core 0 / P4</td><td style="padding:6px;border:1px solid #ddd"><strong>Core 0 / P10</strong></td><td style="padding:6px;border:1px solid #ddd">实时 DAC 抢占级 · 与 codec 同核避免跨核 cache miss</td></tr>
+        <tr><td style="padding:6px;border:1px solid #ddd"><code>audio_communication</code></td><td style="padding:6px;border:1px solid #ddd">Core 1 / P3</td><td style="padding:6px;border:1px solid #ddd"><strong>Core 1 / P7</strong></td><td style="padding:6px;border:1px solid #ddd">AFE ringbuffer 防饥饿（高于 LVGL P5）</td></tr>
+        <tr><td style="padding:6px;border:1px solid #ddd"><code>opus_codec</code></td><td style="padding:6px;border:1px solid #ddd">Core 0 / P7</td><td style="padding:6px;border:1px solid #ddd">Core 0 / P7（不动）</td><td style="padding:6px;border:1px solid #ddd">必须留 Core 0 否则 Core 1 占用爆 88%</td></tr>
+      </tbody>
+    </table>
+    <p style="margin:8px 0 0 0;font-size:12px;color:#666">代价：LVGL 帧率 30→25fps（用户无感 · 测试通过）。详细分析见 markdown § 四.0 / § 四.B.1</p>
+  </div>
 
   <div class="callout">
     <strong>✅ P1 14 处漂移任务 Pin Core 完成</strong>（2026-04-29 · main/ 下零裸 <code>xTaskCreate</code>）
     <ul style="margin:8px 0 0 18px">
-      <li><strong>Core 0（网络/codec/主循环 · 7 task）</strong>：<code>audio_input</code> / <code>audio_output</code> ×2 分支 / <code>activation</code> / <code>status_assets</code> (ota.cc) / <code>LedEvent</code> / <code>ml307_net</code></li>
-      <li><strong>Core 1（音频实时/AFE/BLE+WiFi 协议 · 7 task）</strong>：<code>audio_detection</code> / <code>encode_wake_word</code> ×2（AFE + Custom）/ <code>blufi_wifi</code> / <code>config_done</code> / <code>config_switch</code> ×2（4G/WiFi 板）</li>
-      <li>历史 PSRAM/Core0 红线消除：<code>encode_wake_word</code>（custom_wake_word.cc）栈 PSRAM→INTERNAL；<code>stt_post</code> PSRAM/Core0→INT/Core1（review § 5.2 K1/K2 同步关闭）</li>
+      <li><strong>Core 0（网络/编解码/主循环 · 8 task）</strong>：<code>main_app</code> / <code>audio_output</code> ×2 分支 / <code>opus_codec</code> / <code>activation</code> / <code>status_assets</code> / <code>LedEvent</code> / <code>ml307_net</code> / <code>alarm_manager</code></li>
+      <li><strong>Core 1（实时音频/AFE/UI · 11 task）</strong>：<code>audio_input</code> ×2 / <code>audio_communication</code>（AFE）/ <code>audio_detection</code>（WakeNet）/ <code>encode_wake_word</code> ×2 / <code>mp3_decode/play/out/dl</code> / <code>stt_post</code> / <code>blufi_wifi</code> / <code>config_done</code> / <code>config_switch</code> ×2 / <code>LVGL</code> / <code>dns_server</code> / <code>wifi_ap</code> ×4</li>
+      <li>历史 PSRAM/Core0 红线消除：<code>encode_wake_word</code>（custom_wake_word.cc）栈 PSRAM→INTERNAL；<code>stt_post</code> PSRAM/Core0→INT/Core1</li>
     </ul>
   </div>
 
   <div class="legend">
     <span class="item"><span class="swatch" style="background:var(--core0);border-color:var(--core0-line)"></span>Core 0 · 网络/编解码/主循环</span>
-    <span class="item"><span class="swatch" style="background:var(--core1);border-color:var(--core1-line)"></span>Core 1 · 音频实时/LVGL</span>
-    <span class="item"><span class="swatch" style="background:#E8F5E9;border-color:#2E7D32"></span>原红线任务（已修复）</span>
+    <span class="item"><span class="swatch" style="background:var(--core1);border-color:var(--core1-line)"></span>Core 1 · 实时音频/AFE/UI</span>
+    <span class="item"><span class="swatch" style="background:#FFF8E1;border-color:#F57F17"></span>🔄 2026-04-29 双核重平衡变更</span>
+    <span class="item"><span class="swatch" style="background:#E8F5E9;border-color:#2E7D32"></span>✅ P0/P1 红线已修复</span>
   </div>
 
   <div class="svgwrap">
@@ -1712,84 +1729,110 @@ namespace ActivityCoordinator {
       <text x="257" y="36" class="svg-axis" text-anchor="middle" style="font-weight:600;fill:var(--core0-line)">Core 0 · 网络 / OTA / 主循环</text>
       <text x="662" y="36" class="svg-axis" text-anchor="middle" style="font-weight:600;fill:var(--core1-line)">Core 1 · 音频实时 / LVGL</text>
 
-      <!-- Core 1 任务 -->
+      <!-- Core 1 任务（2026-04-29 双核重平衡：audio_input/AFE 升级到 Core 1） -->
       <g>
-        <rect x="475" y="48" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
-        <text class="node-text" x="565" y="62">audio_input · INT</text>
-        <text class="node-text sm" x="565" y="76">I2S ADC + 唤醒词</text>
+        <!-- P10 audio_input · 2026-04-29 从 Core 0/P8 迁移 -->
+        <rect x="475" y="93" width="180" height="36" rx="4" fill="#FFF8E1" stroke="#F57F17" stroke-width="2"/>
+        <text class="node-text" x="565" y="107" style="fill:#F57F17">🔄 audio_input · INT</text>
+        <text class="node-text sm" x="565" y="121">I2S ADC + AFE Feed · 12KB</text>
 
-        <rect x="475" y="93" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
-        <text class="node-text" x="565" y="107">audio_output · INT</text>
-        <text class="node-text sm" x="565" y="121">PCM → DAC DMA · 4KB</text>
+        <!-- P7 audio_communication（AFE）· 2026-04-29 P3→P7 -->
+        <rect x="475" y="183" width="180" height="36" rx="4" fill="#FFF8E1" stroke="#F57F17" stroke-width="2"/>
+        <text class="node-text" x="565" y="197" style="fill:#F57F17">🔄 audio_communication</text>
+        <text class="node-text sm" x="565" y="211">AFE AEC+NS+VAD · 4KB</text>
 
-        <rect x="475" y="138" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
-        <text class="node-text" x="565" y="152">AFE processor</text>
-        <text class="node-text sm" x="565" y="166">AEC + NS + VAD · 8KB</text>
+        <!-- P7 audio_detection（WakeNet）-->
+        <rect x="675" y="183" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
+        <text class="node-text" x="765" y="197">audio_detection</text>
+        <text class="node-text sm" x="765" y="211">WakeNet · 4KB</text>
 
+        <!-- P5 LVGL -->
         <rect x="475" y="273" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
         <text class="node-text" x="565" y="287">LVGL · 8KB</text>
-        <text class="node-text sm" x="565" y="301">UI 刷新 · esp-idf 内置</text>
+        <text class="node-text sm" x="565" y="301">UI 刷新（30→25fps 让位音频）</text>
 
+        <!-- P5 mp3 任务族 -->
         <rect x="675" y="273" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
-        <text class="node-text" x="765" y="287">flow_load</text>
-        <text class="node-text sm" x="765" y="301">直播脚本 · 8KB</text>
+        <text class="node-text" x="765" y="287">mp3_decode/play/out</text>
+        <text class="node-text sm" x="765" y="301">MusicPlayer · PSRAM</text>
 
-        <rect x="475" y="363" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
-        <text class="node-text" x="565" y="377">audio_communication</text>
-        <text class="node-text sm" x="565" y="391">AFE 回声消除 · 4KB</text>
+        <!-- P3 config_switch -->
+        <rect x="475" y="363" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+        <text class="node-text" x="565" y="377" style="fill:#2E7D32">✅ config_switch ×2</text>
+        <text class="node-text sm" x="565" y="391">BLUFI↔AP 切换 · 4KB</text>
 
+        <!-- P3 dns_server -->
         <rect x="675" y="363" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
         <text class="node-text" x="765" y="377">dns_server · 2KB</text>
         <text class="node-text sm" x="765" y="391">配网 AP 模式</text>
 
-        <rect x="475" y="408" width="180" height="36" rx="4" fill="#fff" stroke="var(--core1-line)" stroke-width="1.5"/>
-        <text class="node-text" x="565" y="422">headset_detect · 3KB</text>
-        <text class="node-text sm" x="565" y="436">Type-C 耳机</text>
+        <!-- P2 encode_wake_word（已修红线） -->
+        <rect x="475" y="408" width="180" height="48" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+        <text class="node-text" x="565" y="424" style="fill:#2E7D32">✅ encode_wake_word ×2</text>
+        <text class="node-text sm" x="565" y="438">INTERNAL 24KB · AFE+Custom</text>
+        <text class="node-text sm" x="565" y="450">PSRAM 红线已消除</text>
+
+        <!-- P1 stt_post -->
+        <rect x="675" y="408" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+        <text class="node-text" x="765" y="422" style="fill:#2E7D32">✅ stt_post · INT 4KB</text>
+        <text class="node-text sm" x="765" y="436">PSRAM/Core0→INT/Core1</text>
       </g>
 
       <!-- Core 0 任务 -->
       <g>
+        <!-- P10 main_app -->
         <rect x="65" y="93" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
         <text class="node-text" x="155" y="107">main_app · 8KB</text>
         <text class="node-text sm" x="155" y="121">Application::Run 主循环</text>
 
-        <!-- 原红线任务: encode_wake_word（已修） -->
-        <rect x="65" y="228" width="180" height="48" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
-        <text class="node-text" x="155" y="244" style="fill:#2E7D32">✅ encode_wake_word</text>
-        <text class="node-text sm" x="155" y="258">INTERNAL 栈 24KB · 已修</text>
-        <text class="node-text sm" x="155" y="270">afe_wake_word.cc:176</text>
+        <!-- P10 audio_output · 2026-04-29 P4→P10 -->
+        <rect x="265" y="93" width="180" height="36" rx="4" fill="#FFF8E1" stroke="#F57F17" stroke-width="2"/>
+        <text class="node-text" x="355" y="107" style="fill:#F57F17">🔄 audio_output</text>
+        <text class="node-text sm" x="355" y="121">PCM→DAC DMA · 8KB INT</text>
 
+        <!-- P7 opus_codec -->
         <rect x="65" y="183" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
         <text class="node-text" x="155" y="197">opus_codec · 24KB</text>
-        <text class="node-text sm" x="155" y="211">Opus 编/解码</text>
+        <text class="node-text sm" x="155" y="211">Opus 编/解码 · 必须 Core 0</text>
+
+        <!-- P5 ml307_net -->
+        <rect x="265" y="273" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+        <text class="node-text" x="355" y="287" style="fill:#2E7D32">✅ ml307_net · 4KB</text>
+        <text class="node-text sm" x="355" y="301">4G modem · Pin Core 0</text>
+
+        <!-- 系统驱动 P23/P18 -->
+        <rect x="65" y="318" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="155" y="332">wifi_drv · P23</text>
+        <text class="node-text sm" x="155" y="346">esp-idf 内置</text>
 
         <rect x="265" y="318" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
-        <text class="node-text" x="355" y="332">wifi 驱动 · P23</text>
+        <text class="node-text" x="355" y="332">tcpip · LWIP P18</text>
         <text class="node-text sm" x="355" y="346">esp-idf 内置</text>
 
-        <rect x="65" y="318" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
-        <text class="node-text" x="155" y="332">modem_task · 4KB</text>
-        <text class="node-text sm" x="155" y="346">ML307 AT · 仅 4G/P31</text>
+        <!-- P4 status_assets -->
+        <rect x="65" y="363" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+        <text class="node-text" x="155" y="377" style="fill:#2E7D32">✅ status_assets · 4KB</text>
+        <text class="node-text sm" x="155" y="391">OTA 资源 · Pin Core 0</text>
 
-        <rect x="65" y="363" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
-        <text class="node-text" x="155" y="377">tcpip · LWIP</text>
-        <text class="node-text sm" x="155" y="391">P18 · esp-idf 内置</text>
-
+        <!-- P2 activation -->
         <rect x="65" y="408" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
         <text class="node-text" x="155" y="422" style="fill:#2E7D32">✅ activation · 8KB</text>
-        <text class="node-text sm" x="155" y="436">临时 · 激活完即删 · Pin Core 0</text>
+        <text class="node-text sm" x="155" y="436">临时 · 激活完即删 · Core 0</text>
 
+        <!-- P2 LedEvent -->
         <rect x="265" y="408" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
-        <text class="node-text" x="355" y="422" style="fill:#2E7D32">✅ status_assets · 4KB</text>
-        <text class="node-text sm" x="355" y="436">OTA 资源 · Pin Core 0</text>
+        <text class="node-text" x="355" y="422" style="fill:#2E7D32">✅ LedEvent · 2KB</text>
+        <text class="node-text sm" x="355" y="436">LED 状态机 · Core 0</text>
 
-        <rect x="65" y="453" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
-        <text class="node-text" x="155" y="467" style="fill:#2E7D32">✅ LedEvent · 2KB</text>
-        <text class="node-text sm" x="155" y="481">LED 状态机 · Pin Core 0</text>
+        <!-- P2 alarm_manager -->
+        <rect x="65" y="453" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="155" y="467">alarm_manager · 4KB</text>
+        <text class="node-text sm" x="155" y="481">闹钟调度 · esp_timer</text>
 
-        <rect x="265" y="453" width="180" height="36" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
-        <text class="node-text" x="355" y="467" style="fill:#2E7D32">✅ ml307_net · 4KB</text>
-        <text class="node-text sm" x="355" y="481">4G modem · Pin Core 0</text>
+        <!-- P1 flow_load -->
+        <rect x="265" y="453" width="180" height="36" rx="4" fill="#fff" stroke="var(--core0-line)" stroke-width="1.5"/>
+        <text class="node-text" x="355" y="467">flow_load · 6KB</text>
+        <text class="node-text sm" x="355" y="481">FlowEngine HTTP 一次性</text>
       </g>
 
       <!-- 优先级横线 -->
@@ -1839,8 +1882,7 @@ namespace ActivityCoordinator {
     <thead><tr><th>#</th><th>任务名</th><th>栈</th><th>类型</th><th>优先级</th><th>核心</th><th>生命周期</th><th>文件:行</th></tr></thead>
     <tbody>
       <tr style="background:#E0F2F1"><td colspan="8"><strong>━━ Core 0 Pinned（持久）━━</strong></td></tr>
-      <tr><td>1</td><td><code>audio_input</code></td><td>6144</td><td>INT</td><td>P8</td><td>Core 0</td><td>Start→Stop</td><td>audio_service.cc:133</td></tr>
-      <tr><td>2</td><td><code>opus_codec</code></td><td>24576</td><td>INT</td><td>P7</td><td>Core 0</td><td>Start→Stop</td><td>audio_service.cc:162</td></tr>
+      <tr><td>2</td><td><code>opus_codec</code></td><td>24576</td><td>INT</td><td>P7</td><td>Core 0</td><td>Start→Stop</td><td>audio_service.cc:162（必须留 Core 0 否则 Core 1 占用爆 88%）</td></tr>
       <tr><td>3</td><td><code>flow_load</code></td><td>6144</td><td>INT</td><td>P1</td><td>Core 0</td><td>临时</td><td>flow_engine.cc:70</td></tr>
       <tr><td>4</td><td><code>alarm_nvs</code></td><td>3584</td><td>INT</td><td>P2</td><td>Core 0</td><td>持久</td><td>alarm_manager.cc:32</td></tr>
       <tr><td>5</td><td><code>dns_server</code></td><td>4096</td><td>INT</td><td>?</td><td>Core 0</td><td>AP 模式</td><td>dns_server.cc:53</td></tr>
@@ -1852,10 +1894,11 @@ namespace ActivityCoordinator {
       <tr><td>11</td><td><code>nfc_ws1850s</code> (仅 P31)</td><td>?</td><td>INT</td><td>?</td><td>Core 0</td><td>持久</td><td>esp_nfc_ws1850s.cc:149</td></tr>
 
       <tr style="background:#FFF3E0"><td colspan="8"><strong>━━ Core 1 Pinned（持久）━━</strong></td></tr>
-      <tr><td>12</td><td><code>audio_communication</code> (AFE)</td><td>4096</td><td>INT</td><td>P3</td><td>Core 1</td><td>Init→Destroy</td><td>afe_audio_processor.cc:70</td></tr>
+      <tr style="background:#FFF8E1"><td>1</td><td><code>audio_input</code> 🔄</td><td>6144</td><td>INT</td><td><strong>P10</strong>（P8→P10）</td><td><strong>Core 1</strong>（Core 0→1）</td><td>Start→Stop</td><td>audio_service.cc:137（2026-04-29 双核重平衡 · AEC 30~50ms/帧 Core 0 装不下）</td></tr>
+      <tr style="background:#FFF8E1"><td>12</td><td><code>audio_communication</code> (AFE) 🔄</td><td>4096</td><td>INT</td><td><strong>P7</strong>（P3→P7）</td><td>Core 1</td><td>Init→Destroy</td><td>afe_audio_processor.cc:74（2026-04-29 双核重平衡 · 防 ringbuffer 饥饿）</td></tr>
 
       <tr style="background:#E8F5E9"><td colspan="8"><strong>━━ Core 0 Pinned · 后续整改（739a2a78 显式 Pin）━━</strong></td></tr>
-      <tr><td>13</td><td><code>audio_output</code> ✅</td><td>4096</td><td>INT</td><td>P4</td><td>Core 0</td><td>Start→Stop</td><td>audio_service.cc:140（与 audio_input 同核 codec I2S 同位）</td></tr>
+      <tr style="background:#FFF8E1"><td>13</td><td><code>audio_output</code> 🔄✅</td><td>4096</td><td>INT</td><td><strong>P10</strong>（P4→P10）</td><td>Core 0</td><td>Start→Stop</td><td>audio_service.cc:144（2026-04-29 双核重平衡 · 实时 DAC 抢占级 · 与 codec 同核）</td></tr>
       <tr><td>17</td><td><code>activation</code> ✅</td><td>8192</td><td>INT</td><td>P2</td><td>Core 0</td><td>临时（自删）</td><td>application.cc:301（HTTP + 主循环同核）</td></tr>
       <tr><td>18</td><td><code>status_assets</code> ✅（原 ota_response）</td><td>4096</td><td>INT</td><td>P4</td><td>Core 0</td><td>临时</td><td>ota.cc:616（HTTP + 服务器时间同步）</td></tr>
       <tr><td>19</td><td><code>ml307_net</code> ✅</td><td>4096</td><td>INT</td><td>P5</td><td>Core 0</td><td>持久</td><td>ml307_board.cc:150（4G modem UART/PPP 同核）</td></tr>
@@ -1877,6 +1920,10 @@ namespace ActivityCoordinator {
 
   <div class="callout">
     <strong>✅ 任意 Core 漂移问题已修</strong>（2026-04-28 · commit <code>739a2a78</code>） · 11 个原 <code>xTaskCreate</code>（无 affinity）任务全部改为 <code>xTaskCreatePinnedToCore</code>，按业务归属固定到目标核：Core 0 收 audio_output / activation / status_assets / ml307_net / LedEvent；Core 1 收 audio_detection（顺便 P3→P5）/ encode_wake_word ×2 / blufi_wifi / config_done / config_switch ×2。原"漂移→cache miss / 抢占 LVGL"风险消除。
+  </div>
+
+  <div class="callout" style="border-left-color:#F57F17">
+    <strong>🔄 双核重平衡补充</strong>（2026-04-29 · 解决 Task WDT reboot · 见 § 四 顶部蓝框）· 在 P1 整改基础上又做 4 处 Core/优先级调整：<code>audio_input</code> Core 0/P8 → <strong>Core 1/P10</strong>（AEC 计算密集）· <code>audio_output</code> Core 0/P4 → <strong>Core 0/P10</strong>（实时 DAC）· <code>audio_communication</code> Core 1/P3 → <strong>Core 1/P7</strong>（防 ringbuffer 饥饿）· <code>opus_codec</code> 保持 Core 0/P7（必须留 Core 0）。实测 Core 0 ~50% / Core 1 ~63%，LVGL 帧率 30→25fps 用户无感。
   </div>
 
   <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">内存占用统计（栈级别）</h4>
@@ -2342,6 +2389,52 @@ T+稳态  Idle · 28 个应用层任务 + 框架任务全部就位</pre>
   <div class="callout warn">
     <strong>量产期纪律</strong> · ① 文档采样率 + 帧长全文同步纠正；② AEC 软件回采缓冲挪 INT RAM 评估（量产后视红线压力决定）；③ FEC 启用属产品决策（带宽 vs 抗丢包）；④ 不动 Opus 编码核心参数（已成熟）。
   </div>
+
+  <h3>§ 五.A AcousticProfile 三档声学配置 + 上传链路增益注入点（2026-04-30）</h3>
+  <p class="sub">参考 <code>xiaozhi-esp32-189/main/audio/acoustic_calibration.cc</code> 简化版 · 新增 <code>main/audio/acoustic_profile.{h,cc}</code> 组件 + 诊断旁路。解决用户反馈"咪头不灵敏 / 服务器没听到"的根因（默认 input_gain=18 dB 偏低 + 缺乏 AEC 残留 vs 人声损失的诊断手段）。</p>
+
+  <div class="callout ok">
+    <strong>📦 三档预设</strong>（mic_gain 都是 ES7210 PGA 3 dB 整数倍 · 无数字补偿误差）
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px">
+      <thead style="background:#F5F5F5">
+        <tr><th style="padding:6px;text-align:left;border:1px solid #ddd">档位</th><th style="padding:6px;text-align:center;border:1px solid #ddd">mic_gain</th><th style="padding:6px;text-align:left;border:1px solid #ddd">适用场景</th><th style="padding:6px;text-align:left;border:1px solid #ddd">AEC 风险</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:6px;border:1px solid #ddd"><code>robust</code></td><td style="padding:6px;text-align:center;border:1px solid #ddd">15 dB</td><td style="padding:6px;border:1px solid #ddd">嘈杂环境 / 外放音乐 / 误唤醒严重</td><td style="padding:6px;border:1px solid #ddd">低</td></tr>
+        <tr style="background:#FFF8E1"><td style="padding:6px;border:1px solid #ddd"><strong>standard（默认）</strong></td><td style="padding:6px;text-align:center;border:1px solid #ddd"><strong>21 dB</strong></td><td style="padding:6px;border:1px solid #ddd">普通家庭近讲 30-80cm</td><td style="padding:6px;border:1px solid #ddd">中（平衡）</td></tr>
+        <tr><td style="padding:6px;border:1px solid #ddd"><code>sensitive</code></td><td style="padding:6px;text-align:center;border:1px solid #ddd">27 dB</td><td style="padding:6px;border:1px solid #ddd">远讲 &gt;1.5m / 卧室 / 咪头隔音差</td><td style="padding:6px;border:1px solid #ddd">高（接近 30 dB 上限）</td></tr>
+      </tbody>
+    </table>
+    <p style="margin:8px 0 0 0;font-size:12px;color:#666">升级路径：旧 NVS <code>input_gain=18</code> 设备 → 自动映射到 <strong>standard</strong>（升级即 18→21 dB · 解决"听不见"问题）</p>
+  </div>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">上传链路 5 个增益注入点决策</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>#</th><th>位置</th><th>信噪比</th><th>影响 AEC</th><th>影响 NS</th><th>影响 WakeNet</th><th>推荐</th></tr></thead>
+    <tbody>
+      <tr style="background:#E8F5E9"><td><strong>A</strong></td><td>ES7210 PGA（已实现 · AcousticProfile.mic_gain）</td><td>★★★★★</td><td>⚠ 同时放大喇叭回采</td><td>同 NS 输入</td><td>影响（已训练阈值偏移）</td><td>✅ 第一档刀</td></tr>
+      <tr><td>B</td><td>WakeWord Feed 前</td><td>★★★★</td><td>—</td><td>—</td><td>❌ 阈值偏移</td><td>✗</td></tr>
+      <tr><td>C</td><td>AFE Feed 前（AEC 输入端）</td><td>★★★★</td><td>❌ 双讲判错</td><td>❌ 学错噪声基线</td><td>—</td><td>✗</td></tr>
+      <tr style="background:#FFF8E1"><td><strong>D</strong></td><td>AfeAudioProcessor::output_callback_ 内</td><td>★★★</td><td>✅ 已完成</td><td>✅ 已完成</td><td>✅ 不影响</td><td>★ 唯一正确（待启用）</td></tr>
+      <tr><td>E</td><td>audio_service push encode 前</td><td>★★★</td><td>同 D</td><td>同 D</td><td>同 D</td><td>✅ 实现更干净</td></tr>
+    </tbody>
+  </table>
+  <p style="margin:8px 0 0 0;font-size:12px;color:#666"><strong>第一性原理</strong>：任何放大都会同时放大信号 + 噪声 + 残留回声。只有在 AEC + NS 全部完成之后放大，才是"纯粹放大用户人声"。<strong>189 版本对比</strong>：<code>AcousticCalibration::afe_linear_gain</code>（1.0~10.0×）就是放在 D 点 · 高/中/低三档咪头分别 3.0×/5.0×/8.0×。<strong>P30 当前</strong>：A 已落地 · D/E 暂未启用（量产实测后再决定 · 保守路径优先 PGA + 钳位防失真）。</p>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">MCP 工具入口（mcp_server.cc）</h4>
+  <table class="tbl-compact">
+    <thead><tr><th>工具名</th><th>用途</th><th>触发场景</th></tr></thead>
+    <tbody>
+      <tr><td><code>self.audio.set_profile</code></td><td>切换三档（robust/standard/sensitive）</td><td>"听不见我说话" / "咪头不灵敏" / "环境太吵"</td></tr>
+      <tr><td><code>self.audio.get_profile</code></td><td>读当前档位 + tradeoff 提示</td><td>设置面板 / AI 自我决策</td></tr>
+      <tr><td><code>self.audio.diagnose_acoustic</code></td><td>抓 200ms 双通道 PCM 算 MIC/REF 比 · 输出 ratio_db + 建议</td><td>"有回声" / "喇叭声漏到识别"</td></tr>
+      <tr><td><code>self.audio.set_mic_gain</code></td><td>底层 mic_gain 直调（绕过 profile）</td><td>高级调试用</td></tr>
+      <tr><td><code>self.audio.set_stt_popup</code></td><td>说话结束提示音开关</td><td>"关掉那个咚的声音"</td></tr>
+    </tbody>
+  </table>
+
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">诊断旁路实现（audio_service.cc）</h4>
+  <p style="font-size:13px;color:#666"><code>SnoopInputForDiagnose(max_ms, ...)</code> 通过 <code>DiagnosticTap</code> struct + binary semaphore 在 <code>ReadAudioData()</code> 末尾加非侵入 hook，抓 200ms 双通道 [MIC, REF, MIC, REF, ...] 算 RMS² → ratio_db。零任务新增 · 单 mutex 保护 · 不打扰 AFE/AudioInputTask 主流程。健康区间 ±2 dB（参考 189 TARGET_RATIO=1.05 即 +0.4 dB）；&gt; +6 dB → AEC 残留高（建议切 robust）；&lt; -6 dB → 人声被吞（建议切 sensitive）。</p>
 </section>
 
 <!-- ==================== § 七.x Display Overlay 层级 ==================== -->
