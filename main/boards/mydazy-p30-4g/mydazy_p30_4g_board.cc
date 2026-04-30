@@ -363,6 +363,8 @@ private:
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "进入省电模式");
             GetBacklight()->SetBrightness(15);
+            // 状态上报触发点：进入省电前打一次（替代周期轮询）
+            ReportStatus();
         });
         power_save_timer_->OnExitSleepMode([this]() {
             ESP_LOGI(TAG, "退出省电模式");
@@ -734,11 +736,21 @@ private:
     // 状态上报
     // ========================================================
 
+    // 周期上报开关：默认关闭。唤醒事件触发的一次性上报不受此开关影响。
+    // 改 true 重编即可恢复 90s 周期；后续可改成 NVS 设置项。
+    static constexpr bool kEnablePeriodicStatusReport = false;
+
     void ReportStatus() {
         // 仅在 idle 上报；对话期让位给音频上传和 TTS，避免 HTTPS/TLS 抢资源。
         auto state = Application::GetInstance().GetDeviceState();
         if (state != kDeviceStateIdle) {
             ESP_LOGD(TAG, "skip status report, state=%d (仅 idle 上报)", (int)state);
+            return;
+        }
+        // 防御性：MP3 流式播放期间禁止上报（4G PPP 链路抢带宽尤为致命，
+        // 实测 OSS Range 续传与 /status POST 同时进行会导致 SSL -76 retry 用尽）
+        if (MusicPlayer::GetInstance().IsPlaying()) {
+            ESP_LOGD(TAG, "skip status report, music playing");
             return;
         }
 
@@ -775,6 +787,10 @@ private:
     }
 
     void StartStatusTimer() {
+        if (!kEnablePeriodicStatusReport) {
+            ESP_LOGI(TAG, "Periodic status report disabled (wake-only mode)");
+            return;
+        }
         esp_timer_create_args_t args = {
             .callback = [](void* arg) {
                 static_cast<MyDazyP30_4GBoard*>(arg)->ReportStatus();
@@ -785,6 +801,11 @@ private:
         };
         esp_timer_create(&args, &status_timer_);
         esp_timer_start_periodic(status_timer_, 90 * 1000000ULL);
+    }
+
+    // 联网成功钩子：每次网络（重）连成功时上报一次状态（替代周期轮询）
+    void OnNetworkConnected() override {
+        ReportStatus();
     }
 
     // ========================================================

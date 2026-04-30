@@ -43,6 +43,10 @@ public:
     int    Read(char* buf, size_t size) override { return http_ ? http_->Read(buf, size) : -1; }
     void   Close()                      override { if (http_) http_->Close(); }
     void   SetTimeout(int ms)           override { if (http_) http_->SetTimeout(ms); }
+    // Range 断点续传需要：转发到底层 Http::SetHeader
+    void   SetHeader(const std::string& key, const std::string& value) override {
+        if (http_) http_->SetHeader(key, value);
+    }
 private:
     std::unique_ptr<Http> http_;
 };
