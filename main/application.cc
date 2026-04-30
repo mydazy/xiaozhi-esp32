@@ -16,6 +16,7 @@
 #include "flow_engine.h"
 #include "device_state_event.h"
 #include "audio/music_player.h"
+#include "audio/acoustic_profile.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -97,6 +98,10 @@ void Application::Initialize() {
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
     audio_service_.Start();
+
+    // 声学档位（参考 189 acoustic_calibration 简化版 · 3 档预设 + 实音/回采诊断）
+    // 必须在 codec 创建后、AudioService 已启动后初始化，确保 SetInputGain 能下发到硬件
+    AcousticProfile::GetInstance().Initialize();
 
     // MP3 流式播放器（远程 music_play 命令触发）
     MusicPlayer::GetInstance().Initialize(codec);
