@@ -72,7 +72,7 @@ void UiDisplay::SetupUI() {
     }
     if (emoji_box_) lv_obj_set_style_opa(emoji_box_, LV_OPA_TRANSP, 0);
 
-    // 3. 开机动画
+    // 2. 开机动画
     StartBootAnimation();
 }
 
@@ -81,6 +81,9 @@ void UiDisplay::SetupUI() {
 // ============================================================
 
 void UiDisplay::UpdateStatusBar(bool update_all) {
+    if (is_clock_mode_) {
+        last_status_update_time_ = std::chrono::system_clock::now();
+    }
     LvglDisplay::UpdateStatusBar(update_all);
     DisplayLockGuard lock(this);
 
@@ -199,7 +202,6 @@ void UiDisplay::SwitchToClockMode() {
 
     if (content_)     lv_obj_add_flag(content_, LV_OBJ_FLAG_HIDDEN);
     if (container_)   lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
-    if (status_bar_)  lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
     if (emoji_box_)   lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
 
     if (clock_container_) {
@@ -209,6 +211,11 @@ void UiDisplay::SwitchToClockMode() {
     if (top_bar_) {
         lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(top_bar_);
+    }
+    if (status_bar_) {
+        lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);  // 防 boot fade_out 残留 TRANSP 致 notification 不可见
+        lv_obj_move_foreground(status_bar_);
     }
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
@@ -230,10 +237,6 @@ void UiDisplay::SwitchToChatMode() {
         lv_obj_move_foreground(container_);
     }
     if (content_) lv_obj_remove_flag(content_, LV_OBJ_FLAG_HIDDEN);
-    if (status_bar_) {
-        lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);
-    }
     if (emoji_box_) {
         lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_opa(emoji_box_, LV_OPA_COVER, 0);  // 关键：boot fade_out 把 opa=TRANSP
@@ -243,8 +246,13 @@ void UiDisplay::SwitchToChatMode() {
     // 被 move_foreground(container_) 盖住 —— SetChatMessage 即使 remove HIDDEN 也看不见。
     if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
 
-    // chat 模式主动隐藏父类 top_bar_（信号 + 电池）—— emoji 满屏，语义明确，UpdateStatusBar 仍可正常跑
+    // chat 模式：top_bar_ HIDDEN（信号/电池不打扰 emoji 满屏）
+    //           status_bar_ 显示（含 status_label_ 对话状态文字 + ShowNotification 通知通道）
     if (top_bar_) lv_obj_add_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
+    if (status_bar_) {
+        lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);
+    }
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
     is_clock_mode_ = false;
