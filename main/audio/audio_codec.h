@@ -21,6 +21,7 @@ public:
     
     virtual void SetOutputVolume(int volume);
     virtual void SetInputGain(float gain);
+    virtual void SetRefGain(float gain);
     virtual void EnableInput(bool enable);
     virtual void EnableOutput(bool enable);
 
@@ -36,6 +37,7 @@ public:
     inline int output_channels() const { return output_channels_; }
     inline int output_volume() const { return output_volume_; }
     inline float input_gain() const { return input_gain_; }
+    inline float ref_gain() const { return ref_gain_; }
     inline bool input_enabled() const { return input_enabled_; }
     inline bool output_enabled() const { return output_enabled_; }
 
@@ -51,8 +53,9 @@ protected:
     int output_sample_rate_ = 0;
     int input_channels_ = 1;
     int output_channels_ = 1;
-    int output_volume_ = 70;
-    float input_gain_ = 0.0;
+    int output_volume_ = 80;
+    float input_gain_ = 21.0;
+    float ref_gain_ = 6.0;
 
     virtual int Read(int16_t* dest, int samples) = 0;
     virtual int Write(const int16_t* data, int samples) = 0;
