@@ -11,11 +11,13 @@ dependencies:
   # ── LCD 面板（本仓库仅用 JD9853 SPI 屏） ─────────────────────
   mydazy/esp_lcd_jd9853: ^2.0.0
 
-  # ── 触摸 IC（本仓库仅用 AXS5106L） ───────────────────────────
-  mydazy/esp_lcd_touch_axs5106l:
-    version: ^2.0.0
-    rules:
-      - if: target in [esp32s3]   # LVGL input integration tested on ESP32-S3
+  # ── 触摸 IC（AXS5106L）：本地 fork 在 components/esp_lcd_touch_axs5106l/
+  # 在 v2.0.0 基础上增加 4G RF 抗扰增强（POST_RELEASE_GUARD + bus recovery 清状态）。
+  # 待乐鑫组件库发布 v2.1.0 后可恢复以下声明：
+  # mydazy/esp_lcd_touch_axs5106l:
+  #   version: ^2.1.0
+  #   rules:
+  #     - if: target in [esp32s3]
 
   # ── 传感器（SC7A20H 三轴加速度计：拾取唤醒 / 运动检测） ─────
   mydazy/esp_sc7a20h: ^2.0.0

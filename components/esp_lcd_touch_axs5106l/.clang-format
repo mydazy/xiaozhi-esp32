@@ -1,0 +1,23 @@
+# Coding style for esp_sc7a20h — based on Google C++ Style with ESP-IDF tweaks.
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++17
+
+ColumnLimit: 100
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: false
+BinPackParameters: false
+BreakBeforeBraces: Attach
+DerivePointerAlignment: false
+PointerAlignment: Left
+SpacesBeforeTrailingComments: 2
+
+IncludeBlocks: Preserve
+SortIncludes: false
