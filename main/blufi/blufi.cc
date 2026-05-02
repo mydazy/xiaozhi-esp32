@@ -279,20 +279,20 @@ void Blufi::SendData(const char *data, int len) {
 
 bool Blufi::StartAdvertising() {
 #ifdef CONFIG_BT_NIMBLE_ENABLED
-  const char *name = ble_svc_gap_device_name();
-  if (!name || name[0] == '\0') {
+  // ⚠️ 关键修复（2026-04-30）：直接用成员变量 device_name_，不要读 ble_svc_gap_device_name()
+  // 根因：Start() 中 line 155 提前调 ble_svc_gap_device_name_set 时 NimBLE 还没 init，
+  //       随后 esp_blufi_host_and_cb_init → ble_svc_gap_init 用 sdkconfig 默认值 "nimble" 覆盖。
+  //       此处若读 ble_svc_gap_device_name() 拿到的是 "nimble"，导致广播设备名是 "nimble"
+  //       而非 device_name_（"MyDazy-XXXX"），手机搜不到 MyDazy。
+  // 解法：直接传 device_name_，esp_blufi_adv_start_with_name 内部会再次调 set（此时 NimBLE 已 init，生效）
+  if (device_name_.empty()) {
     ESP_LOGW(TAG, "BLE设备名为空，跳过广播");
     return false;
   }
 
-  // ⚠️ 修复: 使用ESP-IDF提供的esp_blufi_adv_start_with_name()
-  // 原因: 直接调用ble_gap_adv_start()时没有传入GAP事件回调(esp_blufi_gap_event)
-  //      导致BLE_CONNECT事件无法被处理,进而导致ESP_BLUFI_EVENT_BLE_CONNECT事件丢失
-  // 参考:
-  // esp-idf/components/bt/common/btc/profile/esp/blufi/nimble_host/esp_blufi.c:464
-  esp_blufi_adv_start_with_name(name);
+  esp_blufi_adv_start_with_name(device_name_.c_str());
 
-  ESP_LOGI(TAG, "[1/8] BLE广播已启动: %s", name);
+  ESP_LOGI(TAG, "[1/8] BLE广播已启动: %s", device_name_.c_str());
   return true;
 #else
   esp_blufi_adv_start();
