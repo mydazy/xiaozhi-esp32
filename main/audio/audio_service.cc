@@ -99,6 +99,23 @@ void AudioService::Initialize(AudioCodec* codec) {
 #endif
 
     audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
+        // ─── AEC 后软件增益 + 噪声门（增益值由 codec 统一管理，与 input_gain/ref_gain 同级）─
+        const float g = codec_ ? codec_->aec_gain_linear() : 1.0f;
+        if (!data.empty() && g > 1.01f) {
+            // 噪声门：算帧均方能量，低于阈值（底噪段）跳过增益 → SNR 提升
+            int64_t energy_sum = 0;
+            for (int16_t s : data) energy_sum += (int64_t)s * s;
+            const int32_t energy_avg = (int32_t)(energy_sum / (int64_t)data.size());
+
+            if (energy_avg >= kNoiseGateRmsSq) {
+                // 有声段：线性放大 + 饱和限幅（防 int16 溢出失真）
+                for (int16_t& s : data) {
+                    int32_t v = (int32_t)(s * g);
+                    s = v > 32767 ? 32767 : (v < -32768 ? -32768 : (int16_t)v);
+                }
+            }
+            // 静音段：保持原样不放大（不清零，避免 ASR/VAD 误判语义边界）
+        }
         PushTaskToEncodeQueue(kAudioTaskTypeEncodeToSendQueue, std::move(data));
     });
 

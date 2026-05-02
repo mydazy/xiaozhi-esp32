@@ -157,6 +157,9 @@ private:
     int decoder_duration_ms_ = OPUS_FRAME_DURATION_MS;
     int decoder_frame_size_ = 0;
     DebugStatistics debug_statistics_;
+
+    // AEC 后增益的噪声门门限（增益值在 codec_->aec_gain_linear() 读取，统一管理）
+    static constexpr int32_t kNoiseGateRmsSq = 200 * 200;  // RMS 200 ≈ -44 dBFS，低于此值跳过增益
     srmodel_list_t* models_list_ = nullptr;
 
     EventGroupHandle_t event_group_;

@@ -76,9 +76,22 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
     afe_config->afe_perferred_core = 1;
     afe_config->afe_perferred_priority = 1;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
-    
+
+    afe_config->agc_init = true;
+    afe_config->afe_linear_gain = 3.0f;
+    afe_config->agc_mode = AFE_AGC_MODE_WAKENET;
+
     afe_iface_ = esp_afe_handle_from_config(afe_config);
     afe_data_ = afe_iface_->create_from_config(afe_config);
+
+  // ============== 设置 Wakenet 检测阈值 ==============
+  // 阈值越低越灵敏 (0.3-0.9, 默认~0.9)
+  float new_threshold = 0.55f; // 更高灵敏度
+  for (size_t i = 0; i < wake_words_.size(); i++) {
+    int ret = afe_iface_->set_wakenet_threshold(afe_data_, i, new_threshold);
+    ESP_LOGI(TAG, "设置唤醒词[%d] \"%s\" 阈值: %.2f (ret=%d)", (int)i,
+             wake_words_[i].c_str(), new_threshold, ret);
+  }
 
     xTaskCreatePinnedToCore([](void* arg) {
         auto this_ = (AfeWakeWord*)arg;

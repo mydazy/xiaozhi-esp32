@@ -4,6 +4,7 @@
 
 #include <esp_log.h>
 #include <cstring>
+#include <cmath>
 #include <driver/i2s_common.h>
 
 #define TAG "AudioCodec"
@@ -34,7 +35,11 @@ void AudioCodec::Start() {
         output_volume_ = 10;
     }
 
-    ESP_LOGI(TAG, "Audio codec started");
+    // AEC 后增益（dB）持久化值
+    aec_gain_db_     = settings.GetFloat("aec_gain", aec_gain_db_);
+    aec_gain_linear_ = powf(10.0f, aec_gain_db_ / 20.0f);
+
+    ESP_LOGI(TAG, "Audio codec started · AEC gain=%.1fdB(×%.2f)", aec_gain_db_, aec_gain_linear_);
 }
 
 void AudioCodec::SetOutputVolume(int volume) {
@@ -59,6 +64,15 @@ void AudioCodec::SetRefGain(float gain) {
 
     Settings settings("audio", true);
     settings.SetFloat("ref_gain", ref_gain_);
+}
+
+void AudioCodec::SetAecGain(float db) {
+    aec_gain_db_     = db;
+    aec_gain_linear_ = powf(10.0f, db / 20.0f);
+    ESP_LOGI(TAG, "AEC增益=%.1fdB(×%.2f)", db, aec_gain_linear_);
+
+    Settings settings("audio", true);
+    settings.SetFloat("aec_gain", db);
 }
 
 void AudioCodec::EnableInput(bool enable) {

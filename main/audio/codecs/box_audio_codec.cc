@@ -15,8 +15,9 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     input_channels_ = input_reference_ ? 2 : 1; // 输入通道数
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
-    Settings settings("audio", false);
-    input_gain_ = static_cast<float>(settings.SetFloat("input_gain", 21));
+    Settings settings("audio", false);  // 只读
+    input_gain_ = settings.GetFloat("input_gain", 24.0f);  // MIC 缺省 27dB（1m 远场，命中 ES7210 档位）
+    ref_gain_   = settings.GetFloat("ref_gain",   9.0f);  // REF 缺省 12dB（AEC 参考通道）
 
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
@@ -76,7 +77,7 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     input_dev_ = esp_codec_dev_new(&dev_cfg);
     assert(input_dev_ != NULL);
 
-    ESP_LOGI(TAG, "BoxAudioDevice initialized");
+    ESP_LOGI(TAG, "BoxAudioDevice initialized (MIC1基准=%.1fdB)", input_gain_);
 }
 
 BoxAudioCodec::~BoxAudioCodec() {
@@ -184,17 +185,22 @@ void BoxAudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_
 }
 
 void BoxAudioCodec::SetOutputVolume(int volume) {
-    ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, volume));
+    std::lock_guard<std::mutex> lock(data_if_mutex_);
+    int set_volume = (int)(volume * 0.95);
+    ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, set_volume));
     AudioCodec::SetOutputVolume(volume);
 }
 
 void BoxAudioCodec::SetInputGain(float gain) {
-     input_gain_ = gain;
-     if (input_enabled_) {
-         ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
-     }
+    std::lock_guard<std::mutex> lock(data_if_mutex_);
+    input_gain_ = gain;
 
-     AudioCodec::SetInputGain(gain);
+    if (input_enabled_) {
+        ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
+        ESP_LOGI(TAG, "输入增益已实时更新: %.1fdB", input_gain_);
+    }
+
+    AudioCodec::SetInputGain(gain);
 }
 
 void BoxAudioCodec::SetRefGain(float gain) {
@@ -202,7 +208,6 @@ void BoxAudioCodec::SetRefGain(float gain) {
 
     if (input_enabled_ && input_reference_) {
         ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1), ref_gain_));
-        ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2), ref_gain_));
         ESP_LOGI(TAG, "REF: %.1fdB", ref_gain_);
     }
 
@@ -227,6 +232,10 @@ void BoxAudioCodec::EnableInput(bool enable) {
         }
         ESP_ERROR_CHECK(esp_codec_dev_open(input_dev_, &fs));
         ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
+        if (input_reference_) {
+            ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1), ref_gain_));
+            ESP_LOGI(TAG, "AEC增益配置: MIC=REF=%.1fdB", ref_gain_);
+        }
     } else {
         ESP_ERROR_CHECK(esp_codec_dev_close(input_dev_));
     }
@@ -239,6 +248,9 @@ void BoxAudioCodec::EnableOutput(bool enable) {
         return;
     }
     if (enable) {
+        // 先静音，避免开启时的 POP 噪声
+        ESP_ERROR_CHECK(esp_codec_dev_set_out_mute(output_dev_, true));
+
         // Play 16bit 1 channel
         esp_codec_dev_sample_info_t fs = {
             .bits_per_sample = 16,
@@ -249,7 +261,15 @@ void BoxAudioCodec::EnableOutput(bool enable) {
         };
         ESP_ERROR_CHECK(esp_codec_dev_open(output_dev_, &fs));
         ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, output_volume_));
+
+        // 延迟后取消静音，让功放稳定
+        vTaskDelay(pdMS_TO_TICKS(30));
+        ESP_ERROR_CHECK(esp_codec_dev_set_out_mute(output_dev_, false));
     } else {
+        // 先静音，避免关闭时的 POP 噪声
+        ESP_ERROR_CHECK(esp_codec_dev_set_out_mute(output_dev_, true));
+        vTaskDelay(pdMS_TO_TICKS(20));
+
         ESP_ERROR_CHECK(esp_codec_dev_close(output_dev_));
     }
     AudioCodec::EnableOutput(enable);
