@@ -139,7 +139,8 @@ private:
             .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
             .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
             .clk_source = I2C_CLK_SRC_DEFAULT,
-            .glitch_ignore_cnt = 7,
+            // 提高毛刺过滤阈值（~187ns，原值 7≈87ns）增强 I2C 抗扰
+            .glitch_ignore_cnt = 15,
             .intr_priority = 3,
             .trans_queue_depth = 0,
             .flags = {
