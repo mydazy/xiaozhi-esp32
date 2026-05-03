@@ -19,8 +19,10 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     output_sample_rate_ = output_sample_rate;
     // ───── 麦克风/参考通道增益（NVS 持久化，可通过 codec.SetInputGain/SetRefGain 在线调）─────
     // ES7210 物理档位 0/3/6/9/12/15/18/21/24/27/30/34.5/36/37.5 dB（命中 3dB 倍数无量化损失）
-    constexpr float kDefaultMicGain = 15.0f;   // MIC1 基准（近-中场）
-    constexpr float kDefaultRefGain =  6.0f;   // REF 喇叭回采（AEC 参考通道）
+    // 默认仅在 NVS 未写入时生效（首次开机/工厂复位）。校准会立即覆盖：
+    //   -26 dBV → 15 dB · -36 dBV → 24 dB · -42 dBV → 30 dB
+    constexpr float kDefaultMicGain = 15.0f;   // 默认 -26 dBV mic 配置（量产主物料）
+    constexpr float kDefaultRefGain =  6.0f;   // REF 喇叭回采（与 mic 物料无关，固定 6）
 
     Settings settings("audio", false);  // 只读
     // 用 INT32_MIN sentinel 探测 NVS 是否曾经写入过（区分"默认值" vs "NVS 持久化覆盖值"）
@@ -308,8 +310,9 @@ int BoxAudioCodec::Write(const int16_t* data, int samples) {
 
 // MIC 灵敏度识别（出厂烧录后首次开机一次性）
 // 固定参数: vol=80, input=12dB, 1kHz amp=24000 播 500ms, 跳 150ms 录 200ms 算 RMS
-// 判定: RMS ≥ 600 → -25dBV (input=15dB), 否则 -36dBV (input=24dB)
-// ⚠ 阈值 600 是估算值，需产线采集真实 RMS 后修正
+//   RMS ≥ 3000 → -26 dBV mic → input=15 dB
+//   RMS ≥ 900  → -36 dBV mic → input=24 dB
+//   RMS <  900 → -42 dBV mic → input=30 dB
 void BoxAudioCodec::CalibrateMicOnce() {
     bool was_off_in  = !input_enabled_;
     bool was_off_out = !output_enabled_;
@@ -341,8 +344,12 @@ void BoxAudioCodec::CalibrateMicOnce() {
         sum += (int64_t)rec[i] * rec[i];
     int32_t rms = (int32_t)std::sqrt((double)sum / (rec.size() / input_channels_));
 
-    float gain = (rms >= 600) ? 15.0f : 24.0f;
-    ESP_LOGW(TAG, "MIC校准 RMS=%d → input=%.0fdB (%s)", rms, gain, rms >= 600 ? "-25dBV" : "-36dBV");
+    float gain;
+    const char* mic_type;
+    if      (rms >= 3000) { gain = 15.0f; mic_type = "-26dBV"; }
+    else if (rms >= 900)  { gain = 24.0f; mic_type = "-36dBV"; }
+    else                  { gain = 30.0f; mic_type = "-42dBV"; }
+    ESP_LOGW(TAG, "MIC校准 RMS=%d → input=%.0fdB (%s)", rms, gain, mic_type);
     SetInputGain(gain);
     Settings("audio", true).SetInt("mic_calib", 1);
 

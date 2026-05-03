@@ -57,6 +57,8 @@ protected:
     int input_channels_ = 1;
     int output_channels_ = 1;
     int output_volume_ = 80;
+    // 默认 = -26 dBV mic 配置（量产主物料）。校准后会按 mic 类型覆盖：
+    //   -26 dBV → input=15 (默认) · -36 dBV → 24 · -42 dBV → 30
     float input_gain_ = 15.0;
     float ref_gain_ = 6.0;
     float aec_gain_db_     = 6.0f;   // AEC 后软件增益缺省 +6 dB（≈2×）
