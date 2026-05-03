@@ -37,6 +37,11 @@ public:
     virtual void SetRefGain(float gain) override;
     virtual void EnableInput(bool enable) override;
     virtual void EnableOutput(bool enable) override;
+
+    // MIC 灵敏度校准：vol=50 + input=12 → 播 500ms 1kHz → 算 RMS → 阈值 2500 区分 -25/-36
+    // 自管理 input/output 启停状态，调用方零负担
+    // 触发方式：① application.cc Start 中首次开机 NVS 未标记时 ② RemoteCmd "mic_calibrate" 强制触发
+    void CalibrateMicOnce();
 };
 
 #endif // _BOX_AUDIO_CODEC_H
