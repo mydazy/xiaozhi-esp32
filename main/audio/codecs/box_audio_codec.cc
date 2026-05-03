@@ -15,9 +15,22 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     input_channels_ = input_reference_ ? 2 : 1; // 输入通道数
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
+    // ───── 麦克风/参考通道增益（NVS 持久化，可通过 codec.SetInputGain/SetRefGain 在线调）─────
+    // ES7210 物理档位 0/3/6/9/12/15/18/21/24/27/30/34.5/36/37.5 dB（命中 3dB 倍数无量化损失）
+    constexpr float kDefaultMicGain = 15.0f;   // MIC1 基准（近-中场）
+    constexpr float kDefaultRefGain =  6.0f;   // REF 喇叭回采（AEC 参考通道）
+
     Settings settings("audio", false);  // 只读
-    input_gain_ = settings.GetFloat("input_gain", 24.0f);  // MIC 缺省 27dB（1m 远场，命中 ES7210 档位）
-    ref_gain_   = settings.GetFloat("ref_gain",   9.0f);  // REF 缺省 12dB（AEC 参考通道）
+    // 用 INT32_MIN sentinel 探测 NVS 是否曾经写入过（区分"默认值" vs "NVS 持久化覆盖值"）
+    const bool mic_from_nvs = (settings.GetInt("input_gain", INT32_MIN) != INT32_MIN);
+    const bool ref_from_nvs = (settings.GetInt("ref_gain",   INT32_MIN) != INT32_MIN);
+    input_gain_ = settings.GetFloat("input_gain", kDefaultMicGain);
+    ref_gain_   = settings.GetFloat("ref_gain",   kDefaultRefGain);
+
+    ESP_LOGI(TAG, "增益配置: MIC=%.1fdB(%s) REF=%.1fdB(%s)  [缺省 %.0f/%.0f]",
+             input_gain_, mic_from_nvs ? "NVS" : "默认",
+             ref_gain_,   ref_from_nvs ? "NVS" : "默认",
+             kDefaultMicGain, kDefaultRefGain);
 
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
@@ -77,7 +90,7 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     input_dev_ = esp_codec_dev_new(&dev_cfg);
     assert(input_dev_ != NULL);
 
-    ESP_LOGI(TAG, "BoxAudioDevice initialized (MIC1基准=%.1fdB)", input_gain_);
+    ESP_LOGI(TAG, "BoxAudioDevice initialized");
 }
 
 BoxAudioCodec::~BoxAudioCodec() {
@@ -234,7 +247,9 @@ void BoxAudioCodec::EnableInput(bool enable) {
         ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
         if (input_reference_) {
             ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1), ref_gain_));
-            ESP_LOGI(TAG, "AEC增益配置: MIC=REF=%.1fdB", ref_gain_);
+            ESP_LOGI(TAG, "ES7210 寄存器写入: MIC=%.1fdB REF=%.1fdB", input_gain_, ref_gain_);
+        } else {
+            ESP_LOGI(TAG, "ES7210 寄存器写入: MIC=%.1fdB", input_gain_);
         }
     } else {
         ESP_ERROR_CHECK(esp_codec_dev_close(input_dev_));

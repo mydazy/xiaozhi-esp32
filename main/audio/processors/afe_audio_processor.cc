@@ -53,8 +53,8 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         afe_config->ns_init = false;
     }
 
-    afe_config->agc_init = true;
-    afe_config->afe_linear_gain = 3.0f;  // 1m 远场：3.0 → 4.0（+2.5 dB AFE 内置增益）
+    afe_config->agc_init = false;
+    afe_config->afe_linear_gain = 2.0f;  // 1m 远场：3.0 → 4.0（+2.5 dB AFE 内置增益）
     afe_config->agc_mode = AFE_AGC_MODE_WAKENET;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
 
