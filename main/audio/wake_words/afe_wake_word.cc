@@ -86,7 +86,7 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
 
   // ============== 设置 Wakenet 检测阈值 ==============
   // 阈值越低越灵敏 (0.3-0.9, 默认~0.9)
-  float new_threshold = 0.55f; // 更高灵敏度
+  float new_threshold = 0.6f; // 更高灵敏度
   for (size_t i = 0; i < wake_words_.size(); i++) {
     int ret = afe_iface_->set_wakenet_threshold(afe_data_, i, new_threshold);
     ESP_LOGI(TAG, "设置唤醒词[%d] \"%s\" 阈值: %.2f (ret=%d)", (int)i,
