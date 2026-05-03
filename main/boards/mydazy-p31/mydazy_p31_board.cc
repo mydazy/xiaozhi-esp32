@@ -398,10 +398,7 @@ private:
         // 优化：延迟低电关机到初始化完成后，避免用户无法充电
         if(power_manager_->IsOffBatteryLevel() && battery_level > 0 && !is_charging){
             ESP_LOGE(TAG, "电量过低，强制关机");
-            auto& app = Application::GetInstance();
-            app.Alert("电量过低", "强制关机", "", Lang::Sounds::OGG_LOW_BATTERY);
-            vTaskDelay(pdMS_TO_TICKS(3000));
-            EnterDeepSleep(false);
+            ShutdownOrSleep("电量过低", "强制关机", Lang::Sounds::OGG_LOW_BATTERY, 3000, false);
         }
     }
 
@@ -430,7 +427,9 @@ private:
             int deep_sleep_enabled = settings.GetInt("deepSleep", 1);
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "✅ 深度睡眠已启用，5分钟无操作后进入深度睡眠");
-                EnterDeepSleep(true);
+                // 自动休眠：仅屏幕提示 + 陀螺仪可唤醒（拍拍即醒）
+                // 不播提示音 —— 用户没主动操作，夜间/会议中突然响会打扰
+                ShutdownOrSleep("休眠中", "拍拍唤醒", "", 1500, true);
             }
         });
 
@@ -446,6 +445,12 @@ private:
 
     void EnterDeepSleep(bool enable_gyro_wakeup = true) {
         ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
+
+        // ⚠️ 必须最先停 AudioService：让 audio_input/AFE/encode/output 等任务退出，
+        // 否则后面切 AUDIO_PWR_EN 关电源时任务仍在 I2S 读写已掉电的 codec → I2S timeout/panic。
+        ESP_LOGI(TAG, "停止 AudioService（释放 codec / 退出 audio_* 任务）");
+        Application::GetInstance().GetAudioService().Stop();
+        vTaskDelay(pdMS_TO_TICKS(100));
 
         if (power_save_timer_) {
             power_save_timer_->SetEnabled(false);
@@ -569,6 +574,20 @@ private:
 
         // 进入深度休眠
         esp_deep_sleep_start();
+    }
+
+    // 统一关机/休眠入口：先显示 Alert + 播提示音，等指定时长后进 deep sleep
+    //   title/msg/sound 任一可空跳过；delay_ms 覆盖提示音 + 视觉感知（建议 ≥ 2000ms）
+    //   enable_gyro_wakeup=true：陀螺仪可唤醒（自动休眠场景）/ false：仅按键唤醒（按键关机场景）
+    void ShutdownOrSleep(const char* title, const char* msg, const std::string_view& sound,
+                         int delay_ms, bool enable_gyro_wakeup) {
+        auto& app = Application::GetInstance();
+        if (app.GetDeviceState() == kDeviceStateSpeaking) {
+            app.AbortSpeaking(kAbortReasonNone);
+        }
+        if (title) app.Alert(title, msg ? msg : "", "", sound);
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        EnterDeepSleep(enable_gyro_wakeup);
     }
 
     void InitializeDisplay() {
@@ -698,15 +717,8 @@ private:
         // 连按4次关机
         boot_button_.OnMultipleClick([this]() {
             ESP_LOGI(TAG, "连按4次关机");
-            auto& app = Application::GetInstance();
-            if(app.GetDeviceState() == kDeviceStateSpeaking){
-                app.AbortSpeaking(kAbortReasonNone);
-            }
-            app.Alert("连按4次关机", "拜拜^-^", "", Lang::Sounds::OGG_SHUTDOWN);
-            vTaskDelay(pdMS_TO_TICKS(3000));
-
-            // 进入休眠（按键关机禁用陀螺仪唤醒）
-            EnterDeepSleep(false);
+            // 用户主动关机：从用户视角说"再见"，仅按键唤醒防陀螺仪误开机
+            ShutdownOrSleep("再见", "", Lang::Sounds::OGG_SHUTDOWN, 2500, false);
         }, 4);
 
         // 连按5次：GPS 演示模式（切换开关）
