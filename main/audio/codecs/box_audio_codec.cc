@@ -306,33 +306,25 @@ int BoxAudioCodec::Write(const int16_t* data, int samples) {
     return samples;
 }
 
-// MIC 灵敏度首次校准（一次性）：播 500ms 1kHz vol=50 → 录音算 RMS → 阈值 2500 区分 -25/-36
-//   RMS ≥ 2500 → -25 dBV mic → input=15 dB
-//   RMS < 2500 → -36 dBV mic → input=24 dB
-// 完成后写 NVS audio/mic_calib=1，下次开机不再触发
+// MIC 灵敏度识别（出厂烧录后首次开机一次性）
+// 固定参数: vol=80, input=12dB, 1kHz amp=24000 播 500ms, 跳 150ms 录 200ms 算 RMS
+// 判定: RMS ≥ 600 → -25dBV (input=15dB), 否则 -36dBV (input=24dB)
+// ⚠ 阈值 600 是估算值，需产线采集真实 RMS 后修正
 void BoxAudioCodec::CalibrateMicOnce() {
-    constexpr int kSR = 16000, kFreq = 1000, kAmp = 12000;
-    constexpr int kDurMs = 500, kRecMs = 200;
+    bool was_off_in  = !input_enabled_;
+    bool was_off_out = !output_enabled_;
+    if (was_off_in)  EnableInput(true);
+    if (was_off_out) EnableOutput(true);
 
-    // 校准需要 input + output 都启用，调用方零负担：函数自管理状态
-    bool input_was_off  = !input_enabled_;
-    bool output_was_off = !output_enabled_;
-    if (input_was_off)  EnableInput(true);
-    if (output_was_off) EnableOutput(true);
-
-    // 临时设 vol=50 + input=12（不动 input_gain_/output_volume_ 字段，校准完后下次正常调用即覆盖）
     {
-        std::lock_guard<std::mutex> lock(data_if_mutex_);
-        esp_codec_dev_set_out_vol(output_dev_, (int)(50 * 0.95));
+        std::lock_guard<std::mutex> lk(data_if_mutex_);
+        esp_codec_dev_set_out_vol(output_dev_, 76);   // vol=80 * 0.95
         esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), 12.0f);
     }
 
-    // 生成 500ms 1kHz tone
-    std::vector<int16_t> tone(kSR * kDurMs / 1000);
-    const double w = 2.0 * M_PI * kFreq / kSR;
-    for (size_t i = 0; i < tone.size(); i++) tone[i] = (int16_t)(kAmp * std::sin(w * i));
-
-    // 异步播 + 同步录中段
+    std::vector<int16_t> tone(8000);   // 500ms @ 16K
+    for (size_t i = 0; i < 8000; i++)
+        tone[i] = (int16_t)(24000 * std::sin(2.0 * M_PI * 1000 * i / 16000));
     struct Ctx { BoxAudioCodec* self; std::vector<int16_t>* tone; } ctx{this, &tone};
     xTaskCreate([](void* a) {
         auto* c = (Ctx*)a;
@@ -340,29 +332,21 @@ void BoxAudioCodec::CalibrateMicOnce() {
         vTaskDelete(NULL);
     }, "calib", 4096, &ctx, 5, NULL);
 
-    vTaskDelay(pdMS_TO_TICKS(150));   // 跳 PA 启动瞬态
-    std::vector<int16_t> rec(kSR * kRecMs / 1000 * input_channels_);
+    vTaskDelay(pdMS_TO_TICKS(150));
+    std::vector<int16_t> rec(3200 * input_channels_);   // 200ms × N通道
     Read(rec.data(), rec.size());
 
-    // 取 MIC1 通道（多通道交错）算 RMS
-    int64_t sum_sq = 0; size_t n = 0;
-    for (size_t i = 0; i < rec.size(); i += input_channels_) {
-        sum_sq += (int64_t)rec[i] * rec[i];
-        n++;
-    }
-    const int32_t rms = n ? (int32_t)std::sqrt((double)sum_sq / n) : 0;
+    int64_t sum = 0;
+    for (size_t i = 0; i < rec.size(); i += input_channels_)
+        sum += (int64_t)rec[i] * rec[i];
+    int32_t rms = (int32_t)std::sqrt((double)sum / (rec.size() / input_channels_));
 
-    // 阈值判定
-    const float new_input_gain = (rms >= 2500) ? 15.0f : 24.0f;
-    ESP_LOGW(TAG, "═══ MIC 校准: RMS=%d → input=%.0fdB (%s mic) ═══",
-             rms, new_input_gain, rms >= 2500 ? "-25dBV" : "-36dBV");
+    float gain = (rms >= 600) ? 15.0f : 24.0f;
+    ESP_LOGW(TAG, "MIC校准 RMS=%d → input=%.0fdB (%s)", rms, gain, rms >= 600 ? "-25dBV" : "-36dBV");
+    SetInputGain(gain);
+    Settings("audio", true).SetInt("mic_calib", 1);
 
-    // 写 NVS：input_gain（自动持久化）+ mic_calib 标志
-    SetInputGain(new_input_gain);
-    Settings settings("audio", true);
-    settings.SetInt("mic_calib", 1);
-
-    vTaskDelay(pdMS_TO_TICKS(400));   // 等播放 task 自然结束
-    if (input_was_off)  EnableInput(false);   // 状态对称恢复
-    if (output_was_off) EnableOutput(false);
+    vTaskDelay(pdMS_TO_TICKS(400));
+    if (was_off_in)  EnableInput(false);
+    if (was_off_out) EnableOutput(false);
 }
