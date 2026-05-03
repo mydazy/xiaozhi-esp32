@@ -37,10 +37,7 @@ WifiAp::WifiAp() {
 }
 
 WifiAp::~WifiAp() {
-    if (scan_timer_) {
-        esp_timer_stop(scan_timer_);
-        esp_timer_delete(scan_timer_);
-    }
+    // 不再持有周期 scan_timer_（按需扫描方案）
 }
 
 std::string WifiAp::GetSsid() {
@@ -88,27 +85,12 @@ void WifiAp::Start(const std::string& ssid_prefix, const std::string& language) 
     // 启动 HTTP 服务
     StartWebServer();
 
-    // 创建定时扫描器
-    esp_timer_create_args_t timer_args = {
-        .callback = [](void* arg) {
-            auto* self = static_cast<WifiAp*>(arg);
-            if (self->started_) {
-                WifiStation::GetInstance().TriggerScan();
-            }
-        },
-        .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name = "wifi_scan_timer",
-        .skip_unhandled_events = true
-    };
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &scan_timer_));
-
     started_ = true;
 
-    // 触发首次扫描
-    wifi.TriggerScan();
-
-    ESP_LOGI(TAG, "AP config mode started");
+    // 不再启动 10s 周期扫描器：与用户提交的 TryConnect 抢 STA 会触发
+    // ESP_ERR_WIFI_STATE。改为：① WIFI_EVENT_STA_START 自动首扫
+    // ② HTTP /scan 接口按需触发（5s 节流）
+    ESP_LOGI(TAG, "AP config mode started (on-demand scan)");
 }
 
 void WifiAp::Stop() {
@@ -119,14 +101,6 @@ void WifiAp::Stop() {
 
     ESP_LOGI(TAG, "Stopping AP config mode...");
     started_ = false;
-
-    // 停止定时器
-    if (scan_timer_) {
-        esp_timer_stop(scan_timer_);
-        vTaskDelay(pdMS_TO_TICKS(50));  // 确保回调不在执行
-        esp_timer_delete(scan_timer_);
-        scan_timer_ = nullptr;
-    }
 
     // 清理回调
     auto& wifi = WifiStation::GetInstance();
@@ -193,14 +167,10 @@ void WifiAp::OnScanDone() {
     auto& self = WifiAp::GetInstance();
     if (!self.started_) return;
 
-    // 扫描结果由 WifiStation 管理，这里只打印日志和启动定时器
+    // 扫描结果由 WifiStation 管理，这里只打印日志
+    // 不再排周期 timer：HTTP /scan 接口按需触发新扫描
     auto count = WifiStation::GetInstance().GetCacheCount();
-    ESP_LOGI(TAG, "Scan done, %d APs", (int)count);
-
-    // 10 秒后再次扫描
-    if (self.scan_timer_ && self.started_) {
-        esp_timer_start_once(self.scan_timer_, 10 * 1000000);
-    }
+    ESP_LOGI(TAG, "Scan done, %d APs (cached for /scan endpoint)", (int)count);
 }
 
 // ============ AP 事件回调（日志用）============
@@ -308,13 +278,24 @@ void WifiAp::StartWebServer() {
     };
     httpd_register_uri_handler(server_, &saved_delete);
 
-    // 扫描结果（直接从 WifiStation 获取）
+    // 扫描结果（按需触发：手机端拉取时若缓存陈旧 >5s 且 STA 空闲，触发一次新扫描）
     httpd_uri_t scan = {
         .uri = "/scan",
         .method = HTTP_GET,
         .handler = [](httpd_req_t *req) -> esp_err_t {
-            // 直接从 WifiStation 获取去重后的扫描缓存
-            auto ap_records = WifiStation::GetInstance().GetDeduplicatedCache();
+            auto& wifi = WifiStation::GetInstance();
+
+            // 5s 节流：缓存过期 + STA 空闲（不在 connecting/正在扫描）才触发新扫描
+            // 不阻塞响应，立即返回当前缓存（手机端可下拉刷新拿新结果）
+            int64_t now_ms = esp_timer_get_time() / 1000;
+            int64_t age_ms = now_ms - wifi.GetLastScanTime();
+            if (age_ms > 5000 && !wifi.IsScanning() && !wifi.IsConnected()) {
+                // STA 未连接 + 未扫描中 → 安全触发；wifi.TriggerScan 内部会再判 is_scanning_
+                wifi.TriggerScan();
+            }
+
+            // 直接从 WifiStation 获取去重后的扫描缓存（可能是上次扫描结果，由前端轮询拿新）
+            auto ap_records = wifi.GetDeduplicatedCache();
 
             bool support_5g = false;
 #ifdef CONFIG_SOC_WIFI_SUPPORT_5G

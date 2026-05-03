@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <map>
 
+#include <inttypes.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <esp_log.h>
@@ -195,7 +196,7 @@ void WifiStation::UpdateScanCache(wifi_ap_record_t* records, uint16_t count) {
     last_scan_time_ms_ = esp_timer_get_time() / 1000;
     is_scanning_ = false;
 
-    ESP_LOGI(TAG, "Scan cache updated: %d APs, timestamp: %lld ms",
+    ESP_LOGI(TAG, "Scan cache updated: %d APs, timestamp: %" PRId64 " ms",
         (int)scan_cache_.size(), last_scan_time_ms_);
 }
 
@@ -467,11 +468,14 @@ void WifiStation::StartConnect() {
     }
 
     // 🔴 IDF 5.5 兼容（IDFGH-16870）：esp_wifi_set_config 在 "sta is connecting"
-    // 状态会返回 ESP_OK 但配置不生效（5.4 容忍，5.5 静默失效）。SmartConnect 重试
-    // 路径中前一次连接尝试可能未结束，必须先显式 disconnect 并等驱动状态同步。
-    esp_wifi_disconnect();
+    // 状态会返回 ESP_OK 但配置不生效（5.4 容忍，5.5 静默失效）。
+    // 等 STA_DISCONNECTED 事件而非裸 vTaskDelay，避免 IDF 5.5 抖动期 200ms 不够。
     xEventGroupClearBits(event_group_, WIFI_EVENT_CONNECTED | WIFI_EVENT_DISCONNECTED | WIFI_EVENT_GOT_IP);
-    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_err_t dret = esp_wifi_disconnect();
+    if (dret == ESP_OK) {
+        xEventGroupWaitBits(event_group_, WIFI_EVENT_DISCONNECTED, pdTRUE, pdFALSE, pdMS_TO_TICKS(1500));
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     wifi_config_t wifi_config;
     bzero(&wifi_config, sizeof(wifi_config));
@@ -573,6 +577,16 @@ void WifiStation::WifiEventHandler(void* arg, esp_event_base_t event_base, int32
             return;
         }
 
+        // 仅扫描模式（配网期）：禁用自动重连退避，避免与用户提交的下一次
+        // TryConnect 抢 STA（IDF 5.5 严格化后会触发 ESP_ERR_WIFI_STATE）
+        if (this_->scan_only_mode_) {
+            ESP_LOGD(TAG, "scan_only_mode: skip auto-reconnect (reason=%d)", event->reason);
+            if (this_->on_disconnected_) {
+                this_->on_disconnected_(event->reason);
+            }
+            return;
+        }
+
         // 正常联网模式：指数退避持续重连（1s→2s→...→60s 封顶，无限重试）
         {
             // 创建重连定时器（首次）
@@ -592,7 +606,7 @@ void WifiStation::WifiEventHandler(void* arg, esp_event_base_t event_base, int32
                       ? this_->reconnect_count_ : kReconnectBackoffCount - 1;
             uint64_t delay = kReconnectBackoffUs[idx];
             this_->reconnect_count_++;
-            ESP_LOGI(TAG, "Reconnecting %s in %llu ms (attempt %d)",
+            ESP_LOGI(TAG, "Reconnecting %s in %" PRIu64 " ms (attempt %d)",
                      this_->ssid_.c_str(), delay / 1000, this_->reconnect_count_);
             esp_timer_start_once(this_->reconnect_timer_, delay);
 
@@ -890,18 +904,27 @@ WifiConnectResult WifiStation::TryConnect(const std::string& ssid, const std::st
     try_connect_mode_ = true;
     last_disconnect_reason_ = 0;
 
+    // 🔴 关键：清理可能残留的自动重连退避 timer（上一次 TryConnect 失败后
+    // 若 scan_only_mode_ 守卫失效，退避 timer 会污染本次 STA 状态）
+    if (reconnect_timer_) {
+        esp_timer_stop(reconnect_timer_);
+    }
+    reconnect_count_ = 0;
+
     // 停止扫描
     esp_wifi_scan_stop();
 
     // 🔴 IDF 5.5 兼容（IDFGH-16870）：先显式 disconnect 让驱动退出 "sta is connecting" 态，
     // 否则下面 esp_wifi_set_config 会返回 ESP_OK 但配置不生效（验证器永远 timeout 失败）。
-    esp_wifi_disconnect();
-
-    // 清除之前的连接状态
+    // 清除事件位 → disconnect → 等 STA_DISCONNECTED 事件（最多 1500ms，已连接时通常 100-300ms）
     xEventGroupClearBits(event_group_, WIFI_EVENT_CONNECTED | WIFI_EVENT_DISCONNECTED | WIFI_EVENT_GOT_IP);
-
-    // 等驱动状态同步（实测 IDF 5.5 至少 100ms，给 200ms 预留）
-    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_err_t dret = esp_wifi_disconnect();
+    if (dret == ESP_OK) {
+        // 已连接/正在连接 → 等事件；未连接 → 1500ms 内不会有事件，超时即视为 idle
+        xEventGroupWaitBits(event_group_, WIFI_EVENT_DISCONNECTED, pdTRUE, pdFALSE, pdMS_TO_TICKS(1500));
+    }
+    // 短延时让 wifi 驱动状态机稳定（实测 50ms 足够）
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     // 配置 WiFi 连接
     wifi_config_t wifi_config = {};

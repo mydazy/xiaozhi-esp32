@@ -74,7 +74,6 @@ private:
     httpd_handle_t server_ = NULL;
     std::string ssid_prefix_;
     std::string language_;
-    esp_timer_handle_t scan_timer_ = nullptr;
     bool started_ = false;
 
     // 凭证验证器（业务层提供）
