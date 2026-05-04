@@ -34,12 +34,10 @@ public:
 
     virtual void SetOutputVolume(int volume) override;
     virtual void SetInputGain(float gain) override;
-    virtual void SetRefGain(float gain) override;
     virtual void EnableInput(bool enable) override;
     virtual void EnableOutput(bool enable) override;
 
-    // MIC 灵敏度校准：vol=80 + input=12 → 播 500ms 1kHz → 算 RMS → 阈值 3000 区分 -26/-36/-42
-    // 触发方式：① application.cc Start 中首次开机 NVS 未标记时 ② RemoteCmd "mic_calibrate" 强制触发
+    // MIC 灵敏度校准：vol=80 + input=15 → 播 500ms 1kHz → 算 RMS → 阈值 3000
     void CalibrateMicOnce();
 };
 

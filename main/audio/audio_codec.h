@@ -21,8 +21,7 @@ public:
     
     virtual void SetOutputVolume(int volume);
     virtual void SetInputGain(float gain);
-    virtual void SetRefGain(float gain);
-    virtual void SetAecGain(float db);    // AEC 后软件增益（dB），AudioService::OnOutput 读取生效
+    virtual void SetAecGain(float db);
     virtual void EnableInput(bool enable);
     virtual void EnableOutput(bool enable);
 
@@ -38,7 +37,6 @@ public:
     inline int output_channels() const { return output_channels_; }
     inline int output_volume() const { return output_volume_; }
     inline float input_gain() const { return input_gain_; }
-    inline float ref_gain() const { return ref_gain_; }
     inline float aec_gain() const { return aec_gain_db_; }
     inline float aec_gain_linear() const { return aec_gain_linear_; }
     inline bool input_enabled() const { return input_enabled_; }
@@ -58,7 +56,6 @@ protected:
     int output_channels_ = 1;
     int output_volume_ = 80;
     float input_gain_ = 15.0;
-    float ref_gain_ = 9.0;   // REF 默认室外 9 dB（增强 AEC 参考信号），室内模式降到 6
     float aec_gain_db_     = 6.0f;   // AEC 后软件增益缺省 +6 dB（≈2×）
     float aec_gain_linear_ = 2.0f;   // 预算 powf 结果，避免每帧浮点
 

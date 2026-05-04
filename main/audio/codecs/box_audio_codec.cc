@@ -17,13 +17,8 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     input_channels_ = input_reference_ ? 2 : 1; // 输入通道数
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
-    // ───── 麦克风/参考通道增益（NVS 持久化，可通过 codec.SetInputGain/SetRefGain 在线调）─────
-    // ES7210 物理档位 0/3/6/9/12/15/18/21/24/27/30/34.5/36/37.5 dB（命中 3dB 倍数无量化损失）
-    //   -26 dBV → 15 dB · -36 dBV → 24 dB · -42 dBV → 30 dB
     Settings settings("audio", false);  // 只读
     input_gain_ = settings.GetFloat("input_gain", 15.0f);
-    ref_gain_   = settings.GetFloat("ref_gain",   9.0f);
-    ESP_LOGI(TAG, "====增益配置: MIC=%.1fdB REF=%.1fdB", input_gain_, ref_gain_);
 
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
@@ -83,7 +78,7 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     input_dev_ = esp_codec_dev_new(&dev_cfg);
     assert(input_dev_ != NULL);
 
-    ESP_LOGI(TAG, "BoxAudioDevice initialized");
+    ESP_LOGI(TAG, "BoxAudioDevice initialized MIC=%.1fdB", input_gain_);
 }
 
 BoxAudioCodec::~BoxAudioCodec() {
@@ -206,11 +201,6 @@ void BoxAudioCodec::SetInputGain(float gain) {
         ESP_LOGI(TAG, "输入增益已实时更新: %.1fdB", input_gain_);
     }
     AudioCodec::SetInputGain(gain);
-}
-
-void BoxAudioCodec::SetRefGain(float gain) {
-
-    ref_gain_ = gain;
 }
 
 void BoxAudioCodec::EnableInput(bool enable) {
