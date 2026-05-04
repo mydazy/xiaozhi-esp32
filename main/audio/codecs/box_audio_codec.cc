@@ -275,73 +275,63 @@ int BoxAudioCodec::Write(const int16_t* data, int samples) {
 }
 
 // MIC 灵敏度识别（出厂烧录后首次开机一次性）
-// 固定基准: vol=80, input=15dB, 1kHz amp=24000 播 500ms, 跳 150ms 录 200ms 算 RMS
+//   基准: vol=80, input=15dB, 1kHz amp=24000 播 500ms, 跳 150ms 录 200ms
+//   公式: input = 15 + 20*log10(3500/RMS), 量化 3dB（>31.5 跳 36 避 33 驱动 bug）
+//         mic_type = 36 + 20*log10(1758/RMS), 量化 2dB
 void BoxAudioCodec::CalibrateMicOnce() {
-    ESP_LOGW(TAG, "MIC校准开始: vol=80 input=15dB tone=1kHz/500ms (公式: input=15+20*log10(3500/RMS), 量化 3dB)");
+    ESP_LOGW(TAG, "MIC校准开始 (vol=80 input=15dB tone=1kHz/500ms)");
 
     if (!input_enabled_)  EnableInput(true);
     if (!output_enabled_) EnableOutput(true);
-
-    // 临时设 vol=80 + input=15（基准条件）
     {
         std::lock_guard<std::mutex> lk(data_if_mutex_);
-        esp_codec_dev_set_out_vol(output_dev_, 76);   // vol=80 * 0.95
+        esp_codec_dev_set_out_vol(output_dev_, 76);
         esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), 15.0f);
     }
 
-    // 生成 1kHz tone（两轮共用）
     std::vector<int16_t> tone(8000);
     for (size_t i = 0; i < 8000; i++)
         tone[i] = (int16_t)(24000 * std::sin(2.0 * M_PI * 1000 * i / 16000));
     struct Ctx { BoxAudioCodec* self; std::vector<int16_t>* tone; } ctx{this, &tone};
 
-    auto play_and_measure_rms = [&]() -> int32_t {
+    auto measure = [&]() -> int32_t {
         xTaskCreate([](void* a) {
             auto* c = (Ctx*)a;
             c->self->Write(c->tone->data(), c->tone->size());
             vTaskDelete(NULL);
         }, "calib", 4096, &ctx, 5, NULL);
-
         vTaskDelay(pdMS_TO_TICKS(150));
         std::vector<int16_t> rec(3200 * input_channels_);
         Read(rec.data(), rec.size());
-
         int64_t sum = 0;
         for (size_t i = 0; i < rec.size(); i += input_channels_)
             sum += (int64_t)rec[i] * rec[i];
-        int32_t result = (int32_t)std::sqrt((double)sum / (rec.size() / input_channels_));
-        vTaskDelay(pdMS_TO_TICKS(400));   // 等播放 task 结束
-        return result;
+        vTaskDelay(pdMS_TO_TICKS(400));
+        return (int32_t)std::sqrt((double)sum / (rec.size() / input_channels_));
     };
 
-    // ─── 第一轮：基准 input=15 测 RMS，公式反推 ─────────────────
-    //   input_gain : 0~30dB 用 3dB 步进，>30 跳 36（跳过 33 驱动 bug），覆盖极低灵敏 mic
-    //   mic_type   : 2dB 量化（覆盖市场档位 -22 ~ -50 dBV）
-    int32_t rms = std::max(play_and_measure_rms(), (int32_t)1);
-
-    float input_raw = 15.0f + 20.0f * std::log10(3500.0f / rms);
-    float input_gain = (input_raw <= 31.5f) ? (std::round(input_raw / 3.0f) * 3.0f) : 36.0f;
-    input_gain = std::max(0.0f, std::min(36.0f, input_gain));
-
-    int mic_type = (int)(std::round((36.0f + 20.0f * std::log10(1758.0f / rms)) / 2.0f) * 2);
-    mic_type = std::max(22, std::min(50, mic_type));
-
+    // 第一轮：测基准 RMS，公式反推 input + mic_type + aec
+    int32_t rms = std::max(measure(), (int32_t)1);
+    float in_raw = 15.0f + 20.0f * std::log10(3500.0f / rms);
+    float input_gain = std::max(0.0f, std::min(36.0f,
+        (in_raw <= 31.5f) ? std::round(in_raw / 3.0f) * 3.0f : 36.0f));
+    int mic_type = std::max(22, std::min(50,
+        (int)std::round((36.0f + 20.0f * std::log10(1758.0f / rms)) / 2.0f) * 2));
+    // aec 三段式: 高灵敏(≤30)减小避爆顶 / 低灵敏(≥42)加大补 ASR / 中等基线
+    float aec_gain = (mic_type <= 30) ? 3.0f : (mic_type >= 42) ? 9.0f : 6.0f;
     int32_t rms_expected = (int32_t)(rms * std::pow(10.0, (input_gain - 15.0) / 20.0));
-    bool in_target = (rms_expected >= 3000 && rms_expected <= 4000);
-    ESP_LOGW(TAG, "第一轮: RMS=%d → input=%.0fdB mic_type=-%ddBV 预期=%d %s",
-             rms, input_gain, mic_type, rms_expected,
-             in_target ? "✅ [3000-4000]" : "⚠ 区间外");
+    ESP_LOGW(TAG, "第一轮 RMS=%d → input=%.0fdB mic=-%ddBV aec=%.0fdB 预期=%d",
+             rms, input_gain, mic_type, aec_gain, rms_expected);
 
-    // 应用判定 + 写 NVS
     SetInputGain(input_gain);
-    // SetRefGain(...);   // ⚠ 测试模式: REF 保持开机初值
-    SetAecGain(6.0f);
+    // SetRefGain(...);  // 测试模式: REF 保持开机初值
+    SetAecGain(aec_gain);
     Settings("audio", true).SetInt("mic_type", mic_type);
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // ─── 第二轮：用判定后 input 再测，验证等效响度 ─────────────────
-    int32_t rms_after = play_and_measure_rms();
+    // 第二轮：用判定后 input 验证等效响度
+    int32_t rms_after = measure();
     int diff = (int)(100 * std::abs((double)(rms_after - rms_expected) / rms_expected));
-    ESP_LOGW(TAG, "第二轮: RMS=%d (预期 %d, 偏差 %d%%) %s",
-             rms_after, rms_expected, diff, (diff < 20) ? "✅" : "⚠");
+    ESP_LOGW(TAG, "第二轮 RMS=%d (预期 %d 偏差 %d%%) %s",
+             rms_after, rms_expected, diff, diff < 20 ? "✅" : "⚠");
 }
