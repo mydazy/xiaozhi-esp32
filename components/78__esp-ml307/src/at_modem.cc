@@ -135,7 +135,10 @@ std::string AtModem::GetImei() {
 
 std::string AtModem::GetIccid() {
     if (!at_uart_->SendCommand("AT+ICCID")) {
-        ESP_LOGE(TAG, "Failed to send AT+ICCID command");
+        vTaskDelay(pdMS_TO_TICKS(200));
+        if (!at_uart_->SendCommand("AT+ICCID")) {
+            ESP_LOGE(TAG, "Failed to send AT+ICCID command");
+        }
     }
     return iccid_;
 }
