@@ -29,9 +29,9 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 
-// 同 lcd_display.cc / oled_display.cc 风格：让 BUILTIN_ICON_FONT 宏展开的符号在本文件可见
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 #include <cbin_font.h>
+#include "text_font.h"
 
 #define TAG "UiDisplay"
 
@@ -50,7 +50,7 @@ UiDisplay::UiDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t 
 }
 
 UiDisplay::~UiDisplay() {
-    if (clock_tick_) { lv_timer_del(clock_tick_); clock_tick_ = nullptr; }
+    // clock_tick_ 已移除：时间刷新沿用 1Hz CLOCK_TICK → UpdateStatusBar 链路
 }
 
 // ============================================================
@@ -58,6 +58,9 @@ UiDisplay::~UiDisplay() {
 // ============================================================
 
 void UiDisplay::SetupUI() {
+    // 0. RAM proxy 初始化（必须在任何 lv_obj_set_style_text_font(&g_text_font, ...) 调用前）
+    InitTextFontProxy();
+
     SpiLcdDisplay::SetupUI();
     DisplayLockGuard lock(this);
 
@@ -72,8 +75,56 @@ void UiDisplay::SetupUI() {
     }
     if (emoji_box_) lv_obj_set_style_opa(emoji_box_, LV_OPA_TRANSP, 0);
 
-    // 2. 开机动画
+    // 2. 启用 status_label_ / notification_label_ 的 recolor 富文本
+    //    业务可在文本中嵌入颜色：display->SetStatus("#FF3030 ●# 录音中")
+    //    ⚠️ 启用后业务文本不能裸出现 '#'，需要时用 '##' 转义。
+    if (status_label_)       lv_label_set_recolor(status_label_, true);
+    if (notification_label_) lv_label_set_recolor(notification_label_, true);
+
+    // 3. 开机动画
     StartBootAnimation();
+
+    // 4. 文本字体补字 fallback：BUILTIN_TEXT_FONT 仅链入 ~600 常字，
+    //    通过 cbin 加载 GB 2312 全字（7000+），缺字时由 LVGL 自动 fallback。
+    LoadFallbackTextFont();
+}
+
+// BUILTIN_TEXT_FONT 直接位于 Flash rodata（不可写），无法写它的 fallback 字段。
+// 我们在 RAM 中维护一个按值复制的 proxy，所有 UI 代码以 g_text_font 替代 BUILTIN_TEXT_FONT
+// 引用，proxy 的 fallback 字段在 cbin 字体加载完成后才被写入。
+// 详细说明见 main/display/text_font.h。
+lv_font_t g_text_font;        // RAM-resident proxy，extern 于 text_font.h
+static bool s_text_font_proxy_initialized = false;
+
+void InitTextFontProxy() {
+    if (s_text_font_proxy_initialized) return;
+    g_text_font = BUILTIN_TEXT_FONT;   // 按值复制 lv_font_t（callbacks/cmaps 仍指向 Flash rodata，OK）
+    s_text_font_proxy_initialized = true;
+}
+
+// 同名加载约定：cbin 文件名 = BUILTIN_TEXT_FONT 名 + ".bin"。
+// CMakeLists 改主字体名时，build_default_assets.py 和此处自动联动，无需多处同步。
+#define _STR_HELPER(x) #x
+#define _STR(x) _STR_HELPER(x)
+static constexpr const char* kFallbackFontAsset = _STR(BUILTIN_TEXT_FONT) ".bin";
+
+void UiDisplay::LoadFallbackTextFont() {
+    if (fallback_text_font_) return;
+    InitTextFontProxy();             // 防御：保证 proxy 已就绪
+
+    void* ptr = nullptr; size_t size = 0;
+    if (!Assets::GetInstance().GetAssetData(kFallbackFontAsset, ptr, size) || !ptr) {
+        ESP_LOGW(TAG, "Fallback cbin font asset not found: %s — out-of-glyph chars will render as boxes",
+                 kFallbackFontAsset);
+        return;
+    }
+    fallback_text_font_ = cbin_font_create(static_cast<uint8_t*>(ptr));
+    if (!fallback_text_font_) {
+        ESP_LOGE(TAG, "cbin_font_create failed for %s", kFallbackFontAsset);
+        return;
+    }
+    ESP_LOGI(TAG, "Fallback text font loaded: %s (%u bytes)", kFallbackFontAsset, (unsigned)size);
+    g_text_font.fallback = fallback_text_font_;       // 写 RAM proxy（rodata 主字体不可写）
 }
 
 // ============================================================
@@ -98,6 +149,14 @@ void UiDisplay::UpdateStatusBar(bool update_all) {
 // 时钟主屏（内联实现）
 // ============================================================
 
+namespace {
+// 三段文字以屏幕中心为基准做 y 偏移；x 留 0 = 水平居中。
+constexpr int16_t kClockTimeOffsetY = -36;   // 大字 HH:MM 距中心 -36px（偏上）
+constexpr int16_t kClockDateOffsetY =  40;   // 日期距中心 +40px
+constexpr int16_t kClockWeekOffsetY =  76;   // 星期距中心 +76px
+constexpr int16_t kClockOffsetX     =   0;   // 三段统一水平居中
+}  // namespace
+
 void UiDisplay::CreateClockPage() {
     if (clock_container_) return;
     auto* screen = lv_screen_active();
@@ -116,29 +175,26 @@ void UiDisplay::CreateClockPage() {
     clock_time_label_ = lv_label_create(clock_container_);
     lv_obj_set_style_text_color(clock_time_label_, lv_color_hex(ScreenConfig::Colors::TEXT_PRIMARY), 0);
     lv_label_set_text(clock_time_label_, "--:--");
-    lv_obj_align(clock_time_label_, LV_ALIGN_CENTER, 0, -36);
+    lv_obj_align(clock_time_label_, LV_ALIGN_CENTER, kClockOffsetX, kClockTimeOffsetY);
 
     LoadClockFonts();
-    if (!clock_big_font_) lv_obj_set_style_text_font(clock_time_label_, &BUILTIN_TEXT_FONT, 0);
+    if (!clock_big_font_) lv_obj_set_style_text_font(clock_time_label_, &g_text_font, 0);
 
-    const lv_font_t* text_font = clock_text_font_ ? clock_text_font_ : &BUILTIN_TEXT_FONT;
+    const lv_font_t* text_font = clock_text_font_ ? clock_text_font_ : &g_text_font;
 
     clock_date_label_ = lv_label_create(clock_container_);
     lv_obj_set_style_text_font(clock_date_label_, text_font, 0);
     lv_obj_set_style_text_color(clock_date_label_, lv_color_hex(ScreenConfig::Colors::TEXT_SECONDARY), 0);
     lv_label_set_text(clock_date_label_, "----年--月--日");
-    lv_obj_align(clock_date_label_, LV_ALIGN_CENTER, 0, 40);
+    lv_obj_align(clock_date_label_, LV_ALIGN_CENTER, kClockOffsetX, kClockDateOffsetY);
 
     clock_week_label_ = lv_label_create(clock_container_);
     lv_obj_set_style_text_font(clock_week_label_, text_font, 0);
     lv_obj_set_style_text_color(clock_week_label_, lv_color_hex(ScreenConfig::Colors::TEXT_DISABLED), 0);
     lv_label_set_text(clock_week_label_, "星期--");
-    lv_obj_align(clock_week_label_, LV_ALIGN_CENTER, 0, 76);
+    lv_obj_align(clock_week_label_, LV_ALIGN_CENTER, kClockOffsetX, kClockWeekOffsetY);
 
     UpdateClockTime();
-
-    // 1s 定时器刷新时间（UpdateStatusBar 里已按秒触发，ClockTick 冗余可删；保留 1s tick 避免 status_bar 卡住时时钟不动）
-    clock_tick_ = lv_timer_create(ClockTickCb, 1000, this);
 }
 
 void UiDisplay::LoadClockFonts() {
@@ -147,7 +203,7 @@ void UiDisplay::LoadClockFonts() {
         void* ptr = nullptr; size_t size = 0;
         if (!Assets::GetInstance().GetAssetData(name, ptr, size) || !ptr) return;
         dst = cbin_font_create(static_cast<uint8_t*>(ptr));
-        if (dst) const_cast<lv_font_t*>(dst)->fallback = &BUILTIN_TEXT_FONT;
+        if (dst) const_cast<lv_font_t*>(dst)->fallback = &g_text_font;
     };
     load("font_maru_88_4.bin", clock_big_font_);
     load("font_maru_30_4.bin", clock_text_font_);
@@ -180,12 +236,6 @@ void UiDisplay::UpdateClockTime() {
     static const char* days[] = {"星期日","星期一","星期二","星期三","星期四","星期五","星期六"};
     lv_label_set_text(clock_week_label_,
         (tm_info.tm_wday >= 0 && tm_info.tm_wday < 7) ? days[tm_info.tm_wday] : "");
-}
-
-void UiDisplay::ClockTickCb(lv_timer_t* t) {
-    auto* self = static_cast<UiDisplay*>(lv_timer_get_user_data(t));
-    if (!self->clock_big_font_ || !self->clock_text_font_) self->LoadClockFonts();
-    self->UpdateClockTime();
 }
 
 // ============================================================
@@ -246,7 +296,7 @@ void UiDisplay::SwitchToChatMode() {
     // 被 move_foreground(container_) 盖住 —— SetChatMessage 即使 remove HIDDEN 也看不见。
     if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
 
-    // chat 模式：top_bar_ HIDDEN（信号/电池不打扰 emoji 满屏）
+    // chat 模式：top_bar_ HIDDEN（信号/电量图标让位 emoji 满屏沉浸感 · 产品决策）
     //           status_bar_ 显示（含 status_label_ 对话状态文字 + ShowNotification 通知通道）
     if (top_bar_) lv_obj_add_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
     if (status_bar_) {
@@ -402,7 +452,7 @@ void UiDisplay::ShowQrCode(const char* qr_content,
             memcpy(buf, p, b);
             lv_obj_t* ch = lv_label_create(bar);
             lv_label_set_text(ch, buf);
-            lv_obj_set_style_text_font(ch, &BUILTIN_TEXT_FONT, 0);
+            lv_obj_set_style_text_font(ch, &g_text_font, 0);
             lv_obj_set_style_text_color(ch, tc, 0);
             lv_obj_align(ch, LV_ALIGN_TOP_MID, 0, sy + idx * lh);
             p += b;
@@ -417,7 +467,7 @@ void UiDisplay::ShowQrCode(const char* qr_content,
         if (!text || !text[0]) return nullptr;
         lv_obj_t* lbl = lv_label_create(qr_overlay_);
         lv_label_set_text(lbl, text);
-        lv_obj_set_style_text_font(lbl, &BUILTIN_TEXT_FONT, 0);
+        lv_obj_set_style_text_font(lbl, &g_text_font, 0);
         lv_obj_set_style_text_color(lbl, color, 0);
         lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(lbl, kCenterW);
@@ -607,13 +657,13 @@ void UiDisplay::CreatePlayerPage() {
     constexpr int TIME_Y = 192;
     player_time_cur_ = lv_label_create(player_container_);
     lv_label_set_text(player_time_cur_, "0:00");
-    lv_obj_set_style_text_font(player_time_cur_, &BUILTIN_TEXT_FONT, 0);
+    lv_obj_set_style_text_font(player_time_cur_, &g_text_font, 0);
     lv_obj_set_style_text_color(player_time_cur_, lv_color_hex(Colors::TEXT_SECONDARY), 0);
     lv_obj_set_pos(player_time_cur_, 28, TIME_Y);
 
     player_time_total_ = lv_label_create(player_container_);
     lv_label_set_text(player_time_total_, "0:00");
-    lv_obj_set_style_text_font(player_time_total_, &BUILTIN_TEXT_FONT, 0);
+    lv_obj_set_style_text_font(player_time_total_, &g_text_font, 0);
     lv_obj_set_style_text_color(player_time_total_, lv_color_hex(Colors::TEXT_SECONDARY), 0);
     lv_obj_align(player_time_total_, LV_ALIGN_TOP_RIGHT, -28, TIME_Y);
 

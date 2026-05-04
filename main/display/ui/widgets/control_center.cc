@@ -10,7 +10,7 @@
 
 // 编译期 lv_image_dsc_t 全局符号声明（实体在 main/assets/icons/*.c · CMakeLists 已 GLOB 编入 SRCS）
 LV_IMG_DECLARE(ui_img_icon_signal_wifi_png);
-LV_IMG_DECLARE(ui_img_icon_signal_4g_4_png);
+LV_IMG_DECLARE(ui_img_icon_signal_4g_png);
 
 // 颜色定义（iOS 深色主题）
 #define CC_BG_COLOR         lv_color_hex(0x1C1C1E)  // 深灰背景
@@ -24,8 +24,8 @@ LV_IMG_DECLARE(ui_img_icon_signal_4g_4_png);
 #define CC_TEXT_COLOR       lv_color_hex(0xAAAAAA)  // 文字颜色
 
 // 字体声明
-// 字体: 直接用外部 BUILTIN_TEXT_FONT
-LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
+// 字体: 用 RAM proxy g_text_font（持有 BUILTIN_TEXT_FONT 副本 + 运行时 fallback 字段）
+#include "text_font.h"
 
 // 布局参数（3x2 宫格，284x240 全屏优化）
 #define GRID_COLS       3
@@ -103,7 +103,7 @@ void ControlCenter::CreateUI() {
         // 文字标签
         network_label_ = lv_label_create(container_);
         lv_label_set_text(network_label_, "切换");
-        lv_obj_set_style_text_font(network_label_, &BUILTIN_TEXT_FONT, 0);
+        lv_obj_set_style_text_font(network_label_, &g_text_font, 0);
         lv_obj_set_style_text_color(network_label_, CC_TEXT_COLOR, 0);
         lv_obj_align_to(network_label_, network_btn_, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
     }
@@ -173,7 +173,7 @@ void ControlCenter::CreateGridButton(int col, int row, int start_x, int start_y,
 
     if (use_text_font) {
         // 使用中文字体显示文字
-        lv_obj_set_style_text_font(*icon, &BUILTIN_TEXT_FONT, 0);
+        lv_obj_set_style_text_font(*icon, &g_text_font, 0);
         lv_obj_align(*icon, LV_ALIGN_CENTER, 0, 0);  // 居中
     } else if (large_icon) {
         // 放大图标（使用默认字体但缩放显示）
@@ -188,7 +188,7 @@ void ControlCenter::CreateGridButton(int col, int row, int start_x, int start_y,
     // 文字标签（在按钮下方）
     *label = lv_label_create(container_);
     lv_label_set_text(*label, text);
-    lv_obj_set_style_text_font(*label, &BUILTIN_TEXT_FONT, 0);
+    lv_obj_set_style_text_font(*label, &g_text_font, 0);
     lv_obj_set_style_text_color(*label, CC_TEXT_COLOR, 0);
     lv_obj_align_to(*label, *btn, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
 }
@@ -213,13 +213,13 @@ void ControlCenter::CreateSliderArea() {
 
     // 滑块标题（左上）
     slider_title_ = lv_label_create(slider_container_);
-    lv_obj_set_style_text_font(slider_title_, &BUILTIN_TEXT_FONT, 0);
+    lv_obj_set_style_text_font(slider_title_, &g_text_font, 0);
     lv_obj_set_style_text_color(slider_title_, lv_color_white(), 0);
     lv_obj_align(slider_title_, LV_ALIGN_TOP_LEFT, 0, 12);
 
     // 滑块数值标签（右上）
     slider_value_label_ = lv_label_create(slider_container_);
-    lv_obj_set_style_text_font(slider_value_label_, &BUILTIN_TEXT_FONT, 0);
+    lv_obj_set_style_text_font(slider_value_label_, &g_text_font, 0);
     lv_obj_set_style_text_color(slider_value_label_, lv_color_white(), 0);
     lv_obj_align(slider_value_label_, LV_ALIGN_TOP_RIGHT, 0, 12);
 
@@ -298,7 +298,7 @@ void ControlCenter::UpdateNetworkIcon() {
     // 用编译内置的满格 PNG（同主时钟状态栏那套），避免 assets 分区依赖
     const lv_image_dsc_t* icon_dsc = (network_mode_ == 0)
                                        ? &ui_img_icon_signal_wifi_png
-                                       : &ui_img_icon_signal_4g_4_png;
+                                       : &ui_img_icon_signal_4g_png;
     lv_image_set_src(network_icon_, icon_dsc);
 }
 

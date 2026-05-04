@@ -77,7 +77,6 @@ private:
     lv_obj_t* clock_time_label_ = nullptr;
     lv_obj_t* clock_date_label_ = nullptr;
     lv_obj_t* clock_week_label_ = nullptr;
-    lv_timer_t* clock_tick_     = nullptr;
     const lv_font_t* clock_big_font_  = nullptr;   // 88px cbin（assets 就绪后加载）
     const lv_font_t* clock_text_font_ = nullptr;   // 30px cbin
 
@@ -108,8 +107,9 @@ private:
     // 控制中心（懒加载）
     std::unique_ptr<ControlCenter> control_center_;
 
-    // BUILTIN_TEXT_FONT 的补字字体（覆盖 basic 缺失的 5000+ 常用汉字，如打/断/休/眠/亮/退/分 等）
-    const lv_font_t* puhui_common_font_ = nullptr;
+    // BUILTIN_TEXT_FONT 的补字字体：与主字体同名约定（font_maru_common_20_4.bin），
+    // 链入主字体仅 ~600 字常用文案，cbin 字体补 GB 2312 全字（7000+），LVGL 缺字自动 fallback。
+    const lv_font_t* fallback_text_font_ = nullptr;
 
     // 状态
     bool is_clock_mode_ = false;
@@ -118,7 +118,7 @@ private:
     void CreateClockPage();
     void UpdateClockTime();
     void LoadClockFonts();          // cbin 字体延迟加载（assets 就绪后）
-    static void ClockTickCb(lv_timer_t* t);
+    void LoadFallbackTextFont();    // BUILTIN_TEXT_FONT 缺字 fallback（GB 2312 全字 cbin）
 
     // 音乐播放器页内部方法
     void CreatePlayerPage();

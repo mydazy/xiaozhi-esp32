@@ -88,7 +88,7 @@ function(find_component_by_pattern PATTERN COMPONENT_VAR PATH_VAR)
 endfunction()
 
 # Set default BUILTIN_TEXT_FONT and BUILTIN_ICON_FONT
-set(BUILTIN_TEXT_FONT font_mydazy_text_20_4)
+set(BUILTIN_TEXT_FONT font_maru_common_20_4)
 set(BUILTIN_ICON_FONT font_awesome_20_4)
 
 set(EMOTE_RESOLUTION "284_240")
@@ -97,24 +97,25 @@ set(EMOTE_RESOLUTION "284_240")
 # Set default assets if the board uses partition table V2
 if(CONFIG_BOARD_TYPE_MYDAZY_P31)
     set(BOARD_TYPE "mydazy-p31")
-    set(BUILTIN_TEXT_FONT font_mydazy_text_20_4)
+    set(BUILTIN_TEXT_FONT font_maru_common_20_4)
     set(BUILTIN_ICON_FONT font_awesome_30_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
 elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_4G)
     set(BOARD_TYPE "mydazy-p30-4g")
-    set(BUILTIN_TEXT_FONT font_mydazy_text_20_4)
+    set(BUILTIN_TEXT_FONT font_maru_common_20_4)
     set(BUILTIN_ICON_FONT font_awesome_30_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
-    # UI 资源（状态栏 PNG 图标 + maru 88/30 大字号时钟字体）→ assets 分区
-    set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons")
+    set(DEFAULT_ASSETS_EXTRA_FILES "")
+    list(APPEND DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons")
+    list(APPEND DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/image")
 elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
     set(BOARD_TYPE "mydazy-p30-wifi")
-    set(BUILTIN_TEXT_FONT font_mydazy_text_20_4)
+    set(BUILTIN_TEXT_FONT font_maru_common_20_4)
     set(BUILTIN_ICON_FONT font_awesome_30_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_240)
-
-    # UI 资源（状态栏 PNG 图标 + maru 88/30 大字号时钟字体）→ assets 分区
-    set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons")
+    set(DEFAULT_ASSETS_EXTRA_FILES "")
+    list(APPEND DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons")
+    list(APPEND DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/image")
 endif()
 
 if(MANUFACTURER)
@@ -133,7 +134,7 @@ list(APPEND SOURCES ${BOARD_SOURCES})
 # 后续逐个 UI 功能重构时，把对应图标显式追加到此列表 + 在 .cc 加 LV_IMG_DECLARE。
 list(APPEND SOURCES
     "assets/icons/ui_img_icon_signal_wifi_png.c"     # 状态栏 WiFi 图标 (control_center.cc:91)
-    "assets/icons/ui_img_icon_signal_4g_4_png.c"     # 状态栏 4G 图标 (control_center.cc:297)
+    "assets/icons/ui_img_icon_signal_4g_png.c"       # 状态栏 4G 图标 (control_center.cc:297)
 )
 
 # Select audio processor according to Kconfig
@@ -238,14 +239,14 @@ file(GLOB LANG_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/locales/${LANG_DIR}/*.o
 # If not en-US, collect en-US audio files as fallback for missing files
 if(NOT LANG_DIR STREQUAL "en-US")
     file(GLOB EN_US_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/locales/en-US/*.ogg)
-    
+
     # Extract filenames (without path) from current language
     set(EXISTING_NAMES "")
     foreach(SOUND_FILE ${LANG_SOUNDS})
         get_filename_component(FILENAME ${SOUND_FILE} NAME)
         list(APPEND EXISTING_NAMES ${FILENAME})
     endforeach()
-    
+
     # Only add en-US audio files that are missing in current language
     foreach(EN_SOUND ${EN_US_SOUNDS})
         get_filename_component(FILENAME ${EN_SOUND} NAME)
@@ -272,8 +273,6 @@ if(CONFIG_IDF_TARGET_ESP32)
 endif()
 
 if(CONFIG_BOARD_TYPE_MYDAZY_P30_4G OR CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
-    # 远程 component manager 在 main/idf_component.yml 中以 mydazy/<name> 声明，
-    # IDF 在 build graph 中以 mydazy__<name> 注册，PRIV_REQUIRES 必须用注册名
     list(APPEND MAIN_PRIV_REQUIRES_EXTRA
         mydazy__esp_lcd_jd9853
         mydazy__esp_lcd_touch_axs5106l
@@ -380,7 +379,7 @@ list(APPEND FILES_TO_DOWNLOAD "panic_return.aaf" "wake.aaf")
 foreach(FILENAME IN LISTS FILES_TO_DOWNLOAD)
     set(REMOTE_FILE "${URL}/${FILENAME}")
     set(LOCAL_FILE "${EMOJI_DIR}/${FILENAME}")
-    
+
     # Check if local file exists
     if(EXISTS ${LOCAL_FILE})
         message(STATUS "File ${FILENAME} already exists, skipping download")
@@ -402,31 +401,31 @@ endif()
 function(build_default_assets_bin)
     # Set output path for generated assets.bin
     set(GENERATED_ASSETS_BIN "${CMAKE_BINARY_DIR}/generated_assets.bin")
-    
+
     # Prepare arguments for build script
     set(BUILD_ARGS
         "--sdkconfig" "${SDKCONFIG}"
         "--output" "${GENERATED_ASSETS_BIN}"
     )
-    
+
     # Add builtin text font if defined
     if(BUILTIN_TEXT_FONT)
         list(APPEND BUILD_ARGS "--builtin_text_font" "${BUILTIN_TEXT_FONT}")
     endif()
-    
+
     # Add default emoji collection if defined
     if(DEFAULT_EMOJI_COLLECTION)
         list(APPEND BUILD_ARGS "--emoji_collection" "${DEFAULT_EMOJI_COLLECTION}")
     endif()
-    
+
     # Add default assets extra files if defined
     if(DEFAULT_ASSETS_EXTRA_FILES)
         list(APPEND BUILD_ARGS "--extra_files" "${DEFAULT_ASSETS_EXTRA_FILES}")
     endif()
-    
+
     list(APPEND BUILD_ARGS "--esp_sr_model_path" "${ESP_SR_MODEL_PATH}")
     list(APPEND BUILD_ARGS "--xiaozhi_fonts_path" "${XIAOZHI_FONTS_PATH}")
-    
+
     # Create custom command to build assets
     add_custom_command(
         OUTPUT ${GENERATED_ASSETS_BIN}
@@ -437,15 +436,15 @@ function(build_default_assets_bin)
         COMMENT "Building default assets.bin based on configuration"
         VERBATIM
     )
-    
+
     # Create target for generated assets
     add_custom_target(generated_default_assets ALL
         DEPENDS ${GENERATED_ASSETS_BIN}
     )
-    
+
     # Set the generated file path in parent scope
     set(GENERATED_ASSETS_LOCAL_FILE ${GENERATED_ASSETS_BIN} PARENT_SCOPE)
-    
+
     message(STATUS "Default assets build configured: ${GENERATED_ASSETS_BIN}")
 endfunction()
 
@@ -458,18 +457,18 @@ function(get_assets_local_file assets_source assets_local_file_var)
         get_filename_component(ASSETS_FILENAME "${assets_source}" NAME)
         set(ASSETS_LOCAL_FILE "${CMAKE_BINARY_DIR}/${ASSETS_FILENAME}")
         set(ASSETS_TEMP_FILE "${CMAKE_BINARY_DIR}/${ASSETS_FILENAME}.tmp")
-        
+
         # Check if local file exists
         if(EXISTS ${ASSETS_LOCAL_FILE})
             message(STATUS "Assets file ${ASSETS_FILENAME} already exists, skipping download")
         else()
             message(STATUS "Downloading ${ASSETS_FILENAME}")
-            
+
             # Clean up any existing temp file
             if(EXISTS ${ASSETS_TEMP_FILE})
                 file(REMOVE ${ASSETS_TEMP_FILE})
             endif()
-            
+
             # Download to temporary file first
             file(DOWNLOAD ${assets_source} ${ASSETS_TEMP_FILE}
                  STATUS DOWNLOAD_STATUS)
@@ -481,7 +480,7 @@ function(get_assets_local_file assets_source assets_local_file_var)
                 endif()
                 message(FATAL_ERROR "Failed to download ${ASSETS_FILENAME} from ${assets_source}")
             endif()
-            
+
             # Move temp file to final location (atomic operation)
             file(RENAME ${ASSETS_TEMP_FILE} ${ASSETS_LOCAL_FILE})
             message(STATUS "Successfully downloaded ${ASSETS_FILENAME}")
@@ -493,15 +492,15 @@ function(get_assets_local_file assets_source assets_local_file_var)
         else()
             set(ASSETS_LOCAL_FILE "${CMAKE_CURRENT_SOURCE_DIR}/${assets_source}")
         endif()
-        
+
         # Check if local file exists
         if(NOT EXISTS ${ASSETS_LOCAL_FILE})
             message(FATAL_ERROR "Assets file not found: ${ASSETS_LOCAL_FILE}")
         endif()
-        
+
         message(STATUS "Using assets file: ${ASSETS_LOCAL_FILE}")
     endif()
-    
+
     set(${assets_local_file_var} ${ASSETS_LOCAL_FILE} PARENT_SCOPE)
 endfunction()
 
