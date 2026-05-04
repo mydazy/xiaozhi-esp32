@@ -12,6 +12,7 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "audio/codecs/box_audio_codec.h"
 #include "remote_cmd.h"
 #include "flow_engine.h"
 #include "device_state_event.h"
@@ -96,6 +97,16 @@ void Application::Initialize() {
     // Setup the audio service
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
+
+    // 首次开机：MIC 灵敏度校准（NVS mic_type=0 表示未校准 · 必须在 audio_service.Start 之前做，
+    // 否则会与 audio_input task 抢 input_dev_ 导致死锁）
+    if (Settings("audio", false).GetInt("mic_type", 0) == 0) {
+        if (auto* box = dynamic_cast<BoxAudioCodec*>(codec)) {
+            ESP_LOGW(TAG, "首次开机 MIC 校准开始（约 1 秒，会发出短促 1kHz 提示音）");
+            box->CalibrateMicOnce();
+        }
+    }
+
     audio_service_.Start();
 
     // MP3 流式播放器（远程 music_play 命令触发）
@@ -965,8 +976,7 @@ void Application::HandleStateChangedEvent() {
             if (lcd) lcd->SwitchToChatMode();    // 对话开始，表情/消息可见
             break;
         case kDeviceStateListening:
-            // 录音中显示麦克风图标（依赖 BUILTIN_TEXT_FONT.fallback → BUILTIN_ICON_FONT）
-            display->SetStatus(FONT_AWESOME_MICROPHONE);
+            display->SetStatus("#FF3030 ●#");
             display->SetEmotion("neutral");
 
             // Make sure the audio processor is running

@@ -1,6 +1,7 @@
 #include "audio_service.h"
 #include <esp_log.h>
 #include <cstring>
+#include <cmath>
 
 #define RATE_CVT_CFG(_src_rate, _dest_rate, _channel)        \
     (esp_ae_rate_cvt_cfg_t)                                  \
@@ -99,23 +100,28 @@ void AudioService::Initialize(AudioCodec* codec) {
 #endif
 
     audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
-        // ─── AEC 后软件增益 + 噪声门（增益值由 codec 统一管理，与 input_gain/ref_gain 同级）─
+        // ─── AEC 后软件增益 + 噪声门 + RMS 调试日志 ───
         const float g = codec_ ? codec_->aec_gain_linear() : 1.0f;
-        if (!data.empty() && g > 1.01f) {
-            // 噪声门：算帧均方能量，低于阈值（底噪段）跳过增益 → SNR 提升
-            int64_t energy_sum = 0;
-            for (int16_t s : data) energy_sum += (int64_t)s * s;
-            const int32_t energy_avg = (int32_t)(energy_sum / (int64_t)data.size());
+        int64_t energy_sum = 0;
+        for (int16_t s : data) energy_sum += (int64_t)s * s;
+        const int32_t energy_avg = data.empty() ? 0 : (int32_t)(energy_sum / (int64_t)data.size());
+        const int32_t rms = (int32_t)std::sqrt((double)energy_avg);
 
-            if (energy_avg >= kNoiseGateRmsSq) {
-                // 有声段：线性放大 + 饱和限幅（防 int16 溢出失真）
-                for (int16_t& s : data) {
-                    int32_t v = (int32_t)(s * g);
-                    s = v > 32767 ? 32767 : (v < -32768 ? -32768 : (int16_t)v);
-                }
+        if (g > 1.01f && energy_avg >= kNoiseGateRmsSq) {
+            // 有声段：线性放大 + 饱和限幅
+            for (int16_t& s : data) {
+                int32_t v = (int32_t)(s * g);
+                s = v > 32767 ? 32767 : (v < -32768 ? -32768 : (int16_t)v);
             }
-            // 静音段：保持原样不放大（不清零，避免 ASR/VAD 误判语义边界）
         }
+
+        // 调试日志：每 N 帧打印一次 AFE 输出 RMS (节流，避免 monitor 洪水)
+        // 只在有声段（RMS > 噪声门）打，便于分析"用户说话时上行电平"
+        static int log_cnt = 0;
+        if (rms * rms >= kNoiseGateRmsSq && (++log_cnt % 50 == 0)) {
+            ESP_LOGI(TAG, "AFE→OPUS RMS=%d (gain×%.1f)", rms, g);
+        }
+
         PushTaskToEncodeQueue(kAudioTaskTypeEncodeToSendQueue, std::move(data));
     });
 

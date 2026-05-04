@@ -182,28 +182,22 @@ void RemoteCmd::OnVolume(const cJSON* msg) {
 
 void RemoteCmd::OnGain(const cJSON* msg) {
     // 协议示例：
-    //   {"type":"gain","input":24}                  ← 仅调 MIC（向后兼容）
-    //   {"type":"gain","ref":9}                     ← 仅调 REF（AEC 参考通道）
-    //   {"type":"gain","aec":6}                     ← 仅调 AEC 后软件增益
-    //   {"type":"gain","input":24,"ref":9,"aec":6}  ← 一次调 3 路
+    //   {"type":"gain","input":24}            ← 仅调 MIC
+    //   {"type":"gain","aec":6}               ← 仅调 AEC 后软件增益
+    //   {"type":"gain","input":24,"aec":6}    ← 同时调 input + aec
     auto input = cJSON_GetObjectItem(msg, "input");
-    auto ref   = cJSON_GetObjectItem(msg, "ref");
     auto aec   = cJSON_GetObjectItem(msg, "aec");
     bool has_input = cJSON_IsNumber(input);
-    bool has_ref   = cJSON_IsNumber(ref);
     bool has_aec   = cJSON_IsNumber(aec);
     float in_val  = has_input ? (float)input->valuedouble : 0.0f;
-    float ref_val = has_ref   ? (float)ref->valuedouble   : 0.0f;
     float aec_val = has_aec   ? (float)aec->valuedouble   : 0.0f;
-    ESP_LOGI(TAG, "gain: input=%s%.1f ref=%s%.1f aec=%s%.1f",
+    ESP_LOGI(TAG, "gain: input=%s%.1f aec=%s%.1f",
              has_input ? "" : "(skip)", in_val,
-             has_ref   ? "" : "(skip)", ref_val,
              has_aec   ? "" : "(skip)", aec_val);
-    app_->Schedule([this, in_val, ref_val, aec_val, has_input, has_ref, has_aec]() {
+    app_->Schedule([this, in_val, aec_val, has_input, has_aec]() {
         auto codec = Board::GetInstance().GetAudioCodec();
         if (!codec) return;
         if (has_input) codec->SetInputGain(in_val);
-        if (has_ref)   codec->SetRefGain(ref_val);
         if (has_aec)   codec->SetAecGain(aec_val);
     });
 }
