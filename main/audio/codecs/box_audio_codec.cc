@@ -19,22 +19,11 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     output_sample_rate_ = output_sample_rate;
     // ───── 麦克风/参考通道增益（NVS 持久化，可通过 codec.SetInputGain/SetRefGain 在线调）─────
     // ES7210 物理档位 0/3/6/9/12/15/18/21/24/27/30/34.5/36/37.5 dB（命中 3dB 倍数无量化损失）
-    // 默认仅在 NVS 未写入时生效（首次开机/工厂复位）。校准会立即覆盖：
     //   -26 dBV → 15 dB · -36 dBV → 24 dB · -42 dBV → 30 dB
-    constexpr float kDefaultMicGain = 15.0f;   // 默认 -26 dBV mic 配置（量产主物料）
-    constexpr float kDefaultRefGain =  6.0f;   // REF 喇叭回采（与 mic 物料无关，固定 6）
-
     Settings settings("audio", false);  // 只读
-    // 用 INT32_MIN sentinel 探测 NVS 是否曾经写入过（区分"默认值" vs "NVS 持久化覆盖值"）
-    const bool mic_from_nvs = (settings.GetInt("input_gain", INT32_MIN) != INT32_MIN);
-    const bool ref_from_nvs = (settings.GetInt("ref_gain",   INT32_MIN) != INT32_MIN);
-    input_gain_ = settings.GetFloat("input_gain", kDefaultMicGain);
-    ref_gain_   = settings.GetFloat("ref_gain",   kDefaultRefGain);
-
-    ESP_LOGI(TAG, "增益配置: MIC=%.1fdB(%s) REF=%.1fdB(%s)  [缺省 %.0f/%.0f]",
-             input_gain_, mic_from_nvs ? "NVS" : "默认",
-             ref_gain_,   ref_from_nvs ? "NVS" : "默认",
-             kDefaultMicGain, kDefaultRefGain);
+    input_gain_ = settings.GetFloat("input_gain", 15.0f);
+    ref_gain_   = settings.GetFloat("ref_gain",   9.0f);
+    ESP_LOGI(TAG, "====增益配置: MIC=%.1fdB REF=%.1fdB", input_gain_, ref_gain_);
 
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
@@ -216,13 +205,12 @@ void BoxAudioCodec::SetInputGain(float gain) {
         ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
         ESP_LOGI(TAG, "输入增益已实时更新: %.1fdB", input_gain_);
     }
-
     AudioCodec::SetInputGain(gain);
 }
 
 void BoxAudioCodec::SetRefGain(float gain) {
-    ref_gain_ = gain;
 
+    ref_gain_ = gain;
     if (input_enabled_ && input_reference_) {
         ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1), ref_gain_));
         ESP_LOGI(TAG, "REF: %.1fdB", ref_gain_);
@@ -346,12 +334,14 @@ void BoxAudioCodec::CalibrateMicOnce() {
 
     float gain;
     const char* mic_type;
-    if      (rms >= 3000) { gain = 15.0f; mic_type = "-26dBV"; }
-    else if (rms >= 900)  { gain = 24.0f; mic_type = "-36dBV"; }
-    else                  { gain = 30.0f; mic_type = "-42dBV"; }
+    if      (rms >= 3000) { gain = 9.0f; mic_type = "-26dBV"; }
+    else if (rms >= 900)  { gain = 18.0f; mic_type = "-36dBV"; }
+    else                  { gain = 24.0f; mic_type = "-42dBV"; }
     ESP_LOGW(TAG, "MIC校准 RMS=%d → input=%.0fdB (%s)", rms, gain, mic_type);
     SetInputGain(gain);
-    Settings("audio", true).SetInt("mic_calib", 1);
+    Settings settings("audio", true);
+    settings.SetInt("mic_calib", 1);
+    settings.SetFloat("baseline_gain", gain);   // 室外基线（永久，模式切换的参考点）
 
     vTaskDelay(pdMS_TO_TICKS(400));
     if (was_off_in)  EnableInput(false);

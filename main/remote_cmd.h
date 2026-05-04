@@ -24,7 +24,7 @@ class Application;
  * │ tts           │ {"type":"tts", "text":"你好，我是小智"}                     │
  * │ ttai          │ {"type":"ttai", "text":"今天天气怎么样"}                   │
  * │ volume        │ {"type":"volume", "value":50}                              │
- * │ gain          │ {"type":"gain", "input":20, "ref":12}                      │
+ * │ gain          │ {"type":"gain", "input":15, "ref":6, "aec":6}                      │
  * │ download      │ {"type":"download", "files":[...], "emoji":"happy"}        │
  * │ audio_debug   │ {"type":"audio_debug", "server":"IP:8000", "mode":"raw"}   │
  * │ vad_config    │ {"type":"vad_config", "min_speech":128, "min_noise":500}   │
@@ -34,6 +34,7 @@ class Application;
  * │               │ {"type":"stt_url", "url":""}  清除STT回调                   │
  * │ music_play    │ {"type":"music_play","url":"https://xxx.mp3","title":"xxx"} │
  * │ music_stop    │ {"type":"music_stop"}                                       │
+ * │ mic_calibrate │ {"type":"mic_calibrate"}
  * └───────────────┴────────────────────────────────────────────────────────────┘
  *
  * 完整示例:
@@ -58,6 +59,7 @@ private:
     void OnTtai(const cJSON* msg);
     void OnVolume(const cJSON* msg);
     void OnGain(const cJSON* msg);
+    void OnMicCalibrate();
     void OnDownload(const cJSON* msg);
     void OnVadConfig(const cJSON* msg);
     void OnSleep(const cJSON* msg);

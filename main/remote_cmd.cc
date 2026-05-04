@@ -2,6 +2,7 @@
 #include "application.h"
 #include "flow_engine.h"
 #include "audio/music_player.h"
+#include "audio/codecs/box_audio_codec.h"
 #include "board.h"
 #include "display.h"
 #include "display/ui_display.h"
@@ -63,6 +64,7 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "ttai") == 0) OnTtai(msg);
     else if (strcmp(type, "volume") == 0) OnVolume(msg);
     else if (strcmp(type, "gain") == 0) OnGain(msg);
+    else if (strcmp(type, "mic_calibrate") == 0) OnMicCalibrate();
     else if (strcmp(type, "download") == 0) OnDownload(msg);
     else if (strcmp(type, "vad_config") == 0) OnVadConfig(msg);
     else if (strcmp(type, "flow") == 0) OnFlow(msg);
@@ -179,19 +181,41 @@ void RemoteCmd::OnVolume(const cJSON* msg) {
 }
 
 void RemoteCmd::OnGain(const cJSON* msg) {
+    // 协议示例：
+    //   {"type":"gain","input":24}                  ← 仅调 MIC（向后兼容）
+    //   {"type":"gain","ref":9}                     ← 仅调 REF（AEC 参考通道）
+    //   {"type":"gain","aec":6}                     ← 仅调 AEC 后软件增益
+    //   {"type":"gain","input":24,"ref":9,"aec":6}  ← 一次调 3 路
     auto input = cJSON_GetObjectItem(msg, "input");
+    auto ref   = cJSON_GetObjectItem(msg, "ref");
+    auto aec   = cJSON_GetObjectItem(msg, "aec");
     bool has_input = cJSON_IsNumber(input);
-    float in_val = has_input ? (float)input->valuedouble : 0;
-    app_->Schedule([this, in_val, has_input]() {
+    bool has_ref   = cJSON_IsNumber(ref);
+    bool has_aec   = cJSON_IsNumber(aec);
+    float in_val  = has_input ? (float)input->valuedouble : 0.0f;
+    float ref_val = has_ref   ? (float)ref->valuedouble   : 0.0f;
+    float aec_val = has_aec   ? (float)aec->valuedouble   : 0.0f;
+    ESP_LOGI(TAG, "gain: input=%s%.1f ref=%s%.1f aec=%s%.1f",
+             has_input ? "" : "(skip)", in_val,
+             has_ref   ? "" : "(skip)", ref_val,
+             has_aec   ? "" : "(skip)", aec_val);
+    app_->Schedule([this, in_val, ref_val, aec_val, has_input, has_ref, has_aec]() {
         auto codec = Board::GetInstance().GetAudioCodec();
         if (!codec) return;
-        std::string info;
-        char buf[32];
-        if (has_input) {
-            codec->SetInputGain(in_val);
-            snprintf(buf, sizeof(buf), "MIC: %.1fdB", in_val);
-            info += buf;
-        }
+        if (has_input) codec->SetInputGain(in_val);
+        if (has_ref)   codec->SetRefGain(ref_val);
+        if (has_aec)   codec->SetAecGain(aec_val);
+    });
+}
+
+// 远程触发 MIC 校准（调试 / 售后重校 / 强制覆盖）
+// 协议: {"type":"custom","payload":{"type":"mic_calibrate"}}
+// 直接调 CalibrateMicOnce，不停 audio_service（用户负责确保设备空闲）
+void RemoteCmd::OnMicCalibrate() {
+    ESP_LOGI(TAG, "mic_calibrate: 触发");
+    app_->Schedule([]() {
+        auto* box = dynamic_cast<BoxAudioCodec*>(Board::GetInstance().GetAudioCodec());
+        if (box) box->CalibrateMicOnce();
     });
 }
 

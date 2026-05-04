@@ -56,11 +56,11 @@ protected:
     int output_sample_rate_ = 0;
     int input_channels_ = 1;
     int output_channels_ = 1;
-    int output_volume_ = 80;
+    int output_volume_ = 80;   // 默认 vol=80 → 对话 ~88 dB-C / 音乐峰值 100 dB-C / 用户耳边对话 ~70 dB SPL @ 1m
     // 默认 = -26 dBV mic 配置（量产主物料）。校准后会按 mic 类型覆盖：
-    //   -26 dBV → input=15 (默认) · -36 dBV → 24 · -42 dBV → 30
+    //   -26 dBV → input=9 (默认) · -36 dBV → 18 · -42 dBV → 24
     float input_gain_ = 15.0;
-    float ref_gain_ = 6.0;
+    float ref_gain_ = 9.0;   // REF 默认室外 9 dB（增强 AEC 参考信号），室内模式降到 6
     float aec_gain_db_     = 6.0f;   // AEC 后软件增益缺省 +6 dB（≈2×）
     float aec_gain_linear_ = 2.0f;   // 预算 powf 结果，避免每帧浮点
 
