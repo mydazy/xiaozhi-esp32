@@ -624,7 +624,7 @@ void AtUart::HandleUrc(const std::string& command, const std::vector<AtArgumentV
 }
 
 bool AtUart::DetectBaudRate(int timeout_ms) {
-    int baud_rates[] = {115200, 921600, 460800, 230400, 57600, 38400, 19200, 9600};
+    int baud_rates[] = {2000000, 1500000, 921600};
     TickType_t start_time = xTaskGetTickCount();
     TickType_t timeout_ticks = (timeout_ms == -1) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
     
@@ -662,10 +662,14 @@ bool AtUart::SetBaudRate(int new_baud_rate, int timeout_ms) {
     if (new_baud_rate == baud_rate_) {
         return true;
     }
-    // Set new baud rate
+    // 尝试升档到目标速率。失败时保留 DetectBaudRate 已识别的当前波特率继续工作，
+    // 避免上层（AtModem::Detect）把"升档失败"解读为"modem 检测失败"而进入 30 次重试
+    // → 崩溃重启循环。典型场景：ML307 子型号实际不支持请求的高速档（如 ML307R-DL-MBRH0S01
+    // 不支持 AT+IPR=3000000 / 1500000 等），但 921600 / 检测到的速率本身可用。
     if (!SendCommand(std::string("AT+IPR=") + std::to_string(new_baud_rate))) {
-        ESP_LOGI(TAG, "Failed to set baud rate to %d", new_baud_rate);
-        return false;
+        ESP_LOGW(TAG, "Failed to set baud rate to %d, falling back to detected %d",
+                 new_baud_rate, baud_rate_);
+        return true;   // 保持当前已识别的速率，不让上层 retry
     }
     uart_set_baudrate(uart_num_, new_baud_rate);
     baud_rate_ = new_baud_rate;
