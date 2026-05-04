@@ -221,8 +221,7 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
         return []
     
     emoji_list = []
-    emoji_names = set()
-
+    
     # Check if this is otto-gif collection
     is_otto_gif = 'otto-emoji-gif-component' in emoji_collection_dir or emoji_collection_dir.endswith('otto-gif')
     
@@ -252,8 +251,7 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
                         "name": filename_without_ext,
                         "file": file
                     })
-                    emoji_names.add(filename_without_ext)
-
+                    
                     # Add aliases for otto-gif emojis
                     if is_otto_gif and filename_without_ext in otto_gif_aliases:
                         for alias in otto_gif_aliases[filename_without_ext]:
@@ -261,57 +259,63 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
                                 "name": alias,
                                 "file": file
                             })
-
-    # Append custom emojis from project main/assets/<collection_name>/
-    collection_name = os.path.basename(emoji_collection_dir)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-    custom_dir = os.path.join(project_root, "main", "assets", collection_name)
-    if os.path.isdir(custom_dir):
-        for file in sorted(os.listdir(custom_dir)):
-            if file.lower().endswith(('.png', '.gif')):
-                filename_without_ext = os.path.splitext(file)[0]
-                if filename_without_ext not in emoji_names:
-                    src_file = os.path.join(custom_dir, file)
-                    dst_file = os.path.join(assets_dir, file)
-                    if copy_file(src_file, dst_file):
-                        emoji_list.append({
-                            "name": filename_without_ext,
-                            "file": file
-                        })
-                        emoji_names.add(filename_without_ext)
-        print(f"  Custom emojis from {custom_dir}: {len(emoji_names) - len([e for e in emoji_list if e['name'] in emoji_names])} added")
-
+    
     return emoji_list
 
 
-def process_extra_files(extra_files_dir, assets_dir):
-    """Process default_assets_extra_files parameter"""
-    if not extra_files_dir:
+def process_extra_files(extra_files_arg, assets_dir):
+    """Process default_assets_extra_files parameter.
+
+    Accepts:
+      - None / empty                                  -> no-op
+      - single string (single dir, or ';'-joined)     -> normalised to list
+      - list[str] from argparse nargs='+'             -> may contain ';'-joined elements
+        (CMake forwards list(APPEND ...) as either form depending on version)
+
+    Each directory is walked and all non-hidden files copied flat into
+    assets_dir. Filename collisions across directories let the later directory
+    win, with a warning.
+    """
+    if not extra_files_arg:
         return []
-    
-    if not os.path.exists(extra_files_dir):
-        print(f"Warning: Extra files directory not found: {extra_files_dir}")
-        return []
-    
+
+    # Normalise to a flat list of dir paths (handles both space-separated args
+    # and CMake's `;`-joined list semantics).
+    if isinstance(extra_files_arg, str):
+        raw_items = [extra_files_arg]
+    else:
+        raw_items = list(extra_files_arg)
+    dirs = []
+    for item in raw_items:
+        for piece in str(item).split(';'):
+            piece = piece.strip()
+            if piece:
+                dirs.append(piece)
+
     extra_files_list = []
-    
-    # Copy each file from input directory to build/assets directory
-    for root, dirs, files in os.walk(extra_files_dir):
-        for file in files:
-            # Skip hidden files and directories
-            if file.startswith('.'):
-                continue
-                
-            # Copy file
-            src_file = os.path.join(root, file)
-            dst_file = os.path.join(assets_dir, file)
-            if copy_file(src_file, dst_file):
-                extra_files_list.append(file)
-    
-    if extra_files_list:
-        print(f"Processed {len(extra_files_list)} extra files from: {extra_files_dir}")
-    
+    seen_files = {}   # filename -> source dir, for collision detection
+    for extra_files_dir in dirs:
+        if not os.path.exists(extra_files_dir):
+            print(f"Warning: Extra files directory not found: {extra_files_dir}")
+            continue
+
+        dir_count = 0
+        for root, _, files in os.walk(extra_files_dir):
+            for file in files:
+                if file.startswith('.'):
+                    continue
+                if file in seen_files:
+                    print(f"Warning: '{file}' from {extra_files_dir} overrides earlier copy from {seen_files[file]}")
+                src_file = os.path.join(root, file)
+                dst_file = os.path.join(assets_dir, file)
+                if copy_file(src_file, dst_file):
+                    if file not in seen_files:
+                        extra_files_list.append(file)
+                    seen_files[file] = extra_files_dir
+                    dir_count += 1
+        if dir_count:
+            print(f"Processed {dir_count} extra files from: {extra_files_dir}")
+
     return extra_files_list
 
 
@@ -707,25 +711,41 @@ def get_multinet_model_paths(model_names, esp_sr_model_path):
 
 def get_text_font_path(builtin_text_font, xiaozhi_fonts_path):
     """
-    Get the text font path if needed
-    Returns the font file path or None if no font is needed
+    Resolve the cbin fallback font for the linked-in main font.
+
+    Naming conventions tried in order:
+      1) Same-name (preferred): <BUILTIN_TEXT_FONT>.bin
+         The linked-in C symbol holds a small subset (~600 glyphs); the same-name
+         .bin holds the full GB-2312 charset and attaches as LVGL fallback at
+         runtime. e.g. font_maru_common_20_4 → cbin/{mydazy/,}font_maru_common_20_4.bin
+      2) Upstream xiaozhi-fonts naming:
+         font_*_basic_*  → cbin/font_*_common_*.bin
+         font_noto_basic → cbin/font_noto_qwen_*.bin
     """
-    if not builtin_text_font or 'basic' not in builtin_text_font:
+    if not builtin_text_font:
         return None
-    
-    # Convert from basic to common font name
-    # e.g., font_puhui_basic_16_4 -> font_puhui_common_16_4.bin
-    if builtin_text_font.startswith('font_noto_'):
-        font_name = builtin_text_font.replace('basic', 'qwen') + '.bin'
-    else:
-        font_name = builtin_text_font.replace('basic', 'common') + '.bin'
-    font_path = os.path.join(xiaozhi_fonts_path, 'cbin', font_name)
-    
-    if os.path.exists(font_path):
-        return font_path
-    else:
-        print(f"Warning: Font file not found: {font_path}")
-        return None
+
+    # 1) 同名约定（推荐）
+    same_name = builtin_text_font + '.bin'
+    for sub in ('mydazy', ''):
+        path = os.path.join(xiaozhi_fonts_path, 'cbin', sub, same_name)
+        if os.path.exists(path):
+            print(f"Fallback text font: {os.path.basename(path)}")
+            return path
+
+    # 2) 上游 basic→common / basic→qwen 兼容
+    if 'basic' in builtin_text_font:
+        if builtin_text_font.startswith('font_noto_'):
+            font_name = builtin_text_font.replace('basic', 'qwen') + '.bin'
+        else:
+            font_name = builtin_text_font.replace('basic', 'common') + '.bin'
+        font_path = os.path.join(xiaozhi_fonts_path, 'cbin', font_name)
+        if os.path.exists(font_path):
+            print(f"Fallback text font: {os.path.basename(font_path)}")
+            return font_path
+
+    print(f"Warning: No fallback cbin found for {builtin_text_font}")
+    return None
 
 
 def get_emoji_collection_path(default_emoji_collection, xiaozhi_fonts_path, project_root=None):
@@ -838,7 +858,9 @@ def main():
     parser.add_argument('--output', required=True, help='Output path for assets.bin')
     parser.add_argument('--esp_sr_model_path', help='Path to ESP-SR model directory')
     parser.add_argument('--xiaozhi_fonts_path', help='Path to xiaozhi-fonts component directory')
-    parser.add_argument('--extra_files', help='Path to extra files directory to be included in assets')
+    parser.add_argument('--extra_files', nargs='+', default=None,
+                        help='One or more directories whose files will be flattened into assets/. '
+                             'CMake list (semicolon-joined) and space-separated args both supported.')
     
     args = parser.parse_args()
     

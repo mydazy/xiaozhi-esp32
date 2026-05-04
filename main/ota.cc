@@ -16,6 +16,7 @@
 #include <esp_efuse.h>
 #include <esp_efuse_table.h>
 #include <esp_heap_caps.h>
+#include <esp_task_wdt.h>
 #ifdef SOC_HMAC_SUPPORTED
 #include <esp_hmac.h>
 #endif
@@ -389,22 +390,99 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
         return false;
     }
 
-    size_t buffer_offset = 0;  // Current data size in buffer
+    // 暂停看门狗：4G 弱网下大文件下载可能数分钟，防 task WDT 触发
+    // RAII 退出（含 break/return）自动恢复
+#ifdef CONFIG_ESP_TASK_WDT_EN
+    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+    esp_task_wdt_delete(current_task);
+    ESP_LOGI(TAG, "Task WDT paused for OTA download");
+    struct WdtGuard { TaskHandle_t t; ~WdtGuard() { esp_task_wdt_add(t); } } _wdt_guard{current_task};
+#endif
+
+    size_t buffer_offset = 0;             // Current data size in buffer
     size_t total_read = 0, recent_read = 0;
     auto last_calc_time = esp_timer_get_time();
+    int retry_count = 0;
+    constexpr int kMaxRetries = 5;        // 指数退避 3s/6s/12s/24s/48s 共 ~93s
+
     while (true) {
-        int ret = http->Read(buffer + buffer_offset, PAGE_SIZE - buffer_offset);
-        if (ret < 0) {
-            ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
-            heap_caps_free(buffer);
-            return false;
+        int ret = http ? http->Read(buffer + buffer_offset, PAGE_SIZE - buffer_offset) : -1;
+
+        // ──────── 网络中断检测：read 失败 / 服务端早断（content-length 未下完）─────────
+        if (ret < 0 || (ret == 0 && total_read < content_length)) {
+            if (http) { http->Close(); http.reset(); }
+            if (retry_count >= kMaxRetries) {
+                ESP_LOGE(TAG, "OTA download failed after %d retries", kMaxRetries);
+                if (image_header_checked) esp_ota_abort(update_handle);
+                heap_caps_free(buffer);
+                return false;
+            }
+            retry_count++;
+            ESP_LOGW(TAG, "Download interrupted at %u/%u bytes, retry %d/%d",
+                     (unsigned)total_read, (unsigned)content_length, retry_count, kMaxRetries);
+
+            // ⚠ flush buffer 内已读未写的字节到 partition：保证 partition 写入字节 == total_read
+            // 否则下次 Range: bytes=total_read- 续传时 partition 会缺 buffer_offset 字节
+            if (image_header_checked && buffer_offset > 0) {
+                if (esp_ota_write(update_handle, buffer, buffer_offset) != ESP_OK) {
+                    esp_ota_abort(update_handle);
+                    heap_caps_free(buffer);
+                    return false;
+                }
+                buffer_offset = 0;
+            }
+
+            // 指数退避：3s/6s/12s/24s/48s（封顶 48s 给 modem 足够时间释放 HTTP 资源）
+            int delay_ms = 3000 * (1 << (retry_count - 1));
+            if (delay_ms > 48000) delay_ms = 48000;
+            ESP_LOGI(TAG, "Waiting %d ms before retry...", delay_ms);
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+
+            // Range 重连
+            http = network->CreateHttp(0);
+            std::string range = "bytes=" + std::to_string(total_read) + "-";
+            http->SetHeader("Range", range);
+            if (!http->Open("GET", firmware_url)) {
+                ESP_LOGE(TAG, "Failed to reopen HTTP for resume");
+                http.reset();
+                continue;  // 下轮 Read 因 http==nullptr 走 ret=-1 路径
+            }
+            int rs = http->GetStatusCode();
+            if (rs == 206) {
+                ESP_LOGI(TAG, "Resumed download from byte %u", (unsigned)total_read);
+            } else if (rs == 200) {
+                // 服务器不支持 Range：跳过 total_read 字节模拟续传
+                ESP_LOGW(TAG, "Server returned 200 (no Range support), skipping %u bytes",
+                         (unsigned)total_read);
+                size_t skipped = 0;
+                while (skipped < total_read) {
+                    size_t to_skip = std::min(total_read - skipped, (size_t)PAGE_SIZE);
+                    int skip_ret = http->Read(buffer, to_skip);
+                    if (skip_ret <= 0) {
+                        ESP_LOGE(TAG, "Failed to skip during resume");
+                        break;
+                    }
+                    skipped += skip_ret;
+                }
+                if (skipped < total_read) continue;  // 跳过失败 → 下轮重试
+                ESP_LOGI(TAG, "Skipped %u bytes, resume body stream now", (unsigned)total_read);
+            } else {
+                ESP_LOGE(TAG, "Resume failed, status: %d", rs);
+                continue;
+            }
+            recent_read = 0;
+            last_calc_time = esp_timer_get_time();
+            continue;
         }
+
+        if (ret == 0) break;        // 正常下载完成
+        retry_count = 0;            // 成功读取 → 重置重试计数
 
         // Calculate speed and progress every second
         recent_read += ret;
         total_read += ret;
         buffer_offset += ret;
-        if (esp_timer_get_time() - last_calc_time >= 1000000 || ret == 0) {
+        if (esp_timer_get_time() - last_calc_time >= 1000000) {
             size_t progress = total_read * 100 / content_length;
             ESP_LOGI(TAG, "Progress: %u%% (%u/%u), Speed: %uB/s", progress, total_read, content_length, recent_read);
             if (callback) {
@@ -432,9 +510,8 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
             }
         }
 
-        // Write to flash when buffer is full (4KB) or it's the last chunk
-        bool is_last_chunk = (ret == 0);
-        if (buffer_offset == PAGE_SIZE || (is_last_chunk && buffer_offset > 0)) {
+        // Write to flash when buffer is full (4KB)
+        if (buffer_offset == PAGE_SIZE) {
             auto err = esp_ota_write(update_handle, buffer, buffer_offset);
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to write OTA data: %s", esp_err_to_name(err));
@@ -442,15 +519,21 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
                 heap_caps_free(buffer);
                 return false;
             }
-
             buffer_offset = 0;
         }
+    }
 
-        if (is_last_chunk) {
-            break;
+    // 收尾：flush buffer 残余字节到 partition
+    if (image_header_checked && buffer_offset > 0) {
+        auto err = esp_ota_write(update_handle, buffer, buffer_offset);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to flush final OTA data: %s", esp_err_to_name(err));
+            esp_ota_abort(update_handle);
+            heap_caps_free(buffer);
+            return false;
         }
     }
-    http->Close();
+    if (http) http->Close();
     heap_caps_free(buffer);
 
     esp_err_t err = esp_ota_end(update_handle);
