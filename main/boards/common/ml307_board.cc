@@ -74,7 +74,7 @@ void Ml307Board::NetworkTask() {
     // Try to detect modem with retry limit
     int detect_retries = 0;
     while (detect_retries < MODEM_DETECT_MAX_RETRIES) {
-        modem_ = AtModem::Detect(tx_pin_, rx_pin_, dtr_pin_, 1500000);
+        modem_ = AtModem::Detect(tx_pin_, rx_pin_, dtr_pin_, 921600);
         if (modem_ != nullptr) {
             break;
         }

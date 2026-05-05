@@ -109,7 +109,7 @@ private:
     int cme_error_code_ = 0;
     std::string response_;
     bool wait_for_response_ = false;
-    std::mutex command_mutex_;
+    std::timed_mutex command_mutex_;
     mutable std::mutex mutex_;
     mutable std::mutex urc_mutex_;  // Independent mutex for urc_callbacks_
     std::mutex dtr_mutex_;

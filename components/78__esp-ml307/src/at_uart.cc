@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <sstream>
+#include <chrono>
 
 #define TAG "AtUart"
 
@@ -718,7 +719,13 @@ bool AtUart::SendCommandWithData(const std::string& command, size_t timeout_ms, 
         }
     }
 
-    std::lock_guard<std::mutex> lock(command_mutex_);
+    // 第一性根因修复：等锁加超时（原 lock_guard 无限等 = modem 卡死时全应用瘫痪）
+    // 抢锁超时 = 等价"AT 命令失败"，调用方既有失败处理路径全部 work
+    std::unique_lock<std::timed_mutex> lock(command_mutex_, std::defer_lock);
+    if (!lock.try_lock_for(std::chrono::milliseconds(timeout_ms))) {
+        ESP_LOGW(TAG, "AT cmd mutex timeout %ums: %.32s", (unsigned)timeout_ms, command.data());
+        return false;
+    }
     if (debug_) {
         ESP_LOGI(TAG, ">> %.64s (%u bytes)", command.data(), command.length());
     }
