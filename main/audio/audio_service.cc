@@ -102,26 +102,20 @@ void AudioService::Initialize(AudioCodec* codec) {
     audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
         // ─── AEC 后软件增益 + 噪声门 + RMS 调试日志 ───
         const float g = codec_ ? codec_->aec_gain_linear() : 1.0f;
-        int64_t energy_sum = 0;
-        for (int16_t s : data) energy_sum += (int64_t)s * s;
-        const int32_t energy_avg = data.empty() ? 0 : (int32_t)(energy_sum / (int64_t)data.size());
-        const int32_t rms = (int32_t)std::sqrt((double)energy_avg);
 
-        if (g > 1.01f && energy_avg >= kNoiseGateRmsSq) {
-            // 有声段：线性放大 + 饱和限幅
+        // 第 1 次扫描：算 AFE 输出 RMS（aec_gain 之前 = AEC/AGC/AFE 原始输出）
+        int64_t sum_in = 0;
+        for (int16_t s : data) sum_in += (int64_t)s * s;
+        const int32_t avg_in = data.empty() ? 0 : (int32_t)(sum_in / (int64_t)data.size());
+        const int32_t rms_in = (int32_t)std::sqrt((double)avg_in);
+
+        // 应用 aec_gain（仅有声段）
+        if (g > 1.01f && avg_in >= kNoiseGateRmsSq) {
             for (int16_t& s : data) {
                 int32_t v = (int32_t)(s * g);
                 s = v > 32767 ? 32767 : (v < -32768 ? -32768 : (int16_t)v);
             }
         }
-
-        // 调试日志：每 N 帧打印一次 AFE 输出 RMS (节流，避免 monitor 洪水)
-        // 只在有声段（RMS > 噪声门）打，便于分析"用户说话时上行电平"
-        static int log_cnt = 0;
-        if (rms * rms >= kNoiseGateRmsSq && (++log_cnt % 50 == 0)) {
-            ESP_LOGI(TAG, "AFE→OPUS RMS=%d (gain×%.1f)", rms, g);
-        }
-
         PushTaskToEncodeQueue(kAudioTaskTypeEncodeToSendQueue, std::move(data));
     });
 
