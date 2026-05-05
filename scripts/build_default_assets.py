@@ -266,21 +266,19 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
 def process_extra_files(extra_files_arg, assets_dir):
     """Process default_assets_extra_files parameter.
 
+    返回 (extra_files_list, extra_emoji_list):
+      - extra_files_list: 全部拷贝的文件名（写入 index.json/extra_files）
+      - extra_emoji_list: 来自 basename=="image" 的 .gif/.png 文件（追加到 emoji_collection）
+        约定: assets/image/ 下的图片自动注册为 emoji，可被 SetEmotion(name) 调用
+
     Accepts:
       - None / empty                                  -> no-op
       - single string (single dir, or ';'-joined)     -> normalised to list
       - list[str] from argparse nargs='+'             -> may contain ';'-joined elements
-        (CMake forwards list(APPEND ...) as either form depending on version)
-
-    Each directory is walked and all non-hidden files copied flat into
-    assets_dir. Filename collisions across directories let the later directory
-    win, with a warning.
     """
     if not extra_files_arg:
-        return []
+        return [], []
 
-    # Normalise to a flat list of dir paths (handles both space-separated args
-    # and CMake's `;`-joined list semantics).
     if isinstance(extra_files_arg, str):
         raw_items = [extra_files_arg]
     else:
@@ -293,11 +291,15 @@ def process_extra_files(extra_files_arg, assets_dir):
                 dirs.append(piece)
 
     extra_files_list = []
-    seen_files = {}   # filename -> source dir, for collision detection
+    extra_emoji_list = []
+    seen_files = {}
     for extra_files_dir in dirs:
         if not os.path.exists(extra_files_dir):
             print(f"Warning: Extra files directory not found: {extra_files_dir}")
             continue
+
+        # 约定：basename=="image" 的目录里的图片同时注册为 emoji 资源
+        is_emoji_dir = os.path.basename(os.path.normpath(extra_files_dir)) == "image"
 
         dir_count = 0
         for root, _, files in os.walk(extra_files_dir):
@@ -311,12 +313,19 @@ def process_extra_files(extra_files_arg, assets_dir):
                 if copy_file(src_file, dst_file):
                     if file not in seen_files:
                         extra_files_list.append(file)
+                        # image 目录下的图片自动追加到 emoji_collection
+                        if is_emoji_dir and file.lower().endswith(('.png', '.gif')):
+                            extra_emoji_list.append({
+                                "name": os.path.splitext(file)[0],
+                                "file": file
+                            })
                     seen_files[file] = extra_files_dir
                     dir_count += 1
         if dir_count:
-            print(f"Processed {dir_count} extra files from: {extra_files_dir}")
+            print(f"Processed {dir_count} extra files from: {extra_files_dir}"
+                  + (f" (含 {len([e for e in extra_emoji_list if e['file'] in os.listdir(extra_files_dir)])} 个 emoji)" if is_emoji_dir else ""))
 
-    return extra_files_list
+    return extra_files_list, extra_emoji_list
 
 
 def generate_index_json(assets_dir, srmodels, text_font, emoji_collection, extra_files=None, multinet_model_info=None):
@@ -810,8 +819,16 @@ def build_assets_integrated(wakenet_model_paths, multinet_model_paths, text_font
         srmodels = process_sr_models(wakenet_model_paths, multinet_model_paths, temp_build_dir, assets_dir) if (wakenet_model_paths or multinet_model_paths) else None
         text_font = process_text_font(text_font_path, assets_dir) if text_font_path else None
         emoji_collection = process_emoji_collection(emoji_collection_path, assets_dir) if emoji_collection_path else None
-        extra_files = process_extra_files(extra_files_path, assets_dir) if extra_files_path else None
-        
+        if extra_files_path:
+            extra_files, extra_emoji = process_extra_files(extra_files_path, assets_dir)
+            # main/assets/image 下的 .png/.gif 自动追加到 emoji_collection（可 SetEmotion 调用）
+            if extra_emoji:
+                if not emoji_collection:
+                    emoji_collection = []
+                emoji_collection.extend(extra_emoji)
+        else:
+            extra_files = None
+
         # Generate index.json
         generate_index_json(assets_dir, srmodels, text_font, emoji_collection, extra_files, multinet_model_info)
         
