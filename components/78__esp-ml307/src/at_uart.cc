@@ -624,7 +624,7 @@ void AtUart::HandleUrc(const std::string& command, const std::vector<AtArgumentV
 }
 
 bool AtUart::DetectBaudRate(int timeout_ms) {
-    int baud_rates[] = {2000000, 1500000, 921600};
+    int baud_rates[] = {921600};
     TickType_t start_time = xTaskGetTickCount();
     TickType_t timeout_ticks = (timeout_ms == -1) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
     
