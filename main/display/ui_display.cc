@@ -420,6 +420,37 @@ void UiDisplay::UpdateFontGif(uint8_t* gif_buffer, size_t size) {
 }
 
 // ============================================================
+// SetEmotion override：当前为 font 时仅跳过 neutral；其他 emotion 都允许替换
+// ============================================================
+void UiDisplay::SetEmotion(const char* emotion) {
+    if (!emotion) return;
+
+    // 当前显示 font GIF 时跳过 neutral（application.cc 进 listening 默认强制注入），
+    // happy/laughing/sad 等由 LLM 判定的情绪正常通过。
+    if (current_is_font_ && strcmp(emotion, "neutral") == 0) {
+        return;
+    }
+
+    bool is_font = (strcmp(emotion, "font") == 0);
+    LcdDisplay::SetEmotion(emotion);
+
+    // font: 按 GIF 实际宽度等比缩放到 kFontEmojiSizePx；其他 emoji: 复位原尺寸
+    if (emoji_image_) {
+        DisplayLockGuard lock(this);
+        int32_t zoom = kDefaultEmojiZoom;
+        if (is_font && gif_controller_ && gif_controller_->IsLoaded()) {
+            uint16_t w = gif_controller_->width();
+            if (w > 0) {
+                zoom = (int32_t)kFontEmojiSizePx * 256 / w;
+            }
+        }
+        lv_image_set_scale(emoji_image_, zoom);
+    }
+
+    current_is_font_ = is_font;
+}
+
+// ============================================================
 // 通用二维码页（合并配网 BLUFI/AP + 设备绑定，未来支持付费等扩展）
 // ============================================================
 

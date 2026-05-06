@@ -70,6 +70,10 @@ public:
     // 调用方完成调用后不要再 free buffer。
     void UpdateFontGif(uint8_t* gif_buffer, size_t size);
 
+    // 教育卡专属：当前为 font 时跳过 neutral（application.cc 进 listening 默认注入），
+    // 其他 emotion 正常替换；font 进入时按 GIF 实际宽度等比缩放到 kFontEmojiSizePx。
+    void SetEmotion(const char* emotion) override;
+
     // ===== 控制中心 =====
     // [量产稳定期] ControlCenter 整体下线，保留接口为 stub 维持三个 board 的调用兼容
     void ShowControlCenter() {}
@@ -118,6 +122,11 @@ private:
 
     // 状态
     bool is_clock_mode_ = false;
+
+    // 当前是否在显示 font GIF（仅用于 SetEmotion 判 "跳过 neutral"）
+    bool current_is_font_ = false;
+    static constexpr int32_t kFontEmojiSizePx = 180;   // 笔画 GIF 等比缩放到 180×180px（避开底部字幕）
+    static constexpr int32_t kDefaultEmojiZoom = 256;  // 其他 emoji 保持原尺寸（256 = 100%）
 
     // ===== 内部方法 =====
     void CreateClockPage();
