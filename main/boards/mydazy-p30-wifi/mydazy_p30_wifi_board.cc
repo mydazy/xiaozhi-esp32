@@ -302,8 +302,11 @@ private:
     }
 
     void InitializeSc7a20h() {
-        // v4.0 极简 API：768mg/200ms（避免桌面轻碰误触发）
-        sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 768 /*mg*/, 200 /*ms*/);
+        // 拿起唤醒灵敏度（P30 系列两板统一）：
+        //   threshold 320mg：0.32g 加速度尖峰，拿起 3–5cm 即触发
+        //   duration  100ms：拿起加速段时长，桌面瞬碰（< 80ms）仍滤掉
+        // 调参历史：256→1024→1280→1024→768→512→448→384→320mg
+        sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 320 /*mg*/, 100 /*ms*/);
         sc7a20h_initialized_ = (sc7a20h_sensor_ != nullptr);
         if (!sc7a20h_initialized_) {
             ESP_LOGE(TAG, "SC7A20H 初始化失败");
