@@ -347,6 +347,8 @@ void Application::HandleActivationDoneEvent() {
     has_server_time_ = ota_->HasServerTime();
 
     auto display = Board::GetInstance().GetDisplay();
+    // 隐藏激活期间的绑定 QR + "请绑定设备" 提示（之前有遗漏 → QR 一直停留在屏幕上）
+    display->HideQrCode();
     std::string message = std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
     display->ShowNotification(message.c_str());
     display->SetChatMessage("system", "");
