@@ -21,7 +21,7 @@ protected:
     
     lv_draw_buf_t draw_buf_;
     lv_obj_t* top_bar_ = nullptr;
-    lv_obj_t* status_bar_ = nullptr;
+    // status_bar_ 字段已上提至 LvglDisplay 父类（供 ShowNotification 临时浮起复用）
     lv_obj_t* content_ = nullptr;
     lv_obj_t* container_ = nullptr;
     lv_obj_t* side_bar_ = nullptr;

@@ -23,6 +23,10 @@ LvglDisplay::LvglDisplay() {
             DisplayLockGuard lock(display);
             lv_obj_add_flag(display->notification_label_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(display->status_label_, LV_OBJ_FLAG_HIDDEN);
+            // 还原 status_bar_ 临时浮起前的可见性（chat 模式保持 visible / player 模式恢复 HIDDEN）
+            if (display->status_bar_ && display->status_bar_was_hidden_before_notify_) {
+                lv_obj_add_flag(display->status_bar_, LV_OBJ_FLAG_HIDDEN);
+            }
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
@@ -102,6 +106,15 @@ void LvglDisplay::ShowNotification(const char* notification, int duration_ms) {
         }
         return;
     }
+    // 临时浮起 status_bar_：保存原可见性 + 强制 visible，timer 还原时按原状态恢复
+    // 用途：player/chat 模式下 status_bar_ 可能被 HIDDEN，仍能短暂看到 notification（音量提示等）
+    if (status_bar_) {
+        status_bar_was_hidden_before_notify_ = lv_obj_has_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);
+        lv_obj_move_foreground(status_bar_);
+    }
+
     lv_label_set_text(notification_label_, notification);
     lv_obj_remove_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(status_label_, LV_OBJ_FLAG_HIDDEN);

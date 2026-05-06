@@ -13,7 +13,7 @@ private:
     esp_lcd_panel_handle_t panel_ = nullptr;
 
     lv_obj_t* top_bar_ = nullptr;
-    lv_obj_t* status_bar_ = nullptr;
+    // status_bar_ 字段已上提至 LvglDisplay 父类
     lv_obj_t* content_ = nullptr;
     lv_obj_t* content_left_ = nullptr;
     lv_obj_t* content_right_ = nullptr;

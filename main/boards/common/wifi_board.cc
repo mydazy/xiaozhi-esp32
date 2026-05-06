@@ -7,6 +7,7 @@
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
+#include "audio/music_player.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -517,6 +518,11 @@ std::string WifiBoard::GetBoardJson() {
 }
 
 void WifiBoard::SetPowerSaveLevel(PowerSaveLevel level) {
+    // MP3 播放期间禁止切回省电模式（弱网下省电会让 HTTP 流频繁超时 → 重试耗尽 → 播放中断）
+    // 由 MusicPlayer::Stop / on_finished 主动恢复 LOW_POWER
+    if (level != PowerSaveLevel::PERFORMANCE && MusicPlayer::GetInstance().IsPlaying()) {
+        return;
+    }
     WifiStation::GetInstance().SetPowerSaveMode(level != PowerSaveLevel::PERFORMANCE);
 }
 
