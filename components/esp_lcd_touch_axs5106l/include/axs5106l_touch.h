@@ -2,14 +2,37 @@
  * SPDX-FileCopyrightText: 2026 mydazy
  * SPDX-License-Identifier: Apache-2.0
  *
- * AXS5106L capacitive touch driver — public C API.
+ * AXS5106L 电容触摸驱动 — v4.0.0 极简版（公开 C API）
  *
- * Two-phase init pattern (required when the touch IC shares its reset line
- * with the LCD):
+ * 设计哲学：判断越少问题越少，保留高频刚需。
  *
- *   axs5106l_touch_new(&cfg, &tp);    // before LVGL: configures GPIO/I2C, runs FW upgrade
- *   ... initialise LCD + start LVGL ...
- *   axs5106l_touch_attach_lvgl(tp);   // after LVGL: registers as lv_indev_t
+ * 仅 4 个 API 覆盖项目所有用例：
+ *   1) axs5106l_touch_new          — Phase 1（LCD 启动前）：GPIO + 升级 + chip_id 校验
+ *   2) axs5106l_touch_attach_lvgl  — Phase 2（LVGL 启动后）：注册 lv_indev_t
+ *   3) axs5106l_touch_sleep        — 进深睡前关 INT ISR + 写 sleep 寄存器
+ *   4) axs5106l_touch_resume       — 唤醒后软复位 + 重开 INT ISR
+ *
+ * 两阶段 init 的硬件原因：rst_gpio 与 LCD 共享 → 必须在 LCD 之前 reset；
+ * attach_lvgl 必须在 LVGL 启动后才能调 lv_indev_create。
+ *
+ * 删除的旧 API（v3.0 vs v4.0）：
+ *   - axs5106l_touch_del            → 量产生命周期内不释放，N/A
+ *   - axs5106l_touch_set_wake_callback     → 移入 cfg.wake_cb
+ *   - axs5106l_touch_set_gesture_callback  → 移入 cfg.gesture_cb
+ *   - axs5106l_touch_get_lvgl_device       → 外部不需要
+ *
+ * 项目硬编码（编译期常量化）：
+ *   - I2C 地址 0x63，速率 400 kHz
+ *   - swap_xy=false, mirror_x=false, mirror_y=false（V2907 firmware 已内部 rotation）
+ *   - LVGL polling 30ms，硬件 INT 边沿计数 + storm 检测
+ *
+ * 所有 I2C 走 i2c_bus_worker（防 4G RF 共线污染）。
+ *
+ * 高频使用场景：
+ *   - 屏幕唤醒：手指触屏 → INT 下降沿 → wake_cb（亮屏 + 退出省电）
+ *   - 单击/双击/长按/松开：gesture_cb（500ms 长按门槛 + 60ms 短触）
+ *   - 滑动：gesture_cb 上/下/左/右（量产可丢弃）
+ *   - 深睡：进 sleep + 关 INT ISR（防 RF 误唤）
  */
 
 #pragma once
@@ -17,17 +40,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
-#include <driver/i2c_master.h>
 #include <driver/gpio.h>
 #include <esp_err.h>
-#include <esp_lvgl_port.h>     /* lv_indev_t */
+#include <esp_lvgl_port.h>
+#include "i2c_bus_worker.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Set to 1 at compile time to enable a debug overlay: red tracking dot
- * + periodic [calib] log of the chip's raw coordinate range. */
+/* 编译期开关：调试期可开 1 显示触摸轨迹红点 + raw 坐标日志 */
 #ifndef AXS5106L_TOUCH_DEBUG_OVERLAY
 #define AXS5106L_TOUCH_DEBUG_OVERLAY 0
 #endif
@@ -36,7 +58,6 @@ extern "C" {
  * Public types
  * ====================================================================== */
 
-/// Opaque driver handle.
 typedef struct axs5106l_touch_t *axs5106l_touch_handle_t;
 
 /// Gesture identifiers reported by the recognizer.
@@ -52,91 +73,60 @@ typedef enum {
     AXS5106L_GESTURE_SWIPE_RIGHT,
 } axs5106l_gesture_t;
 
-/// Callback fired on the first touch press (use for screen wake-up).
+/// 屏唤醒回调（首次触摸）。在 LVGL task 上下文调用。
 typedef void (*axs5106l_wake_cb_t)(void *user_ctx);
 
-/// Callback fired when a gesture is recognized.
+/// 手势回调（识别完成）。在 LVGL task 上下文调用。
 typedef void (*axs5106l_gesture_cb_t)(axs5106l_gesture_t g,
                                       int16_t x, int16_t y,
                                       void *user_ctx);
 
-/// Constructor configuration.
+/// 配置（init 时一次性传入，运行时不变）
 typedef struct {
-    i2c_master_bus_handle_t i2c_bus;   ///< Existing I2C master bus
-    gpio_num_t              rst_gpio;  ///< Reset GPIO (may be shared with LCD)
-    gpio_num_t              int_gpio;  ///< INT GPIO (active low)
-    uint16_t                width;     ///< Logical screen width  (px)
-    uint16_t                height;    ///< Logical screen height (px)
-    bool                    swap_xy;   ///< Swap X and Y axes after reading
-    bool                    mirror_x;  ///< Mirror X
-    bool                    mirror_y;  ///< Mirror Y
+    i2c_worker_handle_t     worker;     ///< 已创建的 i2c_bus_worker
+    gpio_num_t              rst_gpio;   ///< Reset GPIO（与 LCD 可共享）
+    gpio_num_t              int_gpio;   ///< INT GPIO（active LOW）
+    uint16_t                width;      ///< 屏幕逻辑宽（px）
+    uint16_t                height;     ///< 屏幕逻辑高（px）
+    axs5106l_wake_cb_t      wake_cb;    ///< 首次触摸回调（可 NULL）
+    axs5106l_gesture_cb_t   gesture_cb; ///< 手势识别回调（可 NULL）
+    void                   *cb_ctx;     ///< 两个回调共用的 user context
 } axs5106l_touch_config_t;
 
-#define AXS5106L_TOUCH_DEFAULT_CONFIG(bus, rst, irq, w, h)  \
-    {                                                       \
-        .i2c_bus  = (bus),                                  \
-        .rst_gpio = (rst),                                  \
-        .int_gpio = (irq),                                  \
-        .width    = (w),                                    \
-        .height   = (h),                                    \
-        .swap_xy  = false,                                  \
-        .mirror_x = false,                                  \
-        .mirror_y = false,                                  \
-    }
-
 /* ========================================================================
- * Lifecycle
+ * Lifecycle (Phase 1 / 2)
  * ====================================================================== */
 
 /**
- * @brief Phase 1 — pull RST, run firmware upgrade if needed, verify chip ID.
+ * Phase 1 — LCD 启动**前**调用：
+ *   - 配 RST GPIO + I2C device
+ *   - 检查并升级固件
+ *   - 验证 chip_id
  *
- * Call before LVGL is started.
- *
- * @param[in]  cfg Driver configuration.
- * @param[out] out Receives the handle on success.
+ * @return ESP_OK / ESP_ERR_INVALID_ARG / ESP_ERR_NO_MEM / ESP_ERR_NOT_FOUND
  */
 esp_err_t axs5106l_touch_new(const axs5106l_touch_config_t *cfg,
                              axs5106l_touch_handle_t *out);
 
 /**
- * @brief Phase 2 — register as an LVGL pointer input device.
+ * Phase 2 — LVGL 启动**后**调用：
+ *   - 配 INT GPIO + 安装 ISR（边沿计数器，不读 I2C）
+ *   - 注册 lv_indev_t（30ms polling read 30ms LVGL）
  *
- * Call after LVGL is initialised. Idempotent.
+ * @return ESP_OK / ESP_ERR_INVALID_ARG
  */
 esp_err_t axs5106l_touch_attach_lvgl(axs5106l_touch_handle_t h);
-
-/**
- * @brief Tear down: unregister LVGL device, release I2C, hold RST high.
- */
-esp_err_t axs5106l_touch_del(axs5106l_touch_handle_t h);
 
 /* ========================================================================
  * Power
  * ====================================================================== */
 
+/// 进深睡前调：关 INT ISR + 写 sleep 寄存器（0x19=0x03）
 esp_err_t axs5106l_touch_sleep(axs5106l_touch_handle_t h);
+
+/// 唤醒后调：软复位芯片 + 重开 INT ISR + 重置 storm 检测窗口
 esp_err_t axs5106l_touch_resume(axs5106l_touch_handle_t h);
 
-/* ========================================================================
- * Callbacks
- * ====================================================================== */
-
-void axs5106l_touch_set_wake_callback(axs5106l_touch_handle_t h,
-                                      axs5106l_wake_cb_t cb,
-                                      void *user_ctx);
-
-void axs5106l_touch_set_gesture_callback(axs5106l_touch_handle_t h,
-                                         axs5106l_gesture_cb_t cb,
-                                         void *user_ctx);
-
-/* ========================================================================
- * Introspection
- * ====================================================================== */
-
-/// Get the underlying lv_indev_t (only valid after attach_lvgl).
-lv_indev_t *axs5106l_touch_get_lvgl_device(axs5106l_touch_handle_t h);
-
 #ifdef __cplusplus
-}  /* extern "C" */
+}
 #endif

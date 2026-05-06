@@ -20,9 +20,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
-#include <driver/i2c_master.h>
 #include <driver/gpio.h>
 #include <esp_err.h>
+#include "i2c_bus_worker.h"     /* v3.0+: 升级路径也走 worker 串行化 */
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,13 +40,13 @@ typedef enum {
 } axs5106l_upgrade_result_t;
 
 /**
- * @brief Allocate an upgrader bound to an I2C device and reset GPIO.
+ * @brief Allocate an upgrader bound to an I2C worker device and reset GPIO.
  *
- * @param[in]  i2c_handle I2C device handle (already added to a master bus).
- * @param[in]  rst_gpio   GPIO connected to the chip reset line.
- * @param[out] out        Receives the handle on success.
+ * @param[in]  dev      i2c_worker_dev_t* (复用 axs5106l_touch 创建的设备).
+ * @param[in]  rst_gpio GPIO connected to the chip reset line.
+ * @param[out] out      Receives the handle on success.
  */
-esp_err_t axs5106l_upgrade_init(i2c_master_dev_handle_t i2c_handle,
+esp_err_t axs5106l_upgrade_init(i2c_worker_dev_t *dev,
                                 gpio_num_t rst_gpio,
                                 axs5106l_upgrade_handle_t *out);
 

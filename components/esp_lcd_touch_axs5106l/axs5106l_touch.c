@@ -56,27 +56,29 @@ static const char *TAG = "axs5106l_touch";
 #define TOUCH_X_RAW_MAX    272
 #define TOUCH_X_RAW_RANGE  (TOUCH_X_RAW_MAX - TOUCH_X_RAW_MIN)  /* 263 */
 
-/* ---------- Gesture thresholds ---------- */
-/* Strategy: keep storm-detector + INT-debounce + per-frame validity as the
- * primary RF defence, relax the gesture-layer gates so real light taps and
- * short swipes are not eaten. The storm detector is the only RF gate based
- * on a physical signature (edge frequency); time/jitter/speed gates are
- * indirect and tend to false-positive on real fingers. */
+/* v3.0 (2026-05) 灵敏度提升 — 儿童快触场景：
+ *   CLICK_MIN_TIME_US 100→60ms（更轻的瞬触可识别）
+ *   CLICK_MIN_FRAMES  3→2（≥2 帧 ~60ms @ 30ms LVGL）
+ *   CLICK_MAX_MOVE   20→25（手抖容忍）
+ *   JITTER_LIMIT_FOR_TAP 24→32（震动容忍）
+ *   LONG_PRESS_TIME_US 500ms 保持（与 BOOT 长按节奏一致）
+ *
+ * 配套 RF 防御不变：storm 检测 + INT 防抖 + trajectory gate。
+ * 风险：CLICK_MIN_FRAMES=2 会让单帧 RF 脉冲更易误识别为 tap，
+ *      靠 storm 检测 + JITTER_LIMIT 兜底；量产前需做 4G 弱信号实测。 */
 #define SWIPE_THRESHOLD      20       /* min travel for swipe (px) */
 #define CLICK_MAX_TIME_US    800000   /* max press duration for tap (800 ms) */
-#define CLICK_MIN_TIME_US    100000   /* min press duration for tap (100 ms — light tap allowed) */
-#define CLICK_MAX_MOVE       20       /* max travel still considered a tap (px) */
+#define CLICK_MIN_TIME_US     60000   /* min press duration for tap (60 ms — sensitive light tap) */
+#define CLICK_MAX_MOVE       25       /* max travel still considered a tap (px) — 儿童手抖容忍 */
 #define LONG_PRESS_TIME_US   500000   /* long-press threshold (500 ms — child-friendly PTT) */
 #define DOUBLE_CLICK_TIME_US 600000   /* max interval between two taps for double-tap (600 ms) */
 #define DOUBLE_CLICK_DIST    50       /* max distance between tap positions for double-tap (px) */
-#define CLICK_MIN_FRAMES     3        /* tap needs ≥3 PRESSED frames (~90 ms @ 30 ms LVGL) */
+#define CLICK_MIN_FRAMES      2       /* tap needs ≥2 PRESSED frames (~60 ms @ 30 ms LVGL) */
 #define SWIPE_MIN_TIME_US    150000   /* min swipe duration (150 ms) */
 #define SWIPE_MIN_FRAMES     5        /* swipe needs ≥5 PRESSED frames */
-#define LONG_PRESS_MIN_FRAMES 12      /* long-press needs ≥12 frames (~360 ms @ 30 ms LVGL) — match 500 ms threshold */
-/* Cumulative jitter budget for tap. Real fingers stay within ~5 px micro-movement
- * across ~5 frames (≈25 px). 24 was chosen as the floor that still passes
- * all measured real taps but flags any frame that hops > 8 px on average. */
-#define JITTER_LIMIT_FOR_TAP   24
+#define LONG_PRESS_MIN_FRAMES 12      /* long-press needs ≥12 frames (~360 ms) — match 500 ms threshold */
+/* Jitter budget — 儿童手部抖动比成人大，从 24 放宽到 32（每帧 ~6.4 px 平均位移仍允）。 */
+#define JITTER_LIMIT_FOR_TAP   32
 /* Swipe trajectory efficiency: real fingers travel in (mostly) straight lines,
  * so the per-frame jitter sum stays close to the start-to-end manhattan distance.
  * RF coupling synthesises pseudo-swipes by jumping between random coordinates,
@@ -172,9 +174,9 @@ typedef struct {
 #endif
 
 struct axs5106l_touch_t {
-    /* Configuration (immutable after _new) */
-    i2c_master_bus_handle_t i2c_bus;
-    i2c_master_dev_handle_t i2c_handle;
+    /* Configuration (immutable after _new) — v3.0+ via i2c_bus_worker */
+    i2c_worker_handle_t     worker;
+    i2c_worker_dev_t       *dev;
     gpio_num_t              rst_gpio;
     gpio_num_t              int_gpio;
     uint16_t                width;
@@ -234,19 +236,27 @@ static void lvgl_read_cb(lv_indev_t *indev, lv_indev_data_t *data);
 esp_err_t axs5106l_touch_new(const axs5106l_touch_config_t *cfg,
                              axs5106l_touch_handle_t *out)
 {
-    if (cfg == NULL || out == NULL || cfg->i2c_bus == NULL) return ESP_ERR_INVALID_ARG;
+    if (cfg == NULL || out == NULL || cfg->worker == NULL) return ESP_ERR_INVALID_ARG;
+    *out = NULL;   /* 防御：调用方未初始化指针时不留垃圾 */
 
     axs5106l_touch_handle_t self = (axs5106l_touch_handle_t)calloc(1, sizeof(struct axs5106l_touch_t));
     if (self == NULL) return ESP_ERR_NO_MEM;
 
-    self->i2c_bus  = cfg->i2c_bus;
+    self->worker   = cfg->worker;
     self->rst_gpio = cfg->rst_gpio;
     self->int_gpio = cfg->int_gpio;
     self->width    = cfg->width;
     self->height   = cfg->height;
-    self->swap_xy  = cfg->swap_xy;
-    self->mirror_x = cfg->mirror_x;
-    self->mirror_y = cfg->mirror_y;
+    /* v4.0 极简：swap_xy/mirror_* 项目硬编码 false（V2907 firmware 已内部 rotation）。
+       移除 cfg 字段以减少调用方判断；如未来需要不同方向请重新 expose。 */
+    self->swap_xy  = false;
+    self->mirror_x = false;
+    self->mirror_y = false;
+    /* 回调从 cfg 一次性传入，删除 set_wake_callback / set_gesture_callback 旧 API */
+    self->wake_cb     = cfg->wake_cb;
+    self->wake_ctx    = cfg->cb_ctx;
+    self->gesture_cb  = cfg->gesture_cb;
+    self->gesture_ctx = cfg->cb_ctx;
 #if AXS5106L_TOUCH_DEBUG_OVERLAY
     self->raw_stats.raw_min_x = 0xFFFF;
     self->raw_stats.raw_min_y = 0xFFFF;
@@ -266,16 +276,10 @@ esp_err_t axs5106l_touch_new(const axs5106l_touch_config_t *cfg,
     if (ret != ESP_OK) goto fail;
     gpio_set_level(self->rst_gpio, 1);
 
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address  = AXS5106L_I2C_ADDR,
-        .scl_speed_hz    = 400000,
-        .scl_wait_us     = 0,
-        .flags           = { .disable_ack_check = 0 },
-    };
-    ret = i2c_master_bus_add_device(self->i2c_bus, &dev_cfg, &self->i2c_handle);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "I2C add device failed: %s", esp_err_to_name(ret));
+    self->dev = i2c_worker_add_device(self->worker, AXS5106L_I2C_ADDR, 400000);
+    if (self->dev == NULL) {
+        ESP_LOGE(TAG, "i2c_worker_add_device failed");
+        ret = ESP_ERR_NO_MEM;
         goto fail;
     }
 
@@ -316,7 +320,7 @@ esp_err_t axs5106l_touch_new(const axs5106l_touch_config_t *cfg,
     return ESP_OK;
 
 fail:
-    if (self->i2c_handle != NULL) i2c_master_bus_rm_device(self->i2c_handle);
+    if (self->dev != NULL) i2c_worker_remove_device(self->dev);
     free(self);
     return ret;
 }
@@ -366,27 +370,10 @@ esp_err_t axs5106l_touch_attach_lvgl(axs5106l_touch_handle_t self)
     return ESP_OK;
 }
 
-esp_err_t axs5106l_touch_del(axs5106l_touch_handle_t self)
-{
-    if (self == NULL) return ESP_ERR_INVALID_ARG;
-
-    if (self->isr_installed) {
-        gpio_isr_handler_remove(self->int_gpio);
-        self->isr_installed = false;
-    }
-    if (self->lvgl_indev != NULL) {
-        lv_indev_delete(self->lvgl_indev);
-        self->lvgl_indev = NULL;
-    }
-    if (self->i2c_handle != NULL) {
-        i2c_master_bus_rm_device(self->i2c_handle);
-        self->i2c_handle = NULL;
-    }
-    /* Keep RST high — shared AUD_VDD line also powers LCD backlight. */
-    gpio_set_level(self->rst_gpio, 1);
-    free(self);
-    return ESP_OK;
-}
+/* v4.0 极简：删除 axs5106l_touch_del()
+ *   量产固件生命周期内驱动从不释放（与板级 Board 单例同寿）。
+ *   保留意味着维护 ISR 移除/I2C device 释放/RST 状态等冗余路径，徒增 bug 面。
+ *   如真要做单元测试 mock，请使用 stub 替代而非 del。 */
 
 /* ------------------------------------------------------------------ */
 /*  Power                                                              */
@@ -418,32 +405,12 @@ esp_err_t axs5106l_touch_resume(axs5106l_touch_handle_t self)
     return ESP_OK;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Callbacks                                                          */
-/* ------------------------------------------------------------------ */
-
-void axs5106l_touch_set_wake_callback(axs5106l_touch_handle_t self,
-                                      axs5106l_wake_cb_t cb,
-                                      void *user_ctx)
-{
-    if (self == NULL) return;
-    self->wake_cb  = cb;
-    self->wake_ctx = user_ctx;
-}
-
-void axs5106l_touch_set_gesture_callback(axs5106l_touch_handle_t self,
-                                         axs5106l_gesture_cb_t cb,
-                                         void *user_ctx)
-{
-    if (self == NULL) return;
-    self->gesture_cb  = cb;
-    self->gesture_ctx = user_ctx;
-}
-
-lv_indev_t *axs5106l_touch_get_lvgl_device(axs5106l_touch_handle_t self)
-{
-    return (self != NULL) ? self->lvgl_indev : NULL;
-}
+/* v4.0 极简：删除 4 个 API（迁移至 cfg / 完全弃用）
+ *   - axs5106l_touch_set_wake_callback     → cfg.wake_cb（init 时一次性传入）
+ *   - axs5106l_touch_set_gesture_callback  → cfg.gesture_cb
+ *   - axs5106l_touch_get_lvgl_device       → 外部不需要，删除
+ *   - axs5106l_touch_del                   → 量产 N/A（生命周期内不释放）
+ */
 
 /* ------------------------------------------------------------------ */
 /*  INT-edge storm detector                                            */
@@ -513,14 +480,19 @@ static void reset_chip(axs5106l_touch_handle_t self)
     vTaskDelay(pdMS_TO_TICKS(50));
 }
 
+/* v3.0+ I2C helpers — 全部走 i2c_bus_worker
+ *   - 重试逻辑保留：worker 内部对单 op 不 retry，driver 层 retry 仍有意义
+ *   - bus_reset 改用 worker_bus_reset（worker 调度，不会砸正在传输的其他设备）
+ *   - 错误恢复触发条件不变（streak ≥ 3）
+ */
 static bool write_register(axs5106l_touch_handle_t self, uint8_t reg, const uint8_t *data, size_t len)
 {
-    if (self->i2c_handle == NULL || len > 15) return false;
+    if (self->dev == NULL || len > 15) return false;
     uint8_t buf[16];
     buf[0] = reg;
     memcpy(&buf[1], data, len);
     for (int i = 0; i < I2C_RETRIES; i++) {
-        if (i2c_master_transmit(self->i2c_handle, buf, len + 1, I2C_TIMEOUT_MS) == ESP_OK) return true;
+        if (i2c_worker_write(self->dev, buf, len + 1, I2C_TIMEOUT_MS) == ESP_OK) return true;
         vTaskDelay(pdMS_TO_TICKS(5));
     }
     return false;
@@ -528,20 +500,20 @@ static bool write_register(axs5106l_touch_handle_t self, uint8_t reg, const uint
 
 static bool read_register(axs5106l_touch_handle_t self, uint8_t reg, uint8_t *data, size_t len)
 {
-    if (self->i2c_handle == NULL) return false;
+    if (self->dev == NULL) return false;
     for (int i = 0; i < I2C_RETRIES; i++) {
-        if (i2c_master_transmit(self->i2c_handle, &reg, 1, I2C_TIMEOUT_MS) == ESP_OK &&
-            i2c_master_receive(self->i2c_handle, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
+        if (i2c_worker_write_read(self->dev, &reg, 1, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
             self->i2c_err_streak = 0;
             return true;
         }
         vTaskDelay(pdMS_TO_TICKS(5));
     }
     /* Consecutive-failure recovery: strong RF interference can lock SDA low.
-     * Reset the bus (issues 9 SCL pulses internally) per the I2C recovery spec. */
+     * worker_bus_reset 会在 worker 内部排空队列后做 9 SCL 脉冲，与共享总线上其他
+     * driver（音频 codec / sensor / NFC）的 op 严格串行 → 不会砸正在传输的状态机。 */
     if (++self->i2c_err_streak >= 3) {
-        ESP_LOGW(TAG, "I2C bus recovery (streak=%d)", self->i2c_err_streak);
-        i2c_master_bus_reset(self->i2c_bus);
+        ESP_LOGW(TAG, "I2C bus recovery (streak=%d) via worker", self->i2c_err_streak);
+        i2c_worker_bus_reset(self->worker);
         self->i2c_err_streak = 0;
         /* Clear transient touch state so a phantom press cannot survive across the reset. */
         self->touch.int_low_since = 0;
@@ -554,7 +526,7 @@ static bool read_register(axs5106l_touch_handle_t self, uint8_t reg, uint8_t *da
 static bool check_and_upgrade_firmware(axs5106l_touch_handle_t self)
 {
     axs5106l_upgrade_handle_t upgrader = NULL;
-    if (axs5106l_upgrade_init(self->i2c_handle, self->rst_gpio, &upgrader) != ESP_OK) {
+    if (axs5106l_upgrade_init(self->dev, self->rst_gpio, &upgrader) != ESP_OK) {
         ESP_LOGW(TAG, "upgrade init failed");
         return false;
     }

@@ -34,7 +34,7 @@ static const uint8_t kFirmwareData[] = {
 #define WRITE_TIMEOUT_MS         10
 
 struct axs5106l_upgrade_t {
-    i2c_master_dev_handle_t i2c_handle;
+    i2c_worker_dev_t       *dev;       /* v3.0+: worker device，与 axs5106l_touch 共用同一 dev */
     gpio_num_t              rst_gpio;
 };
 
@@ -42,17 +42,17 @@ struct axs5106l_upgrade_t {
 /*  Lifecycle                                                          */
 /* ------------------------------------------------------------------ */
 
-esp_err_t axs5106l_upgrade_init(i2c_master_dev_handle_t i2c_handle,
+esp_err_t axs5106l_upgrade_init(i2c_worker_dev_t *dev,
                                 gpio_num_t rst_gpio,
                                 axs5106l_upgrade_handle_t *out)
 {
-    if (i2c_handle == NULL || out == NULL) return ESP_ERR_INVALID_ARG;
+    if (dev == NULL || out == NULL) return ESP_ERR_INVALID_ARG;
 
     axs5106l_upgrade_handle_t h = (axs5106l_upgrade_handle_t)calloc(1, sizeof(struct axs5106l_upgrade_t));
     if (h == NULL) return ESP_ERR_NO_MEM;
 
-    h->i2c_handle = i2c_handle;
-    h->rst_gpio   = rst_gpio;
+    h->dev      = dev;
+    h->rst_gpio = rst_gpio;
     *out = h;
     return ESP_OK;
 }
@@ -82,16 +82,18 @@ static inline void delay_us(uint16_t us)
 /*  Low-level I2C primitives                                           */
 /* ------------------------------------------------------------------ */
 
+/* v3.0+: 全部走 i2c_bus_worker，避免 firmware upgrade 期间被音频 codec 等其他
+ * driver 的 I2C op 打断（虽然量产首烧时通常无并发，仍按 worker 串行更稳） */
 static bool i2c_write_reg(axs5106l_upgrade_handle_t h, uint8_t reg, const uint8_t *data, size_t len)
 {
-    if (h->i2c_handle == NULL || len > 64) return false;
+    if (h->dev == NULL || len > 64) return false;
 
     uint8_t buf[65];
     buf[0] = reg;
     memcpy(&buf[1], data, len);
 
     for (int retry = 0; retry < I2C_MAX_RETRIES; retry++) {
-        if (i2c_master_transmit(h->i2c_handle, buf, len + 1, I2C_TIMEOUT_MS) == ESP_OK) {
+        if (i2c_worker_write(h->dev, buf, len + 1, I2C_TIMEOUT_MS) == ESP_OK) {
             return true;
         }
         delay_ms(5);
@@ -101,11 +103,10 @@ static bool i2c_write_reg(axs5106l_upgrade_handle_t h, uint8_t reg, const uint8_
 
 static bool i2c_read_reg(axs5106l_upgrade_handle_t h, uint8_t reg, uint8_t *data, size_t len)
 {
-    if (h->i2c_handle == NULL) return false;
+    if (h->dev == NULL) return false;
 
     for (int retry = 0; retry < I2C_MAX_RETRIES; retry++) {
-        if (i2c_master_transmit(h->i2c_handle, &reg, 1, I2C_TIMEOUT_MS) == ESP_OK &&
-            i2c_master_receive(h->i2c_handle, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
+        if (i2c_worker_write_read(h->dev, &reg, 1, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
             return true;
         }
         delay_ms(5);
@@ -116,11 +117,10 @@ static bool i2c_read_reg(axs5106l_upgrade_handle_t h, uint8_t reg, uint8_t *data
 static bool i2c_read_regs(axs5106l_upgrade_handle_t h, const uint8_t *reg, size_t reg_len,
                           uint8_t *data, size_t data_len)
 {
-    if (h->i2c_handle == NULL) return false;
+    if (h->dev == NULL) return false;
 
     for (int retry = 0; retry < I2C_MAX_RETRIES; retry++) {
-        if (i2c_master_transmit(h->i2c_handle, reg, reg_len, I2C_TIMEOUT_MS) == ESP_OK &&
-            i2c_master_receive(h->i2c_handle, data, data_len, I2C_TIMEOUT_MS) == ESP_OK) {
+        if (i2c_worker_write_read(h->dev, reg, reg_len, data, data_len, I2C_TIMEOUT_MS) == ESP_OK) {
             return true;
         }
         delay_ms(5);
