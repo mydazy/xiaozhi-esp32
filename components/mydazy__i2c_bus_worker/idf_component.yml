@@ -1,0 +1,14 @@
+description: "I2C bus serializer (single worker task) for shared multi-driver bus, RF-resilient"
+version: "1.0.0"
+maintainers:
+  - "MyDazy <aimydazy@gmail.com>"
+license: "Apache-2.0"
+targets:
+  - esp32s3
+  - esp32s2
+  - esp32c3
+  - esp32c6
+
+dependencies:
+  idf:
+    version: ">=5.5"
