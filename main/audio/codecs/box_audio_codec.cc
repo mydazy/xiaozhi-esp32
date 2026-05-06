@@ -6,10 +6,11 @@
 #include <driver/i2s_tdm.h>
 #include <cmath>
 #include <vector>
+#include "mydazy_codec_ctrl_i2c.h"
 
 #define TAG "BoxAudioCodec"
 
-BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int output_sample_rate,
+BoxAudioCodec::BoxAudioCodec(void* i2c_worker, int input_sample_rate, int output_sample_rate,
     gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
     gpio_num_t pa_pin, uint8_t es8311_addr, uint8_t es7210_addr, bool input_reference) {
     duplex_ = true; // 是否双工
@@ -31,13 +32,13 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     data_if_ = audio_codec_new_i2s_data(&i2s_cfg);
     assert(data_if_ != NULL);
 
-    // Output
-    audio_codec_i2c_cfg_t i2c_cfg = {
-        .port = (i2c_port_t)1,
-        .addr = es8311_addr,
-        .bus_handle = i2c_master_handle,
+    // Output (ES8311) — 通过 worker 路由
+    mydazy_codec_i2c_cfg_t out_i2c_cfg = {
+        .worker       = (i2c_worker_handle_t)i2c_worker,
+        .addr         = es8311_addr,
+        .scl_speed_hz = 100000,
     };
-    out_ctrl_if_ = audio_codec_new_i2c_ctrl(&i2c_cfg);
+    out_ctrl_if_ = mydazy_codec_new_i2c_ctrl(&out_i2c_cfg);
     assert(out_ctrl_if_ != NULL);
 
     gpio_if_ = audio_codec_new_gpio();
@@ -62,9 +63,13 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     output_dev_ = esp_codec_dev_new(&dev_cfg);
     assert(output_dev_ != NULL);
 
-    // Input
-    i2c_cfg.addr = es7210_addr;
-    in_ctrl_if_ = audio_codec_new_i2c_ctrl(&i2c_cfg);
+    // Input (ES7210) — 通过 worker 路由
+    mydazy_codec_i2c_cfg_t in_i2c_cfg = {
+        .worker       = (i2c_worker_handle_t)i2c_worker,
+        .addr         = es7210_addr,
+        .scl_speed_hz = 100000,
+    };
+    in_ctrl_if_ = mydazy_codec_new_i2c_ctrl(&in_i2c_cfg);
     assert(in_ctrl_if_ != NULL);
 
     es7210_codec_cfg_t es7210_cfg = {};

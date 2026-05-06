@@ -103,11 +103,10 @@ void AudioService::Initialize(AudioCodec* codec) {
         // ─── AEC 后软件增益 + 噪声门 + RMS 调试日志 ───
         const float g = codec_ ? codec_->aec_gain_linear() : 1.0f;
 
-        // 第 1 次扫描：算 AFE 输出 RMS（aec_gain 之前 = AEC/AGC/AFE 原始输出）
+        // 算 AFE 输出帧均方能量（噪声门判断用）
         int64_t sum_in = 0;
         for (int16_t s : data) sum_in += (int64_t)s * s;
         const int32_t avg_in = data.empty() ? 0 : (int32_t)(sum_in / (int64_t)data.size());
-        const int32_t rms_in = (int32_t)std::sqrt((double)avg_in);
 
         // 应用 aec_gain（仅有声段）
         if (g > 1.01f && avg_in >= kNoiseGateRmsSq) {
