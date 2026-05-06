@@ -1,5 +1,10 @@
-// MusicPlayer — adapter that wires the project's AudioCodec / Board / Application
-// into the project-agnostic mydazy::Mp3Player component.
+// MusicPlayer — 项目侧 adapter，桥接 AudioCodec / Board / Application 与
+// project-agnostic mydazy::Mp3Player（v2.0 极简 C 风格 event API）。
+//
+// v2.0 适配要点：
+//   - Mp3Player::Callbacks struct → mp3_event_cb_t 函数指针 + ctx
+//   - GetCurrentTitle 删除 → MusicPlayer 自行维护 title_ 字符串
+//   - Pause/Resume 删除 → 内部判 IsPaused 后调用 PauseToggle
 
 #include "music_player.h"
 
@@ -43,7 +48,6 @@ public:
     int    Read(char* buf, size_t size) override { return http_ ? http_->Read(buf, size) : -1; }
     void   Close()                      override { if (http_) http_->Close(); }
     void   SetTimeout(int ms)           override { if (http_) http_->SetTimeout(ms); }
-    // Range 断点续传需要：转发到底层 Http::SetHeader
     void   SetHeader(const std::string& key, const std::string& value) override {
         if (http_) http_->SetHeader(key, value);
     }
@@ -66,6 +70,54 @@ public:
 std::unique_ptr<CodecAudioOutput> g_audio;
 std::unique_ptr<BoardHttpFactory> g_http;
 
+// 内部维护当前曲名（v2.0 Mp3Player 不再暴露 GetCurrentTitle）
+std::string g_current_title;
+
+// 静态 C 风格事件回调（v2.0 Mp3Player API） — 在 worker task 上下文，必须 Schedule 回主任务
+void OnMp3Event(mydazy::mp3_event_t ev, int extra, const char *msg, void *ctx) {
+    (void)ctx;
+    (void)extra;
+    auto& app = Application::GetInstance();
+    auto title = g_current_title;
+
+    switch (ev) {
+        case mydazy::MP3_EVENT_ERROR: {
+            std::string m = msg ? msg : "";
+            app.Schedule([m = std::move(m)]() {
+                MusicPlayer::GetInstance().Stop();
+                if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+                    ui->SwitchOutPlayerMode();
+                }
+                Application::GetInstance().Alert("Playback failed", m.c_str(),
+                                                  "triangle_exclamation", "");
+            });
+            break;
+        }
+        case mydazy::MP3_EVENT_FINISHED: {
+            app.Schedule([]() {
+                if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+                    ui->SwitchOutPlayerMode();
+                }
+                Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+            });
+            break;
+        }
+        case mydazy::MP3_EVENT_PAUSE_TIMEOUT: {
+            app.Schedule([]() {
+                MusicPlayer::GetInstance().Stop();
+                if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+                    ui->SwitchOutPlayerMode();
+                }
+                Application::GetInstance().Alert("暂停超时", "已自动停止播放", "", "");
+            });
+            break;
+        }
+        case mydazy::MP3_EVENT_STARTED:
+            // 首帧解码完成；当前 UI 在 Play() 同步流程已就位，无需额外动作
+            break;
+    }
+}
+
 }  // namespace
 
 MusicPlayer& MusicPlayer::GetInstance() {
@@ -82,45 +134,11 @@ void MusicPlayer::Initialize(AudioCodec* codec) {
     g_audio = std::make_unique<CodecAudioOutput>(codec);
     g_http  = std::make_unique<BoardHttpFactory>();
 
-    mydazy::Mp3Player::Callbacks cb;
-    // Async error → hop back to the main task before touching UI.
-    cb.on_error = [](const char* status, const char* message) {
-        std::string s = status ? status : "";
-        std::string m = message ? message : "";
-        Application::GetInstance().Schedule([s = std::move(s), m = std::move(m)]() {
-            auto& app = Application::GetInstance();
-            MusicPlayer::GetInstance().Stop();
-            if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
-                ui->SwitchOutPlayerMode();
-            }
-            app.Alert(s.c_str(), m.c_str(), "triangle_exclamation", "");
-        });
-    };
-    // Graceful end-of-stream → 自动退出 Player UI 模式（必须 hop 回主任务，组件回调来自 worker task）
-    cb.on_finished = []() {
-        Application::GetInstance().Schedule([]() {
-            if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
-                ui->SwitchOutPlayerMode();
-            }
-            // 正常播完没走 Stop 路径，单独恢复 WiFi 省电（Play 时切到 PERFORMANCE）
-            Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
-        });
-    };
-    // Pause 超过 ~50s（OSS TCP keepalive 前）→ 主动 Stop + 通知用户
-    // 不让 Resume 后 server 关连接被误判为"播完"
-    cb.on_pause_timeout = []() {
-        Application::GetInstance().Schedule([]() {
-            auto& app = Application::GetInstance();
-            MusicPlayer::GetInstance().Stop();
-            if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
-                ui->SwitchOutPlayerMode();
-            }
-            app.Alert("暂停超时", "已自动停止播放", "", "");
-        });
-    };
-    mydazy::Mp3Player::GetInstance().Initialize(g_audio.get(), g_http.get(), cb);
+    // v2.0：单一 mp3_event_cb_t 替代原 Callbacks struct（4 个 std::function）
+    mydazy::Mp3Player::GetInstance().Initialize(
+        g_audio.get(), g_http.get(), &OnMp3Event, nullptr);
     initialized_ = true;
-    ESP_LOGI(TAG, "MusicPlayer adapter initialized");
+    ESP_LOGI(TAG, "MusicPlayer adapter initialized (Mp3Player v2.0)");
 }
 
 bool MusicPlayer::Play(const std::string& url, const std::string& title, std::string* err_msg) {
@@ -130,12 +148,12 @@ bool MusicPlayer::Play(const std::string& url, const std::string& title, std::st
     }
 
     Application::GetInstance().CloseAudioChannel();
-
-    // 播放期间切 PERFORMANCE（关 WiFi 省电 MIN_MODEM）
     Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
-    bool ok = mydazy::Mp3Player::GetInstance().Play(url, title, err_msg);
+
+    g_current_title = title;   // 项目侧维护，Mp3Player v2.0 不再暴露 GetCurrentTitle
+    bool ok = mydazy::Mp3Player::GetInstance().Play(url.c_str(), title.c_str());
     if (!ok) {
-        // Play 自身失败（参数错或资源分配失败）也要恢复，否则 WiFi 永远不省电
+        if (err_msg) *err_msg = "Mp3Player::Play failed (see log)";
         Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
     }
     return ok;
@@ -143,20 +161,23 @@ bool MusicPlayer::Play(const std::string& url, const std::string& title, std::st
 
 void MusicPlayer::Stop() {
     mydazy::Mp3Player::GetInstance().Stop();
-    // 恢复 WiFi 省电（Application 后续状态切换会再调一次也没关系——幂等）
+    g_current_title.clear();
     Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
 }
 
-bool MusicPlayer::IsPlaying() const {
-    return mydazy::Mp3Player::GetInstance().IsPlaying();
-}
+bool MusicPlayer::IsPlaying() const  { return mydazy::Mp3Player::GetInstance().IsPlaying(); }
+std::string MusicPlayer::GetCurrentTitle() const { return g_current_title; }
 
-std::string MusicPlayer::GetCurrentTitle() const {
-    return mydazy::Mp3Player::GetInstance().GetCurrentTitle();
+/* v2.0：Mp3Player 把 Pause+Resume 合并为 PauseToggle；MusicPlayer 保持双 API 以
+   维持现有调用方（Player UI 暂停按钮等）兼容。仅当当前态与目标态不一致时才切换。*/
+void MusicPlayer::Pause() {
+    auto& mp3 = mydazy::Mp3Player::GetInstance();
+    if (!mp3.IsPaused()) mp3.PauseToggle();
 }
-
-void MusicPlayer::Pause() { mydazy::Mp3Player::GetInstance().Pause(); }
-void MusicPlayer::Resume() { mydazy::Mp3Player::GetInstance().Resume(); }
-bool MusicPlayer::IsPaused() const { return mydazy::Mp3Player::GetInstance().IsPaused(); }
+void MusicPlayer::Resume() {
+    auto& mp3 = mydazy::Mp3Player::GetInstance();
+    if (mp3.IsPaused()) mp3.PauseToggle();
+}
+bool MusicPlayer::IsPaused() const   { return mydazy::Mp3Player::GetInstance().IsPaused(); }
 int  MusicPlayer::GetPositionMs() const { return mydazy::Mp3Player::GetInstance().GetPositionMs(); }
 int  MusicPlayer::GetTotalDurationMs() const { return mydazy::Mp3Player::GetInstance().GetTotalDurationMs(); }
