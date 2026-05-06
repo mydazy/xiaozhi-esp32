@@ -135,7 +135,10 @@ void Ml307Board::NetworkTask() {
 }
 
 void Ml307Board::StartNetwork() {
-    // Create network initialization task and return immediately
+    // ─── 系统冷启动电源稳定窗口 ────────────────────────────────────────────
+    // 现象：上电瞬间音频/屏幕/PSRAM/Flash 同时上电浪涌，ML307R 欠压启动失败，必须拔插电源才能联网。
+    vTaskDelay(pdMS_TO_TICKS(1500));
+
     xTaskCreatePinnedToCore([](void* arg) {
         Ml307Board* board = static_cast<Ml307Board*>(arg);
         board->NetworkTask();
