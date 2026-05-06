@@ -11,10 +11,13 @@
  * Features :
  *   - Two-phase init: axs5106l_touch_new (before LVGL) / axs5106l_touch_attach_lvgl (after LVGL)
  *   - Automatic firmware upgrade on first boot
- *   - INT-pin polling (no GPIO ISR required)
- *   - Noise rejection: INT debounce (3 ms) + release debounce (2 frames) + speed filter
+ *   - Hybrid INT handling: GPIO_NEGEDGE ISR for RF-storm detection (edge counting only,
+ *     never reads I2C), LVGL timer (~30 ms) polls level + reads touch frame
+ *   - Noise rejection: INT debounce (8 ms) + release debounce (2 frames) + speed filter
+ *     (2500 px/s) + jitter-variance gate + INT-edge storm detector (12 edges/s → 2 s mute)
  *   - Software gesture recognition: tap, double-tap, long-press, 4-direction swipe
- *   - Sleep / resume
+ *     with trajectory-efficiency gate against RF-synthesised pseudo-swipes
+ *   - Sleep / resume (also disables INT ISR to prevent wake from RF noise)
  *   - Debug overlay (AXS5106L_TOUCH_DEBUG_OVERLAY=1): red tracking dot + raw-coordinate log
  */
 
@@ -25,6 +28,8 @@
 #include <string.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_attr.h>
+#include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -52,26 +57,69 @@ static const char *TAG = "axs5106l_touch";
 #define TOUCH_X_RAW_RANGE  (TOUCH_X_RAW_MAX - TOUCH_X_RAW_MIN)  /* 263 */
 
 /* ---------- Gesture thresholds ---------- */
-/* On compact 1.83"/284-px panels, the previous 30 px swipe + 35 px tap pairing
- * left a 30~35 px ambiguous zone that biased toward tap. 25/24 split makes
- * small swipes register reliably without enlarging the tap envelope. */
-#define SWIPE_THRESHOLD      25       /* min travel for swipe (px) */
-#define CLICK_MAX_TIME_US    500000   /* max press duration for tap (500 ms — slow-lift tolerance) */
-#define CLICK_MIN_TIME_US    40000    /* min press duration for tap, filters RF spikes (40 ms) */
-#define CLICK_MAX_MOVE       24       /* max travel still considered a tap (px) */
-#define LONG_PRESS_TIME_US   600000   /* long-press threshold (600 ms) */
-#define DOUBLE_CLICK_TIME_US 500000   /* max interval between two taps for double-tap (500 ms) */
-#define DOUBLE_CLICK_DIST    60       /* max distance between tap positions for double-tap (px) */
+/* Strategy: keep storm-detector + INT-debounce + per-frame validity as the
+ * primary RF defence, relax the gesture-layer gates so real light taps and
+ * short swipes are not eaten. The storm detector is the only RF gate based
+ * on a physical signature (edge frequency); time/jitter/speed gates are
+ * indirect and tend to false-positive on real fingers. */
+#define SWIPE_THRESHOLD      20       /* min travel for swipe (px) */
+#define CLICK_MAX_TIME_US    800000   /* max press duration for tap (800 ms) */
+#define CLICK_MIN_TIME_US    100000   /* min press duration for tap (100 ms — light tap allowed) */
+#define CLICK_MAX_MOVE       20       /* max travel still considered a tap (px) */
+#define LONG_PRESS_TIME_US   500000   /* long-press threshold (500 ms — child-friendly PTT) */
+#define DOUBLE_CLICK_TIME_US 600000   /* max interval between two taps for double-tap (600 ms) */
+#define DOUBLE_CLICK_DIST    50       /* max distance between tap positions for double-tap (px) */
+#define CLICK_MIN_FRAMES     3        /* tap needs ≥3 PRESSED frames (~90 ms @ 30 ms LVGL) */
+#define SWIPE_MIN_TIME_US    150000   /* min swipe duration (150 ms) */
+#define SWIPE_MIN_FRAMES     5        /* swipe needs ≥5 PRESSED frames */
+#define LONG_PRESS_MIN_FRAMES 12      /* long-press needs ≥12 frames (~360 ms @ 30 ms LVGL) — match 500 ms threshold */
+/* Cumulative jitter budget for tap. Real fingers stay within ~5 px micro-movement
+ * across ~5 frames (≈25 px). 24 was chosen as the floor that still passes
+ * all measured real taps but flags any frame that hops > 8 px on average. */
+#define JITTER_LIMIT_FOR_TAP   24
+/* Swipe trajectory efficiency: real fingers travel in (mostly) straight lines,
+ * so the per-frame jitter sum stays close to the start-to-end manhattan distance.
+ * RF coupling synthesises pseudo-swipes by jumping between random coordinates,
+ * inflating jitter_sum to several times manhattan. We require:
+ *   jitter_sum ≤ manhattan × SWIPE_TRAJECTORY_RATIO + SWIPE_TRAJECTORY_BIAS
+ * with bias allowing minor finger micro-movements on short swipes. */
+#define SWIPE_TRAJECTORY_RATIO 2     /* allow up to 2× direct distance for jitter */
+#define SWIPE_TRAJECTORY_BIAS  20    /* +20 px buffer for short legitimate swipes */
 
 /* ---------- Debounce / noise ---------- */
-#define INT_DEBOUNCE_US   2000  /* INT must stay low ≥2 ms to qualify as press */
-#define RELEASE_DEBOUNCE  1     /* consecutive no-touch frames before reporting release */
-#define MAX_SPEED_PX_S    3000  /* velocity gate: 284px@220DPI, fast swipe ~2600, RF transient >9000 */
-/* RF storm protection: a press arriving within this window after the
- * previous release must persist for one additional LVGL frame before being
- * reported to LVGL. Long-idle-to-press transitions are unaffected — a single
- * tap, a long swipe, or first touch after >200 ms quiet has zero added latency. */
-#define POST_RELEASE_GUARD_US  200000  /* 200 ms */
+/* 8 ms (was 15 ms): real press lasts 50+ ms so 8 ms is invisible to the user,
+ * yet still rejects RF spikes which are typically 1-5 ms. 15 ms was adding
+ * perceptible lag when stacked with the gesture-layer time gate. */
+#define INT_DEBOUNCE_US   8000  /* INT must stay low ≥8 ms to qualify as press */
+#define RELEASE_DEBOUNCE  2     /* consecutive no-touch frames before reporting release */
+/* 2500 px/s: real fast swipe peaks ~1500-2000 px/s on a 1.83" panel, RF coordinate
+ * jumps are typically 5000+ px/s (single-frame teleport across screen). 2500 keeps
+ * 25 % margin for vigorous real swipes while denying every RF teleport observed. */
+#define MAX_SPEED_PX_S    2500
+/* Post-release guard: minimal hold-off so true rapid double-tap stays snappy.
+ * The storm detector + INT debounce already shoulder phantom-press defence. */
+#define POST_RELEASE_GUARD_US  100000  /* 100 ms */
+
+/* INT-falling-edge storm detection — strongest physical discriminator.
+ * A real finger produces 1–3 INT falling edges per second; 4G RF coupling
+ * generates 50+ per second. Once the rolling 1-second count crosses the
+ * threshold we suppress all touch reads for 5 seconds, which is long enough
+ * to outlast a typical 4G TX burst (CSQ poll, MQTT publish, OTA chunk).
+ *
+ * The ISR runs in IRAM, increments a 32-bit counter (atomic on Xtensa LX7),
+ * and never blocks. The LVGL read callback samples + windowizes the counter
+ * — no queue, no semaphore, no priority inversion risk. */
+#define INT_STORM_WINDOW_US   1000000  /* rolling count window: 1 s */
+/* 12 edges/s threshold (was 5):
+ *   - 5 was rejecting real presses — finger contact toggles INT 3–5 times/s
+ *     during normal touch, occasionally crossing 5 → false storm → 2 s mute
+ *     → user perceives "touch dead, must press long".
+ *   - 4G TX bursts produce 30–140 edges/s (real measured), so 12 still catches
+ *     them with 2.5× margin while passing real fingers untouched.
+ *   - LVGL drag-into-click is now blocked by per-widget PRESS_LOCK, so we no
+ *     longer need the storm detector to fire on borderline cases. */
+#define INT_STORM_THRESHOLD   12       /* edges/s above which RF storm declared */
+#define INT_STORM_MUTE_US     2000000  /* mute touch reads for 2 s after storm */
 
 /* ---------- I2C ---------- */
 #define I2C_TIMEOUT_MS  100
@@ -99,6 +147,13 @@ typedef struct {
 typedef struct {
     bool     pressed;
     bool     long_fired;
+    uint8_t  sample_count;          /* PRESSED frames in current press; tap requires ≥CLICK_MIN_FRAMES */
+    /* Inter-frame jitter sum: real fingers stay within ≤2 px between LVGL frames;
+     * RF-synthesised "stable" coordinates still exhibit 5–30 px hops between
+     * consecutive samples. A press whose jitter sum exceeds JITTER_LIMIT_FOR_TAP
+     * is downgraded to "unstable" and tap is suppressed (swipe still allowed). */
+    uint16_t jitter_sum;
+    bool     jitter_unstable;
     int16_t  start_x, start_y;
     int16_t  last_x,  last_y;
     uint64_t press_time;
@@ -142,6 +197,14 @@ struct axs5106l_touch_t {
      * accumulate; on threshold, i2c_master_bus_reset() sends 9 SCL pulses to unlock. */
     uint8_t                 i2c_err_streak;
 
+    /* INT-edge storm detector. ISR-only writers, LVGL-task readers — 32-bit
+     * scalar reads/writes are atomic on Xtensa, no lock needed. */
+    volatile uint32_t       int_edge_count;
+    uint32_t                int_edge_window_baseline;
+    uint64_t                int_edge_window_start_us;
+    uint64_t                storm_mute_until_us;
+    bool                    isr_installed;
+
     touch_state_t           touch;
     gesture_state_t         gesture;
 
@@ -155,6 +218,7 @@ struct axs5106l_touch_t {
 /*  Forward declarations                                               */
 /* ------------------------------------------------------------------ */
 
+static void IRAM_ATTR int_falling_edge_isr(void *arg);
 static void reset_chip(axs5106l_touch_handle_t self);
 static bool check_and_upgrade_firmware(axs5106l_touch_handle_t self);
 static bool write_register(axs5106l_touch_handle_t self, uint8_t reg, const uint8_t *data, size_t len);
@@ -262,16 +326,32 @@ esp_err_t axs5106l_touch_attach_lvgl(axs5106l_touch_handle_t self)
     if (self == NULL) return ESP_ERR_INVALID_ARG;
     if (self->lvgl_indev != NULL) return ESP_OK;  /* idempotent */
 
-    /* INT pin: polled input, no ISR — LVGL timer calls lvgl_read_cb every ~30 ms. */
+    /* INT pin: input + GPIO_NEGEDGE ISR for RF storm detection only (edge counter).
+     * Actual touch reads still happen in lvgl_read_cb at ~30 ms cadence by polling
+     * INT level + reading I2C. Internal pull-up is the minimum-viable defence;
+     * production HW should add 4.7 kΩ external pull-up to VCC-3.3V for RF immunity. */
     gpio_config_t int_cfg = {
         .pin_bit_mask = (1ULL << self->int_gpio),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type    = GPIO_INTR_DISABLE,
+        .intr_type    = GPIO_INTR_NEGEDGE,
     };
     esp_err_t ret = gpio_config(&int_cfg);
     if (ret != ESP_OK) return ret;
+
+    /* Install global ISR service (idempotent — returns ALREADY if installed elsewhere). */
+    esp_err_t isr_svc = gpio_install_isr_service(0);
+    if (isr_svc != ESP_OK && isr_svc != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "gpio_install_isr_service failed: %s, storm detection disabled",
+                 esp_err_to_name(isr_svc));
+    } else if (gpio_isr_handler_add(self->int_gpio, int_falling_edge_isr, self) == ESP_OK) {
+        self->isr_installed = true;
+        self->int_edge_window_start_us = esp_timer_get_time();
+        ESP_LOGI(TAG, "INT edge ISR installed for RF storm detection");
+    } else {
+        ESP_LOGW(TAG, "gpio_isr_handler_add failed, storm detection disabled");
+    }
 
     self->lvgl_indev = lv_indev_create();
     if (self->lvgl_indev == NULL) {
@@ -290,6 +370,10 @@ esp_err_t axs5106l_touch_del(axs5106l_touch_handle_t self)
 {
     if (self == NULL) return ESP_ERR_INVALID_ARG;
 
+    if (self->isr_installed) {
+        gpio_isr_handler_remove(self->int_gpio);
+        self->isr_installed = false;
+    }
     if (self->lvgl_indev != NULL) {
         lv_indev_delete(self->lvgl_indev);
         self->lvgl_indev = NULL;
@@ -312,6 +396,7 @@ esp_err_t axs5106l_touch_sleep(axs5106l_touch_handle_t self)
 {
     if (self == NULL) return ESP_ERR_INVALID_ARG;
     self->sleeping = true;
+    if (self->isr_installed) gpio_intr_disable(self->int_gpio);
     const uint8_t cmd = 0x03;
     write_register(self, AXS5106L_REG_SLEEP, &cmd, 1);
     gpio_set_level(self->rst_gpio, 1);
@@ -324,6 +409,12 @@ esp_err_t axs5106l_touch_resume(axs5106l_touch_handle_t self)
     self->sleeping = false;
     reset_chip(self);
     vTaskDelay(pdMS_TO_TICKS(10));
+    /* Reset storm-detection window so any edges latched across sleep
+     * don't poison the first second after resume. */
+    self->int_edge_window_start_us = esp_timer_get_time();
+    self->int_edge_window_baseline = self->int_edge_count;
+    self->storm_mute_until_us      = 0;
+    if (self->isr_installed) gpio_intr_enable(self->int_gpio);
     return ESP_OK;
 }
 
@@ -352,6 +443,55 @@ void axs5106l_touch_set_gesture_callback(axs5106l_touch_handle_t self,
 lv_indev_t *axs5106l_touch_get_lvgl_device(axs5106l_touch_handle_t self)
 {
     return (self != NULL) ? self->lvgl_indev : NULL;
+}
+
+/* ------------------------------------------------------------------ */
+/*  INT-edge storm detector                                            */
+/* ------------------------------------------------------------------ */
+
+/* IRAM-resident ISR. Increments a 32-bit counter only — never reads I2C, never
+ * logs, never blocks. 32-bit scalar writes are atomic on Xtensa LX7. */
+static void IRAM_ATTR int_falling_edge_isr(void *arg)
+{
+    axs5106l_touch_handle_t self = (axs5106l_touch_handle_t)arg;
+    self->int_edge_count++;
+}
+
+/* Called from lvgl_read_cb on the LVGL task. Returns true if RF storm is in
+ * progress and reads should be suppressed. */
+static bool storm_detected(axs5106l_touch_handle_t self, uint64_t now)
+{
+    if (now < self->storm_mute_until_us) {
+        /* Keep baseline pinned to current count during mute, otherwise edges
+         * accumulated while muted would land in the next 1 s window and
+         * re-trigger the storm immediately on exit. */
+        self->int_edge_window_baseline = self->int_edge_count;
+        self->int_edge_window_start_us = now;
+        return true;
+    }
+    if (!self->isr_installed) return false;
+
+    if (now - self->int_edge_window_start_us >= INT_STORM_WINDOW_US) {
+        uint32_t edges = self->int_edge_count - self->int_edge_window_baseline;
+        if (edges >= INT_STORM_THRESHOLD) {
+            ESP_LOGW(TAG, "RF storm: %lu INT edges in last %lu ms, mute %lu ms",
+                     (unsigned long)edges,
+                     (unsigned long)((now - self->int_edge_window_start_us) / 1000),
+                     (unsigned long)(INT_STORM_MUTE_US / 1000));
+            self->storm_mute_until_us = now + INT_STORM_MUTE_US;
+            /* Drop any latched press so LVGL sees a clean release. */
+            self->touch.pressed       = false;
+            self->touch.press_pending = false;
+            self->touch.int_low_since = 0;
+            self->touch.last_time     = 0;
+            self->int_edge_window_start_us = now;
+            self->int_edge_window_baseline = self->int_edge_count;
+            return true;
+        }
+        self->int_edge_window_start_us = now;
+        self->int_edge_window_baseline = self->int_edge_count;
+    }
+    return false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -446,6 +586,13 @@ static void lvgl_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
     axs5106l_touch_handle_t self = (axs5106l_touch_handle_t)lv_indev_get_user_data(indev);
     if (self == NULL || self->sleeping) {
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+
+    /* RF storm gate: if INT-edge frequency in the last second exceeds the
+     * threshold, drop reads entirely until the storm subsides. */
+    if (storm_detected(self, esp_timer_get_time())) {
         data->state = LV_INDEV_STATE_RELEASED;
         return;
     }
@@ -567,6 +714,7 @@ static bool read_touch(axs5106l_touch_handle_t self, uint16_t *out_x, uint16_t *
 
     if (raw_x == 0xFFF && raw_y == 0xFFF) return false;  /* all-ones invalid frame */
     if (raw_x > TOUCH_MAX_X + 50 || raw_y > TOUCH_MAX_Y + 50) return false;
+    if (buf[3] == 0xFF && buf[5] == 0xFF) return false;
 
 #if AXS5106L_TOUCH_DEBUG_OVERLAY
     if (raw_x < self->raw_stats.raw_min_x) self->raw_stats.raw_min_x = raw_x;
@@ -595,13 +743,16 @@ static bool read_touch(axs5106l_touch_handle_t self, uint16_t *out_x, uint16_t *
     if (self->mirror_x) sx = self->width  - 1 - sx;
     if (self->mirror_y) sy = self->height - 1 - sy;
 
-    /* Gate 3: velocity filter — rejects 4G-RF-induced position jumps (>3000 px/s). */
+    /* Gate 3: velocity filter — rejects 4G-RF-induced coordinate teleports.
+     * Uses microsecond resolution so consecutive frames within the same ms
+     * are still rate-checked (previous ms granularity had a 0-ms blind spot). */
     if (self->touch.last_time > 0) {
-        uint32_t dt_ms = (uint32_t)((now - self->touch.last_time) / 1000);
-        if (dt_ms > 0 && dt_ms < 500) {
+        uint64_t dt_us = now - self->touch.last_time;
+        if (dt_us > 0 && dt_us < 500000) {
             uint32_t dist = (uint32_t)(abs((int)sx - (int)self->touch.last_x) +
                                        abs((int)sy - (int)self->touch.last_y));
-            if (dist * 1000 / dt_ms > MAX_SPEED_PX_S) return false;
+            // px/s = dist * 1e6 / dt_us; compare without division: dist * 1e6 > MAX * dt_us
+            if ((uint64_t)dist * 1000000ULL > (uint64_t)MAX_SPEED_PX_S * dt_us) return false;
         }
     }
 
@@ -626,23 +777,35 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
     gesture_state_t *g = &self->gesture;
 
     if (pressed && !g->pressed) {
-        g->pressed    = true;
-        g->long_fired = false;
-        g->start_x    = x;
-        g->start_y    = y;
-        g->last_x     = x;
-        g->last_y     = y;
-        g->press_time = now;
+        g->pressed         = true;
+        g->long_fired      = false;
+        g->sample_count    = 1;
+        g->jitter_sum      = 0;
+        g->jitter_unstable = false;
+        g->start_x         = x;
+        g->start_y         = y;
+        g->last_x          = x;
+        g->last_y          = y;
+        g->press_time      = now;
         return;
     }
 
     if (pressed && g->pressed) {
+        uint16_t frame_jitter = (uint16_t)(abs(x - g->last_x) + abs(y - g->last_y));
         g->last_x = x;
         g->last_y = y;
+        if (g->sample_count < 0xFF) g->sample_count++;
+        // 累计每帧位移（含大跳跃帧，因真 swipe 也会出现）。溢出时 saturate 保护。
+        // JITTER_PER_FRAME_LIMIT 在此分支不使用——它原仅作"小晃动"的标识，
+        // 但 jitter_sum 的语义本就是累加全部位移，分支判断属冗余。
+        uint32_t new_sum = (uint32_t)g->jitter_sum + frame_jitter;
+        g->jitter_sum = (new_sum < 0xFFFF) ? (uint16_t)new_sum : 0xFFFF;
+        if (g->jitter_sum > JITTER_LIMIT_FOR_TAP) g->jitter_unstable = true;
         if (!g->long_fired) {
             int dx = x - g->start_x, dy = y - g->start_y;
             if (now - g->press_time >= LONG_PRESS_TIME_US &&
-                abs(dx) + abs(dy) < CLICK_MAX_MOVE) {
+                abs(dx) + abs(dy) < CLICK_MAX_MOVE &&
+                g->sample_count >= LONG_PRESS_MIN_FRAMES) {
                 g->long_fired      = true;
                 g->last_click_time = 0;
                 ESP_LOGI(TAG, "long-press (%d,%d)", g->start_x, g->start_y);
@@ -667,7 +830,10 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
         int manhattan = abs(dx) + abs(dy);
         uint64_t dur  = now - g->press_time;
 
-        if (manhattan < CLICK_MAX_MOVE && dur >= CLICK_MIN_TIME_US && dur < CLICK_MAX_TIME_US) {
+        if (manhattan < CLICK_MAX_MOVE &&
+            dur >= CLICK_MIN_TIME_US && dur < CLICK_MAX_TIME_US &&
+            g->sample_count >= CLICK_MIN_FRAMES &&
+            !g->jitter_unstable) {
             int click_dist = abs(g->start_x - g->last_click_x) +
                              abs(g->start_y - g->last_click_y);
             bool is_double = g->last_click_time > 0 &&
@@ -687,8 +853,19 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
             return;
         }
 
+        // 任何越过 SWIPE_THRESHOLD 的释放都不应再被视为 tap 链的一部分——
+        // 即便后续判定为不合规 swipe（被 trajectory 门拒绝）也要清除 last_click_time，
+        // 避免"tap → 拒绝 swipe → tap"被错配为 double-tap。
         if (manhattan >= SWIPE_THRESHOLD) {
             g->last_click_time = 0;
+        }
+
+        // Trajectory-efficiency gate: real swipe ≈ straight line; RF jumps fail this.
+        uint16_t traj_budget = (uint16_t)manhattan * SWIPE_TRAJECTORY_RATIO + SWIPE_TRAJECTORY_BIAS;
+        if (manhattan >= SWIPE_THRESHOLD &&
+            dur >= SWIPE_MIN_TIME_US &&
+            g->sample_count >= SWIPE_MIN_FRAMES &&
+            g->jitter_sum <= traj_budget) {
             bool horiz = abs(dx) > abs(dy);
             axs5106l_gesture_t kind;
             const char *name;

@@ -55,6 +55,10 @@ public:
     virtual void SetPowerSaveLevel(PowerSaveLevel level) override;
     virtual std::string GetBoardJson() override;
     virtual std::string GetDeviceStatusJson() override;
+
+    // Control Center 接口：双网板支持网络切换
+    virtual bool CanSwitchNetwork() const override { return true; }
+    virtual void SwitchNetwork() override { SwitchNetworkType(); }
 };
 
 #endif // DUAL_NETWORK_BOARD_H 

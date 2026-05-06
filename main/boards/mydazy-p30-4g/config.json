@@ -8,7 +8,7 @@
                 "CONFIG_BOARD_TYPE_MYDAZY_P30_4G=y",
                 "CONFIG_LV_DEF_REFR_PERIOD=33",
                 "CONFIG_FLASH_DEFAULT_ASSETS=y",
-                "CONFIG_USE_EMOTE_MESSAGE_STYLE=y",
+                "CONFIG_USE_EMOTE_MESSAGE_STYLE=n",
                 "CONFIG_LV_USE_LODEPNG=y",
                 "CONFIG_LV_USE_GIF=y",
                 "CONFIG_LV_GIF_CACHE_DECODE_DATA=y",

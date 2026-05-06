@@ -1,0 +1,26 @@
+dependencies:
+  idf: '>=5.3'
+description: SC7A20H 3-axis accelerometer driver with motion detection, deep-sleep
+  wakeup and LIS2DH12-compatible register layout (Silan Microelectronics)
+documentation: https://github.com/mydazy/esp_sc7a20h#readme
+files:
+  exclude:
+  - test/**
+  - examples/**/build/**
+  - .github/**
+issues: https://github.com/mydazy/esp_sc7a20h/issues
+license: Apache-2.0
+maintainers:
+- mydazy <opensource@mydazy.com>
+repository: https://github.com/mydazy/esp_sc7a20h.git
+tags:
+- sensor
+- accelerometer
+- i2c
+- sc7a20h
+- lis2dh12
+- motion-detection
+- deep-sleep
+- wakeup
+url: https://github.com/mydazy/esp_sc7a20h
+version: 2.1.0

@@ -20,7 +20,7 @@ dependencies:
   #     - if: target in [esp32s3]
 
   # ── 传感器（SC7A20H 三轴加速度计：拾取唤醒 / 运动检测） ─────
-  mydazy/esp_sc7a20h: ^2.0.0
+  # 本地 fork: components/mydazy__esp_sc7a20h（v2.1.0：清 latch 修立即唤醒 bug）
 
   # ── 音频链路 ────────────────────────────────────────────────
   espressif/esp_codec_dev: ~1.5.6           # box_audio_codec / es7111_audio_codec

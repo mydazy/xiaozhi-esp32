@@ -23,6 +23,7 @@
 #include "power_manager.h"
 #include "mcp_server.h"
 #include "ota.h"
+#include "education_mcp_tools.h"
 #include "assets.h"
 #include <font_awesome.h>
 #include <sys/stat.h>
@@ -50,6 +51,7 @@
 #include <esp_adc/adc_cali_scheme.h>
 
 #include <atomic>
+#include <math.h>
 
 #define TAG "MyDazyP30_4GBoard"
 
@@ -59,6 +61,18 @@ inline void AbortIfSpeaking() {
     auto& app = Application::GetInstance();
     if (app.GetDeviceState() == kDeviceStateSpeaking) {
         app.AbortSpeaking(kAbortReasonNone);
+    }
+}
+
+// 同时打断 Speaking 与 Listening（双击退出/出厂确认/9 连击等场景）
+// 与 AbortIfSpeaking 区别：StopListening(false) 不送 stop 信号，让服务端立即释放，不留 Listening 等 TTS
+inline void AbortAnyConversation() {
+    auto& app = Application::GetInstance();
+    auto state = app.GetDeviceState();
+    if (state == kDeviceStateSpeaking) {
+        app.AbortSpeaking(kAbortReasonNone);
+    } else if (state == kDeviceStateListening) {
+        app.StopListening(false);
     }
 }
 
@@ -128,8 +142,20 @@ private:
     std::atomic<bool> waiting_factory_reset_confirm_{false};
     uint64_t factory_reset_request_time_ = 0;
 
+    // 触摸 RF 风暴节流：1.2s 内 ≥3 个 gesture 视为干扰，静默 3s
+    int64_t last_gesture_us_ = 0;
+    int64_t storm_mute_until_us_ = 0;
+    uint8_t gesture_burst_ = 0;
+    // PTT 配对保护：仅在 LongPress 真正启动了录音时，LongPressRelease 才生效
+    std::atomic<bool> ptt_active_{false};
+    // PTT 超时兜底：60s 内若未收到 release（RF 干扰或硬件离手丢事件），自动 stop
+    esp_timer_handle_t ptt_timeout_timer_ = nullptr;
+
     // 状态定时上报
     esp_timer_handle_t status_timer_ = nullptr;
+
+    // 摇一摇识别任务句柄（仅识别 + 日志，业务接入留待后续）
+    TaskHandle_t shake_detect_task_ = nullptr;
 
     // ========================================================
     // 硬件初始化
@@ -273,14 +299,77 @@ private:
     void InitializeSc7a20h() {
         sc7a20h_config_t cfg = SC7A20H_DEFAULT_CONFIG();
         cfg.i2c_addr = 0x19;
-        if (sc7a20h_create_with_motion_detection(i2c_bus_, &cfg, NULL, &sc7a20h_sensor_) == ESP_OK) {
-            ESP_LOGI(TAG, "SC7A20H传感器初始化成功（运动检测+防抖已启用）");
+        // 调高拾取唤醒阈值：默认 256mg/20ms 桌面轻碰即触发
+        // ±4g 量程下 LSb=32mg：threshold=0x18 ≈ 768mg（轻拿起的加速度门槛）
+        // ODR=100Hz 下 1 step=10ms：duration=0x14 ≈ 200ms（必须持续主动抬起）
+        // 综合考虑场景：床上翻身/桌面碰撞/孩子坐起触碰均瞬冲击 <200ms，被 duration 滤掉；
+        //              "拿起来"（持续 200ms 以上的 0.77g 加速度）才唤醒
+        sc7a20h_motion_config_t mcfg = SC7A20H_DEFAULT_MOTION_CONFIG();
+        mcfg.threshold = 0x18;
+        mcfg.duration  = 0x14;
+        if (sc7a20h_create_with_motion_detection(i2c_bus_, &cfg, &mcfg, &sc7a20h_sensor_) == ESP_OK) {
+            ESP_LOGI(TAG, "SC7A20H传感器初始化成功（运动检测+防抖已启用，threshold=0x%02X duration=0x%02X）",
+                     mcfg.threshold, mcfg.duration);
             sc7a20h_initialized_ = true;
         } else {
             ESP_LOGE(TAG, "SC7A20H传感器初始化失败");
             sc7a20h_sensor_ = nullptr;
             sc7a20h_initialized_ = false;
         }
+    }
+
+    // 摇一摇识别（孩子拿起来甩 → 切话题 / 换 emoji / 抽奖等）
+    // 当前阶段：仅识别 + 打日志，确认算法稳定后再绑业务
+    // 算法：100ms 轮询，6 帧（600ms）滑动窗口；
+    //       帧偏离重力 |‖a‖-1g| > 1500mg 计强动；窗口内 ≥3 帧强动 = 摇一摇。
+    //       触发后冷却 1.5s 防连发。
+    static void ShakeDetectTaskEntry(void* arg) {
+        auto* board = static_cast<MyDazyP30_4GBoard*>(arg);
+        constexpr TickType_t kPeriodTicks  = pdMS_TO_TICKS(100);
+        constexpr float      kStrongMg     = 1500.0f;       // 单帧强动阈值
+        constexpr int        kWindowSize   = 6;             // 600ms 窗口
+        constexpr int        kStrongTarget = 3;             // 窗口内 ≥3 帧 = 摇
+        constexpr int64_t    kCooldownUs   = 1500 * 1000LL; // 触发后 1.5s 冷却
+
+        float   window[kWindowSize] = {0};
+        int     wi = 0;
+        int64_t last_shake_us = 0;
+
+        TickType_t last_wake = xTaskGetTickCount();
+        while (true) {
+            vTaskDelayUntil(&last_wake, kPeriodTicks);
+            if (!board->sc7a20h_initialized_ || !board->sc7a20h_sensor_) continue;
+
+            sc7a20h_acce_t a;
+            if (sc7a20h_get_acce(board->sc7a20h_sensor_, &a) != ESP_OK) continue;
+
+            float mag = sqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
+            window[wi] = fabsf(mag - 1000.0f);  // 偏离 1g 重力
+            wi = (wi + 1) % kWindowSize;
+
+            int   strong = 0;
+            float peak   = 0;
+            for (int i = 0; i < kWindowSize; ++i) {
+                if (window[i] > kStrongMg) strong++;
+                if (window[i] > peak) peak = window[i];
+            }
+
+            int64_t now_us = esp_timer_get_time();
+            if (strong >= kStrongTarget && (now_us - last_shake_us) > kCooldownUs) {
+                ESP_LOGI(TAG, "Shake detected! peak=%.0fmg, strong=%d/%d frames",
+                         peak, strong, kWindowSize);
+                last_shake_us = now_us;
+                // TODO: 后续在此挂业务——切话题 / 换 emoji / 抽奖
+            }
+        }
+    }
+
+    void StartShakeDetect() {
+        if (!sc7a20h_initialized_) return;
+        // Core 1（PSRAM 栈红线 + Core 0 红线均不沾）+ P1 后台 + 2.5KB 内部 RAM 栈
+        // 100ms 周期，I2C 读 6B + 一次 sqrtf；CPU < 1%
+        xTaskCreatePinnedToCore(&MyDazyP30_4GBoard::ShakeDetectTaskEntry,
+                                "accel_shake", 2560, this, 1, &shake_detect_task_, 1);
     }
 
     void PrepareTouchHardware() {
@@ -301,14 +390,57 @@ private:
         static_cast<MyDazyP30_4GBoard*>(ctx)->WakeUp();
     }
 
-    static void OnTouchGesture(axs5106l_gesture_t g, int16_t /*x*/, int16_t /*y*/, void *ctx) {
+    static void OnTouchGesture(axs5106l_gesture_t g, int16_t x, int16_t y, void *ctx) {
         auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
         self->WakeUp();
-        if (g == AXS5106L_GESTURE_SINGLE_CLICK) {
+
+        // 触摸交互矩阵（量产稳定向）：
+        //   SINGLE_CLICK         → Idle 唤醒 / Speaking 打断（与 BOOT 单击同义）
+        //   DOUBLE_CLICK         → 退出对话回时钟主屏（孩子最熟悉的"退出"心智）
+        //   LONG_PRESS / RELEASE → 微信 PTT，按住说话松开发送（500ms 门槛，驱动内）
+        //   SWIPE_DOWN/UP/LEFT/RIGHT → 全部丢弃（ControlCenter 量产期已 stub，无入口）
+        bool is_click        = (g == AXS5106L_GESTURE_SINGLE_CLICK);
+        bool is_double_click = (g == AXS5106L_GESTURE_DOUBLE_CLICK);
+        bool is_long_press   = (g == AXS5106L_GESTURE_LONG_PRESS);
+        bool is_long_release = (g == AXS5106L_GESTURE_LONG_PRESS_RELEASE);
+        if (!is_click && !is_double_click && !is_long_press && !is_long_release) return;
+
+        // 状态栏区域（顶部 HEADER_HEIGHT=36 px）单击/双击由 LVGL CLICKED 独占处理
+        // 这里跳过避免双路径同时唤醒/打断
+        if ((is_click || is_double_click) && y < 36) {
+            ESP_LOGD(TAG, "状态栏点击交由 LVGL 处理，driver 路径忽略");
+            return;
+        }
+        (void)x;
+
+        // RF 风暴节流：仅对 SINGLE_CLICK / DOUBLE_CLICK 计 burst。
+        // LONG_PRESS / RELEASE 是低频长事件（按住-松开成对），不计入风暴指标。
+        if (is_click || is_double_click) {
+            int64_t now = esp_timer_get_time();
+            if (now < self->storm_mute_until_us_) {
+                ESP_LOGD(TAG, "RF 风暴静默期，丢弃 gesture=%d", (int)g);
+                return;
+            }
+            if (now - self->last_gesture_us_ < 1200000) {
+                if (++self->gesture_burst_ >= 3) {
+                    ESP_LOGW(TAG, "检测到 RF 触摸风暴，静默 3s");
+                    self->storm_mute_until_us_ = now + 3000000;
+                    self->gesture_burst_ = 0;
+                    return;
+                }
+            } else {
+                self->gesture_burst_ = 1;
+            }
+            self->last_gesture_us_ = now;
+        }
+
+        if (is_click) {
             self->HandleTouchSingleClick();
-        } else if (g == AXS5106L_GESTURE_LONG_PRESS) {
+        } else if (is_double_click) {
+            self->HandleTouchDoubleClick();
+        } else if (is_long_press) {
             self->HandleTouchLongPress();
-        } else if (g == AXS5106L_GESTURE_LONG_PRESS_RELEASE) {
+        } else if (is_long_release) {
             self->HandleTouchLongPressRelease();
         }
     }
@@ -355,30 +487,37 @@ private:
         }
     }
 
-    // 长按 PTT：仅 MQTT 协议下启用（WebSocket 走流式 VAD/AEC 语义，不需要 PTT）
-    // 行为：打断 TTS → 启动 ManualStop 录音（手不松开持续录音）
-    // MP3 播放由屏幕暂停键独占控制，长按 PTT 在 Player 模式下不响应，避免冲突
+    // 触摸长按 PTT：微信对讲式"按住说话，松开发送"（500ms 门槛由驱动 LONG_PRESS_TIME_US 决定）
+    // 行为：Idle/Speaking → AbortSpeaking + StartListening(ManualStop)
+    // ManualStop 模式下服务端不会因 VAD 自动停录，等 release 才送 stop 信号
+    // MP3 播放中让位给屏幕暂停键
     void HandleTouchLongPress() {
         auto& app = Application::GetInstance();
 
-        // MP3 播放中：让位给屏幕暂停键，长按不触发 PTT
         if (MusicPlayer::GetInstance().IsPlaying()) {
             ESP_LOGD(TAG, "Player 模式忽略长按 PTT");
             return;
         }
 
         auto state = app.GetDeviceState();
-        // HandleStartListeningEvent 内部会处理 Speaking→Abort+ManualStop / Idle→Connecting+ManualStop
         if (state == kDeviceStateIdle || state == kDeviceStateSpeaking) {
             ESP_LOGI(TAG, "长按PTT：开始录音(ManualStop), state=%u", state);
             app.StartListening();
+            ptt_active_ = true;
+            ArmPttTimeout();   // 60s 兜底防 release 丢失
         } else {
             ESP_LOGD(TAG, "长按PTT忽略：state=%u 不在 Idle/Speaking", state);
         }
     }
 
     // 松开 PTT：停止录音 + 发送提示音
+    // 仅在 LongPress 真正启动了录音时才执行，防止 RF 风暴假触的孤立 release 误停 Listening
     void HandleTouchLongPressRelease() {
+        DisarmPttTimeout();
+        if (!ptt_active_.exchange(false)) {
+            ESP_LOGD(TAG, "长按 release 忽略：PTT 未启动（可能是 RF 干扰假触）");
+            return;
+        }
         auto& app = Application::GetInstance();
         if (app.GetDeviceState() == kDeviceStateListening) {
             ESP_LOGI(TAG, "PTT松开：停止录音 + 发送提示音");
@@ -386,6 +525,58 @@ private:
             app.StopListening(true);
             app.PlaySound(Lang::Sounds::OGG_POPUP);
         }
+    }
+
+    // 触摸双击：退出对话回 Idle（孩子最熟悉的"退出"心智）
+    // Listening / Speaking → AbortAnyConversation + 切 Idle + 提示音
+    // Idle / MP3 / 其他 → 忽略（避免误触干扰）
+    void HandleTouchDoubleClick() {
+        auto& app = Application::GetInstance();
+
+        if (MusicPlayer::GetInstance().IsPlaying()) {
+            ESP_LOGD(TAG, "Player 模式忽略双击退出（暂停键独占）");
+            return;
+        }
+
+        auto state = app.GetDeviceState();
+        if (state == kDeviceStateListening || state == kDeviceStateSpeaking) {
+            ESP_LOGI(TAG, "双击退出对话：state=%u → Idle", (int)state);
+            // 同步清理 PTT 残留状态，避免下一次 release 卡死
+            DisarmPttTimeout();
+            ptt_active_.store(false);
+            AbortAnyConversation();
+            app.SetDeviceState(kDeviceStateIdle);
+            app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
+        } else {
+            ESP_LOGD(TAG, "双击忽略：state=%u 不在 Listening/Speaking", (int)state);
+        }
+    }
+
+    // PTT 60s 超时兜底：release 事件因 RF/接触不良丢失时自动停录，防止 ptt_active_ 残留卡死
+    void ArmPttTimeout() {
+        if (ptt_timeout_timer_ == nullptr) {
+            esp_timer_create_args_t args = {
+                .callback = [](void* arg) {
+                    auto* self = static_cast<MyDazyP30_4GBoard*>(arg);
+                    if (!self->ptt_active_.exchange(false)) return;
+                    ESP_LOGW(TAG, "PTT 60s 超时未收到 release，强制 stop（RF 干扰或离手丢事件？）");
+                    auto& app = Application::GetInstance();
+                    if (app.GetDeviceState() == kDeviceStateListening) {
+                        app.StopListening(false);
+                    }
+                },
+                .arg = this,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "ptt_timeout",
+            };
+            esp_timer_create(&args, &ptt_timeout_timer_);
+        }
+        esp_timer_stop(ptt_timeout_timer_);
+        esp_timer_start_once(ptt_timeout_timer_, 60ULL * 1000ULL * 1000ULL);
+    }
+
+    void DisarmPttTimeout() {
+        if (ptt_timeout_timer_) esp_timer_stop(ptt_timeout_timer_);
     }
 
     void InitializePowerManager() {
@@ -690,9 +881,11 @@ private:
             vTaskDelay(pdMS_TO_TICKS(1500));
             SwitchNetworkType();
         } else {
+            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到配网", "logo", Lang::Sounds::OGG_WIFI_CONFIG);
+            vTaskDelay(pdMS_TO_TICKS(1500));
             app.Schedule([this]() {
                 auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
-                wifi_board.EnterWifiConfigMode();
+                wifi_board.ResetWifiConfiguration();
             });
         }
     }
@@ -997,11 +1190,14 @@ private:
                 Application::GetInstance().GetAudioService().EnableDeviceAec(enable);
                 return true;
             });
+
+        // 识字笔画动画（512KB 上限直接下载，含 GIF 头尾校验）
+        RegisterEducationMcpTools(mcp, dynamic_cast<UiDisplay*>(GetDisplay()));
     }
 
 public:
     MyDazyP30_4GBoard() :
-        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC, 0),
+        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC, 1),
         boot_button_(BOOT_BUTTON_GPIO, false, 800, 400),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
@@ -1016,6 +1212,7 @@ public:
         InitializeDisplay();
         InitializeTouch();
         InitializeSc7a20h();
+        StartShakeDetect();
         InitializePowerManager();
         InitializePowerSaveTimer();
         InitializeButtons();
@@ -1079,6 +1276,21 @@ public:
     virtual Backlight* GetBacklight() override {
         static PwmBacklight backlight(DISPLAY_BACKLIGHT, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
+    }
+
+    // Control Center → 自动休眠开关。持久化到 NVS "deepSleep"，下次启动也生效。
+    virtual void EnableAutoSleep(bool enable) override {
+        Settings settings("status", true);
+        settings.SetInt("deepSleep", enable ? 1 : 0);
+        if (power_save_timer_) {
+            power_save_timer_->SetEnabled(enable);
+        }
+        ESP_LOGI(TAG, "EnableAutoSleep: %s", enable ? "ON" : "OFF");
+    }
+
+    virtual bool IsAutoSleepEnabled() const override {
+        Settings settings("status", false);
+        return settings.GetInt("deepSleep", 1) != 0;
     }
 
     void WakeUp() {
