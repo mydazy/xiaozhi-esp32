@@ -56,40 +56,36 @@ Mp3Player& Mp3Player::GetInstance() {
     return instance;
 }
 
-void Mp3Player::Initialize(IAudioOutput* audio,
-                           IHttpFactory* http,
-                           const Callbacks& callbacks) {
-    audio_ = audio;
-    http_ = http;
-    callbacks_ = callbacks;
+void Mp3Player::Initialize(IAudioOutput* audio, IHttpFactory* http,
+                           mp3_event_cb_t cb, void* ctx) {
+    audio_     = audio;
+    http_      = http;
+    event_cb_  = cb;
+    event_ctx_ = ctx;
     EnsureMp3DecoderRegistered();
 }
 
-std::string Mp3Player::GetCurrentTitle() const {
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    return current_title_;
+void Mp3Player::EmitEvent(mp3_event_t ev, int extra, const char *msg) {
+    if (event_cb_) event_cb_(ev, extra, msg, event_ctx_);
 }
 
-void Mp3Player::EmitError(const char* status, const char* message) {
-    if (callbacks_.on_error) callbacks_.on_error(status, message);
+/* v2.0 兼容 wrapper：旧 EmitError 内部 9 处调用站点保留，转发到 ERROR 事件 */
+void Mp3Player::EmitError(const char *status, const char *message) {
+    (void)status;   /* status 在 v2.0 简化为单一 msg；保留参数兼容已有调用 */
+    EmitEvent(MP3_EVENT_ERROR, 0, message);
 }
 
-bool Mp3Player::Play(const std::string& url, const std::string& title, std::string* err_msg) {
-    auto set_err = [err_msg](const char* s) { if (err_msg) *err_msg = s; };
-
+bool Mp3Player::Play(const char* url, const char* title) {
     if (!audio_ || !http_) {
         ESP_LOGE(TAG, "Play failed: not initialized");
-        set_err("player not initialized");
         return false;
     }
-    if (url.empty()) {
+    if (!url || !*url) {
         ESP_LOGW(TAG, "Play failed: empty url");
-        set_err("URL is empty");
         return false;
     }
-    if (url.compare(0, 7, "http://") != 0 && url.compare(0, 8, "https://") != 0) {
-        ESP_LOGW(TAG, "Play failed: unsupported scheme (%s)", url.c_str());
-        set_err("URL must start with http:// or https://");
+    if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0) {
+        ESP_LOGW(TAG, "Play failed: unsupported scheme (%s)", url);
         return false;
     }
 
@@ -102,7 +98,6 @@ bool Mp3Player::Play(const std::string& url, const std::string& title, std::stri
     }
     if (active_tasks_.load(std::memory_order_acquire) > 0) {
         ESP_LOGE(TAG, "Play failed: previous tasks still alive (stuck in TLS read)");
-        set_err("previous playback not finished, retry later");
         return false;
     }
     if (compressed_ring_) {
@@ -114,10 +109,15 @@ bool Mp3Player::Play(const std::string& url, const std::string& title, std::stri
         pcm_ring_ = nullptr;
     }
 
-    {
-        std::lock_guard<std::mutex> lock(state_mutex_);
-        current_url_ = url;
-        current_title_ = title;
+    /* current_url_/title_ 是 char[]：仅在此处写，task 启动后所有 worker 只读 →
+       无需 mutex（写后 atomic running_=true 形成 happens-before 关系） */
+    strncpy(current_url_, url, kUrlBufSize - 1);
+    current_url_[kUrlBufSize - 1] = '\0';
+    if (title) {
+        strncpy(current_title_, title, kTitleBufSize - 1);
+        current_title_[kTitleBufSize - 1] = '\0';
+    } else {
+        current_title_[0] = '\0';
     }
 
     compressed_ring_ = xRingbufferCreateWithCaps(
@@ -125,7 +125,7 @@ bool Mp3Player::Play(const std::string& url, const std::string& title, std::stri
     if (!compressed_ring_) {
         ESP_LOGE(TAG, "Play failed: compressed ring alloc failed (%zu bytes)",
                  kCompressedRingSize);
-        set_err("PSRAM exhausted");
+        EmitError("Playback failed", "PSRAM exhausted");
         return false;
     }
     pcm_ring_ = xRingbufferCreateWithCaps(
@@ -134,7 +134,7 @@ bool Mp3Player::Play(const std::string& url, const std::string& title, std::stri
         ESP_LOGE(TAG, "Play failed: pcm ring alloc failed (%zu bytes)", kPcmRingSize);
         vRingbufferDeleteWithCaps(compressed_ring_);
         compressed_ring_ = nullptr;
-        set_err("PSRAM exhausted");
+        EmitError("Playback failed", "PSRAM exhausted");
         return false;
     }
 
@@ -173,7 +173,7 @@ bool Mp3Player::Play(const std::string& url, const std::string& title, std::stri
         active_tasks_.fetch_sub(1, std::memory_order_acq_rel);
         cleanup_rings();
         running_.store(false, std::memory_order_release);
-        set_err("failed to create download task");
+        EmitError("Playback failed", "failed to create download task");
         return false;
     }
 
@@ -186,7 +186,7 @@ bool Mp3Player::Play(const std::string& url, const std::string& title, std::stri
         ESP_LOGE(TAG, "Play failed: decode task creation failed");
         active_tasks_.fetch_sub(1, std::memory_order_acq_rel);
         abort_.store(true, std::memory_order_release);
-        set_err("failed to create decode task");
+        EmitError("Playback failed", "failed to create decode task");
         return false;
     }
 
@@ -203,12 +203,11 @@ bool Mp3Player::Play(const std::string& url, const std::string& title, std::stri
         ESP_LOGE(TAG, "Play failed: output task creation failed");
         active_tasks_.fetch_sub(1, std::memory_order_acq_rel);
         abort_.store(true, std::memory_order_release);
-        set_err("failed to create output task");
+        EmitError("Playback failed", "failed to create output task");
         return false;
     }
 
-    ESP_LOGI(TAG, "Play: %s (%s)", title.c_str(), url.c_str());
-    if (err_msg) err_msg->clear();
+    ESP_LOGI(TAG, "Play: %s (%s)", current_title_, current_url_);
     return true;
 }
 
@@ -265,11 +264,8 @@ void Mp3Player::DownloadThunk(void* arg) {
 }
 
 void Mp3Player::DownloadLoop() {
-    std::string url;
-    {
-        std::lock_guard<std::mutex> lock(state_mutex_);
-        url = current_url_;
-    }
+    /* v2.0：current_url_ 是 char[]，task 期间 read-only，无需 mutex 拷贝 */
+    std::string url(current_url_);
 
     // Read scratch in PSRAM — TLS handshake leaves limited stack room.
     // 用途：HTTP 下行临时读 buffer；生命周期：DownloadLoop；申请方：本函数
@@ -601,8 +597,8 @@ void Mp3Player::DecodeLoop() {
                         total_duration_ms_.store(total_ms, std::memory_order_release);
                         ESP_LOGI(TAG, "Estimated total duration: %d ms (CBR)", total_ms);
                     }
-                    if (!started_emitted && callbacks_.on_started) {
-                        callbacks_.on_started(GetCurrentTitle());
+                    if (!started_emitted) {
+                        EmitEvent(MP3_EVENT_STARTED, 0, current_title_);
                         started_emitted = true;
                     }
                 }
@@ -697,7 +693,7 @@ void Mp3Player::DecodeLoop() {
     heap_caps_free(in_buf);
     heap_caps_free(out_buf);
 
-    if (finished_emitted && callbacks_.on_finished) callbacks_.on_finished();
+    if (finished_emitted) EmitEvent(MP3_EVENT_FINISHED, 0, current_title_);
 
     ESP_LOGI(TAG, "Decode task exit");
 }
@@ -790,45 +786,48 @@ void Mp3Player::PauseTimeoutCb(void* arg) {
     if (!self->paused_.load(std::memory_order_acquire)) return;
     ESP_LOGW(TAG, "Pause timeout (%d ms) — TCP keepalive expired, notify caller to Stop",
              kPauseTimeoutMs);
-    if (self->callbacks_.on_pause_timeout) self->callbacks_.on_pause_timeout();
+    self->EmitEvent(MP3_EVENT_PAUSE_TIMEOUT, kPauseTimeoutMs, "pause timeout");
 }
 
-void Mp3Player::Pause() {
+/* v2.0：合并 Pause + Resume 为单一切换（API 8→6） */
+void Mp3Player::PauseToggle() {
     if (!running_.load(std::memory_order_acquire)) return;
-    if (paused_.exchange(true, std::memory_order_acq_rel)) return;  // 已暂停
-    if (audio_) audio_->EnableOutput(false);
-    ESP_LOGI(TAG, "Paused at %d ms", position_ms_.load(std::memory_order_acquire));
 
-    // 启动 50s one-shot：超时即 emit on_pause_timeout（OSS keepalive 60s 前提前通知调用方）
-    if (!pause_timeout_timer_) {
-        esp_timer_create_args_t args = {
-            .callback = PauseTimeoutCb,
-            .arg = this,
-            .dispatch_method = ESP_TIMER_TASK,   // 在 esp_timer task 上下文，可以阻塞
-            .name = "mp3_pause_to",
-            .skip_unhandled_events = true,
-        };
-        esp_timer_handle_t h = nullptr;
-        if (esp_timer_create(&args, &h) == ESP_OK) {
-            pause_timeout_timer_ = h;
-        } else {
-            ESP_LOGE(TAG, "Pause timeout timer create failed");
-            return;
+    bool was_paused = paused_.load(std::memory_order_acquire);
+    if (!was_paused) {
+        /* === Pause path === */
+        paused_.store(true, std::memory_order_release);
+        if (audio_) audio_->EnableOutput(false);
+        ESP_LOGI(TAG, "Paused at %d ms", position_ms_.load(std::memory_order_acquire));
+
+        if (!pause_timeout_timer_) {
+            esp_timer_create_args_t args = {
+                .callback = PauseTimeoutCb,
+                .arg = this,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "mp3_pause_to",
+                .skip_unhandled_events = true,
+            };
+            esp_timer_handle_t h = nullptr;
+            if (esp_timer_create(&args, &h) == ESP_OK) {
+                pause_timeout_timer_ = h;
+            } else {
+                ESP_LOGE(TAG, "Pause timeout timer create failed");
+                return;
+            }
         }
-    }
-    esp_timer_stop(static_cast<esp_timer_handle_t>(pause_timeout_timer_));  // 幂等
-    esp_timer_start_once(static_cast<esp_timer_handle_t>(pause_timeout_timer_),
-                          (uint64_t)kPauseTimeoutMs * 1000);
-}
-
-void Mp3Player::Resume() {
-    if (!running_.load(std::memory_order_acquire)) return;
-    if (!paused_.exchange(false, std::memory_order_acq_rel)) return;  // 未暂停
-    if (pause_timeout_timer_) {
         esp_timer_stop(static_cast<esp_timer_handle_t>(pause_timeout_timer_));
+        esp_timer_start_once(static_cast<esp_timer_handle_t>(pause_timeout_timer_),
+                              (uint64_t)kPauseTimeoutMs * 1000);
+    } else {
+        /* === Resume path === */
+        paused_.store(false, std::memory_order_release);
+        if (pause_timeout_timer_) {
+            esp_timer_stop(static_cast<esp_timer_handle_t>(pause_timeout_timer_));
+        }
+        if (audio_) audio_->EnableOutput(true);
+        ESP_LOGI(TAG, "Resumed at %d ms", position_ms_.load(std::memory_order_acquire));
     }
-    if (audio_) audio_->EnableOutput(true);
-    ESP_LOGI(TAG, "Resumed at %d ms", position_ms_.load(std::memory_order_acquire));
 }
 
 }  // namespace mydazy
