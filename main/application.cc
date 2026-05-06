@@ -2,7 +2,8 @@
 #include "board.h"
 #include "display.h"
 #include "display/ui_display.h"
-#include "display/ui/resources/ui_image_manager.h"
+// [量产稳定期] UiImageManager 整体下线（仅原 control_center.cc 是其消费方）
+// #include "display/ui/resources/ui_image_manager.h"
 #include "system_info.h"
 #include "audio_codec.h"
 #include "mqtt_protocol.h"
@@ -432,7 +433,7 @@ void Application::CheckAssetsVersion() {
 
     // Apply assets
     assets.Apply();
-    UiImageManager::GetInstance().LoadAll();
+    // [量产稳定期] UiImageManager::GetInstance().LoadAll() 已下线（无消费方）
     display->SetChatMessage("system", "");
     display->SetEmotion("logo");
 }
@@ -976,7 +977,8 @@ void Application::HandleStateChangedEvent() {
             if (lcd) lcd->SwitchToChatMode();    // 对话开始，表情/消息可见
             break;
         case kDeviceStateListening:
-            display->SetStatus("#FF3030 ●#");
+            // 录音中显示麦克风图标（依赖 BUILTIN_TEXT_FONT.fallback → BUILTIN_ICON_FONT）
+            display->SetStatus(FONT_AWESOME_MICROPHONE);
             display->SetEmotion("neutral");
 
             // Make sure the audio processor is running

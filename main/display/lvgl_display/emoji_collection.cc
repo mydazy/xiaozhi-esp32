@@ -10,6 +10,14 @@ void EmojiCollection::AddEmoji(const std::string& name, LvglImage* image) {
     emoji_collection_[name] = image;
 }
 
+void EmojiCollection::ReplaceEmoji(const std::string& name, LvglImage* image) {
+    auto it = emoji_collection_.find(name);
+    if (it != emoji_collection_.end()) {
+        delete it->second;   // 释放旧 LvglImage（含其管理的 PSRAM buffer）
+    }
+    emoji_collection_[name] = image;
+}
+
 const LvglImage* EmojiCollection::GetEmojiImage(const char* name) {
     auto it = emoji_collection_.find(name);
     if (it != emoji_collection_.end()) {

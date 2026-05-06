@@ -224,7 +224,6 @@ void RemoteCmd::OnDownload(const cJSON* msg) {
 
     app_->Schedule([this, files_copy, emotion]() {
         app_->Alert("同步文件", "下载中...", "", "");
-        // TODO: ProcessCustomContent 需要从189移植 Ota 扩展
         ESP_LOGW(TAG, "File sync not yet implemented in V2");
         if (!emotion.empty()) {
             Board::GetInstance().GetDisplay()->SetEmotion(emotion.c_str());

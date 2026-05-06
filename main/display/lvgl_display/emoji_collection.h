@@ -14,6 +14,8 @@
 class EmojiCollection {
 public:
     virtual void AddEmoji(const std::string& name, LvglImage* image);
+    // 替换或新增（已存在则释放旧 LvglImage）。用于动态注入 PSRAM GIF（如识字笔画）。
+    virtual void ReplaceEmoji(const std::string& name, LvglImage* image);
     virtual const LvglImage* GetEmojiImage(const char* name);
     virtual ~EmojiCollection();
 

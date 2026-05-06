@@ -4,10 +4,10 @@
 #include "lcd_display.h"
 #include "../scene_type.h"
 #include <lvgl.h>
-#include <memory>
 #include <functional>
 
-class ControlCenter;
+// [量产稳定期] ControlCenter 已下线，恢复时取消注释 forward decl 与 unique_ptr 字段
+// class ControlCenter;
 
 /**
  * UiDisplay — 带交互式 UI 的 LCD 显示（仅 mydazy-p30-4g / mydazy-p31 使用）
@@ -65,10 +65,16 @@ public:
     // 仅由 Application::HandleStateChangedEvent(Idle) 调用，确保联网+激活完成才切时钟
     void FinishBootAndShowClock();
 
+    // 用 PSRAM GIF buffer 替换 emoji_collection 中 "font" 槽位（识字笔画动画）
+    // gif_buffer 由 heap_caps_malloc(MALLOC_CAP_SPIRAM) 分配，所有权转移给 EmojiCollection。
+    // 调用方完成调用后不要再 free buffer。
+    void UpdateFontGif(uint8_t* gif_buffer, size_t size);
+
     // ===== 控制中心 =====
-    void ShowControlCenter();
-    void HideControlCenter();
-    bool IsControlCenterVisible() const;
+    // [量产稳定期] ControlCenter 整体下线，保留接口为 stub 维持三个 board 的调用兼容
+    void ShowControlCenter() {}
+    void HideControlCenter() {}
+    bool IsControlCenterVisible() const { return false; }
 
 private:
 
@@ -104,8 +110,7 @@ private:
 
     // 开机动画：logo 持续显示，结束时机由状态机驱动（FinishBootAndShowClock）
 
-    // 控制中心（懒加载）
-    std::unique_ptr<ControlCenter> control_center_;
+    // [量产稳定期] ControlCenter 字段已下线（恢复时改回 std::unique_ptr<ControlCenter> control_center_）
 
     // BUILTIN_TEXT_FONT 的补字字体：与主字体同名约定（font_maru_common_20_4.bin），
     // 链入主字体仅 ~600 字常用文案，cbin 字体补 GB 2312 全字（7000+），LVGL 缺字自动 fallback。
@@ -128,7 +133,7 @@ private:
 
     void StartBootAnimation();
 
-    void EnsureControlCenter();
+    // [量产稳定期] EnsureControlCenter / EnableStatusBarTapForControlCenter / OnStatusBarClicked 已下线
 };
 
 #endif  // UI_DISPLAY_H

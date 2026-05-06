@@ -24,8 +24,10 @@ set(SOURCES "audio/audio_codec.cc"
             "display/lvgl_display/jpg/image_to_jpeg.cpp"
             "display/lvgl_display/jpg/jpeg_to_image.c"
             "display/ui_display.cc"
-            "display/ui/resources/ui_image_manager.cc"
-            "display/ui/widgets/control_center.cc"
+            # [量产稳定期] 暂屏蔽 main/display/ui 整套依赖（ui_image_manager / control_center / ui_config / ui_img_paths）
+            # 待基础功能稳定后恢复
+            # "display/ui/resources/ui_image_manager.cc"
+            # "display/ui/widgets/control_center.cc"
             "protocols/protocol.cc"
             "protocols/mqtt_protocol.cc"
             "protocols/websocket_protocol.cc"
@@ -38,7 +40,6 @@ set(SOURCES "audio/audio_codec.cc"
             "wifi/wifi_ap.cc"
             "wifi/dns_server.cc"
             "wifi/ssid_manager.cc"
-            "ota_http_download.cc"
             "mcp_server.cc"
             "system_info.cc"
             "application.cc"
@@ -53,7 +54,8 @@ set(SOURCES "audio/audio_codec.cc"
             )
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg"
-    "display/ui" "display/ui/core" "display/ui/theme" "display/ui/resources" "display/ui/widgets"
+    # [量产稳定期] display/ui 子目录暂从 INCLUDE_DIRS 移除（ui_display 已切断对 ui/ 的依赖）
+    # "display/ui" "display/ui/core" "display/ui/theme" "display/ui/resources" "display/ui/widgets"
     "audio" "audio/demuxer" "protocols" "blufi" "wifi")
 
 # Add board common files
@@ -67,6 +69,7 @@ list(APPEND SOURCES
     "boards/common/i2c_device.cc"
     "boards/common/power_save_timer.cc"
     "boards/common/press_to_talk_mcp_tool.cc"
+    "boards/common/education_mcp_tools.cc"
     "boards/common/system_reset.cc"
     "boards/common/ml307_gnss.cc"
     "boards/common/typec_headset.cc"
@@ -132,10 +135,11 @@ endif()
 list(APPEND SOURCES ${BOARD_SOURCES})
 
 # 后续逐个 UI 功能重构时，把对应图标显式追加到此列表 + 在 .cc 加 LV_IMG_DECLARE。
-list(APPEND SOURCES
-    "assets/icons/ui_img_icon_signal_wifi_png.c"     # 状态栏 WiFi 图标 (control_center.cc:91)
-    "assets/icons/ui_img_icon_signal_4g_png.c"       # 状态栏 4G 图标 (control_center.cc:297)
-)
+# [量产稳定期] control_center.cc 已暂屏蔽，配套图标也一并下线
+# list(APPEND SOURCES
+#     "assets/icons/ui_img_icon_signal_wifi_png.c"     # 状态栏 WiFi 图标 (control_center.cc:91)
+#     "assets/icons/ui_img_icon_signal_4g_png.c"       # 状态栏 4G 图标 (control_center.cc:297)
+# )
 
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)
@@ -317,6 +321,7 @@ idf_component_register(SRCS ${SOURCES}
                         esp_lcd_touch_axs5106l
                         esp_nfc_ws1850s
                         mydazy__esp_mp3_player
+                        mydazy__esp_sc7a20h
                         78__uart-uhci
                     )
 
