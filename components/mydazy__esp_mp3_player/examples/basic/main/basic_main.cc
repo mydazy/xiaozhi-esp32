@@ -79,17 +79,22 @@ EspHttpFactory  g_http;
 
 }  // namespace
 
+/* v2.0：单一 mp3_event_cb_t 替代 Callbacks struct（4 个 std::function） */
+static void OnMp3Event(mp3_event_t ev, int extra, const char *msg, void *ctx) {
+    (void)ctx; (void)extra;
+    switch (ev) {
+        case MP3_EVENT_STARTED:        ESP_LOGI(TAG, "started: %s", msg ? msg : ""); break;
+        case MP3_EVENT_FINISHED:       ESP_LOGI(TAG, "finished"); break;
+        case MP3_EVENT_ERROR:          ESP_LOGW(TAG, "error: %s", msg ? msg : ""); break;
+        case MP3_EVENT_PAUSE_TIMEOUT:  ESP_LOGW(TAG, "pause timeout"); break;
+    }
+}
+
 extern "C" void app_main(void) {
-    mydazy::Mp3Player::Callbacks cb;
-    cb.on_error    = [](const char* s, const char* m) { ESP_LOGW(TAG, "error: %s — %s", s, m); };
-    cb.on_started  = [](const std::string& t)         { ESP_LOGI(TAG, "started: %s", t.c_str()); };
-    cb.on_finished = []()                             { ESP_LOGI(TAG, "finished"); };
+    mydazy::Mp3Player::GetInstance().Initialize(&g_audio, &g_http, &OnMp3Event, nullptr);
 
-    mydazy::Mp3Player::GetInstance().Initialize(&g_audio, &g_http, cb);
-
-    std::string err;
-    if (!mydazy::Mp3Player::GetInstance().Play(EXAMPLE_MP3_URL, "demo", &err)) {
-        ESP_LOGE(TAG, "play failed: %s", err.c_str());
+    if (!mydazy::Mp3Player::GetInstance().Play(EXAMPLE_MP3_URL, "demo")) {
+        ESP_LOGE(TAG, "play failed (see log)");
         return;
     }
 

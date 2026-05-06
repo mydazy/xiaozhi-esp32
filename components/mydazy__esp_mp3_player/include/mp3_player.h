@@ -1,13 +1,37 @@
+/*
+ * SPDX-FileCopyrightText: 2026 mydazy
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Mydazy 流式 MP3 播放器 — v2.0.0 极简版
+ *
+ * 设计哲学：判断越少问题越少，减少头文件依赖，C 风格 event 取代 std::function table。
+ *
+ * v1.x → v2.0 主要变化：
+ *   ① 减依赖：删除 .h 中的 <string> / <functional> / <mutex> / <vector>
+ *      （IAudioOutput 接口仍保留 vector — 与 AudioCodec 接口兼容）
+ *   ② 4 个独立 std::function callback → 1 个 mp3_event_cb_t 函数指针 + ctx
+ *   ③ Pause / Resume 两个 API → PauseToggle 单一 API
+ *   ④ GetCurrentTitle 删除（事件已含 title 信息；调用方自行维护）
+ *   ⑤ URL/title 类型 std::string → const char*（外部责任 ownership）
+ *
+ * 高频使用场景（设计 3 个核心）：
+ *   1. 故事 / 儿歌流式播放（OSS Range 断点续传）
+ *   2. 中途打断（按键单击 / 切网 / 关机前）
+ *   3. 暂停-续播（保留 HTTP 长连接 + ringbuffer）
+ *
+ * 架构（不变）：
+ *   HTTP → compressed_ring (PSRAM 512KB) → Decode → pcm_ring (32KB INT) → Output → I2S
+ *   三 task：mp3_dl(Core 1 P1 PSRAM) / mp3_dec(Core 0 P7 INT) / mp3_out(Core 1 P10 INT)
+ */
+
 #pragma once
 
 #include <atomic>
-#include <cstddef>
 #include <cstdint>
-#include <functional>
+#include <cstddef>
 #include <memory>
-#include <mutex>
-#include <string>
-#include <vector>
+#include <string>     /* IHttpClient 内部 C++ 接口仍用 std::string */
+#include <vector>     /* IAudioOutput::OutputData 接口（C++20 可换 std::span） */
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/ringbuf.h>
@@ -15,7 +39,10 @@
 
 namespace mydazy {
 
-// Audio sink. The component never owns the codec; the caller keeps it alive.
+/* ────────────────────────────────────────────────────────────────
+ * 接口（不变 — 保持 AudioCodec / HTTP 兼容）
+ * ──────────────────────────────────────────────────────────────── */
+
 struct IAudioOutput {
     virtual ~IAudioOutput() = default;
     virtual int  output_sample_rate() const = 0;
@@ -25,7 +52,8 @@ struct IAudioOutput {
     virtual void OutputData(std::vector<int16_t>& pcm) = 0;
 };
 
-// HTTP transport. One IHttpClient per request; component closes & destroys it.
+/* IHttpClient 保留 std::string 参数（内部 C++ wrapper 接口，与 v1.x 兼容）。
+   外部 Mp3Player public API 已 const char* 化。 */
 struct IHttpClient {
     virtual ~IHttpClient() = default;
     virtual bool   Open(const std::string& method, const std::string& url) = 0;
@@ -42,49 +70,50 @@ struct IHttpFactory {
     virtual std::unique_ptr<IHttpClient> CreateHttp() = 0;
 };
 
-// Streaming MP3 player. Single-instance (`GetInstance()`); MP3 decoder is
-// process-global in esp_audio_codec, so a second player would not buy parallelism.
+/* ────────────────────────────────────────────────────────────────
+ * 事件回调（极简 C 风格）
+ * ──────────────────────────────────────────────────────────────── */
+
+enum mp3_event_t {
+    MP3_EVENT_STARTED = 0,        ///< 首帧解码出，extra = 0，msg = title
+    MP3_EVENT_FINISHED,           ///< 自然结束（非 Stop()），extra = 0
+    MP3_EVENT_ERROR,              ///< 异步错误，msg = "http:404" 等
+    MP3_EVENT_PAUSE_TIMEOUT,      ///< 暂停 ≥ 50s（OSS keepalive 60s 前提示）
+};
+
+/// 事件回调（在 worker task 上下文调用，调用方必要时 Schedule 回主任务）
+typedef void (*mp3_event_cb_t)(mp3_event_t ev, int extra, const char *msg, void *ctx);
+
+/* ────────────────────────────────────────────────────────────────
+ * 播放器（5 个核心 API + 3 个状态查询）
+ * ──────────────────────────────────────────────────────────────── */
+
 class Mp3Player {
 public:
-    struct Callbacks {
-        // Async error from download / decode. Always invoked from a worker task —
-        // the caller is responsible for thread-hopping back to UI if needed.
-        std::function<void(const char* status, const char* message)> on_error;
-        // Optional: called once decode produces its first frame.
-        std::function<void(const std::string& title)> on_started;
-        // Optional: called on graceful end-of-stream (not on Stop()/abort).
-        std::function<void()> on_finished;
-        // Optional: paused 超过 kPauseTimeoutMs（默认 50s）触发。
-        // 调用方应该 Schedule 回主任务调 Stop() + 通知用户暂停超时（OSS keepalive ~60s
-        // 后 TCP 会被 server 关，继续 Resume 会被 DownloadLoop 误判为"播完"）。
-        std::function<void()> on_pause_timeout;
-    };
-
     static Mp3Player& GetInstance();
 
-    // One-time. Pointers must outlive the player.
-    void Initialize(IAudioOutput* audio,
-                    IHttpFactory* http,
-                    const Callbacks& callbacks = {});
+    /// 一次性 init（pointers 必须 outlive player）
+    void Initialize(IAudioOutput* audio, IHttpFactory* http,
+                    mp3_event_cb_t cb, void *ctx);
 
-    // Auto-aborts any previous playback before starting.
-    bool Play(const std::string& url,
-              const std::string& title = "",
-              std::string* err_msg = nullptr);
+    /// 启动流式播放（已有播放自动 Stop）
+    /// @param url    播放地址（OSS 签名 URL，UTF-8 中文需调用方先 percent-encode）
+    /// @param title  曲名（可选，传 NULL = 不传）
+    /// @return true 成功启动；false 见日志（可能 codec 未 init / 内存不足）
+    bool Play(const char* url, const char* title);
 
+    /// 立即停止（最多阻塞 ~100ms 等三 task 退出）
     void Stop();
+
+    /// 暂停 ↔ 续播切换（替代 v1.x 的 Pause + Resume）
+    /// 暂停期间保留 HTTP 长连接 + ringbuffer，无缝续播；
+    /// 暂停 ≥ 50s 触发 MP3_EVENT_PAUSE_TIMEOUT，调用方应 Stop 释放资源。
+    void PauseToggle();
+
+    /* ── 状态查询（lock-free atomic）── */
     bool IsPlaying() const { return running_.load(std::memory_order_acquire); }
-    std::string GetCurrentTitle() const;
-
-    // 暂停/继续：保留 HTTP 连接 + ringbuffer 缓冲，三个 loop 在 paused_ 闸口让出 CPU。
-    // Pause 后 IAudioOutput::EnableOutput(false) 关功放静音；Resume 反之。
-    void Pause();
-    void Resume();
-    bool IsPaused() const { return paused_.load(std::memory_order_acquire); }
-
-    // 进度查询（毫秒）。Position 由 OutputLoop 累计 PCM 输出样本得到，
-    // Duration 由首帧解析的 sample_rate + body_length 估算（CBR 准；VBR 误差 ±10%，可能为 0）。
-    int  GetPositionMs() const { return position_ms_.load(std::memory_order_acquire); }
+    bool IsPaused()  const { return paused_.load(std::memory_order_acquire); }
+    int  GetPositionMs()      const { return position_ms_.load(std::memory_order_acquire); }
     int  GetTotalDurationMs() const { return total_duration_ms_.load(std::memory_order_acquire); }
 
     Mp3Player(const Mp3Player&) = delete;
@@ -102,11 +131,14 @@ private:
     void OutputLoop();
 
     void AbortAndJoin();
-    void EmitError(const char* status, const char* message);
+    void EmitEvent(mp3_event_t ev, int extra, const char *msg);
+    /* 旧 API 兼容 wrapper：转发到 EmitEvent(MP3_EVENT_ERROR)，内部 9 处调用未改 */
+    void EmitError(const char *status, const char *message);
 
-    IAudioOutput* audio_ = nullptr;
-    IHttpFactory* http_ = nullptr;
-    Callbacks callbacks_;
+    IAudioOutput*  audio_  = nullptr;
+    IHttpFactory*  http_   = nullptr;
+    mp3_event_cb_t event_cb_ = nullptr;
+    void*          event_ctx_ = nullptr;
 
     std::atomic<bool> running_{false};
     std::atomic<bool> abort_{false};
@@ -116,33 +148,32 @@ private:
     std::atomic<int>  active_tasks_{0};
     std::atomic<bool> prebuffered_{false};
 
-    // 进度跟踪：OutputLoop 每次 OutputData() 累加输出 PCM 时长到 position_ms_
+    /* 进度 */
     std::atomic<int>     position_ms_{0};
     std::atomic<int>     total_duration_ms_{0};
-    std::atomic<size_t>  body_length_{0};         // HTTP Content-Length，DecodeLoop 首帧估算总时长用
+    std::atomic<size_t>  body_length_{0};
 
-    mutable std::mutex state_mutex_;
-    std::string current_url_;
-    std::string current_title_;
+    /* URL/title 内部存储（fixed-size buffer，无需 mutex/std::string） */
+    static constexpr size_t kUrlBufSize   = 512;
+    static constexpr size_t kTitleBufSize = 96;
+    char current_url_[kUrlBufSize]     = {};
+    char current_title_[kTitleBufSize] = {};
 
-    // Three-stage pipeline: HTTP -> compressed_ring -> Decode -> pcm_ring -> Output -> sink
-    // The PCM ring decouples decode jitter / HTTP read stalls from the I2S
-    // DMA consumer (~60 ms deep on most boards), eliminating the classic
-    // "single-task pipeline" underrun pattern.
-    RingbufHandle_t compressed_ring_ = nullptr;       // MP3 byte stream from HTTP
-    RingbufHandle_t pcm_ring_ = nullptr;              // resampled int16 PCM bytes
-    static constexpr size_t kCompressedRingSize = 512 * 1024;  // ~32-64 s 缓冲
-    static constexpr size_t kPcmRingSize = 32 * 1024;          // ~340 ms @ 24 kHz mono
-    static constexpr size_t kOutputChunkBytes = 4 * 1024;      // ~85 ms @ 24 kHz mono
+    /* 三段流水线 ringbuffer */
+    RingbufHandle_t compressed_ring_ = nullptr;
+    RingbufHandle_t pcm_ring_        = nullptr;
+    static constexpr size_t kCompressedRingSize = 512 * 1024;
+    static constexpr size_t kPcmRingSize        = 32 * 1024;
+    static constexpr size_t kOutputChunkBytes   = 4 * 1024;
     static constexpr size_t kPrebufferThreshold = 32 * 1024;
-    static constexpr int    kHttpTimeoutMs = 25000;
-    static constexpr int    kPauseTimeoutMs = 50000;           // 50s（小于 OSS 默认 keepalive 60s）
-    static constexpr int    kHttpRetryMax = 5;
-    static constexpr int    kPauseCloseConnMs = 5000;
+    static constexpr int    kHttpTimeoutMs      = 25000;
+    static constexpr int    kPauseTimeoutMs     = 50000;
+    static constexpr int    kHttpRetryMax       = 5;
+    static constexpr int    kPauseCloseConnMs   = 5000;
     static constexpr size_t kProactiveReconnectBytes = 5 * 1024 * 1024;
 
-    // 暂停超时定时器（懒创建，one-shot；Pause 启动 / Resume / Stop 取消）
-    void* pause_timeout_timer_ = nullptr;   // 实际类型 esp_timer_handle_t（避免污染头文件 esp_timer.h 依赖）
+    /* 暂停超时定时器（懒创建） */
+    void* pause_timeout_timer_ = nullptr;
     static void PauseTimeoutCb(void* arg);
 };
 
