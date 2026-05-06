@@ -407,6 +407,14 @@ void Mp3Player::DownloadLoop() {
                 break;
             }
             if (n == 0) {
+                size_t expected = body_length_.load(std::memory_order_acquire);
+                if (expected > 0 && total_read < expected) {
+                    ESP_LOGW(TAG,
+                             "Premature EOF: %u/%u bytes (will Range-resume)",
+                             (unsigned)total_read, (unsigned)expected);
+                    inner_break_error = true;
+                    break;
+                }
                 eof_reached = true;
                 break;
             }
