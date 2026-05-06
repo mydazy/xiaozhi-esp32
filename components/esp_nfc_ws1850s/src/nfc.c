@@ -19,6 +19,8 @@
 #include <stdint.h>
 
 #include "esp_log.h"
+#include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -92,15 +94,7 @@ void user_print_hex(const char *prefix, const unsigned char *data, int length)
  */
 void delay_us(unsigned int n)
 {
-	unsigned int i;
-	while (n--)
-	{
-		for (i = 3; i > 0; i--)
-		{
-			;
-			;
-		}
-	}
+	esp_rom_delay_us(n);
 }
 /**
  * @brief ms延时函数
@@ -1147,8 +1141,20 @@ int pcd_com_transceive(struct transceive_buffer *pi)
 		len_rest = 0;				 // bytes received
 		WriteRawRC(ComIrqReg, BIT3); // clear HoAlertIRq
 		SetBitMask(ComIEnReg, BIT3); // enable HoAlertIRq
+		// 🔴 P0 修（2026-05）：原 while(1) 死循环无超时退出。
+		//   触发：4G RF 干扰下 ComIrqReg BIT3/BIT5 反复翻转 → CheckIrq i=500 空读 →
+		//        外层 while(1) 持续翻转 → NFC 任务僵死 → 用户必须重启。
+		//   修：硬超时 ~50ms（200 轮 × 250µs，远超 ISO14443A 最长帧 ~10ms）。
+		//        超时后用 transceive_timeout 标志压制后续 val 解析，正常走 line 1318 清理路径。
+		uint32_t transceive_loop_guard = 200;
+		bool transceive_timeout = false;
 		while (1)
 		{
+			if (transceive_loop_guard-- == 0) {
+				ClearBitMask(ComIEnReg, BIT3); // disable HoAlertIRq
+				transceive_timeout = true;
+				break;
+			}
 			CheckIrq();
 			val = ReadRawRC(ComIrqReg);
 			if ((val & BIT3) && !(val & BIT5))
