@@ -281,6 +281,8 @@ if(CONFIG_BOARD_TYPE_MYDAZY_P30_4G OR CONFIG_BOARD_TYPE_MYDAZY_P30_WIFI)
         mydazy__esp_lcd_jd9853
         mydazy__esp_lcd_touch_axs5106l
         mydazy__esp_sc7a20h
+        mydazy__i2c_bus_worker          # v3.0+ 共享总线串行化
+        mydazy__codec_ctrl_i2c          # v3.0+ codec I2C 通过 worker
     )
 endif()
 
@@ -322,6 +324,8 @@ idf_component_register(SRCS ${SOURCES}
                         esp_nfc_ws1850s
                         mydazy__esp_mp3_player
                         mydazy__esp_sc7a20h
+                        mydazy__i2c_bus_worker          # v3.0+ 共享总线串行化
+                        mydazy__codec_ctrl_i2c          # v3.0+ codec I2C 通过 worker
                         78__uart-uhci
                     )
 
