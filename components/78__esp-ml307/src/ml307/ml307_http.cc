@@ -90,7 +90,10 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
             instance_active_ = true;
             xEventGroupSetBits(event_group_handle_, ML307_HTTP_EVENT_INITIALIZED);
         } else if (command == "FIFO_OVERFLOW") {
-            // V2 独有 · DMA 缓冲溢出，强制关闭释放资源
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                content_lost_ = true;
+            }
             xEventGroupSetBits(event_group_handle_, ML307_HTTP_EVENT_ERROR);
             Close();
         }

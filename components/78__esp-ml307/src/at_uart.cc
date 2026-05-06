@@ -663,14 +663,10 @@ bool AtUart::SetBaudRate(int new_baud_rate, int timeout_ms) {
     if (new_baud_rate == baud_rate_) {
         return true;
     }
-    // 尝试升档到目标速率。失败时保留 DetectBaudRate 已识别的当前波特率继续工作，
-    // 避免上层（AtModem::Detect）把"升档失败"解读为"modem 检测失败"而进入 30 次重试
-    // → 崩溃重启循环。典型场景：ML307 子型号实际不支持请求的高速档（如 ML307R-DL-MBRH0S01
-    // 不支持 AT+IPR=3000000 / 1500000 等），但 921600 / 检测到的速率本身可用。
+    // Set new baud rate
     if (!SendCommand(std::string("AT+IPR=") + std::to_string(new_baud_rate))) {
-        ESP_LOGW(TAG, "Failed to set baud rate to %d, falling back to detected %d",
-                 new_baud_rate, baud_rate_);
-        return true;   // 保持当前已识别的速率，不让上层 retry
+        ESP_LOGI(TAG, "Failed to set baud rate to %d", new_baud_rate);
+        return false;
     }
     uart_set_baudrate(uart_num_, new_baud_rate);
     baud_rate_ = new_baud_rate;

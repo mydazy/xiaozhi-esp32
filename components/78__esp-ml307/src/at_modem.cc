@@ -163,6 +163,11 @@ std::string AtModem::GetCarrierName() {
 }
 
 int AtModem::GetCsq() {
+    // HTTP binary mode 期间 AT 命令会被 AtUart 拒绝，每次轮询都报 ERROR 污染日志。
+    // 直接返回缓存的 csq_，等 binary mode 退出（mp3 重连间隙 / 播放结束）后再刷新。
+    if (at_uart_->GetHttpBinaryMode()) {
+        return csq_;
+    }
     if (!at_uart_->SendCommand("AT+CSQ", 100)) {
         ESP_LOGE(TAG, "Failed to send AT+CSQ command");
     }
