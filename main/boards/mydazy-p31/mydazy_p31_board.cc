@@ -820,7 +820,7 @@ private:
     }
 
     // NFC 读写器
-    NfcWs1850s* nfc_ = nullptr;
+    /* v2.0 极简：NFC 改用静态单例 C API（mydazy_nfc_init/pause/resume），无需实例字段 */
 
     // GNSS 定位
     Ml307Gnss* gnss_ = nullptr;
@@ -935,24 +935,41 @@ private:
         }
     }
 
-    static const char* NfcTypeName(NfcCardType type) {
+    static const char* NfcTypeName(nfc_card_type_t type) {
         switch (type) {
-            case NfcCardType::kMifareClassic1K: return "M1-1K";
-            case NfcCardType::kMifareClassic4K: return "M1-4K";
-            case NfcCardType::kUltralight:      return "NTAG";
-            case NfcCardType::kMifarePlus:      return "Plus";
-            case NfcCardType::kIso14443A4:      return "CPU";
-            default:                            return "NFC";
+            case NFC_CARD_MIFARE_1K:    return "M1-1K";
+            case NFC_CARD_MIFARE_4K:    return "M1-4K";
+            case NFC_CARD_ULTRALIGHT:   return "NTAG";
+            case NFC_CARD_MIFARE_PLUS:  return "Plus";
+            case NFC_CARD_ISO14443A4:   return "CPU";
+            default:                    return "NFC";
         }
     }
 
+    // NFC 静态 C callback（v2.0 极简 API 要求函数指针）→ 转发到实例方法
+    static void OnNfcCard(nfc_card_type_t type, const nfc_uid_t* uid, void* ctx) {
+        static_cast<MyDazyP31Board*>(ctx)->HandleNfcCard(type, uid);
+    }
+
+    void HandleNfcCard(nfc_card_type_t type, const nfc_uid_t* uid) {
+        char uid_str[32];
+        mydazy_nfc_uid_to_str(uid, uid_str, sizeof(uid_str));
+
+        if (auto display = GetDisplay()) {
+            char text[64];
+            snprintf(text, sizeof(text), "%s: %s", NfcTypeName(type), uid_str);
+            display->SetChatMessage("system", text);
+        }
+        NfcRequestSwitch(type, uid_str);
+    }
+
     // NFC → POST OTA_URL/switch {"type":"nfc","uid":"...","card_type":"..."}
-    void NfcRequestSwitch(NfcCardType type, const NfcUid& uid) {
-        auto uid_str = uid.ToString();
-        auto type_name = std::string(NfcTypeName(type));
-        Application::GetInstance().Schedule([uid_str, type_name]() {
+    void NfcRequestSwitch(nfc_card_type_t type, const char* uid_str) {
+        std::string uid(uid_str);
+        std::string type_name = NfcTypeName(type);
+        Application::GetInstance().Schedule([uid, type_name]() {
             cJSON* p = cJSON_CreateObject();
-            cJSON_AddStringToObject(p, "uid", uid_str.c_str());
+            cJSON_AddStringToObject(p, "uid", uid.c_str());
             cJSON_AddStringToObject(p, "card_type", type_name.c_str());
             Ota::RequestSwitch("nfc", p);
         });
@@ -1074,26 +1091,10 @@ private:
     void InitializeNfc() {
         if (!i2c_bus_) return;
 
-        nfc_ = new NfcWs1850s(i2c_bus_);
-        if (nfc_->Initialize() != ESP_OK) {
-            delete nfc_;
-            nfc_ = nullptr;
-            return;
+        // v2.0 极简：1 行初始化（含底层 IIC + chip reset + 启动后台 detection task）
+        if (mydazy_nfc_init(i2c_bus_, &MyDazyP31Board::OnNfcCard, this, 300) != ESP_OK) {
+            ESP_LOGW(TAG, "NFC 初始化失败");
         }
-
-        nfc_->SetCardCallback([this](NfcCardType type, const NfcUid& uid) {
-            auto display = GetDisplay();
-            if (display) {
-                char text[64];
-                snprintf(text, sizeof(text), "%s: %s", NfcTypeName(type), uid.ToString().c_str());
-                display->SetChatMessage("system", text);
-            }
-
-            // NFC 刷卡 → HTTP POST 到 OTA 地址，携带 /switch + UID
-            NfcRequestSwitch(type, uid);
-        });
-
-        nfc_->StartDetection(300);
     }
 
     void InitializeHeadset() {
@@ -1513,12 +1514,8 @@ public:
             delete gnss_;
             gnss_ = nullptr;
         }
-        // 清理 NFC
-        if (nfc_) {
-            nfc_->StopDetection();
-            delete nfc_;
-            nfc_ = nullptr;
-        }
+        // 清理 NFC（v2.0 极简：pause 即可，单例无 handle）
+        mydazy_nfc_pause();
         // 清理音量调节任务
         vol_up_running_ = false;
         vol_down_running_ = false;
