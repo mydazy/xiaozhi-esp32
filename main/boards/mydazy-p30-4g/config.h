@@ -95,7 +95,7 @@
 #define ML307_TX_PIN     GPIO_NUM_2            // ML307 UART发送引脚（ESP32 RX <- ML307 TX）
 #define ML307R_PWR_GPIO  GPIO_NUM_NC           // ML307 独立电源控制未连接；实际电源由 AUDIO_PWR_EN_GPIO(GPIO9) 与音频芯片共享，断电即重置
 #define ML307_RST_GPIO   GPIO_NUM_NC           // ML307 复位引脚未连接；硬复位通过 AUDIO_PWR_EN_GPIO(GPIO9) 断电实现
-// 注意：ML307模块无DTR引脚，深度睡眠后无法通过UART自动唤醒，依赖模块自身电源管理
+#define MODEM_DTR_GPIO   GPIO_NUM_NC           // 硬件未扩展，预留
 
 // ============================================================
 // 电源管理配置

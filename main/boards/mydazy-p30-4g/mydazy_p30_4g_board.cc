@@ -10,6 +10,7 @@
 #include "esp_lcd_jd9853.h"
 #include "axs5106l_touch.h"
 #include "sc7a20h.h"
+#include "i2c_bus_worker.h"
 #include "application.h"
 #include "audio/music_player.h"
 #include "button.h"
@@ -100,6 +101,7 @@ inline void PauseAudioAndChatBeforeSwitch() {
 class MyDazyP30_4GBoard : public DualNetworkBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
+    i2c_worker_handle_t     i2c_worker_ = nullptr;   /* v3.0+ 共享总线串行化 worker */
     Button boot_button_;
     Button volume_up_button_;
     Button volume_down_button_;
@@ -176,6 +178,12 @@ private:
             },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+
+        /* v3.0+: 共享总线串行化 worker —— 5 driver（codec×2 / 触摸 / sensor / NFC）
+           的 I2C 访问全部汇入此 worker 单线程顺序执行，杜绝跨 transaction 污染。
+           Core 0 P10 与 audio_output 同位，高于 LVGL P5 / 网络 P5。 */
+        i2c_worker_config_t wcfg = I2C_WORKER_DEFAULT_CONFIG(i2c_bus_);
+        ESP_ERROR_CHECK(i2c_worker_create(&wcfg, &i2c_worker_));
     }
 
     void InitializeSpi() {
@@ -297,41 +305,25 @@ private:
     }
 
     void InitializeSc7a20h() {
-        sc7a20h_config_t cfg = SC7A20H_DEFAULT_CONFIG();
-        cfg.i2c_addr = 0x19;
-        // 调高拾取唤醒阈值：默认 256mg/20ms 桌面轻碰即触发
-        // ±4g 量程下 LSb=32mg：threshold=0x18 ≈ 768mg（轻拿起的加速度门槛）
-        // ODR=100Hz 下 1 step=10ms：duration=0x14 ≈ 200ms（必须持续主动抬起）
-        // 综合考虑场景：床上翻身/桌面碰撞/孩子坐起触碰均瞬冲击 <200ms，被 duration 滤掉；
-        //              "拿起来"（持续 200ms 以上的 0.77g 加速度）才唤醒
-        sc7a20h_motion_config_t mcfg = SC7A20H_DEFAULT_MOTION_CONFIG();
-        mcfg.threshold = 0x18;
-        mcfg.duration  = 0x14;
-        if (sc7a20h_create_with_motion_detection(i2c_bus_, &cfg, &mcfg, &sc7a20h_sensor_) == ESP_OK) {
-            ESP_LOGI(TAG, "SC7A20H传感器初始化成功（运动检测+防抖已启用，threshold=0x%02X duration=0x%02X）",
-                     mcfg.threshold, mcfg.duration);
-            sc7a20h_initialized_ = true;
-        } else {
-            ESP_LOGE(TAG, "SC7A20H传感器初始化失败");
-            sc7a20h_sensor_ = nullptr;
-            sc7a20h_initialized_ = false;
+        sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 384 /*mg*/, 160 /*ms*/);
+        sc7a20h_initialized_ = (sc7a20h_sensor_ != nullptr);
+        if (!sc7a20h_initialized_) {
+            ESP_LOGE(TAG, "SC7A20H 初始化失败");
         }
     }
 
     // 摇一摇识别（孩子拿起来甩 → 切话题 / 换 emoji / 抽奖等）
-    // 当前阶段：仅识别 + 打日志，确认算法稳定后再绑业务
-    // 算法：100ms 轮询，6 帧（600ms）滑动窗口；
-    //       帧偏离重力 |‖a‖-1g| > 1500mg 计强动；窗口内 ≥3 帧强动 = 摇一摇。
     //       触发后冷却 1.5s 防连发。
     static void ShakeDetectTaskEntry(void* arg) {
         auto* board = static_cast<MyDazyP30_4GBoard*>(arg);
-        constexpr TickType_t kPeriodTicks  = pdMS_TO_TICKS(100);
-        constexpr float      kStrongMg     = 1500.0f;       // 单帧强动阈值
-        constexpr int        kWindowSize   = 6;             // 600ms 窗口
-        constexpr int        kStrongTarget = 3;             // 窗口内 ≥3 帧 = 摇
-        constexpr int64_t    kCooldownUs   = 1500 * 1000LL; // 触发后 1.5s 冷却
+        constexpr TickType_t kPeriodTicks   = pdMS_TO_TICKS(100);
+        constexpr int32_t    kStrongMgSq    = 1500 * 1500;   // 偏离 1g 阈值的平方
+        constexpr int32_t    kGravitySq     = 1000 * 1000;   // (1g)²
+        constexpr int        kWindowSize    = 6;             // 600ms 窗口
+        constexpr int        kStrongTarget  = 3;             // 窗口内 ≥3 帧 = 摇
+        constexpr int64_t    kCooldownUs    = 1500 * 1000LL; // 触发后 1.5s 冷却
 
-        float   window[kWindowSize] = {0};
+        int32_t window_dev_sq[kWindowSize] = {0};   // 每帧 (|a|² - 1g²) 绝对值
         int     wi = 0;
         int64_t last_shake_us = 0;
 
@@ -340,24 +332,27 @@ private:
             vTaskDelayUntil(&last_wake, kPeriodTicks);
             if (!board->sc7a20h_initialized_ || !board->sc7a20h_sensor_) continue;
 
-            sc7a20h_acce_t a;
-            if (sc7a20h_get_acce(board->sc7a20h_sensor_, &a) != ESP_OK) continue;
+            int16_t x, y, z;
+            if (sc7a20h_read_mg(board->sc7a20h_sensor_, &x, &y, &z) != ESP_OK) continue;
 
-            float mag = sqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
-            window[wi] = fabsf(mag - 1000.0f);  // 偏离 1g 重力
+            // 模长平方 - 重力平方（无 sqrt）
+            int32_t mag_sq = (int32_t)x * x + (int32_t)y * y + (int32_t)z * z;
+            int32_t dev    = mag_sq - kGravitySq;
+            if (dev < 0) dev = -dev;
+            window_dev_sq[wi] = dev;
             wi = (wi + 1) % kWindowSize;
 
-            int   strong = 0;
-            float peak   = 0;
+            int     strong = 0;
+            int32_t peak   = 0;
             for (int i = 0; i < kWindowSize; ++i) {
-                if (window[i] > kStrongMg) strong++;
-                if (window[i] > peak) peak = window[i];
+                if (window_dev_sq[i] > kStrongMgSq) strong++;
+                if (window_dev_sq[i] > peak) peak = window_dev_sq[i];
             }
 
             int64_t now_us = esp_timer_get_time();
             if (strong >= kStrongTarget && (now_us - last_shake_us) > kCooldownUs) {
-                ESP_LOGI(TAG, "Shake detected! peak=%.0fmg, strong=%d/%d frames",
-                         peak, strong, kWindowSize);
+                ESP_LOGI(TAG, "Shake detected! peak_dev_sq=%ld, strong=%d/%d",
+                         (long)peak, strong, kWindowSize);
                 last_shake_us = now_us;
                 // TODO: 后续在此挂业务——切话题 / 换 emoji / 抽奖
             }
@@ -373,12 +368,16 @@ private:
     }
 
     void PrepareTouchHardware() {
-        axs5106l_touch_config_t cfg = AXS5106L_TOUCH_DEFAULT_CONFIG(
-            i2c_bus_, TOUCH_RST_NUM, TOUCH_INT_NUM, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-        cfg.swap_xy  = TOUCH_SWAP_XY;
-        cfg.mirror_x = TOUCH_MIRROR_X;
-        cfg.mirror_y = TOUCH_MIRROR_Y;
-
+        axs5106l_touch_config_t cfg = {
+            .worker     = i2c_worker_,
+            .rst_gpio   = TOUCH_RST_NUM,
+            .int_gpio   = TOUCH_INT_NUM,
+            .width      = DISPLAY_WIDTH,
+            .height     = DISPLAY_HEIGHT,
+            .wake_cb    = &MyDazyP30_4GBoard::OnTouchWake,
+            .gesture_cb = &MyDazyP30_4GBoard::OnTouchGesture,
+            .cb_ctx     = this,
+        };
         if (axs5106l_touch_new(&cfg, &touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏硬件初始化失败");
             touch_driver_ = nullptr;
@@ -448,17 +447,13 @@ private:
     void InitializeTouch() {
         if (touch_driver_ == nullptr) return;
 
+        // v4.0 极简：回调已通过 cfg 注入，attach_lvgl 失败仅置空 handle 不再 del。
         if (axs5106l_touch_attach_lvgl(touch_driver_) != ESP_OK) {
-            ESP_LOGE(TAG, "触摸屏输入初始化失败");
-            axs5106l_touch_del(touch_driver_);
+            ESP_LOGE(TAG, "触摸屏 LVGL attach 失败");
             touch_driver_ = nullptr;
             return;
         }
-
-        axs5106l_touch_set_wake_callback(touch_driver_, &MyDazyP30_4GBoard::OnTouchWake, this);
-        axs5106l_touch_set_gesture_callback(touch_driver_, &MyDazyP30_4GBoard::OnTouchGesture, this);
-
-        ESP_LOGI(TAG, "触摸屏初始化完成");
+        ESP_LOGI(TAG, "触摸屏初始化完成（v4.0 worker 路径）");
     }
 
     void HandleTouchSingleClick() {
@@ -633,7 +628,9 @@ private:
 
     void ShutdownTouchAndAudioForSleep() {
         if (touch_driver_) {
-            axs5106l_touch_del(touch_driver_);
+            // v4.0 极简：del 已删除，深睡前用 sleep + 关 INT ISR 即可。
+            // 整机即将进 deep_sleep，I2C device handle 由 worker_destroy 统一回收。
+            axs5106l_touch_sleep(touch_driver_);
             touch_driver_ = nullptr;
             vTaskDelay(pdMS_TO_TICKS(100));
         }
@@ -700,6 +697,19 @@ private:
         gpio_config(&input_conf);
     }
 
+    // 4G modem 优雅释放：进飞行模式让基站清理 PPP/RRC 会话。
+    // driver SetFlightMode 内部 = AT+CFUN=4 + DTR 高（如已启用 GPIO6 DTR）。
+    // 失败不阻塞断电流程（modem 异常时仍走电源级硬复位）。
+    void GracefulShutdownModem() {
+        if (GetNetworkType() != NetworkType::ML307) return;
+        auto& ml307 = static_cast<Ml307Board&>(GetCurrentBoard());
+        auto* modem = ml307.GetModem();
+        if (!modem) return;
+        ESP_LOGI(TAG, "AT+CFUN=4 优雅释放 4G PPP 会话");
+        modem->SetFlightMode(true);
+        vTaskDelay(pdMS_TO_TICKS(800));   // 给 modem 时间释放 PPP/RRC（实测 200-500ms）
+    }
+
     void EnterDeepSleep(bool enable_gyro_wakeup = true) {
         ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
 
@@ -719,13 +729,16 @@ private:
         Application::GetInstance().ResetProtocol();
         vTaskDelay(pdMS_TO_TICKS(500));  // 等异步 Schedule lambda 完成 close + 析构
 
+        // 优雅释放 4G PPP（必须在 ResetProtocol 之后、断电前 — 此时 4G 仍可用）
+        GracefulShutdownModem();
+
         if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
             Settings settings("status", false);
             int32_t pickup_wake = settings.GetInt("pickupWake", 1);
             if (pickup_wake) {
-                esp_err_t r = sc7a20h_config_deep_sleep_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
+                esp_err_t r = sc7a20h_arm_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
                 if (r != ESP_OK) {
-                    ESP_LOGW(TAG, "sc7a20h_config_deep_sleep_wakeup failed: %s", esp_err_to_name(r));
+                    ESP_LOGW(TAG, "sc7a20h_arm_wakeup failed: %s", esp_err_to_name(r));
                 }
             }
         }
@@ -1197,7 +1210,9 @@ private:
 
 public:
     MyDazyP30_4GBoard() :
-        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC, 1),
+        // 当前量产线路板未扩展 GPIO6 DTR；下版硬件改板后改用 MODEM_DTR_GPIO 即可。
+        // GracefulShutdownModem 内部用 AT+CFUN=4 优雅释放（不依赖 DTR 硬件连接）。
+        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 1),
         boot_button_(BOOT_BUTTON_GPIO, false, 800, 400),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
@@ -1222,6 +1237,9 @@ public:
 
         ApplyDefaultSettings();
 
+        // 注册板专属 MCP 工具（含教育卡 self.education.show_stroke）— 必须在 Display 初始化之后
+        InitializeTools();
+
         ESP_LOGI(TAG, "MyDazy P30 4G 初始化完成 (ES8311+ES7210, 支持4G、电源管理、触摸屏)");
 
         StartWelcomeTask();
@@ -1231,7 +1249,7 @@ public:
     virtual AudioCodec* GetAudioCodec() override {
         if (audio_codec_ == nullptr) {
             audio_codec_ = new BoxAudioCodec(
-                i2c_bus_,
+                i2c_worker_,                       /* v3.0+ 通过 worker 串行化 codec I2C */
                 AUDIO_INPUT_SAMPLE_RATE,
                 AUDIO_OUTPUT_SAMPLE_RATE,
                 AUDIO_I2S_GPIO_MCLK,
