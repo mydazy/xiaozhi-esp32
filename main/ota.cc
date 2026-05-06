@@ -1,5 +1,4 @@
 #include "ota.h"
-#include "ota_http_download.h"
 #include "application.h"
 #include "system_info.h"
 #include "settings.h"
@@ -367,6 +366,9 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
 
     auto network = Board::GetInstance().GetNetwork();
     auto http = network->CreateHttp(0);
+    // 4G + 921600 UART 下大固件下载典型 ~44s；默认 30s 在弱网时会让单片读取假超时
+    // → 触发不必要的指数退避。提到 90s 给单连接 read 留足容错窗口。
+    http->SetTimeout(90000);
     if (!http->Open("GET", firmware_url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         return false;
@@ -438,38 +440,17 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
             ESP_LOGI(TAG, "Waiting %d ms before retry...", delay_ms);
             vTaskDelay(pdMS_TO_TICKS(delay_ms));
 
-            // Range 重连
+            // Range 重连（仅接受 206 · 主流 OSS/Nginx 都支持，不支持则继续重试）
             http = network->CreateHttp(0);
-            std::string range = "bytes=" + std::to_string(total_read) + "-";
-            http->SetHeader("Range", range);
-            if (!http->Open("GET", firmware_url)) {
-                ESP_LOGE(TAG, "Failed to reopen HTTP for resume");
+            http->SetTimeout(90000);
+            http->SetHeader("Range", "bytes=" + std::to_string(total_read) + "-");
+            if (!http->Open("GET", firmware_url) || http->GetStatusCode() != 206) {
+                ESP_LOGE(TAG, "Resume failed (status=%d)", http ? http->GetStatusCode() : -1);
+                if (http) http->Close();
                 http.reset();
-                continue;  // 下轮 Read 因 http==nullptr 走 ret=-1 路径
-            }
-            int rs = http->GetStatusCode();
-            if (rs == 206) {
-                ESP_LOGI(TAG, "Resumed download from byte %u", (unsigned)total_read);
-            } else if (rs == 200) {
-                // 服务器不支持 Range：跳过 total_read 字节模拟续传
-                ESP_LOGW(TAG, "Server returned 200 (no Range support), skipping %u bytes",
-                         (unsigned)total_read);
-                size_t skipped = 0;
-                while (skipped < total_read) {
-                    size_t to_skip = std::min(total_read - skipped, (size_t)PAGE_SIZE);
-                    int skip_ret = http->Read(buffer, to_skip);
-                    if (skip_ret <= 0) {
-                        ESP_LOGE(TAG, "Failed to skip during resume");
-                        break;
-                    }
-                    skipped += skip_ret;
-                }
-                if (skipped < total_read) continue;  // 跳过失败 → 下轮重试
-                ESP_LOGI(TAG, "Skipped %u bytes, resume body stream now", (unsigned)total_read);
-            } else {
-                ESP_LOGE(TAG, "Resume failed, status: %d", rs);
                 continue;
             }
+            ESP_LOGI(TAG, "Resumed from byte %u", (unsigned)total_read);
             recent_read = 0;
             last_calc_time = esp_timer_get_time();
             continue;
@@ -558,6 +539,75 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
 
 bool Ota::StartUpgrade(std::function<void(int progress, size_t speed)> callback) {
     return Upgrade(firmware_url_, callback);
+}
+
+// 通用 HTTP GET → PSRAM 缓冲下载（用于动态 GIF/PNG 等小资源）
+// 与 Upgrade 不同：不做 Range 续传（小文件重传成本低），不做 WdtGuard（下载快），
+// 不做 esp_ota_*（写到 PSRAM 而非 flash partition）。
+bool Ota::Download(const std::string& url, size_t max_size,
+                   uint8_t** buffer, size_t* size) {
+    *buffer = nullptr;
+    *size = 0;
+
+    auto network = Board::GetInstance().GetNetwork();
+    constexpr int kMaxRetries = 2;
+
+    uint8_t* buf = (uint8_t*)heap_caps_malloc(max_size, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        ESP_LOGE(TAG, "Download: PSRAM alloc %u failed", (unsigned)max_size);
+        return false;
+    }
+
+    for (int attempt = 0; attempt <= kMaxRetries; attempt++) {
+        if (attempt > 0) {
+            ESP_LOGW(TAG, "Download: retry %d/%d", attempt, kMaxRetries);
+            vTaskDelay(pdMS_TO_TICKS(500 * attempt));
+        }
+
+        auto http = network->CreateHttp(0);
+        http->SetTimeout(15000);
+        if (!http->Open("GET", url)) {
+            ESP_LOGE(TAG, "Download: HTTP open failed");
+            continue;
+        }
+        int status = http->GetStatusCode();
+        if (status != 200) {
+            ESP_LOGW(TAG, "Download: HTTP %d", status);
+            http->Close();
+            break;  // 非网络错误（404 等），不重试
+        }
+        size_t expected = http->GetBodyLength();
+
+        // 流式读到 PSRAM
+        size_t total_read = 0;
+        while (total_read < max_size) {
+            int n = http->Read((char*)(buf + total_read), max_size - total_read);
+            if (n <= 0) break;
+            total_read += n;
+        }
+        http->Close();
+
+        // Content-Length 完整性校验（4G AT 通道可能丢数据块）
+        if (expected > 0 && total_read < expected) {
+            ESP_LOGW(TAG, "Download: incomplete %u/%u", (unsigned)total_read, (unsigned)expected);
+            continue;
+        }
+        if (total_read == 0) {
+            ESP_LOGW(TAG, "Download: empty body");
+            continue;
+        }
+
+        // 缩小 PSRAM 到实际大小
+        uint8_t* shrunk = (uint8_t*)heap_caps_realloc(buf, total_read, MALLOC_CAP_SPIRAM);
+        if (shrunk) buf = shrunk;
+        *buffer = buf;
+        *size = total_read;
+        ESP_LOGI(TAG, "Download: %u bytes from %s", (unsigned)total_read, url.c_str());
+        return true;
+    }
+
+    heap_caps_free(buf);
+    return false;
 }
 
 
@@ -749,15 +799,6 @@ bool Ota::ReportStatus() {
                 }
             }
 
-            // 处理自定义内容下载
-            Settings settings("ota", false);
-            int enabled = settings.GetInt("custom", 1);
-            cJSON* custom = cJSON_GetObjectItem(root, "custom");
-            if (enabled && cJSON_IsArray(custom)) {
-                Ota ota_instance;
-                ota_instance.ProcessCustomContent(custom, "ReportStatus");
-            }
-
             cJSON_Delete(root);
             vTaskDelete(NULL);
         }, "status_assets", kStatusAssetsStackSize / sizeof(StackType_t),
@@ -771,46 +812,3 @@ bool Ota::ReportStatus() {
     return true;
 }
 
-// P30: 处理自定义内容下载
-bool Ota::ProcessCustomContent(cJSON* custom_array, const std::string& context) {
-    if (!cJSON_IsArray(custom_array)) return false;
-    int total_items = cJSON_GetArraySize(custom_array);
-    ESP_LOGI(TAG, "Processing %d custom items%s", total_items,
-             context.empty() ? "" : (" from " + context).c_str());
-
-    OtaHttpDownload& downloader = OtaHttpDownload::GetInstance();
-    if (downloader.is_downloading()) {
-        ESP_LOGW(TAG, "Downloader busy, skipping");
-        return false;
-    }
-
-    downloader.set_progress_callback([](int progress, size_t downloaded, size_t total) {
-        ESP_LOGI(TAG, "Download: %d%% (%zu/%zu)", progress, downloaded, total);
-    });
-
-    cJSON* item = nullptr;
-    int count = 0;
-    cJSON_ArrayForEach(item, custom_array) {
-        if (!cJSON_IsObject(item)) continue;
-        cJSON* url = cJSON_GetObjectItem(item, "url");
-        cJSON* path = cJSON_GetObjectItem(item, "path");
-        cJSON* md5 = cJSON_GetObjectItem(item, "md5");
-
-        if (!cJSON_IsString(url) || !cJSON_IsString(path)) continue;
-
-        std::string original_path = path->valuestring;
-        std::string filename = original_path.substr(original_path.find_last_of('/') + 1);
-        std::string save_path = std::string("/spiffs") + "/" + filename;
-        std::string expected_md5 = cJSON_IsString(md5) ? md5->valuestring : "";
-
-        downloader.add_download(url->valuestring, save_path.c_str(), expected_md5.c_str());
-        count++;
-    }
-
-    if (count > 0) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-        downloader.start_downloads();
-    }
-
-    return true;
-}

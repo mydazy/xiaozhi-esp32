@@ -24,7 +24,6 @@ public:
     /// POST OTA_URL/status — 上报设备状态（GPS、电量等）
     static esp_err_t ReportStatus(cJSON* payload);
     bool ReportStatus();
-    bool ProcessCustomContent(cJSON* custom_array, const std::string& context = "");
     bool HasActivationChallenge() { return has_activation_challenge_; }
     bool HasNewVersion() { return has_new_version_; }
     bool HasMqttConfig() { return has_mqtt_config_; }
@@ -34,6 +33,13 @@ public:
     bool StartUpgrade(std::function<void(int progress, size_t speed)> callback);
     static bool Upgrade(const std::string& firmware_url, std::function<void(int progress, size_t speed)> callback);
     void MarkCurrentVersionValid();
+
+    // 通用 HTTP GET 下载到 PSRAM 缓冲（动态图片 / 小资源等）。
+    //   max_size: 安全上限（防服务器返回畸形大数据撑爆 PSRAM）
+    //   返回 true 时 *buffer 由调用方 heap_caps_free 释放，*size = 实际字节数
+    //   失败 *buffer = nullptr。简单 2 次重试 + 递增退避，无 Range 续传（小文件不值得）
+    static bool Download(const std::string& url, size_t max_size,
+                         uint8_t** buffer, size_t* size);
 
     const std::string& GetFirmwareVersion() const { return firmware_version_; }
     const std::string& GetCurrentVersion() const { return current_version_; }
