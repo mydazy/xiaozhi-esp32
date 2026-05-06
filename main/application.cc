@@ -851,7 +851,10 @@ void Application::HandleStopListeningEvent() {
         }
         if (play_sound) {
             audio_service_.EnableVoiceProcessing(false);
-            ESP_LOGI(TAG, "PTT 松手：关录音上送，保持 Listening 等服务端 TTS（mode=ManualStop）");
+            // 松手即把 listening_mode_ 归位为 AutoStop/Realtime —
+            // 这样后续 tts.stop 走 else 分支 → 自动回 Listening → 支持多轮对话不需再按 PTT
+            SetListeningMode(GetDefaultListeningMode());
+            ESP_LOGI(TAG, "PTT 松手：关录音上送，模式归位 → TTS 完自动续录（多轮对话）");
         } else {
             // 普通 Stop（Audio Testing 退出等）：切 Idle 走原路径
             SetDeviceState(kDeviceStateIdle);
