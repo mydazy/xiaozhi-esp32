@@ -70,13 +70,13 @@ static const char *TAG = "axs5106l_touch";
 #define CLICK_MAX_TIME_US    800000   /* max press duration for tap (800 ms) */
 #define CLICK_MIN_TIME_US     60000   /* min press duration for tap (60 ms — sensitive light tap) */
 #define CLICK_MAX_MOVE       25       /* max travel still considered a tap (px) — 儿童手抖容忍 */
-#define LONG_PRESS_TIME_US   400000   /* long-press threshold (400 ms — 比 500 ms 更敏感，儿童 PTT 起手更跟手) */
+#define LONG_PRESS_TIME_US   300000   /* long-press threshold (300 ms — 进一步降低 PTT 起手门槛) */
 #define DOUBLE_CLICK_TIME_US 600000   /* max interval between two taps for double-tap (600 ms) */
 #define DOUBLE_CLICK_DIST    50       /* max distance between tap positions for double-tap (px) */
 #define CLICK_MIN_FRAMES      2       /* tap needs ≥2 PRESSED frames (~60 ms @ 30 ms LVGL) */
 #define SWIPE_MIN_TIME_US    150000   /* min swipe duration (150 ms) */
 #define SWIPE_MIN_FRAMES     5        /* swipe needs ≥5 PRESSED frames */
-#define LONG_PRESS_MIN_FRAMES 12      /* long-press needs ≥12 frames (~360 ms) — match 500 ms threshold */
+#define LONG_PRESS_MIN_FRAMES  9      /* long-press needs ≥9 frames (~270 ms @ 30 ms LVGL) — 配合 300 ms 时间阈值 */
 /* Jitter budget — 儿童手部抖动比成人大，从 24 放宽到 32（每帧 ~6.4 px 平均位移仍允）。 */
 #define JITTER_LIMIT_FOR_TAP   32
 /* Swipe trajectory efficiency: real fingers travel in (mostly) straight lines,
@@ -428,6 +428,19 @@ static void IRAM_ATTR int_falling_edge_isr(void *arg)
  * progress and reads should be suppressed. */
 static bool storm_detected(axs5106l_touch_handle_t self, uint64_t now)
 {
+    /* 长按已 fire（PTT 中）：完全绕过 storm 抑制，让 I2C 读取 + chip 自己的"按住/松开"
+     * 信号成为真相源——storm 期间 INT 不可信，但 I2C 仍可正常读取 chip 寄存器。
+     * 这样按下→松开整个 PTT 过程不被 storm 打断，直到用户真的松手 chip 报告 num=0 → release。 */
+    if (self->gesture.long_fired) {
+        /* 仍维护窗口/计数，避免 storm 警告日志失真，但不影响 lvgl 读取。 */
+        if (now - self->int_edge_window_start_us >= INT_STORM_WINDOW_US) {
+            self->int_edge_window_start_us = now;
+            self->int_edge_window_baseline = self->int_edge_count;
+        }
+        self->storm_mute_until_us = 0;   /* 主动清掉残留 mute，防 long-press 结束后多余 mute 拖尾 */
+        return false;
+    }
+
     if (now < self->storm_mute_until_us) {
         /* Keep baseline pinned to current count during mute, otherwise edges
          * accumulated while muted would land in the next 1 s window and
@@ -453,6 +466,9 @@ static bool storm_detected(axs5106l_touch_handle_t self, uint64_t now)
             self->touch.last_time     = 0;
             self->int_edge_window_start_us = now;
             self->int_edge_window_baseline = self->int_edge_count;
+            /* tap 阶段或未确认按下时被 storm 打断：模拟 release 让 gesture 状态机收尾，
+             * 避免短按卡在中间态。long_fired 路径已在函数顶部直接 return，不会到这里。 */
+            recognize_gesture(self, 0, 0, false);
             return true;
         }
         self->int_edge_window_start_us = now;

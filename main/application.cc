@@ -834,6 +834,10 @@ void Application::HandleStartListeningEvent() {
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
         SetListeningMode(kListeningModeManualStop);
+    } else if (state == kDeviceStateListening) {
+        listening_mode_ = kListeningModeManualStop;
+        protocol_->SendStartListening(kListeningModeManualStop);
+        ESP_LOGI(TAG, "PTT 在 Listening 中接管：切到 ManualStop（关服务端 VAD）");
     }
 }
 

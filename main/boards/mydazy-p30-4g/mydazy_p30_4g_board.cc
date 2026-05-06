@@ -499,13 +499,17 @@ private:
         }
 
         auto state = app.GetDeviceState();
-        if (state == kDeviceStateIdle || state == kDeviceStateSpeaking) {
+        // 允许在 Listening 中接管：多轮对话续录的 AutoStop 状态下用户想长按强切 ManualStop，
+        // 否则服务端 VAD 会把一句话切成多段 STT/TTS，屏幕反复 listening↔speaking 跳变。
+        if (state == kDeviceStateIdle ||
+            state == kDeviceStateSpeaking ||
+            state == kDeviceStateListening) {
             ESP_LOGI(TAG, "长按PTT：开始录音(ManualStop), state=%u", state);
             app.StartListening();
             ptt_active_ = true;
             ArmPttTimeout();   // 60s 兜底防 release 丢失
         } else {
-            ESP_LOGD(TAG, "长按PTT忽略：state=%u 不在 Idle/Speaking", state);
+            ESP_LOGD(TAG, "长按PTT忽略：state=%u 不在 Idle/Speaking/Listening", state);
         }
     }
 
