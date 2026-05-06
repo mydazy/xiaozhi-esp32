@@ -35,9 +35,6 @@ public:
     void MarkCurrentVersionValid();
 
     // 通用 HTTP GET 下载到 PSRAM 缓冲（动态图片 / 小资源等）。
-    //   max_size: 安全上限（防服务器返回畸形大数据撑爆 PSRAM）
-    //   返回 true 时 *buffer 由调用方 heap_caps_free 释放，*size = 实际字节数
-    //   失败 *buffer = nullptr。简单 2 次重试 + 递增退避，无 Range 续传（小文件不值得）
     static bool Download(const std::string& url, size_t max_size,
                          uint8_t** buffer, size_t* size);
 

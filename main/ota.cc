@@ -366,8 +366,6 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
 
     auto network = Board::GetInstance().GetNetwork();
     auto http = network->CreateHttp(0);
-    // 4G + 921600 UART 下大固件下载典型 ~44s；默认 30s 在弱网时会让单片读取假超时
-    // → 触发不必要的指数退避。提到 90s 给单连接 read 留足容错窗口。
     http->SetTimeout(90000);
     if (!http->Open("GET", firmware_url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
