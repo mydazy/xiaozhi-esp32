@@ -49,14 +49,20 @@ typedef struct {
     uint32_t                err_streak_for_reset; /**< 连续错误触发 bus_reset，默认 3 */
 } i2c_worker_config_t;
 
-/** 默认配置宏 */
+/** 默认配置宏
+ * err_streak_for_reset = 20（v1.1）：原 3 太敏感
+ *   - 设备 NACK（chip 未上电完成 / 出厂空白未烧固件 / 4G RF 临时干扰）算"设备层"错误
+ *   - bus_reset 只能修复"总线层"锁死（SDA 被拉低不释放），无法修复设备层
+ *   - 设备层失败应交给 driver retry（已有 I2C_RETRIES=3）
+ *   - 设备层重试 × driver 多次 = 实际容忍 ~20 个连续失败再触发 bus_reset
+ *   - 量产 AXS5106L 上电首次 chip_id 读 + 升级流程多次写都属设备层失败 */
 #define I2C_WORKER_DEFAULT_CONFIG(_bus) {                       \
     .bus                  = (_bus),                              \
     .task_priority        = 10,                                  \
     .task_core            = 0,                                   \
     .queue_depth          = 32,                                  \
     .stack_size           = 4096,                                \
-    .err_streak_for_reset = 3,                                   \
+    .err_streak_for_reset = 20,                                  \
 }
 
 /** 诊断统计（用户可定期读取上报后台） */

@@ -74,6 +74,11 @@ struct i2c_worker_t {
     uint32_t                  err_streak_for_reset;
     uint32_t                  err_streak;        /* 仅 worker task 访问 */
 
+    /* bus_reset 节流：避免设备层 NACK 反复触发 reset 风暴。
+       连续 reset ≥ kBusResetBurstLimit 次后冷却 kBusResetCooldownMs ms。 */
+    uint32_t                  consecutive_resets; /* 仅 worker task 访问 */
+    uint64_t                  last_reset_us;      /* 仅 worker task 访问 */
+
     /* 诊断（worker task 写，外部 lock-free 读） */
     atomic_uint               total_ops;
     atomic_uint               total_errors;
@@ -82,6 +87,11 @@ struct i2c_worker_t {
     atomic_uint               timeout_count;
     atomic_uint_fast64_t      last_error_us;
 };
+
+/* bus_reset 节流参数（避免风暴） */
+#define BUS_RESET_BURST_LIMIT      3       /* 连续 N 次 reset */
+#define BUS_RESET_COOLDOWN_MS      5000    /* 后冷却 5 s 不再 reset */
+#define BUS_RESET_BURST_WINDOW_US  500000  /* 500 ms 内连续 = burst */
 
 /* 给 .c 内部使用的 typedef（头文件只有 i2c_worker_handle_t 指针 typedef） */
 typedef struct i2c_worker_t i2c_worker_t;
@@ -159,14 +169,42 @@ static void worker_task(void *arg)
             atomic_store(&w->max_queue_depth, (uint32_t)depth);
         }
 
-        /* 错误连击达阈值 → 优先 bus_reset */
+        /* 错误连击达阈值 → bus_reset，但加节流避免风暴：
+         *   - 连续 reset ≥ BUS_RESET_BURST_LIMIT（500ms 内）后冷却 5s
+         *   - 冷却期间 streak 仍清零（不让"已知有问题"反复刷屏） */
         if (w->err_streak >= w->err_streak_for_reset) {
-            esp_err_t reset_ret = i2c_master_bus_reset(w->bus);
-            atomic_fetch_add(&w->bus_reset_count, 1);
-            ESP_LOGW(TAG, "auto bus_reset due to streak=%u (ret=%d)",
-                     w->err_streak, (int)reset_ret);
-            w->err_streak = 0;
-            vTaskDelay(pdMS_TO_TICKS(2));   /* 给从机 settling */
+            uint64_t now = (uint64_t)esp_timer_get_time();
+            bool in_burst_window = (now - w->last_reset_us) < BUS_RESET_BURST_WINDOW_US;
+            if (!in_burst_window) {
+                w->consecutive_resets = 0;   /* 离开 burst 窗口，重置计数 */
+            }
+
+            if (w->consecutive_resets >= BUS_RESET_BURST_LIMIT) {
+                /* 冷却期：不再 reset，仅清 streak 让 driver 继续 retry */
+                if ((now - w->last_reset_us) < (uint64_t)BUS_RESET_COOLDOWN_MS * 1000ULL) {
+                    w->err_streak = 0;
+                    /* 不打日志避免刷屏 */
+                } else {
+                    /* 冷却结束，可以再 reset 一次 */
+                    w->consecutive_resets = 0;
+                }
+            }
+
+            if (w->consecutive_resets < BUS_RESET_BURST_LIMIT) {
+                esp_err_t reset_ret = i2c_master_bus_reset(w->bus);
+                atomic_fetch_add(&w->bus_reset_count, 1);
+                w->consecutive_resets++;
+                w->last_reset_us = now;
+                ESP_LOGW(TAG, "auto bus_reset (streak=%u, burst=%u/%d, ret=%d)",
+                         w->err_streak, w->consecutive_resets, BUS_RESET_BURST_LIMIT, (int)reset_ret);
+                w->err_streak = 0;
+                vTaskDelay(pdMS_TO_TICKS(50));   /* 50ms settling（原 2ms 太短） */
+
+                if (w->consecutive_resets >= BUS_RESET_BURST_LIMIT) {
+                    ESP_LOGW(TAG, "bus_reset burst limit reached → cooldown %d ms",
+                             BUS_RESET_COOLDOWN_MS);
+                }
+            }
         }
 
         esp_err_t ret = worker_execute_op(w, &op);
