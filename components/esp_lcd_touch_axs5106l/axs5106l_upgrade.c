@@ -106,7 +106,8 @@ static bool i2c_read_reg(axs5106l_upgrade_handle_t h, uint8_t reg, uint8_t *data
     if (h->dev == NULL) return false;
 
     for (int retry = 0; retry < I2C_MAX_RETRIES; retry++) {
-        if (i2c_worker_write_read(h->dev, &reg, 1, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
+        if (i2c_worker_write(h->dev, &reg, 1, I2C_TIMEOUT_MS) == ESP_OK &&
+            i2c_worker_read (h->dev, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
             return true;
         }
         delay_ms(5);
@@ -120,7 +121,8 @@ static bool i2c_read_regs(axs5106l_upgrade_handle_t h, const uint8_t *reg, size_
     if (h->dev == NULL) return false;
 
     for (int retry = 0; retry < I2C_MAX_RETRIES; retry++) {
-        if (i2c_worker_write_read(h->dev, reg, reg_len, data, data_len, I2C_TIMEOUT_MS) == ESP_OK) {
+        if (i2c_worker_write(h->dev, reg,  reg_len,  I2C_TIMEOUT_MS) == ESP_OK &&
+            i2c_worker_read (h->dev, data, data_len, I2C_TIMEOUT_MS) == ESP_OK) {
             return true;
         }
         delay_ms(5);
@@ -290,6 +292,23 @@ bool axs5106l_upgrade_get_chip_version(axs5106l_upgrade_handle_t h, uint16_t *ve
     return true;
 }
 
+/* reset 后 chip bootloader 需要时间稳定，0x05 寄存器在 bootloader 期间读到 0；
+ * 多次重试避开这段窗口，避免把"已刷过的 chip"误判成"空白芯片"导致重复升级。
+ * 5 × 50 ms = 250 ms，覆盖 chip 启动 + I2C 抖动。 */
+static bool read_chip_version_stable(axs5106l_upgrade_handle_t h, uint16_t *version)
+{
+    for (int i = 0; i < 5; i++) {
+        uint16_t v = 0;
+        if (axs5106l_upgrade_get_chip_version(h, &v) && v != 0) {
+            *version = v;
+            return true;
+        }
+        delay_ms(50);
+    }
+    *version = 0;
+    return false;
+}
+
 uint16_t axs5106l_upgrade_get_embedded_version(void)
 {
     if (sizeof(kFirmwareData) < FIRMWARE_VERSION_OFFSET + 2) return 0;
@@ -301,22 +320,22 @@ axs5106l_upgrade_result_t axs5106l_upgrade_run(axs5106l_upgrade_handle_t h)
 {
     if (h == NULL) return AXS5106L_UPGRADE_I2C_ERROR;
 
-    /* 1. Read the version currently running on the chip. */
+    /* 1. Read the version currently running on the chip (with retry，避开 bootloader 窗口). */
     uint16_t chip_version = 0;
-    if (!axs5106l_upgrade_get_chip_version(h, &chip_version)) {
-        ESP_LOGW(TAG, "cannot read chip firmware version; will attempt upgrade anyway "
-                      "(may be a blank chip)");
-    } else {
+    if (read_chip_version_stable(h, &chip_version)) {
         ESP_LOGI(TAG, "chip firmware version: V%u", chip_version);
+    } else {
+        ESP_LOGW(TAG, "chip firmware version read = 0 after 5 retries; "
+                      "assume blank chip and attempt upgrade");
     }
 
     /* 2. Read the embedded version. */
     uint16_t embedded_version = axs5106l_upgrade_get_embedded_version();
     ESP_LOGI(TAG, "embedded firmware version: V%u", embedded_version);
 
-    /* 3. Compare; skip if equal. */
-    if (chip_version == embedded_version && chip_version != 0) {
-        ESP_LOGI(TAG, "chip firmware up to date; no upgrade needed");
+    /* 3. Compare; skip if chip already matches embedded（量产纪律：减少无谓 flash 擦写）. */
+    if (chip_version != 0 && chip_version == embedded_version) {
+        ESP_LOGI(TAG, "chip firmware up to date (V%u); no upgrade needed", chip_version);
         return AXS5106L_UPGRADE_NOT_NEEDED;
     }
 
@@ -326,18 +345,19 @@ axs5106l_upgrade_result_t axs5106l_upgrade_run(axs5106l_upgrade_handle_t h)
     for (int retry = 0; retry < UPGRADE_RETRY_TIMES; retry++) {
         if (do_upgrade(h)) {
             software_reset(h);
-            delay_ms(50);
+            delay_ms(100);  /* bootloader 启动等 100 ms（原 50 ms 不够）*/
 
             uint16_t new_version = 0;
-            if (axs5106l_upgrade_get_chip_version(h, &new_version)) {
+            if (read_chip_version_stable(h, &new_version)) {
                 if (new_version == embedded_version) {
                     ESP_LOGI(TAG, "firmware upgrade succeeded; new version: V%u", new_version);
                     return AXS5106L_UPGRADE_SUCCESS;
                 }
                 ESP_LOGW(TAG, "version mismatch after upgrade: expected V%u, got V%u",
                          embedded_version, new_version);
+            } else {
+                ESP_LOGW(TAG, "post-upgrade version still reads 0 after retry");
             }
-            ESP_LOGW(TAG, "post-upgrade version verification failed; retrying...");
         }
     }
 

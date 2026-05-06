@@ -70,7 +70,7 @@ static const char *TAG = "axs5106l_touch";
 #define CLICK_MAX_TIME_US    800000   /* max press duration for tap (800 ms) */
 #define CLICK_MIN_TIME_US     60000   /* min press duration for tap (60 ms — sensitive light tap) */
 #define CLICK_MAX_MOVE       25       /* max travel still considered a tap (px) — 儿童手抖容忍 */
-#define LONG_PRESS_TIME_US   500000   /* long-press threshold (500 ms — child-friendly PTT) */
+#define LONG_PRESS_TIME_US   400000   /* long-press threshold (400 ms — 比 500 ms 更敏感，儿童 PTT 起手更跟手) */
 #define DOUBLE_CLICK_TIME_US 600000   /* max interval between two taps for double-tap (600 ms) */
 #define DOUBLE_CLICK_DIST    50       /* max distance between tap positions for double-tap (px) */
 #define CLICK_MIN_FRAMES      2       /* tap needs ≥2 PRESSED frames (~60 ms @ 30 ms LVGL) */
@@ -502,7 +502,8 @@ static bool read_register(axs5106l_touch_handle_t self, uint8_t reg, uint8_t *da
 {
     if (self->dev == NULL) return false;
     for (int i = 0; i < I2C_RETRIES; i++) {
-        if (i2c_worker_write_read(self->dev, &reg, 1, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
+        if (i2c_worker_write(self->dev, &reg, 1,   I2C_TIMEOUT_MS) == ESP_OK &&
+            i2c_worker_read (self->dev, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
             self->i2c_err_streak = 0;
             return true;
         }
@@ -832,7 +833,7 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
             g->last_click_time = 0;
         }
 
-        // Trajectory-efficiency gate: real swipe ≈ straight line; RF jumps fail this.
+        #if 0
         uint16_t traj_budget = (uint16_t)manhattan * SWIPE_TRAJECTORY_RATIO + SWIPE_TRAJECTORY_BIAS;
         if (manhattan >= SWIPE_THRESHOLD &&
             dur >= SWIPE_MIN_TIME_US &&
@@ -852,5 +853,6 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
                      g->start_x, g->start_y, g->last_x, g->last_y);
             fire_gesture(self, kind, g->start_x, g->start_y);
         }
+        #endif
     }
 }

@@ -322,6 +322,8 @@ void UiDisplay::SwitchToChatMode() {
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
     is_clock_mode_ = false;
+    // 离开时钟回到 chat = 新一次对话语境，清掉上一次的 font 标记，让 neutral 能正常显示
+    current_is_font_ = false;
     ESP_LOGI(TAG, "Switched to chat mode");
 }
 
