@@ -424,8 +424,6 @@ void UiDisplay::UpdateFontGif(uint8_t* gif_buffer, size_t size) {
 void UiDisplay::SetEmotion(const char* emotion) {
     if (!emotion) return;
 
-    // 当前显示 font GIF 时跳过 neutral（application.cc 进 listening 默认强制注入），
-    // happy/laughing/sad 等由 LLM 判定的情绪正常通过。
     if (current_is_font_ && strcmp(emotion, "neutral") == 0) {
         return;
     }
@@ -433,10 +431,8 @@ void UiDisplay::SetEmotion(const char* emotion) {
     bool is_font = (strcmp(emotion, "font") == 0);
     LcdDisplay::SetEmotion(emotion);
 
-    // font: 保持原尺寸（不缩放）+ 整体向上偏移 12px；其他 emoji: 居中复位
     if (emoji_image_) {
         DisplayLockGuard lock(this);
-        lv_image_set_scale(emoji_image_, kDefaultEmojiZoom);
         lv_obj_align(emoji_image_, LV_ALIGN_CENTER, 0, is_font ? kFontEmojiOffsetY : 0);
     }
 
