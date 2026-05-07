@@ -50,7 +50,7 @@ public:
     // ===== 主屏切换 =====
     void SwitchToClockMode();    // idle → 时钟主屏
     void SwitchToChatMode();     // 对话 → 聊天 UI
-    bool IsClockMode() const { return is_clock_mode_; }
+    bool IsClockMode() const { return current_scene_ == SceneType::kClock; }
 
     // ===== 音乐播放器页（极简：曲名 + Play/Pause + 进度条）=====
     using PlayerPauseToggleCb = std::function<void()>;
@@ -59,7 +59,10 @@ public:
     void UpdatePlayerProgress(int position_ms, int total_ms);
     void SetPlayerPaused(bool paused);
     void OnPlayerPauseToggle(PlayerPauseToggleCb cb) { on_player_pause_toggle_ = std::move(cb); }
-    bool IsPlayerMode() const { return is_player_mode_; }
+    bool IsPlayerMode() const { return current_scene_ == SceneType::kPlayer; }
+
+    // 三维心智模型（C 维度）查询入口：UI 场景互斥维度（替代 is_clock_mode_ / is_player_mode_）
+    SceneType GetCurrentScene() const { return current_scene_; }
 
     // 开机引导结束：logo fade_out → SwitchToClockMode（幂等）
     // 仅由 Application::HandleStateChangedEvent(Idle) 调用，确保联网+激活完成才切时钟
@@ -108,7 +111,6 @@ private:
     lv_obj_t* player_time_cur_   = nullptr;
     lv_obj_t* player_time_total_ = nullptr;
     lv_timer_t* player_tick_     = nullptr;     // 200ms 自动刷新进度
-    bool is_player_mode_         = false;
     bool is_player_paused_       = false;
     PlayerPauseToggleCb on_player_pause_toggle_;
 
@@ -120,8 +122,9 @@ private:
     // 链入主字体仅 ~600 字常用文案，cbin 字体补 GB 2312 全字（7000+），LVGL 缺字自动 fallback。
     const lv_font_t* fallback_text_font_ = nullptr;
 
-    // 状态
-    bool is_clock_mode_ = false;
+    // 状态：UI 场景维度（详见 docs/p30-architecture.html § 一.5 三维心智模型 · C 维度）
+    // 默认 kEmoji（启动时 emoji_box 显 logo · 进 chat 后显表情都属此场景）
+    SceneType current_scene_ = SceneType::kEmoji;
 
     // 当前是否在显示 font GIF（仅用于 SetEmotion 判 "跳过 neutral"）
     bool current_is_font_ = false;

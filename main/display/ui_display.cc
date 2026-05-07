@@ -136,14 +136,14 @@ void UiDisplay::LoadFallbackTextFont() {
 // ============================================================
 
 void UiDisplay::UpdateStatusBar(bool update_all) {
-    if (is_clock_mode_) {
+    if (current_scene_ == SceneType::kClock) {
         last_status_update_time_ = std::chrono::system_clock::now();
     }
     LvglDisplay::UpdateStatusBar(update_all);
     DisplayLockGuard lock(this);
 
     // clock 模式：1s tick 刷新时钟（cbin 字体尚未就绪时延迟加载）
-    if (is_clock_mode_ && clock_time_label_) {
+    if (current_scene_ == SceneType::kClock && clock_time_label_) {
         if (!clock_big_font_ || !clock_text_font_) LoadClockFonts();
         UpdateClockTime();
     }
@@ -260,9 +260,9 @@ void UiDisplay::UpdateClockTime() {
 
 void UiDisplay::SwitchToClockMode() {
     DisplayLockGuard lock(this);
-    if (is_clock_mode_) return;
+    if (current_scene_ == SceneType::kClock) return;
     if (!setup_ui_called_) return;
-    if (is_player_mode_) return;
+    if (current_scene_ == SceneType::kPlayer) return;
 
     if (!clock_container_) CreateClockPage();
 
@@ -285,13 +285,13 @@ void UiDisplay::SwitchToClockMode() {
     }
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
-    is_clock_mode_ = true;
+    current_scene_ = SceneType::kClock;
     ESP_LOGI(TAG, "Switched to clock mode");
 }
 
 void UiDisplay::SwitchToChatMode() {
     DisplayLockGuard lock(this);
-    if (!is_clock_mode_) return;
+    if (current_scene_ != SceneType::kClock) return;
 
     if (clock_container_) {
         lv_obj_add_flag(clock_container_, LV_OBJ_FLAG_HIDDEN);
@@ -321,7 +321,7 @@ void UiDisplay::SwitchToChatMode() {
     }
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
-    is_clock_mode_ = false;
+    current_scene_ = SceneType::kEmoji;   // chat 主 widget = emoji_box
     // 离开时钟回到 chat = 新一次对话语境，清掉上一次的 font 标记，让 neutral 能正常显示
     current_is_font_ = false;
     ESP_LOGI(TAG, "Switched to chat mode");
@@ -361,10 +361,10 @@ void UiDisplay::StartBootAnimation() {
 
 void UiDisplay::FinishBootAndShowClock() {
     DisplayLockGuard lock(this);
-    if (is_clock_mode_) return;          // 幂等：已切时钟，重复 Idle 事件忽略
+    if (current_scene_ == SceneType::kClock) return;   // 幂等：已切时钟，重复 Idle 事件忽略
     if (!setup_ui_called_) return;
     // 同 SwitchToClockMode：Player 模式下不切回时钟（OnMusicPlay 路径会触发 Idle 状态事件）
-    if (is_player_mode_) return;
+    if (current_scene_ == SceneType::kPlayer) return;
 
     // 清理可能残留的开机引导覆盖层（激活码 / 配网 QR），避免切到时钟后仍被 overlay 遮挡。
     HideQrCode();
@@ -732,7 +732,7 @@ void UiDisplay::OnPlayerPlayPauseClicked(lv_event_t* e) {
 // 200ms tick：直接从 MusicPlayer 拉进度/暂停状态，自动刷新 UI
 void UiDisplay::PlayerTickCb(lv_timer_t* t) {
     auto* self = static_cast<UiDisplay*>(lv_timer_get_user_data(t));
-    if (!self || !self->is_player_mode_) return;
+    if (!self || self->current_scene_ != SceneType::kPlayer) return;
     auto& mp = MusicPlayer::GetInstance();
     self->UpdatePlayerProgress(mp.GetPositionMs(), mp.GetTotalDurationMs());
     self->SetPlayerPaused(mp.IsPaused());
@@ -773,8 +773,7 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
     }
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
-    is_player_mode_ = true;
-    is_clock_mode_  = false;   // 复用 clock 状态字段，与 SwitchToChatMode 保持互斥
+    current_scene_ = SceneType::kPlayer;   // 与 Clock / Emoji 互斥
 
     // 启动 200ms 进度刷新 timer（懒创建）
     if (!player_tick_) player_tick_ = lv_timer_create(PlayerTickCb, 200, this);
@@ -785,18 +784,18 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
 
 void UiDisplay::SwitchOutPlayerMode() {
     DisplayLockGuard lock(this);
-    if (!is_player_mode_) return;
+    if (current_scene_ != SceneType::kPlayer) return;
     if (player_container_) lv_obj_add_flag(player_container_, LV_OBJ_FLAG_HIDDEN);
     if (player_tick_) lv_timer_pause(player_tick_);
-    is_player_mode_ = false;
-    // 退出时回时钟主屏（idle 状态）
+    // 先退出 Player 场景，让 SwitchToClockMode 内的 kPlayer 互斥判定通过
+    current_scene_ = SceneType::kEmoji;
     SwitchToClockMode();
     ESP_LOGI(TAG, "Switched out player mode");
 }
 
 void UiDisplay::UpdatePlayerProgress(int position_ms, int total_ms) {
     DisplayLockGuard lock(this);
-    if (!is_player_mode_ || !player_progress_) return;
+    if (current_scene_ != SceneType::kPlayer || !player_progress_) return;
 
     char buf[16];
     if (player_time_cur_) {

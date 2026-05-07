@@ -504,7 +504,11 @@ private:
         if (state == kDeviceStateIdle ||
             state == kDeviceStateSpeaking ||
             state == kDeviceStateListening) {
+            if (state == kDeviceStateSpeaking) {
+                app.AbortSpeaking(kAbortReasonNone);
+            }
             ESP_LOGI(TAG, "长按PTT：开始录音(ManualStop), state=%u", state);
+            app.PlaySound(Lang::Sounds::OGG_TACTILE);
             app.StartListening();
             ptt_active_ = true;
             ArmPttTimeout();   // 60s 兜底防 release 丢失
