@@ -77,7 +77,7 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
     afe_config->afe_perferred_priority = 1;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
 
-    afe_config->afe_linear_gain = 2.0f;
+    afe_config->afe_linear_gain = 3.0f;
     afe_config->agc_init = true;
     afe_config->agc_mode = AFE_AGC_MODE_WAKENET;
 

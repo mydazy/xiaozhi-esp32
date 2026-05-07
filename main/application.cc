@@ -2,8 +2,6 @@
 #include "board.h"
 #include "display.h"
 #include "display/ui_display.h"
-// [量产稳定期] UiImageManager 整体下线（仅原 control_center.cc 是其消费方）
-// #include "display/ui/resources/ui_image_manager.h"
 #include "system_info.h"
 #include "audio_codec.h"
 #include "mqtt_protocol.h"
@@ -435,7 +433,6 @@ void Application::CheckAssetsVersion() {
 
     // Apply assets
     assets.Apply();
-    // [量产稳定期] UiImageManager::GetInstance().LoadAll() 已下线（无消费方）
     display->SetChatMessage("system", "");
     display->SetEmotion("logo");
 }
@@ -554,7 +551,6 @@ void Application::InitializeProtocol() {
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
         if (GetDeviceState() == kDeviceStateSpeaking) {
-            // wait=true: decode_queue 满时阻塞协议任务，让 TCP 反压自然流控；
             // 避免弱网时静默丢包导致音节缺失（破音根因 #1）。队列上限 40 帧=2.4s，
             audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
         }
@@ -806,7 +802,7 @@ void Application::HandleStartListeningEvent() {
     MusicPlayer::GetInstance().Stop();
 
     auto state = GetDeviceState();
-
+    
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;
@@ -837,6 +833,12 @@ void Application::HandleStartListeningEvent() {
     } else if (state == kDeviceStateListening) {
         listening_mode_ = kListeningModeManualStop;
         protocol_->SendStartListening(kListeningModeManualStop);
+        // 上一轮 PTT 松手在 HandleStopListeningEvent 关了 voice processing（见本文件 line ~857），
+        // 但 state 仍 Listening，不会触发 OnStateChanged 重启 audio_processor。
+        // 如果不在此显式重启，第二次起所有 PTT 录音都是空帧，服务端收不到音频→无 STT/TTS 反馈。
+        if (!audio_service_.IsAudioProcessorRunning()) {
+            audio_service_.EnableVoiceProcessing(true);
+        }
         ESP_LOGI(TAG, "PTT 在 Listening 中接管：切到 ManualStop（关服务端 VAD）");
     }
 }
@@ -986,8 +988,7 @@ void Application::HandleStateChangedEvent() {
             if (lcd) lcd->SwitchToChatMode();    // 对话开始，表情/消息可见
             break;
         case kDeviceStateListening:
-            // 录音中显示麦克风图标（依赖 BUILTIN_TEXT_FONT.fallback → BUILTIN_ICON_FONT）
-            display->SetStatus(FONT_AWESOME_MICROPHONE);
+            display->SetStatus("●");
             display->SetEmotion("neutral");
 
             // Make sure the audio processor is running

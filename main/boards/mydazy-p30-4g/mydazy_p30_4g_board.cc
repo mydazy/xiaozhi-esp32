@@ -179,9 +179,6 @@ private:
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
 
-        /* v3.0+: 共享总线串行化 worker —— 5 driver（codec×2 / 触摸 / sensor / NFC）
-           的 I2C 访问全部汇入此 worker 单线程顺序执行，杜绝跨 transaction 污染。
-           Core 0 P10 与 audio_output 同位，高于 LVGL P5 / 网络 P5。 */
         i2c_worker_config_t wcfg = I2C_WORKER_DEFAULT_CONFIG(i2c_bus_);
         ESP_ERROR_CHECK(i2c_worker_create(&wcfg, &i2c_worker_));
     }
@@ -305,10 +302,6 @@ private:
     }
 
     void InitializeSc7a20h() {
-        // 拿起唤醒灵敏度（P30 系列两板统一）：
-        //   threshold 320mg：0.32g 加速度尖峰，拿起 3–5cm 即触发
-        //   duration  100ms：拿起加速段时长，桌面瞬碰（< 80ms）仍滤掉
-        // 调参历史：256→1024→1280→1024→768→512→448→384→320mg
         sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 320 /*mg*/, 100 /*ms*/);
         sc7a20h_initialized_ = (sc7a20h_sensor_ != nullptr);
         if (!sc7a20h_initialized_) {
@@ -365,8 +358,6 @@ private:
 
     void StartShakeDetect() {
         if (!sc7a20h_initialized_) return;
-        // Core 1（PSRAM 栈红线 + Core 0 红线均不沾）+ P1 后台 + 2.5KB 内部 RAM 栈
-        // 100ms 周期，I2C 读 6B + 一次 sqrtf；CPU < 1%
         xTaskCreatePinnedToCore(&MyDazyP30_4GBoard::ShakeDetectTaskEntry,
                                 "accel_shake", 2560, this, 1, &shake_detect_task_, 1);
     }
@@ -625,9 +616,7 @@ private:
         power_save_timer_->OnShutdownRequest([this, deep_sleep_enabled]() {
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
-                // 自动休眠：仅屏幕提示 + 陀螺仪可唤醒（拍拍即醒）
-                // 不播提示音 —— 用户没主动操作，夜间/会议中突然响会打扰
-                ShutdownOrSleep("休眠中", "拍拍唤醒", "", 1500, true);
+                ShutdownOrSleep("休眠中", "拿起唤醒", "", 1500, true);
             }
         });
 
@@ -640,8 +629,6 @@ private:
 
     void ShutdownTouchAndAudioForSleep() {
         if (touch_driver_) {
-            // v4.0 极简：del 已删除，深睡前用 sleep + 关 INT ISR 即可。
-            // 整机即将进 deep_sleep，I2C device handle 由 worker_destroy 统一回收。
             axs5106l_touch_sleep(touch_driver_);
             touch_driver_ = nullptr;
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -653,8 +640,6 @@ private:
     }
 
     void ConfigureDeepSleepWakeupSources(bool enable_gyro_wakeup) {
-        // 等用户松开 BOOT 键（带 5 秒兜底，避免硬件按死时永远卡住）。
-        // CheckBootHoldOnWakeup 看到仍按住 → 误判为新一次开机长按 → 关机失败。
         const int kReleaseWaitMaxMs = 5000;
         const int kStepMs = 50;
         int waited_ms = 0;
@@ -709,9 +694,6 @@ private:
         gpio_config(&input_conf);
     }
 
-    // 4G modem 优雅释放：进飞行模式让基站清理 PPP/RRC 会话。
-    // driver SetFlightMode 内部 = AT+CFUN=4 + DTR 高（如已启用 GPIO6 DTR）。
-    // 失败不阻塞断电流程（modem 异常时仍走电源级硬复位）。
     void GracefulShutdownModem() {
         if (GetNetworkType() != NetworkType::ML307) return;
         auto& ml307 = static_cast<Ml307Board&>(GetCurrentBoard());
@@ -725,9 +707,6 @@ private:
     void EnterDeepSleep(bool enable_gyro_wakeup = true) {
         ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
 
-        // ⚠️ 必须最先停 AudioService：让 audio_input/AFE/encode/output 等 FreeRTOS 任务退出。
-        // 否则后面切 AUDIO_PWR_EN 关电源时任务仍在 I2S 读写已掉电的 codec → I2S timeout/panic
-        // → CPU reset（表现为"deep sleep 立即重启"，烧录日志的根因）。
         ESP_LOGI(TAG, "停止 AudioService（释放 codec / 退出 audio_* 任务）");
         Application::GetInstance().GetAudioService().Stop();
         vTaskDelay(pdMS_TO_TICKS(100));   // 等任务循环检测 service_stopped_ 后退出
@@ -769,8 +748,6 @@ private:
         esp_deep_sleep_start();
     }
 
-    // 统一关机/休眠入口：先显示 Alert + 播提示音，等指定时长后进 deep sleep
-    //   title/msg/sound 任一可空跳过；delay_ms 覆盖提示音 + 视觉感知（建议 ≥ 2000ms）
     //   enable_gyro_wakeup=true：陀螺仪可唤醒（自动休眠场景）/ false：仅按键唤醒（按键关机场景）
     void ShutdownOrSleep(const char* title, const char* msg, const std::string_view& sound,
                          int delay_ms, bool enable_gyro_wakeup) {
@@ -920,17 +897,6 @@ private:
         ShutdownOrSleep("再见", "", Lang::Sounds::OGG_SHUTDOWN, 2500, false);
     }
 
-    void HandleBootMultiClick6_AudioTest() {
-        auto& app = Application::GetInstance();
-        AbortIfSpeaking();
-        app.SetDeviceState(kDeviceStateWifiConfiguring);
-        app.StartListening();
-        app.Alert("音频测试", "", "", Lang::Sounds::OGG_AUDIO_TEST);
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        app.SetDeviceState(kDeviceStateAudioTesting);
-        app.StopListening();
-    }
-
     void HandleBootMultiClick9_FactoryReset() {
         auto& app = Application::GetInstance();
         AbortIfSpeaking();
@@ -992,9 +958,6 @@ private:
         if (!shutdown_armed_.load()) return;
         shutdown_armed_.store(false);
         ESP_LOGI(TAG, "长按 5 秒：执行关机");
-        // 不再播提示音 —— 3s 警告已播 OGG_REBOOT，间隔 2s 短于音频时长，
-        // 这里再播会重叠成"两遍"。让 3s 的 OGG_REBOOT 自然延续到关机即可。
-        // 屏幕"关机中"文字 + 2s 后熄屏，视听连贯。
         ShutdownOrSleep("关机中", "", "", 2000, false);
     }
 
@@ -1003,7 +966,6 @@ private:
         boot_button_.OnDoubleClick([this]() { HandleBootDoubleClick(); });
         boot_button_.OnMultipleClick([this]() { HandleBootMultiClick3_SwitchNetwork(); }, 3);
         boot_button_.OnMultipleClick([this]() { HandleBootMultiClick4_PowerOff(); }, 4);
-        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick6_AudioTest(); }, 6);
         boot_button_.OnMultipleClick([this]() { HandleBootMultiClick9_FactoryReset(); }, 9);
         // 长按多段：0.7s 录音、3s 关机提醒、5s 真正关机
         boot_button_.OnLongPress([this]() { HandleBootLongPress(); }, 700);
@@ -1029,8 +991,6 @@ private:
     // 状态上报
     // ========================================================
 
-    // 周期上报开关：默认关闭。唤醒事件触发的一次性上报不受此开关影响。
-    // 改 true 重编即可恢复 90s 周期；后续可改成 NVS 设置项。
     static constexpr bool kEnablePeriodicStatusReport = false;
 
     void ReportStatus() {
@@ -1121,8 +1081,6 @@ private:
         codec->SetOutputVolume(v);
         char buf[32];
         snprintf(buf, sizeof(buf), "%s %d", Lang::Strings::VOLUME, v);
-        // 改用 ShowNotification（1.5s 自动消失） · clock/player 模式下也能可见
-        // 见 LvglDisplay::ShowNotification: 临时浮起 status_bar_ + timer 还原原状态
         GetDisplay()->ShowNotification(buf, 1500);
         WakeUp();
     }

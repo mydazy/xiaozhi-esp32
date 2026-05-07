@@ -882,17 +882,6 @@ private:
         ShutdownOrSleep("再见", "", Lang::Sounds::OGG_SHUTDOWN, 2500, false);
     }
 
-    void HandleBootMultiClick6_AudioTest() {
-        auto& app = Application::GetInstance();
-        AbortIfSpeaking();
-        app.SetDeviceState(kDeviceStateWifiConfiguring);
-        app.StartListening();
-        app.Alert("音频测试", "", "", Lang::Sounds::OGG_AUDIO_TEST);
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        app.SetDeviceState(kDeviceStateAudioTesting);
-        app.StopListening();
-    }
-
     void HandleBootMultiClick9_FactoryReset() {
         auto& app = Application::GetInstance();
         AbortIfSpeaking();
@@ -965,7 +954,6 @@ private:
         boot_button_.OnDoubleClick([this]() { HandleBootDoubleClick(); });
         boot_button_.OnMultipleClick([this]() { HandleBootMultiClick3_EnterWifiConfig(); }, 3);
         boot_button_.OnMultipleClick([this]() { HandleBootMultiClick4_PowerOff(); }, 4);
-        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick6_AudioTest(); }, 6);
         boot_button_.OnMultipleClick([this]() { HandleBootMultiClick9_FactoryReset(); }, 9);
         // 长按多段：0.7s 录音、3s 关机提醒、5s 真正关机
         boot_button_.OnLongPress([this]() { HandleBootLongPress(); }, 700);

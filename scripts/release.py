@@ -54,8 +54,25 @@ def zip_bin(name: str, version: str) -> None:
     if output_path.exists():
         output_path.unlink()
 
+    # 要添加到压缩包的文件列表
+    files_to_zip = [
+        "build/merged-binary.bin",
+        "build/bootloader/bootloader.bin",
+        "build/xiaozhi.bin",
+        "build/partition_table/partition-table.bin",
+        "build/ota_data_initial.bin",
+        "build/srmodels/srmodels.bin",
+        "build/storage.bin"
+    ]
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write("build/merged-binary.bin", arcname="merged-binary.bin")
+        for file_path in files_to_zip:
+            if os.path.exists(file_path):
+                # 使用文件名作为压缩包内的路径（去掉build/前缀）
+                arcname = os.path.basename(file_path)
+                zipf.write(file_path, arcname=arcname)
+                print(f"已添加: {file_path} -> {arcname}")
+            else:
+                print(f"警告: 文件不存在，跳过: {file_path}")
     print(f"zip bin to {output_path} done")
 
 def _get_manufacturer(cfg: dict) -> Optional[str]:

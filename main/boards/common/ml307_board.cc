@@ -66,7 +66,7 @@ void Ml307Board::OnNetworkEvent(NetworkEvent event, const std::string& data) {
 
 void Ml307Board::NetworkTask() {
     // ─── ML307R 模组上电稳定窗口（必须保留）────────────────────────────────
-    vTaskDelay(pdMS_TO_TICKS(1500));
+    vTaskDelay(pdMS_TO_TICKS(3000));
 
     // Notify modem detection started
     OnNetworkEvent(NetworkEvent::ModemDetecting);
@@ -135,9 +135,6 @@ void Ml307Board::NetworkTask() {
 }
 
 void Ml307Board::StartNetwork() {
-    // ─── 系统冷启动电源稳定窗口 ────────────────────────────────────────────
-    // 现象：上电瞬间音频/屏幕/PSRAM/Flash 同时上电浪涌，ML307R 欠压启动失败，必须拔插电源才能联网。
-    vTaskDelay(pdMS_TO_TICKS(1500));
 
     xTaskCreatePinnedToCore([](void* arg) {
         Ml307Board* board = static_cast<Ml307Board*>(arg);
