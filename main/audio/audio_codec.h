@@ -56,7 +56,7 @@ protected:
     int output_channels_ = 1;
     int output_volume_ = 80;
     float input_gain_ = 15.0;
-    float aec_gain_db_     = 6.0f;   // AEC 后软件增益缺省 +6 dB（≈2×）
+    float aec_gain_db_     = 9.0f;   // AEC 后软件增益缺省 +6 dB（≈2×）
     float aec_gain_linear_ = 2.0f;   // 预算 powf 结果，避免每帧浮点
 
     virtual int Read(int16_t* dest, int samples) = 0;

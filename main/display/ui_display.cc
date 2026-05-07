@@ -77,9 +77,6 @@ void UiDisplay::SetupUI() {
     }
     if (emoji_box_) lv_obj_set_style_opa(emoji_box_, LV_OPA_TRANSP, 0);
 
-    // 2. 启用 status_label_ / notification_label_ 的 recolor 富文本
-    //    业务可在文本中嵌入颜色：display->SetStatus("#FF3030 ●# 录音中")
-    //    ⚠️ 启用后业务文本不能裸出现 '#'，需要时用 '##' 转义。
     if (status_label_)       lv_label_set_recolor(status_label_, true);
     if (notification_label_) lv_label_set_recolor(notification_label_, true);
 
@@ -87,16 +84,9 @@ void UiDisplay::SetupUI() {
     StartBootAnimation();
 
     // 4. 文本字体补字 fallback：BUILTIN_TEXT_FONT 仅链入 ~600 常字，
-    //    通过 cbin 加载 GB 2312 全字（7000+），缺字时由 LVGL 自动 fallback。
     LoadFallbackTextFont();
-
-    // [量产稳定期] 第 5 步原本是 EnableStatusBarTapForControlCenter()——已与 ControlCenter 一并下线
 }
 
-// BUILTIN_TEXT_FONT 直接位于 Flash rodata（不可写），无法写它的 fallback 字段。
-// 我们在 RAM 中维护一个按值复制的 proxy，所有 UI 代码以 g_text_font 替代 BUILTIN_TEXT_FONT
-// 引用，proxy 的 fallback 字段在 cbin 字体加载完成后才被写入。
-// 详细说明见 main/display/text_font.h。
 lv_font_t g_text_font;        // RAM-resident proxy，extern 于 text_font.h
 static bool s_text_font_proxy_initialized = false;
 
@@ -160,8 +150,6 @@ constexpr int16_t kClockDateOffsetY =  40;   // 日期距中心 +40px
 constexpr int16_t kClockWeekOffsetY =  76;   // 星期距中心 +76px
 constexpr int16_t kClockOffsetX     =   0;   // 三段统一水平居中
 
-// [量产稳定期] 从 display/ui/theme/ui_config.h 内联（切断对 ui/ 目录依赖）
-// 恢复时改回 ScreenConfig::WIDTH / HEIGHT / RADIUS / HEADER_HEIGHT / Colors::*
 constexpr int      kScreenWidth        = 284;
 constexpr int      kScreenHeight       = 240;
 constexpr int      kScreenRadius       = 25;
@@ -278,6 +266,10 @@ void UiDisplay::SwitchToClockMode() {
         lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(top_bar_);
     }
+    // 恢复 chat 模式下隐藏的三个图标
+    if (network_label_) lv_obj_remove_flag(network_label_, LV_OBJ_FLAG_HIDDEN);
+    if (battery_label_) lv_obj_remove_flag(battery_label_, LV_OBJ_FLAG_HIDDEN);
+    if (mute_label_)    lv_obj_remove_flag(mute_label_, LV_OBJ_FLAG_HIDDEN);
     if (status_bar_) {
         lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);  // 防 boot fade_out 残留 TRANSP 致 notification 不可见
@@ -312,12 +304,17 @@ void UiDisplay::SwitchToChatMode() {
     // 被 move_foreground(container_) 盖住 —— SetChatMessage 即使 remove HIDDEN 也看不见。
     if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
 
-    // chat 模式：top_bar_ HIDDEN（信号/电量图标让位 emoji 满屏沉浸感 · 产品决策）
+    // chat 模式：top_bar_ 容器保留，三个图标 label 全部隐藏（信号/电池/静音让位 emoji 满屏沉浸感）
     //           status_bar_ 显示（含 status_label_ 对话状态文字 + ShowNotification 通知通道）
-    if (top_bar_) lv_obj_add_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
+    if (network_label_) lv_obj_add_flag(network_label_, LV_OBJ_FLAG_HIDDEN);
+    if (battery_label_) lv_obj_add_flag(battery_label_, LV_OBJ_FLAG_HIDDEN);
+    if (mute_label_)    lv_obj_add_flag(mute_label_, LV_OBJ_FLAG_HIDDEN);
     if (status_bar_) {
         lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);
+        // 必须提顶：container_/emoji_box_/bottom_bar_ 都已 move_foreground，
+        // status_bar_ 不提则被 sibling 遮挡（与 SwitchToClockMode line 281-285 对齐）
+        lv_obj_move_foreground(status_bar_);
     }
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
@@ -436,17 +433,11 @@ void UiDisplay::SetEmotion(const char* emotion) {
     bool is_font = (strcmp(emotion, "font") == 0);
     LcdDisplay::SetEmotion(emotion);
 
-    // font: 按 GIF 实际宽度等比缩放到 kFontEmojiSizePx；其他 emoji: 复位原尺寸
+    // font: 保持原尺寸（不缩放）+ 整体向上偏移 12px；其他 emoji: 居中复位
     if (emoji_image_) {
         DisplayLockGuard lock(this);
-        int32_t zoom = kDefaultEmojiZoom;
-        if (is_font && gif_controller_ && gif_controller_->IsLoaded()) {
-            uint16_t w = gif_controller_->width();
-            if (w > 0) {
-                zoom = (int32_t)kFontEmojiSizePx * 256 / w;
-            }
-        }
-        lv_image_set_scale(emoji_image_, zoom);
+        lv_image_set_scale(emoji_image_, kDefaultEmojiZoom);
+        lv_obj_align(emoji_image_, LV_ALIGN_CENTER, 0, is_font ? kFontEmojiOffsetY : 0);
     }
 
     current_is_font_ = is_font;
@@ -760,7 +751,7 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
     if (clock_container_) lv_obj_add_flag(clock_container_, LV_OBJ_FLAG_HIDDEN);
     if (content_)         lv_obj_add_flag(content_, LV_OBJ_FLAG_HIDDEN);
     if (container_)       lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
-    if (status_bar_)      lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+    // status_bar_ 永久不隐藏（产品决策）：Player 模式也显示顶部状态栏
     if (emoji_box_)       lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_remove_flag(player_container_, LV_OBJ_FLAG_HIDDEN);
@@ -770,6 +761,16 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
     if (top_bar_) {
         lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(top_bar_);
+    }
+    // 恢复 chat 模式下隐藏的三个图标（chat → player 路径）
+    if (network_label_) lv_obj_remove_flag(network_label_, LV_OBJ_FLAG_HIDDEN);
+    if (battery_label_) lv_obj_remove_flag(battery_label_, LV_OBJ_FLAG_HIDDEN);
+    if (mute_label_)    lv_obj_remove_flag(mute_label_, LV_OBJ_FLAG_HIDDEN);
+    // status_bar_ 永久不隐藏：必须提顶否则被 player_container_ 遮挡
+    if (status_bar_) {
+        lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);
+        lv_obj_move_foreground(status_bar_);
     }
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 

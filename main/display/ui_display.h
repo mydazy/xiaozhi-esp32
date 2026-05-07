@@ -128,8 +128,9 @@ private:
 
     // 当前是否在显示 font GIF（仅用于 SetEmotion 判 "跳过 neutral"）
     bool current_is_font_ = false;
-    static constexpr int32_t kFontEmojiSizePx = 180;   // 笔画 GIF 等比缩放到 180×180px（避开底部字幕）
+    static constexpr int32_t kFontEmojiSizePx = 180;   // 笔画 GIF 等比缩放到 180×180px（避开底部字幕，已弃用，保留兼容）
     static constexpr int32_t kDefaultEmojiZoom = 256;  // 其他 emoji 保持原尺寸（256 = 100%）
+    static constexpr int32_t kFontEmojiOffsetY = -12;  // font GIF 向上偏移 12px（避免压到底部状态文字）
 
     // ===== 内部方法 =====
     void CreateClockPage();

@@ -721,7 +721,7 @@ void Application::Alert(const char* status, const char* message, const char* emo
 void Application::DismissAlert() {
     if (GetDeviceState() == kDeviceStateIdle) {
         auto display = Board::GetInstance().GetDisplay();
-        display->SetStatus(Lang::Strings::STANDBY);
+        display->SetStatus("");
         display->SetEmotion("neutral");
         display->SetChatMessage("system", "");
     }
@@ -974,7 +974,7 @@ void Application::HandleStateChangedEvent() {
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
-            display->SetStatus(Lang::Strings::STANDBY);
+            display->SetStatus("");
             display->ClearChatMessages();  // Clear messages first
 //            display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
@@ -988,7 +988,7 @@ void Application::HandleStateChangedEvent() {
             if (lcd) lcd->SwitchToChatMode();    // 对话开始，表情/消息可见
             break;
         case kDeviceStateListening:
-            display->SetStatus("●");
+            display->SetStatus("#FF3030 ●#");
             display->SetEmotion("neutral");
 
             // Make sure the audio processor is running
