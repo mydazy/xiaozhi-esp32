@@ -647,6 +647,11 @@ void AudioService::SetCallbacks(AudioServiceCallbacks& callbacks) {
 }
 
 void AudioService::PlaySound(const std::string_view& ogg) {
+    // 防御：boot 期间 button 回调可能在 Initialize() 之前触发（如开机长按延伸到 iot_button 启动后）
+    if (codec_ == nullptr) {
+        ESP_LOGW(TAG, "PlaySound called before Initialize, ignored");
+        return;
+    }
     if (!codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);

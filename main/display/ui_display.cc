@@ -439,7 +439,9 @@ void UiDisplay::SetEmotion(const char* emotion) {
     LcdDisplay::SetEmotion(emotion);
 
     // 背景保持主题黑底
-    if (bottom_bar_) {
+    // 仅在 font 进/出转换时切换 bottom_bar_ 可见性，避免每次 SetEmotion 都触发 layout 失效
+    // （EduCard overlay 期间反复 layout 失效叠加 lv_obj_del_async 会让 LVGL event 链 corrupt 崩溃）
+    if (bottom_bar_ && is_font != current_is_font_) {
         DisplayLockGuard lock(this);
         if (is_font) {
             lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);

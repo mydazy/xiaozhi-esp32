@@ -244,6 +244,17 @@ private:
             elapsed += kStepMs;
         }
         ESP_LOGI(TAG, "开机长按 2 秒确认，准备启动");
+
+        // 等待用户松手，避免开机长按被随后初始化的 iot_button 误判为"长按 3 秒关机"
+        // （iot_button 在 init 时若发现 GPIO 已按下，从 init 时刻起算长按时长）
+        // 上限 5s 防卡死；超时即使还按着也继续启动（异常场景仅遗留关机倒计时提示）
+        const int kReleaseWaitMaxMs = 5000;
+        int release_wait = 0;
+        while (gpio_get_level(BOOT_BUTTON_GPIO) == 0 && release_wait < kReleaseWaitMaxMs) {
+            vTaskDelay(pdMS_TO_TICKS(kStepMs));
+            release_wait += kStepMs;
+        }
+        ESP_LOGI(TAG, "开机长按已松手（等待 %d ms）", release_wait);
         return true;
     }
 
