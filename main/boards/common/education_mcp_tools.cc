@@ -104,45 +104,14 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui) {
             return std::string("OK,正在加载笔画动画");
         });
 
-    // 教育卡（统一接口，category 切换排版）— overlay 显示，触屏点击退出
-    // 三行布局：[top 30px 浅橙] + main 48px 金黄 + bottom 48px 绿色（CJK fallback 30px）
-    //
-    // category 必填："word" | "hanzi" | "pinyin"
-    //   word   英文单词：top=自然拼读 / main=英文 / bottom=中文释义
-    //   hanzi  汉字注音：top=拼音(带声调) / main=汉字 / bottom=组词       ★ "X字怎么读/拼音"用此
-    //   pinyin 拼音教学：top=类别 / main=声韵母字母 / bottom=例字          ★ 仅"学韵母/声母/整体认读"用此
+    // 教育卡片渲染原语 — 何时调用由云端 lesson_*** 工具（ai_mcp_tool_config）路由
+    // category 决定三行布局语义；字符上限超出会被裁切
     mcp.AddTool("self.education.show_card",
-        "显示小学教育学习卡片(英文单词/汉字注音/拼音 三选一)。"
-        "用户问字词意思/怎么读/怎么写/拼写/spell/X字组词/学拼音 时调用。"
-        ""
-        "★类别选择路由（重要！按用户问题决定 category）★"
-        "用户问'X字怎么读/拼音'→category=hanzi(top=拼音 main=汉字 bottom=组词);"
-        "用户问'X字组词'→category=hanzi(top=拼音 main=汉字 bottom=组词);"
-        "用户问'X单词意思/怎么拼/spell'→category=word(top=自然拼读 main=英文 bottom=中文);"
-        "用户问'学韵母/学声母/整体认读/拼读'→category=pinyin(top=类别 main=带声调字母 bottom=例字);"
-        ""
-        "category=类别('word'英文|'hanzi'汉字|'pinyin'声韵母教学);"
-        ""
-        "top=上行标注 30px 浅橙(hanzi/pinyin 必填，word 选填):"
-            "★word填自然拼读≤12字符如\"c-a-t\"\"ban-an-a\"，禁止 IPA 国际音标;"
-            "★hanzi填拼音带声调≤6字符如\"niǎo\"\"hǎo\"\"nǐ hǎo\"，必须用ǎēīǒū等字母;"
-            "★pinyin填类别如\"韵母\"\"声母\"\"整体认读\"≤4汉字;"
-        ""
-        "main=主体大字 48px 金黄:"
-            "★word填英文≤9字母全小写如\"apple\";"
-            "★hanzi填汉字单字或词组≤4字如\"鸟\"\"好\"\"你好\";"
-            "★pinyin填带声调拼音字母≤8字符如\"ang\"\"b\"\"ying\";"
-        ""
-        "bottom=下行说明 48px 绿色 ≤4 字(可空):"
-            "★word填中文释义如\"苹果\";"
-            "★hanzi填组词或释义如\"小鸟\"\"美好\"\"问候\";"
-            "★pinyin填例字如\"昂浪\"\"波\"\"英应\";"
-        ""
-        "字符上限严格遵守，超长会被裁切。"
-        "拼音必须用带声调字母 ā á ǎ à ē é ě è ī í ǐ ì ō ó ǒ ò ū ú ǔ ù ǖ ǘ ǚ ǜ，"
-        "禁用不带声调如\"hao\"，禁用文字描述声调如\"三声\"。"
-        "调用后用语气词回应+朗读 main 带声调发音+说 bottom+1 句巩固。"
-        "回复温暖简短，适合 3-10 岁儿童语音播报，≤3 句。",
+        "渲染教育卡片(三选一)，需要可视化展示字词读音/拼写/释义/拼音教学时调用："
+        "word: top=自然拼读如\"a-pp-le\"(选填) / main=英文≤9 字母 / bottom=中文释义≤4 字；"
+        "hanzi: top=带声调拼音如\"niǎo\"(必填) / main=汉字≤4 字 / bottom=组词≤4 字；"
+        "pinyin: top=类别如\"韵母\"(必填) / main=带调字母≤8 字符 / bottom=例字≤4 字。"
+        "拼音必须用 ǎēīǒūǚ 等带声调字母，禁用\"hao\"无声调或\"三声\"文字描述。",
         PropertyList({
             Property("category", kPropertyTypeString),
             Property("main",     kPropertyTypeString),

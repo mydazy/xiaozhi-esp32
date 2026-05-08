@@ -18,6 +18,7 @@
 #include "audio/music_player.h"
 
 #include <cstring>
+#include <vector>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
 #include <cJSON.h>
@@ -29,40 +30,102 @@
 
 
 namespace {
-// 教育卡触发格式（v6.1）：[part1-part2] → ShowEduCard(main=part1, bottom=part2)
-//   全 ASCII：半角中括号 + 半角短横线，杜绝全角/半角输入法错位
-//   part1 内允许 '-'（如拼音音节 ap-ple）：取 ']' 之前最后一个 '-' 作为切点
-//
-//   样例：
-//     [apple-苹果]      → main=apple,     bottom=苹果
-//     [hǎo-好]          → main=hǎo,       bottom=好
-//     [nǐ hǎo-你好]     → main=nǐ hǎo,   bottom=你好
-//     [ap-ple-苹果]     → main=ap-ple,    bottom=苹果（rfind 取最右 '-'）
+// 教育卡触发格式（v6.3）：'|' 优先 + '-' 兜底（LLM 实测倾向用 '-'）
+//   [main|bottom] / [main-bottom]      → main, bottom (top="")
+//   [top|main|bottom]                  → 三段, 仅 '|' 形式
+// 单句严格 1 卡（音画同步）：1 句 sentence_start ≈ 3s 语音 ≈ 1 张卡显示时长。
+// LLM 偶尔输出多卡时设备端只取首张，剩余丢失（防止屏幕滞后于语音）。
+// kEduCardMaxPerSentence 保留 8 是为多卡链式机制预留，实际 LLM 须每句 1 卡。
+constexpr size_t kEduCardMaxPerSentence = 1;     // 严格单卡：音画同步
+constexpr int    kEduCardIntervalMs     = 3500;
+
 struct EduWordHit {
-    std::string word;     // part1 → main
-    std::string bottom;   // part2 → bottom
+    std::string word;
+    std::string top;
+    std::string bottom;
 };
 
-bool ExtractEduWordCard(const std::string& s, EduWordHit* out) {
-    auto lp = s.find('[');
-    if (lp == std::string::npos) return false;
-    auto rp = s.find(']', lp + 1);
-    if (rp == std::string::npos || rp <= lp + 2) return false;
-    auto dash = s.rfind('-', rp - 1);
-    if (dash == std::string::npos || dash <= lp) return false;
-
+bool ParseEduCardBody(const std::string& s, size_t lp, size_t rp, EduWordHit* out) {
+    out->top.clear();
+    auto first = s.find('|', lp + 1);
+    if (first != std::string::npos && first < rp) {
+        // '|' 路径：1 个 → 二段 / 2 个 → 三段
+        auto second = s.find('|', first + 1);
+        if (second != std::string::npos && second < rp) {
+            out->top    = s.substr(lp + 1, first - lp - 1);
+            out->word   = s.substr(first + 1, second - first - 1);
+            out->bottom = s.substr(second + 1, rp - second - 1);
+        } else {
+            out->word   = s.substr(lp + 1, first - lp - 1);
+            out->bottom = s.substr(first + 1, rp - first - 1);
+        }
+    } else {
+        // fallback '-' 路径（LLM 倾向 + demo SQL 旧格式）：rfind 取最右
+        auto dash = s.rfind('-', rp - 1);
+        if (dash == std::string::npos || dash <= lp) return false;
+        out->word   = s.substr(lp + 1, dash - lp - 1);
+        out->bottom = s.substr(dash + 1, rp - dash - 1);
+    }
     auto trim = [](std::string& x) {
         while (!x.empty() && x.front() == ' ') x.erase(0, 1);
         while (!x.empty() && x.back() == ' ') x.pop_back();
     };
-    out->word   = s.substr(lp + 1, dash - lp - 1);
-    out->bottom = s.substr(dash + 1, rp - dash - 1);
-    trim(out->word);
-    trim(out->bottom);
-
+    trim(out->top); trim(out->word); trim(out->bottom);
     if (out->word.empty() || out->bottom.empty()) return false;
-    if (out->word.size() > 32 || out->bottom.size() > 48) return false;
+    if (out->word.size() > 32 || out->bottom.size() > 48 || out->top.size() > 24) return false;
     return true;
+}
+
+std::vector<EduWordHit> ExtractEduWordCards(const std::string& s) {
+    std::vector<EduWordHit> hits;
+    size_t pos = 0;
+    while (hits.size() < kEduCardMaxPerSentence) {
+        auto lp = s.find('[', pos);
+        if (lp == std::string::npos) break;
+        auto rp = s.find(']', lp + 1);
+        if (rp == std::string::npos) break;
+        EduWordHit hit;
+        if (ParseEduCardBody(s, lp, rp, &hit)) hits.push_back(std::move(hit));
+        pos = rp + 1;
+    }
+    return hits;
+}
+
+// 链式弹卡状态（main_event_loop 单线程访问，无并发）
+std::vector<EduWordHit> g_edu_queue;
+size_t                  g_edu_idx = 0;
+esp_timer_handle_t      g_edu_timer = nullptr;
+
+void FlushNextEduCard() {
+    if (g_edu_idx >= g_edu_queue.size()) return;
+    auto hit = g_edu_queue[g_edu_idx++];
+    Application::GetInstance().Schedule([hit]() {
+        if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+            ui->ShowEduCard("word", hit.word.c_str(),
+                            hit.top.c_str(), hit.bottom.c_str());
+        }
+    });
+    if (g_edu_idx < g_edu_queue.size()) {
+        esp_timer_start_once(g_edu_timer, (uint64_t)kEduCardIntervalMs * 1000);
+    }
+}
+
+void EnqueueEduCards(std::vector<EduWordHit> hits) {
+    if (hits.empty()) return;
+    if (!g_edu_timer) {
+        esp_timer_create_args_t args = {
+            .callback = [](void*) { FlushNextEduCard(); },
+            .arg = nullptr,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "edu_card_timer",
+            .skip_unhandled_events = true,
+        };
+        esp_timer_create(&args, &g_edu_timer);
+    }
+    esp_timer_stop(g_edu_timer);
+    g_edu_queue = std::move(hits);
+    g_edu_idx = 0;
+    FlushNextEduCard();
 }
 }  // namespace
 
@@ -638,18 +701,11 @@ void Application::InitializeProtocol() {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
                     std::string sentence = text->valuestring;
 
-                    // 被动学习：[part1-part2] 模式 → 自动弹教育卡
-                    EduWordHit hit;
-                    if (ExtractEduWordCard(sentence, &hit)) {
-                        ESP_LOGI(TAG, "EduCard auto-trigger: %s | %s",
-                                 hit.word.c_str(), hit.bottom.c_str());
-                        Schedule([hit]() {
-                            if (auto* ui = dynamic_cast<UiDisplay*>(
-                                    Board::GetInstance().GetDisplay())) {
-                                ui->ShowEduCard("word", hit.word.c_str(),
-                                                "", hit.bottom.c_str());
-                            }
-                        });
+                    // 被动学习：[main|bottom] 或 [top|main|bottom] → 自动弹 word 卡（多张链式）
+                    auto hits = ExtractEduWordCards(sentence);
+                    if (!hits.empty()) {
+                        ESP_LOGI(TAG, "EduCard auto-trigger: %zu card(s)", hits.size());
+                        EnqueueEduCards(std::move(hits));
                     }
 
                     Schedule([display, message = sentence]() {
@@ -1101,13 +1157,40 @@ void Application::CloseAudioChannel() {
     }
 }
 
-void Application::SendTextToTts(const std::string& text) {
-    if (text.empty() || !protocol_) return;
+// 远程 / 本地触发的 TTS 朗读：自动唤醒 + 抢占当前 TTS
+//   Idle      → 切 Connecting，让 UI 从 clock 进 chat（与 WakeWordInvoke 同款过渡）
+//   Speaking  → 先 Abort 当前 TTS（远程新指令优先级更高）
+//   Listening → 不动（让录音继续，TTS 平行通道）
+// 返回 false：text 空 / protocol 未就绪 / OpenAudioChannel 失败 / 协议层未实现 tts 通道
+bool Application::SendTextToTts(const std::string& text) {
+    if (text.empty() || !protocol_) return false;
+
+    auto state = GetDeviceState();
+    if (state == kDeviceStateSpeaking) {
+        AbortSpeaking(kAbortReasonNone);
+    } else if (state == kDeviceStateIdle) {
+        // 切 Connecting：状态机会联动 UI SwitchToChatMode（与 WakeWordInvoke 一致）
+        SetDeviceState(kDeviceStateConnecting);
+    }
+
     if (!protocol_->IsAudioChannelOpened() && !protocol_->OpenAudioChannel()) {
         ESP_LOGE(TAG, "TTS failed: OpenAudioChannel failed");
-        return;
+        return false;
     }
-    protocol_->SendTextToTts(text);
+
+    // 协议适配 fallback 链：
+    //   1. WebsocketBaiduProtocol → 专用 tts 通道直发朗读
+    //   2. MqttProtocol / WebsocketProtocol → 基类 tts 返回 false → fallback ai 通道（LLM 朗读）
+    //   3. 极端兜底：上两条都未实现 → WakeWordInvoke 把 text 作唤醒词触发对话
+    if (protocol_->SendTextToTts(text)) {
+        return true;
+    }
+    ESP_LOGI(TAG, "SendTextToTts -> fallback ai channel (MQTT/WS)");
+    if (protocol_->SendTextToAI(text)) {
+        return true;
+    }
+    WakeWordInvoke(text);
+    return true;
 }
 
 void Application::SendTextToAI(const std::string& text) {

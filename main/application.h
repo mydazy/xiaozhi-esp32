@@ -115,7 +115,7 @@ public:
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void CloseAudioChannel();
-    void SendTextToTts(const std::string& text);
+    bool SendTextToTts(const std::string& text);   // false = 协议未实现 / channel 未开
     void SendTextToAI(const std::string& text);
     bool SendProtocolText(const std::string& text);
     void ForceListeningMode(ListeningMode mode) { listening_mode_ = mode; }

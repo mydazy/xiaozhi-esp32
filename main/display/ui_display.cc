@@ -459,10 +459,36 @@ void UiDisplay::SetEmotion(const char* emotion) {
     current_is_font_ = is_font;
 }
 
-// font 模式静默丢弃字幕：直接 early-return，既不写 chat_message_label_，
-// 也不让父类把 bottom_bar_ unhide 回来。退出 font 模式后由 SetEmotion 恢复 bottom_bar_。
+// font 模式静默丢弃字幕。常规模式下根据文本宽度自适应 long_mode：
+// 单屏容得下 → LONG_WRAP 静态多行；超出 → LONG_SCROLL_CIRCULAR 横向跑马灯。
+// 速度参数 kChatScrollSpeedPps：3-10 岁孩子推荐 ~28 px/s（约 1.4 字/秒）。
 void UiDisplay::SetChatMessage(const char* role, const char* content) {
     if (current_is_font_) return;
+
+    if (chat_message_label_ && content && content[0]) {
+        DisplayLockGuard lock(this);
+        constexpr int kChatScrollSpeedPps = 30;  // pixel/second ≈ 2 字/秒
+        const lv_font_t* font = lv_obj_get_style_text_font(chat_message_label_, LV_PART_MAIN);
+        int char_w = font ? lv_font_get_line_height(font) : 20;
+        int chars = 0;
+        for (size_t i = 0; content[i]; ) {
+            uint8_t b = (uint8_t)content[i];
+            i += (b < 0x80) ? 1 : (b < 0xC0) ? 1 : (b < 0xE0) ? 2 : (b < 0xF0) ? 3 : 4;
+            ++chars;
+        }
+        int label_w = lv_obj_get_width(chat_message_label_);
+        int total_w = chars * char_w;
+        if (total_w > label_w) {
+            lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+            // LVGL 9 不再有 set_style_anim_speed，用 anim_duration（一轮滚动总时长 ms）等效
+            // duration_ms = total_w * 1000 / pps → 30 pps 即 30 px/s
+            int duration_ms = (total_w * 1000) / kChatScrollSpeedPps;
+            lv_obj_set_style_anim_duration(chat_message_label_, duration_ms, LV_PART_MAIN);
+        } else {
+            lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_WRAP);
+        }
+    }
+
     LcdDisplay::SetChatMessage(role, content);
 }
 
