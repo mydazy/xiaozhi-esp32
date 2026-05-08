@@ -74,14 +74,33 @@ public:
     void UpdateFontGif(uint8_t* gif_buffer, size_t size);
 
     // 教育卡专属：当前为 font 时跳过 neutral（application.cc 进 listening 默认注入），
-    // 其他 emotion 正常替换；font 进入时按 GIF 实际宽度等比缩放到 kFontEmojiSizePx。
+    // 其他 emotion 正常替换；font 模式额外隐藏 bottom_bar_ 让出底部视觉。
+    // 写字 GIF 原始尺寸 200×200，在 284×240 屏上居中即可，不做缩放。
     void SetEmotion(const char* emotion) override;
+
+    // font 模式（识字写字）静默丢弃字幕——避免 LLM 中途推送 SetChatMessage
+    // 把 bottom_bar_ 重新 unhide 出来，破坏写字 GIF 的沉浸感。
+    void SetChatMessage(const char* role, const char* content) override;
 
     // ===== 控制中心 =====
     // [量产稳定期] ControlCenter 整体下线，保留接口为 stub 维持三个 board 的调用兼容
     void ShowControlCenter() {}
     void HideControlCenter() {}
     bool IsControlCenterVisible() const { return false; }
+
+    // ===== 教育卡（统一接口）=====
+    // overlay 模式，与 QR 同 — 不占 SceneType（C 维），盖在 chat/clock 之上
+    // 触屏点击退出。top/bottom 可空字符串（该行不显示）。
+    //
+    // category 取值（5-10 岁三年级以下儿童被动跟读场景）：
+    //   "word"   英文单词/拼写： top=拼读/音标, main=英文单词(金黄, 字距 4),     bottom=中文释义（带分隔线）
+    //   "hanzi"  汉字组词：       top=拼音,       main=汉字(白色, 字距 8 加宽),     bottom=组词
+    //   "pinyin" 拼音/声韵母：    top=类别,       main=声韵母(橙红, 字距 6),         bottom=例字
+    // 主体一律 48px（edu_main_font_，CJK 走 fallback 链）/ 副字一律 20px（g_text_font 含 GB2312 全字 fallback）
+    void ShowEduCard(const char* category, const char* main_text,
+                     const char* top, const char* bottom);
+    void HideEduCard();
+    bool IsEduCardActive() const { return edu_card_overlay_ != nullptr; }
 
 private:
 
@@ -91,10 +110,36 @@ private:
     lv_obj_t* clock_date_label_ = nullptr;
     lv_obj_t* clock_week_label_ = nullptr;
     const lv_font_t* clock_big_font_  = nullptr;   // 88px cbin（assets 就绪后加载）
-    const lv_font_t* clock_text_font_ = nullptr;   // 30px cbin
+    const lv_font_t* clock_text_font_ = nullptr;   // 30px cbin（同时是教育卡副字 + hanzi main 字体）
+    const lv_font_t* edu_main_font_   = nullptr;   // 48px cbin（教育卡 word/pinyin main 大字，不含 CJK）
 
     // 通用二维码 overlay（配网 / 绑定 / 付费等场景共享，同时只有一个）
     lv_obj_t* qr_overlay_ = nullptr;
+
+    // 教育卡 overlay（单词 / 拼音 / 汉字组词）— 同时只有一个；删除后 emoji_box_/clock 自动暴露
+    lv_obj_t* edu_card_overlay_ = nullptr;
+    static void OnEduCardClicked(lv_event_t* e);
+
+    // 清场 helper：font 模式（GIF 笔画）退出 + 状态切换前调用
+    // 防止 font 状态在 SwitchTo* 之间残留导致 emoji_image 仍显示 GIF
+    void ResetFontMode();
+
+    // GIF 笔画字触屏退出回调（与教育卡 OnEduCardClicked 同款机制）
+    // 单击 emoji_box 区域 → ResetFontMode → 切回 neutral 表情
+    // 仅 font 模式生效（其他 emotion 时回调内 early return）
+    static void OnFontExitClicked(lv_event_t* e);
+
+    // 教育卡布局：[top 30px] + main 48px + bottom 48px（top 可空 · 整体上下居中）
+    //   MCP 调用 show_card (category="word"/"pinyin") 传 top → 三行（拼读/拼音）
+    //   聊天正则提取（part1|part2）传 top="" → 两行（更紧凑）
+    struct EduRow {
+        const char* text;            // null 或空字符串则该行不渲染
+        const lv_font_t* font;
+        uint32_t color;              // 0xRRGGBB
+        int letter_space;
+        int height;                  // 字体高度 px，用于布局计算
+    };
+    void BuildEduCard(const EduRow& top, const EduRow& main_row, const EduRow& bottom);
 
     // 整页双击 callback（仅显示左右色条时有效，用于切换模式）
     // 必须保活直到 HideQrCode，否则 lambda 析构后 click 事件触发 UAF
@@ -128,14 +173,11 @@ private:
 
     // 当前是否在显示 font GIF（仅用于 SetEmotion 判 "跳过 neutral"）
     bool current_is_font_ = false;
-    static constexpr int32_t kFontEmojiSizePx = 220;   // 笔画 GIF 等比缩放到 220×220px（接近屏宽 284，留 32px 防溢出）
-    static constexpr int32_t kDefaultEmojiZoom = 256;  // 其他 emoji 保持原尺寸（256 = 100%）
-    static constexpr int32_t kFontEmojiOffsetY = -12;  // font GIF 向上偏移 12px（避免压到底部状态文字）
 
     // ===== 内部方法 =====
     void CreateClockPage();
     void UpdateClockTime();
-    void LoadClockFonts();          // cbin 字体延迟加载（assets 就绪后）
+    void EnsureDisplayFonts();          // cbin 字体延迟加载（assets 就绪后）
     void LoadFallbackTextFont();    // BUILTIN_TEXT_FONT 缺字 fallback（GB 2312 全字 cbin）
 
     // 音乐播放器页内部方法
@@ -145,6 +187,10 @@ private:
     static void FormatTime(int ms, char* buf, size_t buf_size);
 
     void StartBootAnimation();
+
+    // 三个 SwitchTo* 共享的状态栏管理 helper（去除重复）
+    void SetTopBarIconsVisible(bool visible);   // network/battery/mute 三 icon 一次切换
+    void RaiseStatusBar();                       // remove HIDDEN + opa COVER + move_foreground
 
     // [量产稳定期] EnsureControlCenter / EnableStatusBarTapForControlCenter / OnStatusBarClicked 已下线
 };

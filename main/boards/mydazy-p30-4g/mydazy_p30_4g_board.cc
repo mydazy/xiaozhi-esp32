@@ -25,6 +25,7 @@
 #include "mcp_server.h"
 #include "ota.h"
 #include "education_mcp_tools.h"
+#include "edu_scene_pool.h"
 #include "assets.h"
 #include <font_awesome.h>
 #include <sys/stat.h>
@@ -66,14 +67,23 @@ inline void AbortIfSpeaking() {
 }
 
 // 同时打断 Speaking 与 Listening（双击退出/出厂确认/9 连击等场景）
-// 与 AbortIfSpeaking 区别：StopListening(false) 不送 stop 信号，让服务端立即释放，不留 Listening 等 TTS
+// 与 AbortIfSpeaking 区别：StopListening 不送 stop 信号，让服务端立即释放，不留 Listening 等 TTS
 inline void AbortAnyConversation() {
     auto& app = Application::GetInstance();
     auto state = app.GetDeviceState();
     if (state == kDeviceStateSpeaking) {
         app.AbortSpeaking(kAbortReasonNone);
     } else if (state == kDeviceStateListening) {
-        app.StopListening(false);
+        app.StopListening();
+    }
+}
+
+// MP3 播放期间：停播 + 退 Player UI（按键打断 / 切网前都需要）
+inline void StopMp3AndExitPlayerUi() {
+    if (!MusicPlayer::GetInstance().IsPlaying()) return;
+    MusicPlayer::GetInstance().Stop();
+    if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+        ui->SwitchOutPlayerMode();
     }
 }
 
@@ -84,10 +94,7 @@ inline void PauseAudioAndChatBeforeSwitch() {
 
     if (MusicPlayer::GetInstance().IsPlaying()) {
         ESP_LOGI(TAG, "切网前停止 MP3 播放");
-        MusicPlayer::GetInstance().Stop();
-        if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
-            ui->SwitchOutPlayerMode();
-        }
+        StopMp3AndExitPlayerUi();
     }
 
     auto state = app.GetDeviceState();
@@ -130,15 +137,8 @@ private:
     std::atomic<bool> vol_up_running_{false};
     std::atomic<bool> vol_down_running_{false};
 
-    // 长按录音状态跟踪（按键线程 vs 主循环）
-    std::atomic<bool> is_recording_for_test_{false};
-    std::atomic<bool> is_recording_for_send_{false};
-
-    // 关机三段长按状态（3秒提醒、5秒执行、PressUp 取消）
+    // 关机两段长按状态（3秒提醒、5秒执行、PressUp 取消）
     std::atomic<bool> shutdown_armed_{false};
-
-    // 欢迎音异步任务句柄
-    std::atomic<TaskHandle_t> welcome_task_handle_{nullptr};
 
     // 恢复出厂设置确认状态
     std::atomic<bool> waiting_factory_reset_confirm_{false};
@@ -148,16 +148,6 @@ private:
     int64_t last_gesture_us_ = 0;
     int64_t storm_mute_until_us_ = 0;
     uint8_t gesture_burst_ = 0;
-    // PTT 配对保护：仅在 LongPress 真正启动了录音时，LongPressRelease 才生效
-    std::atomic<bool> ptt_active_{false};
-    // PTT 超时兜底：60s 内若未收到 release（RF 干扰或硬件离手丢事件），自动 stop
-    esp_timer_handle_t ptt_timeout_timer_ = nullptr;
-
-    // 状态定时上报
-    esp_timer_handle_t status_timer_ = nullptr;
-
-    // 摇一摇识别任务句柄（仅识别 + 日志，业务接入留待后续）
-    TaskHandle_t shake_detect_task_ = nullptr;
 
     // ========================================================
     // 硬件初始化
@@ -297,8 +287,6 @@ private:
             .intr_type = GPIO_INTR_DISABLE,
         };
         gpio_config(&input_conf);
-
-        HandleWakeupCause();
     }
 
     void InitializeSc7a20h() {
@@ -351,7 +339,27 @@ private:
                 ESP_LOGI(TAG, "Shake detected! peak_dev_sq=%ld, strong=%d/%d",
                          (long)peak, strong, kWindowSize);
                 last_shake_us = now_us;
-                // TODO: 后续在此挂业务——切话题 / 换 emoji / 抽奖
+
+                // 摇一摇 → 启蒙学习场景触发（10 个本地池随机选一个）
+                // 仅 Idle 状态接管，避免干扰对话/播放/QR/EduCard 等场景
+                // 走 SendTextToAI：发触发指令给云端 LLM，让 LLM 自然展开互动
+                //   离线：SendTextToAI 内部 fallback 到 WakeWordInvoke 自动连接
+                //   在线：直发 LLM 通道，云端可结合用户档案 + 艾宾浩斯个性化推荐
+                Application::GetInstance().Schedule([]() {
+                    auto& app = Application::GetInstance();
+                    if (app.GetDeviceState() != kDeviceStateIdle) {
+                        ESP_LOGD(TAG, "Shake ignored: not idle");
+                        return;
+                    }
+                    app.PlaySound(Lang::Sounds::OGG_POPUP);
+
+                    auto pick = EduScenePool::GetInstance().GetRandomWithCount();
+                    char buf[40];
+                    // 拼 [场景名 累计次数] · 让云端按编号轮换内容（避免同话题重复）
+                    snprintf(buf, sizeof(buf), "[%s %d]", pick.name, pick.count);
+                    ESP_LOGI(TAG, "Shake → 启蒙场景 %s", buf);
+                    app.SendTextToAI(buf);
+                });
             }
         }
     }
@@ -359,7 +367,7 @@ private:
     void StartShakeDetect() {
         if (!sc7a20h_initialized_) return;
         xTaskCreatePinnedToCore(&MyDazyP30_4GBoard::ShakeDetectTaskEntry,
-                                "accel_shake", 2560, this, 1, &shake_detect_task_, 1);
+                                "accel_shake", 2560, this, 1, nullptr, 1);
     }
 
     void PrepareTouchHardware() {
@@ -391,51 +399,42 @@ private:
         // 触摸交互矩阵（量产稳定向）：
         //   SINGLE_CLICK         → Idle 唤醒 / Speaking 打断（与 BOOT 单击同义）
         //   DOUBLE_CLICK         → 退出对话回时钟主屏（孩子最熟悉的"退出"心智）
-        //   LONG_PRESS / RELEASE → 微信 PTT，按住说话松开发送（500ms 门槛，驱动内）
+        //   LONG_PRESS / RELEASE → 已下线（PTT 移除）
         //   SWIPE_DOWN/UP/LEFT/RIGHT → 全部丢弃（ControlCenter 量产期已 stub，无入口）
         bool is_click        = (g == AXS5106L_GESTURE_SINGLE_CLICK);
         bool is_double_click = (g == AXS5106L_GESTURE_DOUBLE_CLICK);
-        bool is_long_press   = (g == AXS5106L_GESTURE_LONG_PRESS);
-        bool is_long_release = (g == AXS5106L_GESTURE_LONG_PRESS_RELEASE);
-        if (!is_click && !is_double_click && !is_long_press && !is_long_release) return;
+        if (!is_click && !is_double_click) return;
 
         // 状态栏区域（顶部 HEADER_HEIGHT=36 px）单击/双击由 LVGL CLICKED 独占处理
         // 这里跳过避免双路径同时唤醒/打断
-        if ((is_click || is_double_click) && y < 36) {
+        if (y < 36) {
             ESP_LOGD(TAG, "状态栏点击交由 LVGL 处理，driver 路径忽略");
             return;
         }
         (void)x;
 
-        // RF 风暴节流：仅对 SINGLE_CLICK / DOUBLE_CLICK 计 burst。
-        // LONG_PRESS / RELEASE 是低频长事件（按住-松开成对），不计入风暴指标。
-        if (is_click || is_double_click) {
-            int64_t now = esp_timer_get_time();
-            if (now < self->storm_mute_until_us_) {
-                ESP_LOGD(TAG, "RF 风暴静默期，丢弃 gesture=%d", (int)g);
+        // RF 风暴节流：到这里 g 必是 SINGLE_CLICK / DOUBLE_CLICK
+        int64_t now = esp_timer_get_time();
+        if (now < self->storm_mute_until_us_) {
+            ESP_LOGD(TAG, "RF 风暴静默期，丢弃 gesture=%d", (int)g);
+            return;
+        }
+        if (now - self->last_gesture_us_ < 1200000) {
+            if (++self->gesture_burst_ >= 3) {
+                ESP_LOGW(TAG, "检测到 RF 触摸风暴，静默 3s");
+                self->storm_mute_until_us_ = now + 3000000;
+                self->gesture_burst_ = 0;
                 return;
             }
-            if (now - self->last_gesture_us_ < 1200000) {
-                if (++self->gesture_burst_ >= 3) {
-                    ESP_LOGW(TAG, "检测到 RF 触摸风暴，静默 3s");
-                    self->storm_mute_until_us_ = now + 3000000;
-                    self->gesture_burst_ = 0;
-                    return;
-                }
-            } else {
-                self->gesture_burst_ = 1;
-            }
-            self->last_gesture_us_ = now;
+        } else {
+            self->gesture_burst_ = 1;
         }
+        self->last_gesture_us_ = now;
 
         if (is_click) {
             self->HandleTouchSingleClick();
         } else if (is_double_click) {
             self->HandleTouchDoubleClick();
-        } else if (is_long_press) {
-            self->HandleTouchLongPress();
-        } else if (is_long_release) {
-            self->HandleTouchLongPressRelease();
         }
     }
 
@@ -477,54 +476,6 @@ private:
         }
     }
 
-    // 触摸长按 PTT：微信对讲式"按住说话，松开发送"（500ms 门槛由驱动 LONG_PRESS_TIME_US 决定）
-    // 行为：Idle/Speaking → AbortSpeaking + StartListening(ManualStop)
-    // ManualStop 模式下服务端不会因 VAD 自动停录，等 release 才送 stop 信号
-    // MP3 播放中让位给屏幕暂停键
-    void HandleTouchLongPress() {
-        auto& app = Application::GetInstance();
-
-        if (MusicPlayer::GetInstance().IsPlaying()) {
-            ESP_LOGD(TAG, "Player 模式忽略长按 PTT");
-            return;
-        }
-
-        auto state = app.GetDeviceState();
-        // 允许在 Listening 中接管：多轮对话续录的 AutoStop 状态下用户想长按强切 ManualStop，
-        // 否则服务端 VAD 会把一句话切成多段 STT/TTS，屏幕反复 listening↔speaking 跳变。
-        if (state == kDeviceStateIdle ||
-            state == kDeviceStateSpeaking ||
-            state == kDeviceStateListening) {
-            if (state == kDeviceStateSpeaking) {
-                app.AbortSpeaking(kAbortReasonNone);
-            }
-            ESP_LOGI(TAG, "长按PTT：开始录音(ManualStop), state=%u", state);
-            app.PlaySound(Lang::Sounds::OGG_TACTILE);
-            app.StartListening();
-            ptt_active_ = true;
-            ArmPttTimeout();   // 60s 兜底防 release 丢失
-        } else {
-            ESP_LOGD(TAG, "长按PTT忽略：state=%u 不在 Idle/Speaking/Listening", state);
-        }
-    }
-
-    // 松开 PTT：停止录音 + 发送提示音
-    // 仅在 LongPress 真正启动了录音时才执行，防止 RF 风暴假触的孤立 release 误停 Listening
-    void HandleTouchLongPressRelease() {
-        DisarmPttTimeout();
-        if (!ptt_active_.exchange(false)) {
-            ESP_LOGD(TAG, "长按 release 忽略：PTT 未启动（可能是 RF 干扰假触）");
-            return;
-        }
-        auto& app = Application::GetInstance();
-        if (app.GetDeviceState() == kDeviceStateListening) {
-            ESP_LOGI(TAG, "PTT松开：停止录音 + 发送提示音");
-            // play_sound=true：脱离 ManualStop、保持 Listening 等服务端 TTS（不切 Idle 不闪主屏）
-            app.StopListening(true);
-            app.PlaySound(Lang::Sounds::OGG_POPUP);
-        }
-    }
-
     // 触摸双击：退出对话回 Idle（孩子最熟悉的"退出"心智）
     // Listening / Speaking → AbortAnyConversation + 切 Idle + 提示音
     // Idle / MP3 / 其他 → 忽略（避免误触干扰）
@@ -539,42 +490,12 @@ private:
         auto state = app.GetDeviceState();
         if (state == kDeviceStateListening || state == kDeviceStateSpeaking) {
             ESP_LOGI(TAG, "双击退出对话：state=%u → Idle", (int)state);
-            // 同步清理 PTT 残留状态，避免下一次 release 卡死
-            DisarmPttTimeout();
-            ptt_active_.store(false);
             AbortAnyConversation();
             app.SetDeviceState(kDeviceStateIdle);
             app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
         } else {
             ESP_LOGD(TAG, "双击忽略：state=%u 不在 Listening/Speaking", (int)state);
         }
-    }
-
-    // PTT 60s 超时兜底：release 事件因 RF/接触不良丢失时自动停录，防止 ptt_active_ 残留卡死
-    void ArmPttTimeout() {
-        if (ptt_timeout_timer_ == nullptr) {
-            esp_timer_create_args_t args = {
-                .callback = [](void* arg) {
-                    auto* self = static_cast<MyDazyP30_4GBoard*>(arg);
-                    if (!self->ptt_active_.exchange(false)) return;
-                    ESP_LOGW(TAG, "PTT 60s 超时未收到 release，强制 stop（RF 干扰或离手丢事件？）");
-                    auto& app = Application::GetInstance();
-                    if (app.GetDeviceState() == kDeviceStateListening) {
-                        app.StopListening(false);
-                    }
-                },
-                .arg = this,
-                .dispatch_method = ESP_TIMER_TASK,
-                .name = "ptt_timeout",
-            };
-            esp_timer_create(&args, &ptt_timeout_timer_);
-        }
-        esp_timer_stop(ptt_timeout_timer_);
-        esp_timer_start_once(ptt_timeout_timer_, 60ULL * 1000ULL * 1000ULL);
-    }
-
-    void DisarmPttTimeout() {
-        if (ptt_timeout_timer_) esp_timer_stop(ptt_timeout_timer_);
     }
 
     void InitializePowerManager() {
@@ -797,10 +718,7 @@ private:
         // MP3 播放期间：按键 = 先打断 MP3 + 退 Player UI，再走唤醒/对话流程
         if (MusicPlayer::GetInstance().IsPlaying()) {
             ESP_LOGI(TAG, "按键打断 MP3 → 唤醒对话");
-            MusicPlayer::GetInstance().Stop();
-            if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
-                ui->SwitchOutPlayerMode();
-            }
+            StopMp3AndExitPlayerUi();
         }
 
         if (status != kDeviceStateIdle && status != kDeviceStateListening && status != kDeviceStateSpeaking) {
@@ -892,106 +810,67 @@ private:
         }
     }
 
-    void HandleBootMultiClick4_PowerOff() {
-        // 用户主动关机：从用户视角说"再见"，仅按键唤醒防陀螺仪误开机
-        ShutdownOrSleep("再见", "", Lang::Sounds::OGG_SHUTDOWN, 2500, false);
-    }
-
-    void HandleBootMultiClick9_FactoryReset() {
-        auto& app = Application::GetInstance();
-        AbortIfSpeaking();
-        waiting_factory_reset_confirm_.store(true);
-        factory_reset_request_time_ = esp_timer_get_time();
-        app.Alert("恢复出厂设置", "10秒内双击确认", "logo", Lang::Sounds::OGG_FACTORY_RESET);
-    }
-
-    void HandleBootLongPress() {
-        auto& app = Application::GetInstance();
-        auto status = app.GetDeviceState();
-        if (status == kDeviceStateIdle || status == kDeviceStateSpeaking || status == kDeviceStateListening) {
-            if (status != kDeviceStateListening) {
-                app.StartListening();
-            }
-            is_recording_for_send_.store(true);
-        } else if (status == kDeviceStateStarting || status == kDeviceStateActivating || status == kDeviceStateWifiConfiguring) {
-            is_recording_for_test_.store(true);
-            app.SetDeviceState(kDeviceStateWifiConfiguring);
-            vTaskDelay(pdMS_TO_TICKS(100));
-            app.StartListening();
-        }
-    }
-
-    void HandleBootPressUp() {
-        auto& app = Application::GetInstance();
-        // 关机倒计时未到 5 秒就松开 → 取消
-        if (shutdown_armed_.exchange(false)) {
-            ESP_LOGI(TAG, "关机倒计时取消");
-            app.PlaySound(Lang::Sounds::OGG_POPUP);
-            return;
-        }
-        if (is_recording_for_test_.exchange(false)) {
-            app.SetDeviceState(kDeviceStateAudioTesting);
-            app.StopListening();
-        } else if (is_recording_for_send_.exchange(false)) {
-            app.StopListening();
-            vTaskDelay(pdMS_TO_TICKS(100));
-            app.PlaySound(Lang::Sounds::OGG_POPUP);
-        }
-    }
-
-    // 长按 3 秒：提醒"再按 2 秒关机"，同时停止录音避免冲突
-    void HandleBootLongPress3s_ShutdownWarn() {
-        auto& app = Application::GetInstance();
-
-        // 停掉可能的录音（不发送）
-        if (is_recording_for_send_.exchange(false) || is_recording_for_test_.exchange(false)) {
-            app.StopListening();
-        }
-
-        shutdown_armed_.store(true);
-        ESP_LOGI(TAG, "长按 3 秒：关机倒计时开始");
-        app.Alert("长按 5 秒关机", "继续按住...", "logo", Lang::Sounds::OGG_REBOOT);
-    }
-
-    // 长按 5 秒：真正关机
-    void HandleBootLongPress5s_ShutdownConfirm() {
-        if (!shutdown_armed_.load()) return;
-        shutdown_armed_.store(false);
-        ESP_LOGI(TAG, "长按 5 秒：执行关机");
-        ShutdownOrSleep("关机中", "", "", 2000, false);
-    }
-
+    // ========================================================
+    // 按键注册（BOOT 复杂分支保留独立 Handle*；短分支内联在此）
+    //
+    // BOOT 键交互矩阵：
+    //   单击/双击/3连击     → HandleBoot* 独立函数（逻辑长，跳进去看）
+    //   4 连击              → 关机
+    //   9 连击              → 进入恢复出厂确认（10s 内双击确认 → HandleBootDoubleClick）
+    //   长按 3s             → 关机预警
+    //   长按 5s             → 真关机
+    //   松开（3-5s 之间）   → 取消关机倒计时
+    //   ※ 深睡按键唤醒长按 2s 开机由 CheckBootHoldOnWakeup 在 HandleWakeupCause 处理
+    //
+    // 音量键：单击 ±10，长按 200ms 步进 ±5（自动重复任务）
+    // ========================================================
     void InitializeButtons() {
-        boot_button_.OnClick([this]() { HandleBootClick(); });
+        boot_button_.OnClick      ([this]() { HandleBootClick(); });
         boot_button_.OnDoubleClick([this]() { HandleBootDoubleClick(); });
         boot_button_.OnMultipleClick([this]() { HandleBootMultiClick3_SwitchNetwork(); }, 3);
-        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick4_PowerOff(); }, 4);
-        boot_button_.OnMultipleClick([this]() { HandleBootMultiClick9_FactoryReset(); }, 9);
-        // 长按多段：0.7s 录音、3s 关机提醒、5s 真正关机
-        boot_button_.OnLongPress([this]() { HandleBootLongPress(); }, 700);
-        boot_button_.OnLongPress([this]() { HandleBootLongPress3s_ShutdownWarn(); }, 3000);
-        boot_button_.OnLongPress([this]() { HandleBootLongPress5s_ShutdownConfirm(); }, 5000);
-        boot_button_.OnPressUp([this]() { HandleBootPressUp(); });
 
-        volume_up_button_.OnClick([this]() { AdjustVolume(+10); });
-        volume_down_button_.OnClick([this]() { AdjustVolume(-10); });
+        // 4 连击关机：用户主动关机视角说"再见"，仅按键唤醒（防陀螺仪误开机）
+        boot_button_.OnMultipleClick([this]() {
+            ShutdownOrSleep("再见", "", Lang::Sounds::OGG_SHUTDOWN, 2500, false);
+        }, 4);
 
-        volume_up_button_.OnLongPress([this]() {
-            StartVolumeTask(+5, &vol_up_task_, &vol_up_running_);
+        // 9 连击进入恢复出厂确认（10s 内再双击确认，超时由 HandleBootClick/DoubleClick 自动清）
+        boot_button_.OnMultipleClick([this]() {
+            AbortIfSpeaking();
+            waiting_factory_reset_confirm_.store(true);
+            factory_reset_request_time_ = esp_timer_get_time();
+            Application::GetInstance().Alert("恢复出厂设置", "10秒内双击确认", "logo", Lang::Sounds::OGG_FACTORY_RESET);
+        }, 9);
+
+        // 长按 3s 警告 + 5s 真关机；松开取消倒计时
+        boot_button_.OnLongPress([this]() {
+            shutdown_armed_.store(true);
+            ESP_LOGI(TAG, "长按 3 秒：关机倒计时开始");
+            Application::GetInstance().Alert("长按 5 秒关机", "继续按住...", "logo", Lang::Sounds::OGG_REBOOT);
+        }, 3000);
+        boot_button_.OnLongPress([this]() {
+            if (!shutdown_armed_.exchange(false)) return;
+            ESP_LOGI(TAG, "长按 5 秒：执行关机");
+            ShutdownOrSleep("关机中", "", "", 2000, false);
+        }, 5000);
+        boot_button_.OnPressUp([this]() {
+            if (shutdown_armed_.exchange(false)) {
+                ESP_LOGI(TAG, "关机倒计时取消");
+                Application::GetInstance().PlaySound(Lang::Sounds::OGG_POPUP);
+            }
         });
-        volume_up_button_.OnPressUp([this]() { vol_up_running_.store(false); });
 
-        volume_down_button_.OnLongPress([this]() {
-            StartVolumeTask(-5, &vol_down_task_, &vol_down_running_);
-        });
-        volume_down_button_.OnPressUp([this]() { vol_down_running_.store(false); });
+        volume_up_button_.OnClick   ([this]() { AdjustVolume(+10); });
+        volume_down_button_.OnClick ([this]() { AdjustVolume(-10); });
+        volume_up_button_.OnLongPress  ([this]() { StartVolumeTask(+5, &vol_up_task_,   &vol_up_running_);   });
+        volume_down_button_.OnLongPress([this]() { StartVolumeTask(-5, &vol_down_task_, &vol_down_running_); });
+        volume_up_button_.OnPressUp    ([this]() { vol_up_running_.store(false);   });
+        volume_down_button_.OnPressUp  ([this]() { vol_down_running_.store(false); });
     }
 
     // ========================================================
-    // 状态上报
+    // 状态上报（仅唤醒事件触发：进省电前 PowerSaveTimer::OnEnterSleepMode 调一次）
     // ========================================================
-
-    static constexpr bool kEnablePeriodicStatusReport = false;
 
     void ReportStatus() {
         // 仅在 idle 上报；对话期让位给音频上传和 TTS，避免 HTTPS/TLS 抢资源。
@@ -1034,7 +913,7 @@ private:
         Application::GetInstance().Schedule(
             [battery, charging, volume, brightness, theme, csq, carrier]() {
             cJSON* p = cJSON_CreateObject();
-            cJSON_AddNumberToObject(p, "battery", battery);
+            cJSON_AddNumberToObject(p, "battery_level", battery);
             cJSON_AddBoolToObject(p, "charging", charging);
             if (volume >= 0)     cJSON_AddNumberToObject(p, "volume", volume);
             if (brightness >= 0) cJSON_AddNumberToObject(p, "brightness", brightness);
@@ -1048,23 +927,6 @@ private:
 
             Ota::ReportStatus(p);
         });
-    }
-
-    void StartStatusTimer() {
-        if (!kEnablePeriodicStatusReport) {
-            ESP_LOGI(TAG, "Periodic status report disabled (wake-only mode)");
-            return;
-        }
-        esp_timer_create_args_t args = {
-            .callback = [](void* arg) {
-                static_cast<MyDazyP30_4GBoard*>(arg)->ReportStatus();
-            },
-            .arg = this,
-            .dispatch_method = ESP_TIMER_TASK,
-            .name = "status_report",
-        };
-        esp_timer_create(&args, &status_timer_);
-        esp_timer_start_periodic(status_timer_, 90 * 1000000ULL);
     }
 
     // ========================================================
@@ -1118,7 +980,7 @@ private:
     void ApplyDefaultSettings() {
         // 音量范围修正（50-100）
         Settings audio_settings("audio", true);
-        int DEFAULT_VOLUME = 80;
+        constexpr int DEFAULT_VOLUME = 80;
         int original_volume = audio_settings.GetInt("output_volume", DEFAULT_VOLUME);
         if (original_volume < 50) {
             audio_settings.SetInt("output_volume", DEFAULT_VOLUME);
@@ -1174,7 +1036,7 @@ private:
                 return true;
             });
 
-        // 识字笔画动画（512KB 上限直接下载，含 GIF 头尾校验）
+        // 教育卡 MCP 工具集：show_stroke 笔画 GIF（512KB 直载 + 头尾校验）+ show_card 单词/汉字/拼音三类卡
         RegisterEducationMcpTools(mcp, dynamic_cast<UiDisplay*>(GetDisplay()));
     }
 
@@ -1191,6 +1053,8 @@ public:
         esp_register_shutdown_handler(ShutdownHandler);
 
         InitializeGpio();
+        // 解析唤醒原因（按键开机要求长按 2s，否则立即回深睡——不会返回）
+        HandleWakeupCause();
         InitializeI2c();
         PrepareTouchHardware();
         InitializeSpi();
@@ -1201,13 +1065,13 @@ public:
         InitializePowerManager();
         InitializePowerSaveTimer();
         InitializeButtons();
-        StartStatusTimer();
 
+        // 触发 audio_codec_ 懒构造（codec 必须在 ApplyDefaultSettings 写音量前就绪）
         GetAudioCodec();
 
         ApplyDefaultSettings();
 
-        // 注册板专属 MCP 工具（含教育卡 self.education.show_stroke）— 必须在 Display 初始化之后
+        // 注册板专属 MCP 工具（AEC 开关 + 教育卡 show_stroke/show_card）— 必须在 Display 初始化之后
         InitializeTools();
 
         ESP_LOGI(TAG, "MyDazy P30 4G 初始化完成 (ES8311+ES7210, 支持4G、电源管理、触摸屏)");

@@ -1,6 +1,7 @@
 #include "remote_cmd.h"
 #include "application.h"
 #include "flow_engine.h"
+#include "edu_scene_pool.h"
 #include "audio/music_player.h"
 #include "audio/codecs/box_audio_codec.h"
 #include "board.h"
@@ -71,6 +72,7 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "stt_url") == 0) OnSttUrl(msg);
     else if (strcmp(type, "music_play") == 0) OnMusicPlay(msg);
     else if (strcmp(type, "music_stop") == 0) OnMusicStop();
+    else if (strcmp(type, "edu_pool") == 0) OnEduPool(msg);
     else {
         ESP_LOGW(TAG, "未知命令: %s", type);
         handled = false;
@@ -526,5 +528,23 @@ void RemoteCmd::OnMusicStop() {
         if (was_playing) {
             Board::GetInstance().GetDisplay()->ShowNotification("已停止播放", 1500);
         }
+    });
+}
+
+// 远程更新摇一摇启蒙场景池（10 个完整替换 · NVS 持久化）
+// 协议（极简单字符串 '|' 分隔，不用 JSON 数组）：
+//   {"type":"edu_pool","names":"故事盒子|百科精灵|猜一猜|接龙啦|唱歌啦|念古诗|说英语|比比快|转转脑|对暗号"}
+// 必须正好 10 段，每段 ≤24 字节（≈ 8 汉字）
+void RemoteCmd::OnEduPool(const cJSON* msg) {
+    auto* names = cJSON_GetObjectItem(msg, "names");
+    if (!cJSON_IsString(names) || !names->valuestring[0]) {
+        ESP_LOGW(TAG, "edu_pool: missing 'names' string");
+        return;
+    }
+    ESP_LOGI(TAG, "edu_pool: \"%s\"", names->valuestring);
+    app_->Schedule([s = std::string(names->valuestring)]() {
+        bool ok = EduScenePool::GetInstance().UpdateFromString(s.c_str());
+        Board::GetInstance().GetDisplay()->ShowNotification(
+            ok ? "启蒙场景已更新" : "启蒙场景更新失败", 2000);
     });
 }

@@ -28,6 +28,56 @@
 #define TAG "Application"
 
 
+namespace {
+// 统一教育卡触发格式：（part1|part2）→ ShowEduCard(main=part1, bottom=part2)
+//   单词：（apple|苹果）/（banana|香蕉）
+//   汉字：（鸟|niǎo 小鸟）/（好|hǎo 你好）
+//   拼音：（ang|韵母 昂浪）/（b|声母 波）
+// 用全角括号 + 半角'|' 分隔，LLM 易稳定输出，TTS 朗读自然
+// 全角字符 UTF-8: （= EF BC 88 · ）= EF BC 89 · ｜= EF BD 9C
+struct EduWordHit {
+    std::string word;     // part1 → main
+    std::string bottom;   // part2 → bottom
+};
+
+bool ExtractEduWordCard(const std::string& s, EduWordHit* out) {
+    static const std::string kLP = "\xEF\xBC\x88";   // （
+    static const std::string kRP = "\xEF\xBC\x89";   // ）
+    static const std::string kFP = "\xEF\xBD\x9C";   // ｜全角竖线（兼容）
+
+    auto lp = s.find(kLP);
+    if (lp == std::string::npos) return false;
+    auto rp = s.find(kRP, lp + kLP.size());
+    if (rp == std::string::npos) return false;
+
+    std::string content = s.substr(lp + kLP.size(), rp - lp - kLP.size());
+    if (content.empty()) return false;
+
+    // 找 '|' 分隔（半角 0x7C 优先，全角 ｜ 兼容）
+    size_t pos = content.find('|');
+    size_t skip = 1;
+    if (pos == std::string::npos) {
+        pos = content.find(kFP);
+        skip = kFP.size();
+        if (pos == std::string::npos) return false;
+    }
+
+    out->word   = content.substr(0, pos);
+    out->bottom = content.substr(pos + skip);
+
+    // 去首尾空格
+    while (!out->word.empty() && (out->word.back() == ' ')) out->word.pop_back();
+    while (!out->bottom.empty() && (out->bottom.front() == ' ')) out->bottom.erase(0, 1);
+    while (!out->bottom.empty() && (out->bottom.back() == ' ')) out->bottom.pop_back();
+
+    // 校验：两段非空，part1 长度 ≤ 32 字节（防故事文本误匹配）
+    if (out->word.empty() || out->bottom.empty()) return false;
+    if (out->word.size() > 32 || out->bottom.size() > 48) return false;
+    return true;
+}
+}  // namespace
+
+
 Application::Application() {
     event_group_ = xEventGroupCreate();
 
@@ -597,7 +647,23 @@ void Application::InitializeProtocol() {
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (cJSON_IsString(text)) {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
-                    Schedule([display, message = std::string(text->valuestring)]() {
+                    std::string sentence = text->valuestring;
+
+                    // 被动学习：（part1|part2）模式 → 自动弹教育卡
+                    EduWordHit hit;
+                    if (ExtractEduWordCard(sentence, &hit)) {
+                        ESP_LOGI(TAG, "EduCard auto-trigger: %s | %s",
+                                 hit.word.c_str(), hit.bottom.c_str());
+                        Schedule([hit]() {
+                            if (auto* ui = dynamic_cast<UiDisplay*>(
+                                    Board::GetInstance().GetDisplay())) {
+                                ui->ShowEduCard("word", hit.word.c_str(),
+                                                "", hit.bottom.c_str());
+                            }
+                        });
+                    }
+
+                    Schedule([display, message = sentence]() {
                         display->SetChatMessage("assistant", message.c_str());
                     });
                 }
@@ -609,7 +675,7 @@ void Application::InitializeProtocol() {
                 Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
                     // 触发：服务器 stt 文本回包 = 用户语音已被服务器收到+识别
-                    // 跳过：① stt_popup_enabled_=false ② PTT 模式（用户已知响应）③ 唤醒词首条 STT
+                    // 跳过：① stt_popup_enabled_=false ② ManualStop 模式（FlowEngine 流程） ③ 唤醒词首条 STT
                     if (stt_popup_enabled_ &&
                         listening_mode_ != kListeningModeManualStop &&
                         !skip_next_stt_popup_.exchange(false)) {
@@ -735,8 +801,7 @@ void Application::StartListening() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING);
 }
 
-void Application::StopListening(bool play_sound) {
-    if (play_sound) stop_listening_play_sound_ = true;
+void Application::StopListening() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_STOP_LISTENING);
 }
 
@@ -798,11 +863,11 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
 }
 
 void Application::HandleStartListeningEvent() {
-    // 长按/按键/外部 StartListening() 触发 → 先停 MP3
+    // 按键/外部 StartListening() 触发 → 先停 MP3
     MusicPlayer::GetInstance().Stop();
 
     auto state = GetDeviceState();
-    
+
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;
@@ -830,21 +895,10 @@ void Application::HandleStartListeningEvent() {
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
         SetListeningMode(kListeningModeManualStop);
-    } else if (state == kDeviceStateListening) {
-        listening_mode_ = kListeningModeManualStop;
-        protocol_->SendStartListening(kListeningModeManualStop);
-        // 上一轮 PTT 松手在 HandleStopListeningEvent 关了 voice processing（见本文件 line ~857），
-        // 但 state 仍 Listening，不会触发 OnStateChanged 重启 audio_processor。
-        // 如果不在此显式重启，第二次起所有 PTT 录音都是空帧，服务端收不到音频→无 STT/TTS 反馈。
-        if (!audio_service_.IsAudioProcessorRunning()) {
-            audio_service_.EnableVoiceProcessing(true);
-        }
-        ESP_LOGI(TAG, "PTT 在 Listening 中接管：切到 ManualStop（关服务端 VAD）");
     }
 }
 
 void Application::HandleStopListeningEvent() {
-    bool play_sound = stop_listening_play_sound_.exchange(false);
     auto state = GetDeviceState();
     
     if (state == kDeviceStateAudioTesting) {
@@ -855,16 +909,7 @@ void Application::HandleStopListeningEvent() {
         if (protocol_) {
             protocol_->SendStopListening();
         }
-        if (play_sound) {
-            audio_service_.EnableVoiceProcessing(false);
-            // 松手即把 listening_mode_ 归位为 AutoStop/Realtime —
-            // 这样后续 tts.stop 走 else 分支 → 自动回 Listening → 支持多轮对话不需再按 PTT
-            SetListeningMode(GetDefaultListeningMode());
-            ESP_LOGI(TAG, "PTT 松手：关录音上送，模式归位 → TTS 完自动续录（多轮对话）");
-        } else {
-            // 普通 Stop（Audio Testing 退出等）：切 Idle 走原路径
-            SetDeviceState(kDeviceStateIdle);
-        }
+        SetDeviceState(kDeviceStateIdle);
     }
 }
 
@@ -990,6 +1035,9 @@ void Application::HandleStateChangedEvent() {
         case kDeviceStateListening:
             display->SetStatus("#FF3030 ●#");
             display->SetEmotion("neutral");
+            display->SetChatMessage("system", "");
+            // 下轮对话开始 → 自动清上一轮的教育卡（不依赖 SwitchToChatMode 的 kClock 守护）
+            if (lcd) lcd->HideEduCard();
 
             // Make sure the audio processor is running
             if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {

@@ -67,6 +67,7 @@ private:
     void OnSttUrl(const cJSON* msg);
     void OnMusicPlay(const cJSON* msg);
     void OnMusicStop();
+    void OnEduPool(const cJSON* msg);
 
     Application* app_;
     std::string stt_url_;  // 运行时缓存，启动时从 NVS 加载

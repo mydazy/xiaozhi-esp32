@@ -1045,7 +1045,7 @@ private:
             [battery, charging, volume, brightness, theme, fixed, sats, lat, lon, csq, carrier]() {
             cJSON* p = cJSON_CreateObject();
 
-            cJSON_AddNumberToObject(p, "battery", battery);
+            cJSON_AddNumberToObject(p, "battery_level", battery);   // 服务端解析字段（snake_case）
             cJSON_AddBoolToObject(p, "charging", charging);
             if (volume >= 0)     cJSON_AddNumberToObject(p, "volume", volume);
             if (brightness >= 0) cJSON_AddNumberToObject(p, "brightness", brightness);

@@ -75,7 +75,13 @@ void UiDisplay::SetupUI() {
         lv_image_set_src(emoji_image_, &ui_img_start_logo_png);
         lv_obj_remove_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
     }
-    if (emoji_box_) lv_obj_set_style_opa(emoji_box_, LV_OPA_TRANSP, 0);
+    if (emoji_box_) {
+        lv_obj_set_style_opa(emoji_box_, LV_OPA_TRANSP, 0);
+        // GIF 笔画字（font 模式）触屏退出 — 与教育卡 OnEduCardClicked 同款机制
+        // 永久注册，仅 font 模式回调内才执行 ResetFontMode（其他 emotion 不响应）
+        lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(emoji_box_, OnFontExitClicked, LV_EVENT_CLICKED, this);
+    }
 
     if (status_label_)       lv_label_set_recolor(status_label_, true);
     if (notification_label_) lv_label_set_recolor(notification_label_, true);
@@ -134,7 +140,7 @@ void UiDisplay::UpdateStatusBar(bool update_all) {
 
     // clock 模式：1s tick 刷新时钟（cbin 字体尚未就绪时延迟加载）
     if (current_scene_ == SceneType::kClock && clock_time_label_) {
-        if (!clock_big_font_ || !clock_text_font_) LoadClockFonts();
+        if (!clock_big_font_ || !clock_text_font_) EnsureDisplayFonts();
         UpdateClockTime();
     }
 }
@@ -181,7 +187,7 @@ void UiDisplay::CreateClockPage() {
     lv_label_set_text(clock_time_label_, "--:--");
     lv_obj_align(clock_time_label_, LV_ALIGN_CENTER, kClockOffsetX, kClockTimeOffsetY);
 
-    LoadClockFonts();
+    EnsureDisplayFonts();
     if (!clock_big_font_) lv_obj_set_style_text_font(clock_time_label_, &g_text_font, 0);
 
     const lv_font_t* text_font = clock_text_font_ ? clock_text_font_ : &g_text_font;
@@ -201,7 +207,7 @@ void UiDisplay::CreateClockPage() {
     UpdateClockTime();
 }
 
-void UiDisplay::LoadClockFonts() {
+void UiDisplay::EnsureDisplayFonts() {
     auto load = [](const char* name, const lv_font_t*& dst) {
         if (dst) return;
         void* ptr = nullptr; size_t size = 0;
@@ -211,6 +217,12 @@ void UiDisplay::LoadClockFonts() {
     };
     load("font_maru_88_4.bin", clock_big_font_);
     load("font_maru_30_4.bin", clock_text_font_);
+    load("font_maru_48_4.bin", edu_main_font_);
+
+
+    if (edu_main_font_ && clock_text_font_) {
+        const_cast<lv_font_t*>(edu_main_font_)->fallback = clock_text_font_;
+    }
 
     if (clock_big_font_  && clock_time_label_) lv_obj_set_style_text_font(clock_time_label_, clock_big_font_, 0);
     if (clock_text_font_ && clock_date_label_) lv_obj_set_style_text_font(clock_date_label_, clock_text_font_, 0);
@@ -252,6 +264,9 @@ void UiDisplay::SwitchToClockMode() {
     if (!setup_ui_called_) return;
     if (current_scene_ == SceneType::kPlayer) return;
 
+    HideEduCard();   // 状态切换清场，防止教育卡遮挡时钟主屏
+    ResetFontMode(); // 同步清 font 状态，防止 GIF 笔画残留
+
     if (!clock_container_) CreateClockPage();
 
     if (content_)     lv_obj_add_flag(content_, LV_OBJ_FLAG_HIDDEN);
@@ -266,15 +281,8 @@ void UiDisplay::SwitchToClockMode() {
         lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(top_bar_);
     }
-    // 恢复 chat 模式下隐藏的三个图标
-    if (network_label_) lv_obj_remove_flag(network_label_, LV_OBJ_FLAG_HIDDEN);
-    if (battery_label_) lv_obj_remove_flag(battery_label_, LV_OBJ_FLAG_HIDDEN);
-    if (mute_label_)    lv_obj_remove_flag(mute_label_, LV_OBJ_FLAG_HIDDEN);
-    if (status_bar_) {
-        lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);  // 防 boot fade_out 残留 TRANSP 致 notification 不可见
-        lv_obj_move_foreground(status_bar_);
-    }
+    SetTopBarIconsVisible(true);   // 恢复 chat 模式下隐藏的三个图标
+    RaiseStatusBar();
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
     current_scene_ = SceneType::kClock;
@@ -284,6 +292,9 @@ void UiDisplay::SwitchToClockMode() {
 void UiDisplay::SwitchToChatMode() {
     DisplayLockGuard lock(this);
     if (current_scene_ != SceneType::kClock) return;
+
+    HideEduCard();   // 状态切换清场，防止教育卡遮挡 emoji 表情
+    ResetFontMode(); // 同步清 font 状态，防止 GIF 笔画残留
 
     if (clock_container_) {
         lv_obj_add_flag(clock_container_, LV_OBJ_FLAG_HIDDEN);
@@ -304,18 +315,10 @@ void UiDisplay::SwitchToChatMode() {
     // 被 move_foreground(container_) 盖住 —— SetChatMessage 即使 remove HIDDEN 也看不见。
     if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
 
-    // chat 模式：top_bar_ 容器保留，三个图标 label 全部隐藏（信号/电池/静音让位 emoji 满屏沉浸感）
-    //           status_bar_ 显示（含 status_label_ 对话状态文字 + ShowNotification 通知通道）
-    if (network_label_) lv_obj_add_flag(network_label_, LV_OBJ_FLAG_HIDDEN);
-    if (battery_label_) lv_obj_add_flag(battery_label_, LV_OBJ_FLAG_HIDDEN);
-    if (mute_label_)    lv_obj_add_flag(mute_label_, LV_OBJ_FLAG_HIDDEN);
-    if (status_bar_) {
-        lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);
-        // 必须提顶：container_/emoji_box_/bottom_bar_ 都已 move_foreground，
-        // status_bar_ 不提则被 sibling 遮挡（与 SwitchToClockMode line 281-285 对齐）
-        lv_obj_move_foreground(status_bar_);
-    }
+    // chat 模式：top_bar_ 容器保留 / 三个图标 label 全部隐藏（让位 emoji 满屏沉浸感）
+    //          status_bar_ 显示（status_label_ 对话状态 + 通知）必须提顶（emoji_box_/container_/bottom_bar_ 已 foreground）
+    SetTopBarIconsVisible(false);
+    RaiseStatusBar();
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
     current_scene_ = SceneType::kEmoji;   // chat 主 widget = emoji_box
@@ -424,6 +427,10 @@ void UiDisplay::UpdateFontGif(uint8_t* gif_buffer, size_t size) {
 void UiDisplay::SetEmotion(const char* emotion) {
     if (!emotion) return;
 
+    if (current_is_font_ && strcmp(emotion, "font") != 0) {
+        return;
+    }
+
     if (current_is_font_ && strcmp(emotion, "neutral") == 0) {
         return;
     }
@@ -431,12 +438,67 @@ void UiDisplay::SetEmotion(const char* emotion) {
     bool is_font = (strcmp(emotion, "font") == 0);
     LcdDisplay::SetEmotion(emotion);
 
-    if (emoji_image_) {
+    // 背景保持主题黑底
+    if (bottom_bar_) {
         DisplayLockGuard lock(this);
-        lv_obj_align(emoji_image_, LV_ALIGN_CENTER, 0, is_font ? kFontEmojiOffsetY : 0);
+        if (is_font) {
+            lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    // font 模式（GIF 笔画）：与教育卡 / QR 互斥（show_stroke 期间不允许其他 overlay 共存）
+    if (is_font && emoji_box_) {
+        DisplayLockGuard lock(this);
+        HideEduCard();
+        HideQrCode();
+        lv_obj_move_foreground(emoji_box_);
     }
 
     current_is_font_ = is_font;
+}
+
+// font 模式静默丢弃字幕：直接 early-return，既不写 chat_message_label_，
+// 也不让父类把 bottom_bar_ unhide 回来。退出 font 模式后由 SetEmotion 恢复 bottom_bar_。
+void UiDisplay::SetChatMessage(const char* role, const char* content) {
+    if (current_is_font_) return;
+    LcdDisplay::SetChatMessage(role, content);
+}
+
+// ============================================================
+// 三个 SwitchTo* 共享的状态栏管理 helper
+// 调用方需自持 DisplayLockGuard
+// ============================================================
+
+// 清场：font 模式（GIF 笔画）状态切换前调用，避免 emoji_image src 仍指向 GIF
+// 状态切换路径必须先清 font 状态，否则切回 chat/clock 时仍显示 GIF 笔画字
+void UiDisplay::ResetFontMode() {
+    if (!current_is_font_) return;
+    current_is_font_ = false;             // 绕过 SetEmotion font→neutral 守护
+    SetEmotion("neutral");                // 切回静态表情
+}
+
+// 触屏点击 emoji_box 退出 font 模式（与教育卡退出机制一致）
+// 仅 font 模式生效；非 font 时点击不响应（避免误触干扰 happy 等表情）
+// 用 Schedule 异步：避免在 LVGL 事件回调内修改 emoji src + flag 引发事件链问题
+void UiDisplay::OnFontExitClicked(lv_event_t* e) {
+    auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
+    if (!self || !self->current_is_font_) return;
+    Application::GetInstance().Schedule([self]() { self->ResetFontMode(); });
+}
+
+void UiDisplay::SetTopBarIconsVisible(bool v) {
+    if (network_label_) (v ? lv_obj_remove_flag : lv_obj_add_flag)(network_label_, LV_OBJ_FLAG_HIDDEN);
+    if (battery_label_) (v ? lv_obj_remove_flag : lv_obj_add_flag)(battery_label_, LV_OBJ_FLAG_HIDDEN);
+    if (mute_label_)    (v ? lv_obj_remove_flag : lv_obj_add_flag)(mute_label_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void UiDisplay::RaiseStatusBar() {
+    if (!status_bar_) return;
+    lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);  // 防 boot fade_out 残留 TRANSP
+    lv_obj_move_foreground(status_bar_);
 }
 
 // ============================================================
@@ -570,7 +632,9 @@ void UiDisplay::ShowQrCode(const char* qr_content,
 void UiDisplay::HideQrCode() {
     DisplayLockGuard lock(this);
     if (qr_overlay_) {
-        lv_obj_del(qr_overlay_);
+        // 用 async 删除：与 HideEduCard 同源问题（注册了 OnQrClicked event_cb，
+        // 同步 lv_obj_del 在事件链处理中可能触发 lv_event_mark_deleted 死循环 → Task WDT）
+        lv_obj_del_async(qr_overlay_);
         qr_overlay_ = nullptr;
         ESP_LOGI(TAG, "隐藏 QR 页");
     }
@@ -731,6 +795,9 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
     if (!player_container_) CreatePlayerPage();
     if (!player_container_) return;
 
+    HideEduCard();   // 状态切换清场，防止教育卡遮挡 player UI
+    ResetFontMode(); // 同步清 font 状态，防止 GIF 笔画残留
+
     if (player_title_) {
         const char* t = (title && title[0]) ? title : "正在播放";
         lv_label_set_text(player_title_, t);
@@ -758,16 +825,8 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
         lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(top_bar_);
     }
-    // 恢复 chat 模式下隐藏的三个图标（chat → player 路径）
-    if (network_label_) lv_obj_remove_flag(network_label_, LV_OBJ_FLAG_HIDDEN);
-    if (battery_label_) lv_obj_remove_flag(battery_label_, LV_OBJ_FLAG_HIDDEN);
-    if (mute_label_)    lv_obj_remove_flag(mute_label_, LV_OBJ_FLAG_HIDDEN);
-    // status_bar_ 永久不隐藏：必须提顶否则被 player_container_ 遮挡
-    if (status_bar_) {
-        lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);
-        lv_obj_move_foreground(status_bar_);
-    }
+    SetTopBarIconsVisible(true);  // chat → player 路径恢复三个图标
+    RaiseStatusBar();              // status_bar_ 永久不隐藏，必须提顶否则被 player_container_ 遮挡
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
     current_scene_ = SceneType::kPlayer;   // 与 Clock / Emoji 互斥
@@ -815,3 +874,139 @@ void UiDisplay::SetPlayerPaused(bool paused) {
     is_player_paused_ = paused;
     lv_label_set_text(player_play_icon_, paused ? FONT_AWESOME_PLAY : FONT_AWESOME_PAUSE);
 }
+
+// ============================================================
+// 教育卡（单词 / 拼音 / 汉字组词）— overlay 模式（与 QR 同），不占 SceneType
+// 双行 48px 均分居中布局（284×240 屏）：
+//   ┌─────────────────────┐
+//   │                     │
+//   │     main (主色)      │ ← 48px（hanzi CJK 实际 fallback 30px）
+//   │                     │
+//   │     bottom (配色)    │ ← 48px（中文 CJK 实际 fallback 30px）
+//   │                     │
+//   └─────────────────────┘
+// 配色：main 金黄 0xFFD54F（三类统一）/ bottom 绿 0x81C784
+// ============================================================
+
+void UiDisplay::OnEduCardClicked(lv_event_t* e) {
+    auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
+    if (!self) return;
+    self->HideEduCard();
+}
+
+void UiDisplay::HideEduCard() {
+    DisplayLockGuard lock(this);
+    if (edu_card_overlay_) {
+        // 用 async 删除避开 lv_event_mark_deleted 在事件链处理中死循环
+        // （overlay 注册了 OnEduCardClicked event_cb，同步删会卡 main task → Task WDT 触发）
+        lv_obj_del_async(edu_card_overlay_);
+        edu_card_overlay_ = nullptr;
+        ESP_LOGI(TAG, "隐藏教育卡");
+    }
+}
+
+void UiDisplay::BuildEduCard(const EduRow& top, const EduRow& main_row, const EduRow& bottom) {
+    DisplayLockGuard lock(this);
+    HideEduCard();
+    HideQrCode();      // 与 QR overlay 互斥（同时只有一个 overlay）
+
+    auto* screen = lv_screen_active();
+    if (!screen) return;
+
+    // 全屏黑底容器
+    edu_card_overlay_ = lv_obj_create(screen);
+    lv_obj_set_size(edu_card_overlay_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_align(edu_card_overlay_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_remove_flag(edu_card_overlay_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(edu_card_overlay_, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(edu_card_overlay_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(edu_card_overlay_, 0, 0);
+    lv_obj_set_style_radius(edu_card_overlay_, 0, 0);
+    lv_obj_set_style_pad_all(edu_card_overlay_, 0, 0);
+    lv_obj_add_flag(edu_card_overlay_, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(edu_card_overlay_, OnEduCardClicked, LV_EVENT_CLICKED, this);
+
+    // 教育卡布局（284×240 屏 · main 底部锚定屏幕中线 y=120）：
+    //   y=120 (屏幕中心) 对齐 main 底部 → main_top = 120 - 48 = 72
+    //   [top 30px]      ← MCP 拼读/拼音（聊天正则空跳过）
+    //   ↕ 12px (kTopGap)
+    //   main 48px (字符底部 = y=120)
+    //   ↕ 10px (kBottomGap)
+    //   bottom 48px (字体设置 / CJK 渲染 30px)
+    constexpr int kTopGap    = 12;
+    constexpr int kBottomGap = 10;
+    constexpr int kLblW      = 270;
+
+    const bool has_top    = top.text    && top.text[0];
+    const bool has_bottom = bottom.text && bottom.text[0];
+
+    int main_top = LV_VER_RES / 2 - main_row.height;   // main 底部 = 屏幕中线
+    if (main_top < 0) main_top = 0;
+
+    auto add_label = [this](const EduRow& row, int y) {
+        lv_obj_t* lbl = lv_label_create(edu_card_overlay_);
+        lv_label_set_text(lbl, row.text);
+        lv_obj_set_style_text_font(lbl, row.font, 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(row.color), 0);
+        if (row.letter_space) lv_obj_set_style_text_letter_space(lbl, row.letter_space, 0);
+        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_CLIP);
+        lv_obj_set_width(lbl, kLblW);
+        lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, y);
+    };
+
+    if (has_top) {
+        int top_y = main_top - kTopGap - top.height;
+        if (top_y < 0) top_y = 0;
+        add_label(top, top_y);
+    }
+    add_label(main_row, main_top);
+    if (has_bottom) {
+        add_label(bottom, main_top + main_row.height + kBottomGap);
+    }
+
+    lv_obj_move_foreground(edu_card_overlay_);
+}
+
+void UiDisplay::ShowEduCard(const char* category, const char* main_text,
+                             const char* top, const char* bottom) {
+    if (!main_text || !main_text[0]) return;
+    if (!category) category = "word";
+
+    EnsureDisplayFonts();
+    // 防 crash：top 行永远用 clock_text_font_，main 行可能兜底到 clock_text_font_
+    // 任一缺失则跳过整张卡（assets 损坏的极端场景，量产保护）
+    if (!edu_main_font_ || !clock_text_font_) {
+        ESP_LOGW(TAG, "EduCard skipped: fonts not loaded (edu=%p text=%p)",
+                 edu_main_font_, clock_text_font_);
+        return;
+    }
+
+    // 清场：当前若在 font 模式（GIF 笔画动画），切 neutral 防 GIF 残留
+    ResetFontMode();
+
+    // main 颜色统一金黄 0xFFD54F（三种 category 不再单独区分配色）
+    constexpr uint32_t main_color = 0xFFD54F;
+
+    // 主体字号：默认 48px；以下两种情况降级 30px：
+    //   ① 长度 > 9 字节（长英文如 pronunciation）
+    //   ② 含空格（拼音组词如 "xiao niǎo" / "ban-an-a 拼读"）
+    const lv_font_t* main_font = edu_main_font_;
+    int main_h = 48;
+    if (strlen(main_text) > 9 || strchr(main_text, ' ') != nullptr) {
+        main_font = clock_text_font_;
+        main_h = 30;
+    }
+
+    // 三行布局：top(可空 30px) + main(48px/30px 金黄) + bottom(48px 绿色 · 字距 4)
+    //   MCP 调用：top 传"自然拼读" / "拼音"等 → 30px 浅橙显示
+    //   聊天正则提取：top="" → 仅两行（main + bottom）
+    // CJK 字符走 edu_main_font_ → clock_text_font_ fallback 链以 30px 渲染
+    EduRow t{top,       clock_text_font_, 0xFFB74D, 0, 30};   // 30px 浅橙拼读/拼音
+    EduRow m{main_text, main_font,        main_color, 0, main_h};
+    EduRow b{bottom,    edu_main_font_,   0x81C784,   4, 48};   // letter_space=4 加宽
+    BuildEduCard(t, m, b);
+    ESP_LOGI(TAG, "EduCard[%s] main=%s top=%s (main_h=%d)",
+             category, main_text, top ? top : "", main_h);
+}
+
