@@ -105,30 +105,44 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui) {
         });
 
     // 教育卡（统一接口，category 切换排版）— overlay 显示，触屏点击退出
+    // 三行布局：[top 30px 浅橙] + main 48px 金黄 + bottom 48px 绿色（CJK fallback 30px）
+    //
     // category 必填："word" | "hanzi" | "pinyin"
-    //   word   英文单词/拼写：上中下三行 / 主体 48px 金黄
-    //                       main=英文单词(≤9字母),top=自然拼读(≤12字符),bottom=中文释义(≤7字)
-    //   hanzi  汉字组词：    上中下三行 / 主体 48px 白色（黑底高对比）
-    //                       main=单个汉字(严格1字),top=拼音含四声(≤6字符),bottom=组词(≤7字含标点)
-    //   pinyin 拼音/声韵母： 上中下三行 / 主体 48px 橙红
-    //                       main=声韵母字母(≤4字符),top=类别(声母/韵母/整体认读, ≤4汉字),bottom=例字(≤4汉字)
-    // 适用人群：3-10 岁启蒙 / 中国孩子缺英语环境，自然拼读优先（不用 IPA 国际音标）
+    //   word   英文单词：top=自然拼读 / main=英文 / bottom=中文释义
+    //   hanzi  汉字注音：top=拼音(带声调) / main=汉字 / bottom=组词       ★ "X字怎么读/拼音"用此
+    //   pinyin 拼音教学：top=类别 / main=声韵母字母 / bottom=例字          ★ 仅"学韵母/声母/整体认读"用此
     mcp.AddTool("self.education.show_card",
-        "显示小学教育学习卡片(英文单词/汉字组词/拼音声韵母 三选一)。"
-        "当用户问字词意思、学英语单词、问怎么拼写、学汉字组词、学拼音声母韵母时调用。"
-        "包括: 什么意思/怎么读/怎么拼/spell/学单词/教我写X字/这字怎么读/X字组词/"
-        "学拼音/声母韵母/整体认读/小学语文/小学英语。"
-        "category=类别('word'英文单词|'hanzi'汉字|'pinyin'声母韵母); "
-        "main=主体内容(word填英文单词≤9字母/hanzi填严格单个汉字/pinyin填声韵母字母≤4字符如\"ang\"); "
-        "top=上行标注(可空; word填【自然拼读】≤12字符如\"c-a-t\"或\"ban-an-a\"或\"k-æ-t\","
-        "禁止 IPA 国际音标格式如\"/kæt/\"; "
-        "hanzi填拼音含四声≤6字符如\"niǎo\"; "
-        "pinyin填\"声母\"\"韵母\"\"整体认读\"≤4汉字); "
-        "bottom=下行说明(可空; word填中文释义≤7字如\"小猫宠物\"/"
-        "hanzi填组词≤7字含标点如\"小鸟，鸟蛋\"/pinyin填例字≤4汉字如\"英 应\")。"
-        "字符上限是显示约束,超长会被裁切,务必遵守。"
-        "调用后先用语气词回应,再朗读 main,然后说 top 和 bottom,最后用 1 个例句或情境巩固。"
-        "回复要简短温暖,适合 3-10 岁儿童语音播报,不超过 3 句话。",
+        "显示小学教育学习卡片(英文单词/汉字注音/拼音 三选一)。"
+        "用户问字词意思/怎么读/怎么写/拼写/spell/X字组词/学拼音 时调用。"
+        ""
+        "★类别选择路由（重要！按用户问题决定 category）★"
+        "用户问'X字怎么读/拼音'→category=hanzi(top=拼音 main=汉字 bottom=组词);"
+        "用户问'X字组词'→category=hanzi(top=拼音 main=汉字 bottom=组词);"
+        "用户问'X单词意思/怎么拼/spell'→category=word(top=自然拼读 main=英文 bottom=中文);"
+        "用户问'学韵母/学声母/整体认读/拼读'→category=pinyin(top=类别 main=带声调字母 bottom=例字);"
+        ""
+        "category=类别('word'英文|'hanzi'汉字|'pinyin'声韵母教学);"
+        ""
+        "top=上行标注 30px 浅橙(hanzi/pinyin 必填，word 选填):"
+            "★word填自然拼读≤12字符如\"c-a-t\"\"ban-an-a\"，禁止 IPA 国际音标;"
+            "★hanzi填拼音带声调≤6字符如\"niǎo\"\"hǎo\"\"nǐ hǎo\"，必须用ǎēīǒū等字母;"
+            "★pinyin填类别如\"韵母\"\"声母\"\"整体认读\"≤4汉字;"
+        ""
+        "main=主体大字 48px 金黄:"
+            "★word填英文≤9字母全小写如\"apple\";"
+            "★hanzi填汉字单字或词组≤4字如\"鸟\"\"好\"\"你好\";"
+            "★pinyin填带声调拼音字母≤8字符如\"ang\"\"b\"\"ying\";"
+        ""
+        "bottom=下行说明 48px 绿色 ≤4 字(可空):"
+            "★word填中文释义如\"苹果\";"
+            "★hanzi填组词或释义如\"小鸟\"\"美好\"\"问候\";"
+            "★pinyin填例字如\"昂浪\"\"波\"\"英应\";"
+        ""
+        "字符上限严格遵守，超长会被裁切。"
+        "拼音必须用带声调字母 ā á ǎ à ē é ě è ī í ǐ ì ō ó ǒ ò ū ú ǔ ù ǖ ǘ ǚ ǜ，"
+        "禁用不带声调如\"hao\"，禁用文字描述声调如\"三声\"。"
+        "调用后用语气词回应+朗读 main 带声调发音+说 bottom+1 句巩固。"
+        "回复温暖简短，适合 3-10 岁儿童语音播报，≤3 句。",
         PropertyList({
             Property("category", kPropertyTypeString),
             Property("main",     kPropertyTypeString),

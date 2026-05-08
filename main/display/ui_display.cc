@@ -439,8 +439,6 @@ void UiDisplay::SetEmotion(const char* emotion) {
     LcdDisplay::SetEmotion(emotion);
 
     // 背景保持主题黑底
-    // 仅在 font 进/出转换时切换 bottom_bar_ 可见性，避免每次 SetEmotion 都触发 layout 失效
-    // （EduCard overlay 期间反复 layout 失效叠加 lv_obj_del_async 会让 LVGL event 链 corrupt 崩溃）
     if (bottom_bar_ && is_font != current_is_font_) {
         DisplayLockGuard lock(this);
         if (is_font) {
@@ -896,26 +894,22 @@ void UiDisplay::OnEduCardClicked(lv_event_t* e) {
     self->HideEduCard();
 }
 
+// 复用单 overlay：仅切 HIDDEN flag，不删除子节点
+// 关键：避免 lv_obj_del 与 label 异步 layout cb 的 race（lv_event_mark_deleted UAF）
 void UiDisplay::HideEduCard() {
     DisplayLockGuard lock(this);
-    if (edu_card_overlay_) {
-        // 用 async 删除避开 lv_event_mark_deleted 在事件链处理中死循环
-        // （overlay 注册了 OnEduCardClicked event_cb，同步删会卡 main task → Task WDT 触发）
-        lv_obj_del_async(edu_card_overlay_);
-        edu_card_overlay_ = nullptr;
+    if (edu_card_overlay_ && !lv_obj_has_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_add_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
         ESP_LOGI(TAG, "隐藏教育卡");
     }
 }
 
-void UiDisplay::BuildEduCard(const EduRow& top, const EduRow& main_row, const EduRow& bottom) {
-    DisplayLockGuard lock(this);
-    HideEduCard();
-    HideQrCode();      // 与 QR overlay 互斥（同时只有一个 overlay）
-
+// 懒创建 overlay + 3 个 label 槽位；后续 ShowEduCard 都复用，仅更新内容
+void UiDisplay::EnsureEduCardOverlay() {
+    if (edu_card_overlay_) return;
     auto* screen = lv_screen_active();
     if (!screen) return;
 
-    // 全屏黑底容器
     edu_card_overlay_ = lv_obj_create(screen);
     lv_obj_set_size(edu_card_overlay_, LV_HOR_RES, LV_VER_RES);
     lv_obj_align(edu_card_overlay_, LV_ALIGN_CENTER, 0, 0);
@@ -927,46 +921,62 @@ void UiDisplay::BuildEduCard(const EduRow& top, const EduRow& main_row, const Ed
     lv_obj_set_style_pad_all(edu_card_overlay_, 0, 0);
     lv_obj_add_flag(edu_card_overlay_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(edu_card_overlay_, OnEduCardClicked, LV_EVENT_CLICKED, this);
+    lv_obj_add_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);  // 默认隐藏，等 BuildEduCard 显示
+
+    auto make_label = [this]() {
+        lv_obj_t* lbl = lv_label_create(edu_card_overlay_);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_CLIP);
+        lv_obj_set_width(lbl, 270);
+        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+        return lbl;
+    };
+    edu_top_label_    = make_label();
+    edu_main_label_   = make_label();
+    edu_bottom_label_ = make_label();
+}
+
+// 在已有 label 槽上更新内容（无则隐藏该槽）
+void UiDisplay::UpdateEduRow(lv_obj_t* lbl, const EduRow& row, int y) {
+    if (!lbl) return;
+    if (!row.text || !row.text[0]) {
+        lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_label_set_text(lbl, row.text);
+    lv_obj_set_style_text_font(lbl, row.font, 0);
+    lv_obj_set_style_text_color(lbl, lv_color_hex(row.color), 0);
+    lv_obj_set_style_text_letter_space(lbl, row.letter_space, 0);
+    lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, y);
+    lv_obj_remove_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+}
+
+void UiDisplay::BuildEduCard(const EduRow& top, const EduRow& main_row, const EduRow& bottom) {
+    DisplayLockGuard lock(this);
+    HideQrCode();      // 与 QR overlay 互斥（同时只有一个 overlay）
+
+    EnsureEduCardOverlay();
+    if (!edu_card_overlay_) return;
 
     // 教育卡布局（284×240 屏 · main 底部锚定屏幕中线 y=120）：
-    //   y=120 (屏幕中心) 对齐 main 底部 → main_top = 120 - 48 = 72
-    //   [top 30px]      ← MCP 拼读/拼音（聊天正则空跳过）
+    //   [top 30px]      ← MCP 拼读/拼音（空则隐藏该槽）
     //   ↕ 12px (kTopGap)
     //   main 48px (字符底部 = y=120)
     //   ↕ 10px (kBottomGap)
-    //   bottom 48px (字体设置 / CJK 渲染 30px)
+    //   bottom 30px (释义/组词)
     constexpr int kTopGap    = 12;
     constexpr int kBottomGap = 10;
-    constexpr int kLblW      = 270;
 
-    const bool has_top    = top.text    && top.text[0];
-    const bool has_bottom = bottom.text && bottom.text[0];
-
-    int main_top = LV_VER_RES / 2 - main_row.height;   // main 底部 = 屏幕中线
+    int main_top = LV_VER_RES / 2 - main_row.height;
     if (main_top < 0) main_top = 0;
 
-    auto add_label = [this](const EduRow& row, int y) {
-        lv_obj_t* lbl = lv_label_create(edu_card_overlay_);
-        lv_label_set_text(lbl, row.text);
-        lv_obj_set_style_text_font(lbl, row.font, 0);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(row.color), 0);
-        if (row.letter_space) lv_obj_set_style_text_letter_space(lbl, row.letter_space, 0);
-        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
-        lv_label_set_long_mode(lbl, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(lbl, kLblW);
-        lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, y);
-    };
+    int top_y = main_top - kTopGap - top.height;
+    if (top_y < 0) top_y = 0;
+    UpdateEduRow(edu_top_label_,    top,      top_y);
+    UpdateEduRow(edu_main_label_,   main_row, main_top);
+    UpdateEduRow(edu_bottom_label_, bottom,   main_top + main_row.height + kBottomGap);
 
-    if (has_top) {
-        int top_y = main_top - kTopGap - top.height;
-        if (top_y < 0) top_y = 0;
-        add_label(top, top_y);
-    }
-    add_label(main_row, main_top);
-    if (has_bottom) {
-        add_label(bottom, main_top + main_row.height + kBottomGap);
-    }
-
+    lv_obj_remove_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(edu_card_overlay_);
 }
 

@@ -29,48 +29,37 @@
 
 
 namespace {
-// 统一教育卡触发格式：（part1|part2）→ ShowEduCard(main=part1, bottom=part2)
-//   单词：（apple|苹果）/（banana|香蕉）
-//   汉字：（鸟|niǎo 小鸟）/（好|hǎo 你好）
-//   拼音：（ang|韵母 昂浪）/（b|声母 波）
-// 用全角括号 + 半角'|' 分隔，LLM 易稳定输出，TTS 朗读自然
-// 全角字符 UTF-8: （= EF BC 88 · ）= EF BC 89 · ｜= EF BD 9C
+// 教育卡触发格式（v6.1）：[part1-part2] → ShowEduCard(main=part1, bottom=part2)
+//   全 ASCII：半角中括号 + 半角短横线，杜绝全角/半角输入法错位
+//   part1 内允许 '-'（如拼音音节 ap-ple）：取 ']' 之前最后一个 '-' 作为切点
+//
+//   样例：
+//     [apple-苹果]      → main=apple,     bottom=苹果
+//     [hǎo-好]          → main=hǎo,       bottom=好
+//     [nǐ hǎo-你好]     → main=nǐ hǎo,   bottom=你好
+//     [ap-ple-苹果]     → main=ap-ple,    bottom=苹果（rfind 取最右 '-'）
 struct EduWordHit {
     std::string word;     // part1 → main
     std::string bottom;   // part2 → bottom
 };
 
 bool ExtractEduWordCard(const std::string& s, EduWordHit* out) {
-    static const std::string kLP = "\xEF\xBC\x88";   // （
-    static const std::string kRP = "\xEF\xBC\x89";   // ）
-    static const std::string kFP = "\xEF\xBD\x9C";   // ｜全角竖线（兼容）
-
-    auto lp = s.find(kLP);
+    auto lp = s.find('[');
     if (lp == std::string::npos) return false;
-    auto rp = s.find(kRP, lp + kLP.size());
-    if (rp == std::string::npos) return false;
+    auto rp = s.find(']', lp + 1);
+    if (rp == std::string::npos || rp <= lp + 2) return false;
+    auto dash = s.rfind('-', rp - 1);
+    if (dash == std::string::npos || dash <= lp) return false;
 
-    std::string content = s.substr(lp + kLP.size(), rp - lp - kLP.size());
-    if (content.empty()) return false;
+    auto trim = [](std::string& x) {
+        while (!x.empty() && x.front() == ' ') x.erase(0, 1);
+        while (!x.empty() && x.back() == ' ') x.pop_back();
+    };
+    out->word   = s.substr(lp + 1, dash - lp - 1);
+    out->bottom = s.substr(dash + 1, rp - dash - 1);
+    trim(out->word);
+    trim(out->bottom);
 
-    // 找 '|' 分隔（半角 0x7C 优先，全角 ｜ 兼容）
-    size_t pos = content.find('|');
-    size_t skip = 1;
-    if (pos == std::string::npos) {
-        pos = content.find(kFP);
-        skip = kFP.size();
-        if (pos == std::string::npos) return false;
-    }
-
-    out->word   = content.substr(0, pos);
-    out->bottom = content.substr(pos + skip);
-
-    // 去首尾空格
-    while (!out->word.empty() && (out->word.back() == ' ')) out->word.pop_back();
-    while (!out->bottom.empty() && (out->bottom.front() == ' ')) out->bottom.erase(0, 1);
-    while (!out->bottom.empty() && (out->bottom.back() == ' ')) out->bottom.pop_back();
-
-    // 校验：两段非空，part1 长度 ≤ 32 字节（防故事文本误匹配）
     if (out->word.empty() || out->bottom.empty()) return false;
     if (out->word.size() > 32 || out->bottom.size() > 48) return false;
     return true;
@@ -649,7 +638,7 @@ void Application::InitializeProtocol() {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
                     std::string sentence = text->valuestring;
 
-                    // 被动学习：（part1|part2）模式 → 自动弹教育卡
+                    // 被动学习：[part1-part2] 模式 → 自动弹教育卡
                     EduWordHit hit;
                     if (ExtractEduWordCard(sentence, &hit)) {
                         ESP_LOGI(TAG, "EduCard auto-trigger: %s | %s",

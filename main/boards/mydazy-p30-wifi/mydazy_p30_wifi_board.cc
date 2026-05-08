@@ -348,17 +348,21 @@ private:
                 last_shake_us = now_us;
 
                 // 摇一摇 → 启蒙学习场景触发（与 P30-4G 对称）
+                // 接管状态：Idle / Listening（Speaking 不打断 TTS）
+                // 关键：Listening 中不调 StopListening — 否则 idle 中转触发 SwitchToClockMode 抖动。
+                // protocol channel 已开，SendTextToAI 直接走云端通道发文本指令，平滑过渡到 Speaking。
                 Application::GetInstance().Schedule([]() {
                     auto& app = Application::GetInstance();
-                    if (app.GetDeviceState() != kDeviceStateIdle) {
-                        ESP_LOGD(TAG, "Shake ignored: not idle");
+                    auto state = app.GetDeviceState();
+                    if (state != kDeviceStateIdle && state != kDeviceStateListening) {
+                        ESP_LOGD(TAG, "Shake ignored: state=%d", (int)state);
                         return;
                     }
                     app.PlaySound(Lang::Sounds::OGG_POPUP);
                     auto pick = EduScenePool::GetInstance().GetRandomWithCount();
                     char buf[40];
                     snprintf(buf, sizeof(buf), "[%s %d]", pick.name, pick.count);
-                    ESP_LOGI(TAG, "Shake → 启蒙场景 %s", buf);
+                    ESP_LOGI(TAG, "Shake → 启蒙场景 %s (state=%d)", buf, (int)state);
                     app.SendTextToAI(buf);
                 });
             }
@@ -401,8 +405,8 @@ private:
         self->WakeUp();
 
         // 触摸交互矩阵（量产稳定向）：
-        //   SINGLE_CLICK         → Idle 唤醒 / Speaking 打断（与 BOOT 单击同义）
-        //   DOUBLE_CLICK         → 退出对话回时钟主屏（孩子最熟悉的"退出"心智）
+        //   SINGLE_CLICK         → Idle 唤醒 / Speaking 打断（与 BOOT 单击同义，参与节流防 RF 误触）
+        //   DOUBLE_CLICK         → 退出对话回时钟主屏（明确意图操作 · 不参与节流，风暴期也响应）
         //   LONG_PRESS / RELEASE → 已下线（PTT 移除）
         //   SWIPE_DOWN/UP/LEFT/RIGHT → 全部丢弃（ControlCenter 量产期已 stub，无入口）
         bool is_click        = (g == AXS5106L_GESTURE_SINGLE_CLICK);
@@ -417,15 +421,22 @@ private:
         }
         (void)x;
 
-        // RF 风暴节流：到这里 g 必是 SINGLE_CLICK / DOUBLE_CLICK
+        // 双击是明确意图操作（孩子两连点 = 退对话），不参与 RF 风暴节流，
+        // driver 已自带 mute；上层不再二次拦截，确保关键退出路径在风暴期也可用
+        if (is_double_click) {
+            self->HandleTouchDoubleClick();
+            return;
+        }
+
+        // 单击参与节流：1.2s 内 ≥3 次 SingleClick → 静默 3s（防 RF 风暴假单击误唤醒）
         int64_t now = esp_timer_get_time();
         if (now < self->storm_mute_until_us_) {
-            ESP_LOGD(TAG, "RF 风暴静默期，丢弃 gesture=%d", (int)g);
+            ESP_LOGD(TAG, "RF 风暴静默期，丢弃 SingleClick");
             return;
         }
         if (now - self->last_gesture_us_ < 1200000) {
             if (++self->gesture_burst_ >= 3) {
-                ESP_LOGW(TAG, "检测到 RF 触摸风暴，静默 3s");
+                ESP_LOGW(TAG, "检测到 RF 触摸风暴（单击），静默 3s");
                 self->storm_mute_until_us_ = now + 3000000;
                 self->gesture_burst_ = 0;
                 return;
@@ -434,12 +445,7 @@ private:
             self->gesture_burst_ = 1;
         }
         self->last_gesture_us_ = now;
-
-        if (is_click) {
-            self->HandleTouchSingleClick();
-        } else if (is_double_click) {
-            self->HandleTouchDoubleClick();
-        }
+        self->HandleTouchSingleClick();
     }
 
     void InitializeTouch() {

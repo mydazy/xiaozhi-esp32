@@ -100,7 +100,10 @@ public:
     void ShowEduCard(const char* category, const char* main_text,
                      const char* top, const char* bottom);
     void HideEduCard();
-    bool IsEduCardActive() const { return edu_card_overlay_ != nullptr; }
+    bool IsEduCardActive() const {
+        return edu_card_overlay_ != nullptr &&
+               !lv_obj_has_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
+    }
 
 private:
 
@@ -116,8 +119,14 @@ private:
     // 通用二维码 overlay（配网 / 绑定 / 付费等场景共享，同时只有一个）
     lv_obj_t* qr_overlay_ = nullptr;
 
-    // 教育卡 overlay（单词 / 拼音 / 汉字组词）— 同时只有一个；删除后 emoji_box_/clock 自动暴露
+    // 教育卡 overlay（单词 / 拼音 / 汉字组词）— 复用单一 overlay + 3 个 label
+    // 设计：第一次 ShowEduCard 时懒创建，后续仅更新 label 内容/字体/位置；
+    //      HideEduCard 只 set HIDDEN flag，不删 overlay → 杜绝 lv_obj_del 与 label 异步
+    //      layout cb 的 race，从根本上避免 LVGL 9 的 lv_event_mark_deleted UAF。
     lv_obj_t* edu_card_overlay_ = nullptr;
+    lv_obj_t* edu_top_label_    = nullptr;
+    lv_obj_t* edu_main_label_   = nullptr;
+    lv_obj_t* edu_bottom_label_ = nullptr;
     static void OnEduCardClicked(lv_event_t* e);
 
     // 清场 helper：font 模式（GIF 笔画）退出 + 状态切换前调用
@@ -131,7 +140,7 @@ private:
 
     // 教育卡布局：[top 30px] + main 48px + bottom 48px（top 可空 · 整体上下居中）
     //   MCP 调用 show_card (category="word"/"pinyin") 传 top → 三行（拼读/拼音）
-    //   聊天正则提取（part1|part2）传 top="" → 两行（更紧凑）
+    //   聊天正则提取 [part1-part2] 传 top="" → 两行（更紧凑）
     struct EduRow {
         const char* text;            // null 或空字符串则该行不渲染
         const lv_font_t* font;
@@ -140,6 +149,8 @@ private:
         int height;                  // 字体高度 px，用于布局计算
     };
     void BuildEduCard(const EduRow& top, const EduRow& main_row, const EduRow& bottom);
+    void EnsureEduCardOverlay();                                        // 懒创建 overlay + 3 label 槽
+    void UpdateEduRow(lv_obj_t* lbl, const EduRow& row, int y);         // 更新单个 label 槽（空文本则隐藏）
 
     // 整页双击 callback（仅显示左右色条时有效，用于切换模式）
     // 必须保活直到 HideQrCode，否则 lambda 析构后 click 事件触发 UAF
