@@ -118,6 +118,8 @@ public:
     bool SendTextToTts(const std::string& text);   // false = 协议未实现 / channel 未开
     void SendTextToAI(const std::string& text);
     bool SendProtocolText(const std::string& text);
+    // 教育卡 P0：动态切换 system prompt（model_type=2 视觉 / 0 聊天 / 空 prompt 恢复默认）
+    bool UpdateSystemPrompt(int model_type, const std::string& prompt);
     void ForceListeningMode(ListeningMode mode) { listening_mode_ = mode; }
     void ScheduleDelayedWake(const std::string& wake_text, uint64_t delay_us);
     void SetAecMode(AecMode mode);

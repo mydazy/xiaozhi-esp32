@@ -30,12 +30,6 @@
 
 
 namespace {
-// 教育卡触发格式（v6.3）：'|' 优先 + '-' 兜底（LLM 实测倾向用 '-'）
-//   [main|bottom] / [main-bottom]      → main, bottom (top="")
-//   [top|main|bottom]                  → 三段, 仅 '|' 形式
-// 单句严格 1 卡（音画同步）：1 句 sentence_start ≈ 3s 语音 ≈ 1 张卡显示时长。
-// LLM 偶尔输出多卡时设备端只取首张，剩余丢失（防止屏幕滞后于语音）。
-// kEduCardMaxPerSentence 保留 8 是为多卡链式机制预留，实际 LLM 须每句 1 卡。
 constexpr size_t kEduCardMaxPerSentence = 1;     // 严格单卡：音画同步
 constexpr int    kEduCardIntervalMs     = 3500;
 
@@ -47,25 +41,24 @@ struct EduWordHit {
 
 bool ParseEduCardBody(const std::string& s, size_t lp, size_t rp, EduWordHit* out) {
     out->top.clear();
-    auto first = s.find('|', lp + 1);
-    if (first != std::string::npos && first < rp) {
-        // '|' 路径：1 个 → 二段 / 2 个 → 三段
-        auto second = s.find('|', first + 1);
-        if (second != std::string::npos && second < rp) {
-            out->top    = s.substr(lp + 1, first - lp - 1);
-            out->word   = s.substr(first + 1, second - first - 1);
-            out->bottom = s.substr(second + 1, rp - second - 1);
-        } else {
-            out->word   = s.substr(lp + 1, first - lp - 1);
-            out->bottom = s.substr(first + 1, rp - first - 1);
-        }
+
+    auto first = s.find('_', lp + 1);
+    if (first == std::string::npos || first >= rp) return false;  // 无 '_' 拒绝
+
+    auto second = s.find('_', first + 1);
+    if (second != std::string::npos && second < rp) {
+        // 三段 [main_bottom_top]
+        auto third = s.find('_', second + 1);
+        if (third != std::string::npos && third < rp) return false;  // 4 段拒绝
+        out->word   = s.substr(lp + 1, first - lp - 1);
+        out->bottom = s.substr(first + 1, second - first - 1);
+        out->top    = s.substr(second + 1, rp - second - 1);
     } else {
-        // fallback '-' 路径（LLM 倾向 + demo SQL 旧格式）：rfind 取最右
-        auto dash = s.rfind('-', rp - 1);
-        if (dash == std::string::npos || dash <= lp) return false;
-        out->word   = s.substr(lp + 1, dash - lp - 1);
-        out->bottom = s.substr(dash + 1, rp - dash - 1);
+        // 二段 [main_bottom]
+        out->word   = s.substr(lp + 1, first - lp - 1);
+        out->bottom = s.substr(first + 1, rp - first - 1);
     }
+
     auto trim = [](std::string& x) {
         while (!x.empty() && x.front() == ' ') x.erase(0, 1);
         while (!x.empty() && x.back() == ' ') x.pop_back();
@@ -1204,6 +1197,16 @@ void Application::SendTextToAI(const std::string& text) {
 bool Application::SendProtocolText(const std::string& text) {
     if (text.empty() || !protocol_) return false;
     return protocol_->SendRawText(text);
+}
+
+// 教育卡：动态切换 system prompt（无 channel 自动开通道；当前协议不实现则返回 false）
+bool Application::UpdateSystemPrompt(int model_type, const std::string& prompt) {
+    if (!protocol_) return false;
+    if (!protocol_->IsAudioChannelOpened() && !protocol_->OpenAudioChannel()) {
+        ESP_LOGW(TAG, "UpdateSystemPrompt: OpenAudioChannel failed");
+        return false;
+    }
+    return protocol_->UpdateSystemPrompt(model_type, prompt);
 }
 
 void Application::ScheduleDelayedWake(const std::string& wake_text, uint64_t delay_us) {
