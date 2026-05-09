@@ -13,6 +13,7 @@ main/mmap_generate_emoji.h
 .DS_Store
 .cache
 *.pyc
+__pycache__/
 *.bin
 mmap_generate_*.h
 .clangd
