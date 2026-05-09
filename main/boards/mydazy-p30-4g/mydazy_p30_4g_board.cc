@@ -25,7 +25,6 @@
 #include "mcp_server.h"
 #include "ota.h"
 #include "education_mcp_tools.h"
-#include "edu_scene_pool.h"
 #include "assets.h"
 #include <font_awesome.h>
 #include <sys/stat.h>
@@ -140,6 +139,9 @@ private:
     // 关机两段长按状态（3秒提醒、5秒执行、PressUp 取消）
     std::atomic<bool> shutdown_armed_{false};
 
+    // 开机长按 grace 期：注册按键时若 GPIO 仍按下，置 true；首次 PressUp 自动清。
+    std::atomic<bool> boot_hold_grace_active_{false};
+
     // 恢复出厂设置确认状态
     std::atomic<bool> waiting_factory_reset_confirm_{false};
     uint64_t factory_reset_request_time_ = 0;
@@ -189,7 +191,6 @@ private:
     void HandleWakeupCause() {
         esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
         esp_reset_reason_t reset_reason = esp_reset_reason();
-        // 诊断日志：同时打印 wakeup_cause + reset_reason，可区分
         ESP_LOGI(TAG, "Boot diag: wakeup_cause=%d, reset_reason=%d", (int)wakeup_reason, (int)reset_reason);
 
         switch (wakeup_reason) {
@@ -244,17 +245,6 @@ private:
             elapsed += kStepMs;
         }
         ESP_LOGI(TAG, "开机长按 2 秒确认，准备启动");
-
-        // 等待用户松手，避免开机长按被随后初始化的 iot_button 误判为"长按 3 秒关机"
-        // （iot_button 在 init 时若发现 GPIO 已按下，从 init 时刻起算长按时长）
-        // 上限 5s 防卡死；超时即使还按着也继续启动（异常场景仅遗留关机倒计时提示）
-        const int kReleaseWaitMaxMs = 5000;
-        int release_wait = 0;
-        while (gpio_get_level(BOOT_BUTTON_GPIO) == 0 && release_wait < kReleaseWaitMaxMs) {
-            vTaskDelay(pdMS_TO_TICKS(kStepMs));
-            release_wait += kStepMs;
-        }
-        ESP_LOGI(TAG, "开机长按已松手（等待 %d ms）", release_wait);
         return true;
     }
 
@@ -308,80 +298,26 @@ private:
         }
     }
 
-    // 摇一摇识别（孩子拿起来甩 → 切话题 / 换 emoji / 抽奖等）
-    //       触发后冷却 1.5s 防连发。
-    static void ShakeDetectTaskEntry(void* arg) {
-        auto* board = static_cast<MyDazyP30_4GBoard*>(arg);
-        constexpr TickType_t kPeriodTicks   = pdMS_TO_TICKS(100);
-        constexpr int32_t    kStrongMgSq    = 1500 * 1500;   // 偏离 1g 阈值的平方
-        constexpr int32_t    kGravitySq     = 1000 * 1000;   // (1g)²
-        constexpr int        kWindowSize    = 6;             // 600ms 窗口
-        constexpr int        kStrongTarget  = 3;             // 窗口内 ≥3 帧 = 摇
-        constexpr int64_t    kCooldownUs    = 1500 * 1000LL; // 触发后 1.5s 冷却
-
-        int32_t window_dev_sq[kWindowSize] = {0};   // 每帧 (|a|² - 1g²) 绝对值
-        int     wi = 0;
-        int64_t last_shake_us = 0;
-
-        TickType_t last_wake = xTaskGetTickCount();
-        while (true) {
-            vTaskDelayUntil(&last_wake, kPeriodTicks);
-            if (!board->sc7a20h_initialized_ || !board->sc7a20h_sensor_) continue;
-
-            int16_t x, y, z;
-            if (sc7a20h_read_mg(board->sc7a20h_sensor_, &x, &y, &z) != ESP_OK) continue;
-
-            // 模长平方 - 重力平方（无 sqrt）
-            int32_t mag_sq = (int32_t)x * x + (int32_t)y * y + (int32_t)z * z;
-            int32_t dev    = mag_sq - kGravitySq;
-            if (dev < 0) dev = -dev;
-            window_dev_sq[wi] = dev;
-            wi = (wi + 1) % kWindowSize;
-
-            int     strong = 0;
-            int32_t peak   = 0;
-            for (int i = 0; i < kWindowSize; ++i) {
-                if (window_dev_sq[i] > kStrongMgSq) strong++;
-                if (window_dev_sq[i] > peak) peak = window_dev_sq[i];
+    // 摇一摇识别（孩子拿起来甩 → 云端决定返回什么）
+    // 算法在驱动 sc7a20h_start_shake_detect() 内，回调出事件 → Schedule 主线程。
+    // Listening 中不调 StopListening 避免 UI 抖回时钟，直接 SendTextToAI 平滑过渡。
+    static void OnShake(void* /*ctx*/) {
+        Application::GetInstance().Schedule([]() {
+            auto& app = Application::GetInstance();
+            auto state = app.GetDeviceState();
+            if (state != kDeviceStateIdle && state != kDeviceStateListening) {
+                ESP_LOGD(TAG, "Shake ignored: state=%d", (int)state);
+                return;
             }
-
-            int64_t now_us = esp_timer_get_time();
-            if (strong >= kStrongTarget && (now_us - last_shake_us) > kCooldownUs) {
-                ESP_LOGI(TAG, "Shake detected! peak_dev_sq=%ld, strong=%d/%d",
-                         (long)peak, strong, kWindowSize);
-                last_shake_us = now_us;
-
-                // 摇一摇 → 启蒙学习场景触发（10 个本地池随机选一个）
-                // 接管状态：Idle / Listening（Speaking 不打断 TTS）
-                // 关键：Listening 中**不要**调 StopListening
-                //   StopListening → state listening->idle → application.cc 联动 SwitchToClockMode
-                //   → UI 抖动到时钟再切回 chat。
-                //   protocol channel 在 Listening 中是开的，SendTextToAI 直接走云端通道发文本指令
-                //   云端按文本指令切场景，UI 状态从 Listening 平滑过渡到 Speaking，无 idle 中转。
-                Application::GetInstance().Schedule([]() {
-                    auto& app = Application::GetInstance();
-                    auto state = app.GetDeviceState();
-                    if (state != kDeviceStateIdle && state != kDeviceStateListening) {
-                        ESP_LOGD(TAG, "Shake ignored: state=%d", (int)state);
-                        return;
-                    }
-                    app.PlaySound(Lang::Sounds::OGG_POPUP);
-
-                    auto pick = EduScenePool::GetInstance().GetRandomWithCount();
-                    char buf[40];
-                    // 拼 [场景名 累计次数] · 让云端按编号轮换内容（避免同话题重复）
-                    snprintf(buf, sizeof(buf), "[%s %d]", pick.name, pick.count);
-                    ESP_LOGI(TAG, "Shake → 启蒙场景 %s (state=%d)", buf, (int)state);
-                    app.SendTextToAI(buf);
-                });
-            }
-        }
+            app.PlaySound(Lang::Sounds::OGG_POPUP);
+            ESP_LOGI(TAG, "Shake → 摇一摇 (state=%d)", (int)state);
+            app.SendTextToAI("摇一摇随机互动");
+        });
     }
 
     void StartShakeDetect() {
         if (!sc7a20h_initialized_) return;
-        xTaskCreatePinnedToCore(&MyDazyP30_4GBoard::ShakeDetectTaskEntry,
-                                "accel_shake", 2560, this, 1, nullptr, 1);
+        sc7a20h_start_shake_detect(sc7a20h_sensor_, &MyDazyP30_4GBoard::OnShake, this);
     }
 
     void PrepareTouchHardware() {
@@ -411,16 +347,10 @@ private:
         self->WakeUp();
 
         // 触摸交互矩阵（量产稳定向）：
-        //   SINGLE_CLICK         → Idle 唤醒 / Speaking 打断（与 BOOT 单击同义，参与节流防 RF 误触）
-        //   DOUBLE_CLICK         → 退出对话回时钟主屏（明确意图操作 · 不参与节流，风暴期也响应）
-        //   LONG_PRESS / RELEASE → 已下线（PTT 移除）
-        //   SWIPE_DOWN/UP/LEFT/RIGHT → 全部丢弃（ControlCenter 量产期已 stub，无入口）
         bool is_click        = (g == AXS5106L_GESTURE_SINGLE_CLICK);
         bool is_double_click = (g == AXS5106L_GESTURE_DOUBLE_CLICK);
         if (!is_click && !is_double_click) return;
 
-        // 状态栏区域（顶部 HEADER_HEIGHT=36 px）单击/双击由 LVGL CLICKED 独占处理
-        // 这里跳过避免双路径同时唤醒/打断
         if (y < 36) {
             ESP_LOGD(TAG, "状态栏点击交由 LVGL 处理，driver 路径忽略");
             return;
@@ -456,8 +386,6 @@ private:
 
     void InitializeTouch() {
         if (touch_driver_ == nullptr) return;
-
-        // v4.0 极简：回调已通过 cfg 注入，attach_lvgl 失败仅置空 handle 不再 del。
         if (axs5106l_touch_attach_lvgl(touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏 LVGL attach 失败");
             touch_driver_ = nullptr;
@@ -841,6 +769,28 @@ private:
     // 音量键：单击 ±10，长按 200ms 步进 ±5（自动重复任务）
     // ========================================================
     void InitializeButtons() {
+        // 注册前等开机长按松手：避免 iot_button 把"开机长按 2s"接力误判为"长按 3s 关机预警"。
+        // 此时 Display/Touch 已初始化完成，屏幕已亮，用户视觉无延迟感；上限 5s 防卡死。
+        // 超时后若仍按着，置 grace 标记 → 下方 OnLongPress 3s/5s 回调直接忽略一次，
+        //   首次 OnPressUp（用户终于松手）时自动清。双层保险，避免开机长按误触关机。
+        if (first_boot_ && gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+            boot_hold_grace_active_.store(true);
+            const int kReleaseWaitMaxMs = 5000;
+            const int kStepMs = 50;
+            int waited = 0;
+            while (gpio_get_level(BOOT_BUTTON_GPIO) == 0 && waited < kReleaseWaitMaxMs) {
+                vTaskDelay(pdMS_TO_TICKS(kStepMs));
+                waited += kStepMs;
+            }
+            // 用户在 5s 内松手（正常路径）→ 立即清 grace，后续长按 3s/5s 关机回归正常
+            // 5s 超时仍按着（异常路径）→ 保留 grace，等首次 OnPressUp 触发自动清
+            if (gpio_get_level(BOOT_BUTTON_GPIO) != 0) {
+                boot_hold_grace_active_.store(false);
+            }
+            ESP_LOGI(TAG, "InitializeButtons: 开机长按等松手 %d ms (grace=%d)",
+                     waited, boot_hold_grace_active_.load());
+        }
+
         boot_button_.OnClick      ([this]() { HandleBootClick(); });
         boot_button_.OnDoubleClick([this]() { HandleBootDoubleClick(); });
         boot_button_.OnMultipleClick([this]() { HandleBootMultiClick3_SwitchNetwork(); }, 3);
@@ -860,16 +810,28 @@ private:
 
         // 长按 3s 警告 + 5s 真关机；松开取消倒计时
         boot_button_.OnLongPress([this]() {
+            if (boot_hold_grace_active_.load()) {
+                ESP_LOGI(TAG, "开机长按 grace 期：忽略 3s 关机预警");
+                return;
+            }
             shutdown_armed_.store(true);
             ESP_LOGI(TAG, "长按 3 秒：关机倒计时开始");
             Application::GetInstance().Alert("长按 5 秒关机", "继续按住...", "logo", Lang::Sounds::OGG_REBOOT);
         }, 3000);
         boot_button_.OnLongPress([this]() {
+            if (boot_hold_grace_active_.load()) {
+                ESP_LOGI(TAG, "开机长按 grace 期：忽略 5s 真关机");
+                return;
+            }
             if (!shutdown_armed_.exchange(false)) return;
             ESP_LOGI(TAG, "长按 5 秒：执行关机");
             ShutdownOrSleep("关机中", "", "", 2000, false);
         }, 5000);
         boot_button_.OnPressUp([this]() {
+            // 首次 PressUp 自动清 grace（用户终于松手 → 后续按键回归正常语义）
+            if (boot_hold_grace_active_.exchange(false)) {
+                ESP_LOGI(TAG, "开机长按 grace 期已结束（用户松手）");
+            }
             if (shutdown_armed_.exchange(false)) {
                 ESP_LOGI(TAG, "关机倒计时取消");
                 Application::GetInstance().PlaySound(Lang::Sounds::OGG_POPUP);
@@ -1052,8 +1014,17 @@ private:
                 return true;
             });
 
-        // 教育卡 MCP 工具集：show_stroke 笔画 GIF（512KB 直载 + 头尾校验）+ show_card 单词/汉字/拼音三类卡
-        RegisterEducationMcpTools(mcp, dynamic_cast<UiDisplay*>(GetDisplay()));
+        // 教育卡 MCP 工具集：set_mode + show_card（本地文字/触发器，4G 也注册）
+        //                    show_stroke 笔画 GIF（512KB 云端 bcebos）—— 仅 WiFi 注册
+        // 4G 模式跳过 show_stroke 的原因：
+        //   1) 单字 GIF ≤512KB · 4G 计费流量贵
+        //   2) ML307 单 UART HTTP 透传期间 UDP 上行被阻塞 → 音频毛刺（详见 .cc 注释）
+        // 网络模式切换会触发重启 → 重启后按新模式重新走这段逻辑（GetNetworkType 构造期稳态）
+        const bool include_stroke = (GetNetworkType() == NetworkType::WIFI);
+        RegisterEducationMcpTools(mcp, dynamic_cast<UiDisplay*>(GetDisplay()), include_stroke);
+        if (!include_stroke) {
+            ESP_LOGI(TAG, "4G 模式下跳过 self.education.show_stroke（GIF 大流量 + UART 占用）");
+        }
     }
 
 public:

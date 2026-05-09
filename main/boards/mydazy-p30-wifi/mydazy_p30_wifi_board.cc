@@ -23,7 +23,6 @@
 #include "mcp_server.h"
 #include "ota.h"
 #include "education_mcp_tools.h"
-#include "edu_scene_pool.h"
 #include "assets.h"
 #include <font_awesome.h>
 #include <sys/stat.h>
@@ -301,80 +300,24 @@ private:
         }
     }
 
-    // 摇一摇识别（孩子拿起来甩 → 切话题 / 换 emoji / 抽奖等）
-    // 当前阶段：仅识别 + 打日志，确认算法稳定后再绑业务
-    // 算法：100ms 轮询，6 帧（600ms）滑动窗口；
-    //       帧偏离重力 |‖a‖-1g| > 1500mg 计强动；窗口内 ≥3 帧强动 = 摇一摇。
-    //       触发后冷却 1.5s 防连发。
-    // v4.0 重构：int16 整数模长平方比较，避免浮点 sqrtf
-    static void ShakeDetectTaskEntry(void* arg) {
-        auto* board = static_cast<MyDazyP30_WifiBoard*>(arg);
-        constexpr TickType_t kPeriodTicks   = pdMS_TO_TICKS(100);
-        constexpr int32_t    kStrongMgSq    = 1500 * 1500;
-        constexpr int32_t    kGravitySq     = 1000 * 1000;
-        constexpr int        kWindowSize    = 6;
-        constexpr int        kStrongTarget  = 3;
-        constexpr int64_t    kCooldownUs    = 1500 * 1000LL;
-
-        int32_t window_dev_sq[kWindowSize] = {0};
-        int     wi = 0;
-        int64_t last_shake_us = 0;
-
-        TickType_t last_wake = xTaskGetTickCount();
-        while (true) {
-            vTaskDelayUntil(&last_wake, kPeriodTicks);
-            if (!board->sc7a20h_initialized_ || !board->sc7a20h_sensor_) continue;
-
-            int16_t x, y, z;
-            if (sc7a20h_read_mg(board->sc7a20h_sensor_, &x, &y, &z) != ESP_OK) continue;
-
-            int32_t mag_sq = (int32_t)x * x + (int32_t)y * y + (int32_t)z * z;
-            int32_t dev    = mag_sq - kGravitySq;
-            if (dev < 0) dev = -dev;
-            window_dev_sq[wi] = dev;
-            wi = (wi + 1) % kWindowSize;
-
-            int     strong = 0;
-            int32_t peak   = 0;
-            for (int i = 0; i < kWindowSize; ++i) {
-                if (window_dev_sq[i] > kStrongMgSq) strong++;
-                if (window_dev_sq[i] > peak) peak = window_dev_sq[i];
+    // 摇一摇识别（孩子拿起来甩 → 云端决定返回什么）
+    static void OnShake(void* /*ctx*/) {
+        Application::GetInstance().Schedule([]() {
+            auto& app = Application::GetInstance();
+            auto state = app.GetDeviceState();
+            if (state != kDeviceStateIdle && state != kDeviceStateListening) {
+                ESP_LOGD(TAG, "Shake ignored: state=%d", (int)state);
+                return;
             }
-
-            int64_t now_us = esp_timer_get_time();
-            if (strong >= kStrongTarget && (now_us - last_shake_us) > kCooldownUs) {
-                ESP_LOGI(TAG, "Shake detected! peak_dev_sq=%ld, strong=%d/%d",
-                         (long)peak, strong, kWindowSize);
-                last_shake_us = now_us;
-
-                // 摇一摇 → 启蒙学习场景触发（与 P30-4G 对称）
-                // 接管状态：Idle / Listening（Speaking 不打断 TTS）
-                // 关键：Listening 中不调 StopListening — 否则 idle 中转触发 SwitchToClockMode 抖动。
-                // protocol channel 已开，SendTextToAI 直接走云端通道发文本指令，平滑过渡到 Speaking。
-                Application::GetInstance().Schedule([]() {
-                    auto& app = Application::GetInstance();
-                    auto state = app.GetDeviceState();
-                    if (state != kDeviceStateIdle && state != kDeviceStateListening) {
-                        ESP_LOGD(TAG, "Shake ignored: state=%d", (int)state);
-                        return;
-                    }
-                    app.PlaySound(Lang::Sounds::OGG_POPUP);
-                    auto pick = EduScenePool::GetInstance().GetRandomWithCount();
-                    char buf[40];
-                    snprintf(buf, sizeof(buf), "[%s %d]", pick.name, pick.count);
-                    ESP_LOGI(TAG, "Shake → 启蒙场景 %s (state=%d)", buf, (int)state);
-                    app.SendTextToAI(buf);
-                });
-            }
-        }
+            app.PlaySound(Lang::Sounds::OGG_POPUP);
+            ESP_LOGI(TAG, "Shake → 摇一摇 (state=%d)", (int)state);
+            app.SendTextToAI("摇一摇随机互动");
+        });
     }
 
     void StartShakeDetect() {
         if (!sc7a20h_initialized_) return;
-        // Core 1（PSRAM 栈红线 + Core 0 红线均不沾）+ P1 后台 + 2.5KB 内部 RAM 栈
-        // 100ms 周期，I2C 读 6B + 一次 sqrtf；CPU < 1%
-        xTaskCreatePinnedToCore(&MyDazyP30_WifiBoard::ShakeDetectTaskEntry,
-                                "accel_shake", 2560, this, 1, nullptr, 1);
+        sc7a20h_start_shake_detect(sc7a20h_sensor_, &MyDazyP30_WifiBoard::OnShake, this);
     }
 
     void PrepareTouchHardware() {
