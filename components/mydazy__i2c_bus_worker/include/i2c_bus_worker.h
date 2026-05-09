@@ -43,13 +43,20 @@ typedef struct i2c_worker_dev_t  i2c_worker_dev_t;
 typedef struct {
     i2c_master_bus_handle_t bus;            /**< 已存在的 IDF I2C bus */
     uint32_t                task_priority;  /**< 推荐 10（与 audio_output 同位） */
-    int                     task_core;      /**< 推荐 0（网络/codec 同核） */
+    int                     task_core;      /**< 推荐 1（音频/触摸/sensor 同核，远离 BLE/WiFi 争抢） */
     uint32_t                queue_depth;    /**< 默认 32，溢出 caller 阻塞 */
     uint32_t                stack_size;     /**< 默认 4096，复杂场景可调 6144 */
     uint32_t                err_streak_for_reset; /**< 连续错误触发 bus_reset，默认 3 */
 } i2c_worker_config_t;
 
 /** 默认配置宏
+ * task_core = 1（v1.2，2026-05-09）：原 0 在 BLE 启动期被 NimBLE/phy_init 饿
+ *   - Core 0 已塞满：WiFi/LWIP/NimBLE/opus_codec/audio_output/main_app/ml307_net
+ *   - I2C 主调用方在 Core 1：触摸屏(LVGL)、shake_task、codec ctrl
+ *   - 移 Core 1 = 减少跨核排队 + 避开 BLE/WiFi 启动期的 Core 0 高占
+ *   - worker prio=10 == audio_input(P10) 不抢 AFE，单 op < 5ms 不卡 LVGL
+ *   - 触发现象：日志 "submit timeout — worker may still be executing" 在 BLE 主机栈注册 GATT 时出现
+ *
  * err_streak_for_reset = 20（v1.1）：原 3 太敏感
  *   - 设备 NACK（chip 未上电完成 / 出厂空白未烧固件 / 4G RF 临时干扰）算"设备层"错误
  *   - bus_reset 只能修复"总线层"锁死（SDA 被拉低不释放），无法修复设备层
@@ -59,7 +66,7 @@ typedef struct {
 #define I2C_WORKER_DEFAULT_CONFIG(_bus) {                       \
     .bus                  = (_bus),                              \
     .task_priority        = 10,                                  \
-    .task_core            = 0,                                   \
+    .task_core            = 1,                                   \
     .queue_depth          = 32,                                  \
     .stack_size           = 4096,                                \
     .err_streak_for_reset = 20,                                  \

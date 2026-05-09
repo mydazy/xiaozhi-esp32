@@ -246,10 +246,13 @@ static esp_err_t submit_and_wait(i2c_worker_handle_t w, op_t *op, uint32_t total
     op->result_sem = sem;
     op->result_out = &op_result;
 
-    /* 拆分 timeout：等队列入队 + 等 worker 执行 */
+    /* 拆分 timeout：入队应 us 级（仅等 worker 调度抖动 / 优先级反转），
+       绝大部分预算留给 worker 执行（含 i2c_master 硬件超时）。
+       原实现 50/50 拆分在 BLE/WiFi 启动期容易 50ms 入队不够 → 误报 timeout。 */
     TickType_t tick_total = pdMS_TO_TICKS(total_timeout_ms);
-    TickType_t tick_send  = (tick_total > 1) ? (tick_total / 2) : 1;
-    TickType_t tick_wait  = tick_total - tick_send;
+    TickType_t tick_send  = pdMS_TO_TICKS(10);
+    if (tick_send > tick_total) tick_send = (tick_total > 1) ? (tick_total / 4) : 1;
+    TickType_t tick_wait  = (tick_total > tick_send) ? (tick_total - tick_send) : 1;
 
     if (xQueueSend(w->queue, op, tick_send) != pdTRUE) {
         vSemaphoreDelete(sem);
@@ -257,8 +260,15 @@ static esp_err_t submit_and_wait(i2c_worker_handle_t w, op_t *op, uint32_t total
     }
 
     if (xSemaphoreTake(sem, tick_wait) != pdTRUE) {
-        /* worker 还在执行此 op，不能立即 delete sem，否则 worker 给 sem 时 UAF */
-        ESP_LOGE(TAG, "submit timeout — worker may still be executing");
+        /* worker 还在执行此 op，不能立即 delete sem，否则 worker 给 sem 时 UAF。
+           带上诊断字段（队列深度 + 累计错误）方便量产现场追踪是 worker 被饿
+           还是 i2c_master_* 卡住硬件超时 */
+        UBaseType_t qd = uxQueueMessagesWaiting(w->queue);
+        ESP_LOGE(TAG, "submit timeout — worker may still be executing "
+                      "(queue=%u, errs=%u, total_ops=%u)",
+                 (unsigned)qd,
+                 atomic_load(&w->total_errors),
+                 atomic_load(&w->total_ops));
         /* 兜底再等 200 ms（若 worker 已开始 i2c_master_*，会在硬件超时后退出） */
         if (xSemaphoreTake(sem, pdMS_TO_TICKS(200)) != pdTRUE) {
             ESP_LOGE(TAG, "worker stuck > 200ms after queue timeout");
