@@ -75,6 +75,8 @@ public:
     virtual void SendMcpMessage(const std::string& message);
     virtual bool SendTextToTts(const std::string& text) { return false; }
     virtual bool SendTextToAI(const std::string& text) { return false; }
+    virtual bool UpdateSystemPrompt(int model_type, const std::string& prompt) { return false; }
+    virtual bool SendRemoteMusicControl(const std::string& action) { return false; }
     virtual int client_frame_duration() const { return 60; }
     bool SendRawText(const std::string& text) { return SendText(text); }
 

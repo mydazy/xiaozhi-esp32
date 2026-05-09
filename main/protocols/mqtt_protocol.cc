@@ -387,3 +387,16 @@ std::string MqttProtocol::DecodeHexString(const std::string& hex_string) {
 bool MqttProtocol::IsAudioChannelOpened() const {
     return udp_ != nullptr && !error_occurred_ && !IsTimeout();
 }
+
+bool MqttProtocol::SendTextToTts(const std::string& text) {
+    std::string json = "{\"session_id\":\"" + session_id_ +
+                       "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + text + "\"}";
+    return SendText(json);
+}
+
+bool MqttProtocol::SendTextToAI(const std::string& text) {
+    // 同 SendTextToTts，以 detect 消息触发 AI 对话（云端按文本指令处理）
+    std::string json = "{\"session_id\":\"" + session_id_ +
+                       "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + text + "\"}";
+    return SendText(json);
+}

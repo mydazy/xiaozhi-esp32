@@ -33,6 +33,9 @@ public:
     bool OpenAudioChannel() override;
     void CloseAudioChannel(bool send_goodbye = true) override;
     bool IsAudioChannelOpened() const override;
+    // 远程 tts/ttai 命令统一以 listen state=detect 文本消息发给云端（与上游 xiaozhi-189 对齐）
+    bool SendTextToTts(const std::string& text) override;
+    bool SendTextToAI(const std::string& text) override;
 
 private:
     // Alive flag for safe scheduled callbacks - set to false in destructor

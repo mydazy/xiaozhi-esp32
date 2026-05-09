@@ -51,6 +51,8 @@ public:
     void SendMcpMessage(const std::string& payload) override;
     bool SendTextToTts(const std::string& text) override;
     bool SendTextToAI(const std::string& text) override;
+    bool UpdateSystemPrompt(int model_type, const std::string& prompt) override;
+    bool SendRemoteMusicControl(const std::string& action) override;
 
     // 百度特有方法
     void SendInterrupt();
@@ -143,6 +145,9 @@ private:
     void HandleFunctionCall(const std::string& data);
     void HandleLicenseEvent(const std::string& event);
     void HandleCustomData(const std::string& data);
+    // 云端 → 设备 远程音乐控制（[E]:[CMD]:[REMOTE_PLAYER]:[STOP/PAUSE/RESUME]）
+    //   云端识别用户"暂停/继续/停止"语音 → 推命令到设备 → 同步联动本地 MusicPlayer
+    void HandleRemoteMusicCommand(const char* action);
 
     // 内部方法
     bool SendText(const std::string& text) override;

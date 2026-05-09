@@ -1,5 +1,7 @@
 #include "websocket_baidu_protocol.h"
 #include "board.h"
+#include "display.h"
+#include "audio/music_player.h"
 #include "system_info.h"
 #include "application.h"
 #include "settings.h"
@@ -57,6 +59,10 @@
 #define CMD_ASR_MANUAL          "[E]:[CMD]:[ASR_DISABLE_REALTIME]"
 #define CMD_ASR_START           "[E]:[CMD]:[ASR_START_LONGTEXT_REC]"
 #define CMD_ASR_STOP            "[E]:[CMD]:[ASR_STOP_LONGTEXT_REC]"
+
+// System prompt 动态切换（教育卡 P0）
+#define CMD_UPDATE_PROMPT       "[SET]:[UPDATE_SYSTEM_PROMPT]:"
+#define EVENT_PROMPT_UPDATED    "[E]:[SYSTEM_PROMPT_UPDATED]:"
 
 // 设备配置
 #define CMD_DEVICE_INFO         "[SET]:[DEVICE_INFO]:"
@@ -954,6 +960,28 @@ void WebsocketBaiduProtocol::HandleEvent(const std::string& event) {
         media_ready_ = true;
         xEventGroupSetBits(event_group_handle_, BAIDU_PROTOCOL_MEDIA_READY_EVENT);
     }
+    // 云端 → 设备 远程音乐控制（用户语音"暂停/继续/停止" → 云端 → 设备本地 MusicPlayer 同步）
+    // 顺序敏感：先匹配最长前缀再匹配短前缀，否则 STOP 会被 PAUSE/RESUME 的更短匹配吃掉
+    else if (event.find("[CMD]:[REMOTE_PLAYER]:[PAUSE]") != std::string::npos) {
+        HandleRemoteMusicCommand("pause");
+    }
+    else if (event.find("[CMD]:[REMOTE_PLAYER]:[RESUME]") != std::string::npos) {
+        HandleRemoteMusicCommand("resume");
+    }
+    else if (event.find("[CMD]:[REMOTE_PLAYER]:[STOP]") != std::string::npos) {
+        HandleRemoteMusicCommand("stop");
+    }
+    // 教育卡：system prompt 切档结果回执（带 model_type/result，简化为日志 + 轻提示）
+    else if (event.find("[SYSTEM_PROMPT_UPDATED]") != std::string::npos) {
+        ESP_LOGI(TAG, "<< SYSTEM_PROMPT_UPDATED");
+        auto guard = prevent_destroy_guard_;
+        Application::GetInstance().Schedule([guard]() {
+            if (!guard->load()) return;
+            if (auto* d = Board::GetInstance().GetDisplay()) {
+                d->ShowNotification("已切换教学模式", 1500);
+            }
+        });
+    }
     else {
         ESP_LOGD(TAG, "<< [E] %s", event.c_str());
     }
@@ -1191,6 +1219,75 @@ bool WebsocketBaiduProtocol::SendTextToAI(const std::string& text) {
 
 bool WebsocketBaiduProtocol::SendTextToTts(const std::string& text) {
     return SendText(std::string(INPUT_TEXT_TO_TTS) + text);
+}
+
+// 教育卡 P0：动态切换 system prompt（参考 BRTC SDK update_vision_prompt 协议）
+//   model_type=0 聊天 / 2 视觉理解；prompt 空串=云端清空恢复默认
+//   服务端会回执 [E]:[SYSTEM_PROMPT_UPDATED]:{...}（HandleEvent 处理）
+bool WebsocketBaiduProtocol::UpdateSystemPrompt(int model_type, const std::string& prompt) {
+    if (!websocket_ || !websocket_->IsConnected()) {
+        ESP_LOGW(TAG, "UpdateSystemPrompt: ws not connected");
+        return false;
+    }
+
+    cJSON* json = cJSON_CreateObject();
+    char model_type_buf[8];
+    snprintf(model_type_buf, sizeof(model_type_buf), "%d", model_type);
+    cJSON_AddStringToObject(json, "model_type", model_type_buf);
+    cJSON_AddStringToObject(json, "prompt", prompt.c_str());
+
+    char* str = cJSON_PrintUnformatted(json);
+    bool ok = SendText(std::string(CMD_UPDATE_PROMPT) + (str ? str : ""));
+    if (str) cJSON_free(str);
+    cJSON_Delete(json);
+
+    ESP_LOGI(TAG, ">> UPDATE_PROMPT type=%d len=%u %s",
+             model_type, (unsigned)prompt.size(), ok ? "ok" : "fail");
+    return ok;
+}
+
+// 本地 → 云端 远程音乐控制（CMD_MUSIC_STOP/PAUSE/RESUME）
+//   action: "stop" / "pause" / "resume"
+bool WebsocketBaiduProtocol::SendRemoteMusicControl(const std::string& action) {
+    if (!websocket_ || !websocket_->IsConnected()) return false;
+    if (action == "stop")   return SendText(CMD_MUSIC_STOP);
+    if (action == "pause")  return SendText(CMD_MUSIC_PAUSE);
+    if (action == "resume") return SendText(CMD_MUSIC_RESUME);
+    ESP_LOGW(TAG, "SendRemoteMusicControl: unknown action='%s'", action.c_str());
+    return false;
+}
+
+// 云端 → 设备 远程音乐控制（HandleEvent 中 CMD:REMOTE_PLAYER:xxx 调用）
+// 顶级原则：协议层只负责"翻译事件"，业务态决策放主线程：
+//   1. 同步本地状态 is_playing_music_（影响 SendStartListening 等分支）
+//   2. Schedule 到主线程操作 MusicPlayer（与 LVGL/AFE 同核，避免跨线程竞争）
+void WebsocketBaiduProtocol::HandleRemoteMusicCommand(const char* action) {
+    if (!action) return;
+    ESP_LOGI(TAG, "<< REMOTE_PLAYER:%s", action);
+
+    std::string a = action;
+    auto guard = prevent_destroy_guard_;
+    Application::GetInstance().Schedule([a = std::move(a), guard]() {
+        if (!guard->load()) return;
+        auto& mp = MusicPlayer::GetInstance();
+        if (a == "stop") {
+            if (mp.IsPlaying()) mp.Stop();
+            // 解码队列同步清空，防止云端流残留
+            Application::GetInstance().GetAudioService().ResetDecoder();
+        } else if (a == "pause") {
+            if (mp.IsPlaying() && !mp.IsPaused()) mp.Pause();
+        } else if (a == "resume") {
+            if (mp.IsPaused()) mp.Resume();
+        }
+    });
+
+    // 同步协议侧"音乐播放中"标志（SendStartListening 等分支用）
+    if (std::strcmp(action, "stop") == 0) {
+        is_playing_music_ = false;
+        is_speaking_ = false;
+    } else if (std::strcmp(action, "pause") == 0) {
+        // pause 期间云端不再下发音频，但会话仍存在，保持 is_playing_music_ 为 true 以触发 RESUME 时的逻辑
+    }
 }
 
 void WebsocketBaiduProtocol::SendInterrupt() {
