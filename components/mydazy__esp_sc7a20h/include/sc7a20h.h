@@ -6,10 +6,11 @@
  *
  * 设计哲学：判断越少问题越少，保留高频刚需，删除运行时切换。
  *
- * 仅 3 个 API 覆盖项目所有用例：
- *   1) sc7a20h_init        — 一行初始化（拿起阈值/时长 + worker 注入）
- *   2) sc7a20h_read_mg     — 读三轴加速度（mg），摇一摇/晃停共用
- *   3) sc7a20h_arm_wakeup  — 进深睡前一调（清 latch + 注册 EXT1）
+ * 仅 4 个 API 覆盖项目所有用例：
+ *   1) sc7a20h_init                 — 一行初始化（拿起阈值/时长 + worker 注入）
+ *   2) sc7a20h_read_mg              — 读三轴加速度（mg），原始数据出口
+ *   3) sc7a20h_arm_wakeup           — 进深睡前一调（清 latch + 注册 EXT1）
+ *   4) sc7a20h_start_shake_detect   — 后台任务做摇一摇识别，回调通知
  *
  * 项目级硬编码（编译期常量化，零运行时分支）：
  *   - I2C 地址  : 0x19
@@ -21,8 +22,8 @@
  *
  * 与项目高频场景的对应：
  *   - 拿起唤醒：sc7a20h_init() + sc7a20h_arm_wakeup() 配对，深睡 → INT1 LOW → wake
- *   - 摇一摇识别：100 ms 周期 sc7a20h_read_mg() + 模长平方比较
- *   - 闹钟摇停：与摇一摇共用 read_mg
+ *   - 摇一摇识别：sc7a20h_start_shake_detect() 后台任务，回调出事件
+ *   - 闹钟摇停：sc7a20h_read_mg() 自取数据自定义判定
  *
  * 工程细节：
  *   - 所有 I2C 走 i2c_bus_worker（防 4G RF 共线污染）
@@ -77,6 +78,33 @@ esp_err_t sc7a20h_read_mg(sc7a20h_handle_t h, int16_t *x, int16_t *y, int16_t *z
  *   esp_deep_sleep_start();   // 由调用方触发
  */
 esp_err_t sc7a20h_arm_wakeup(sc7a20h_handle_t h, gpio_num_t int1_gpio);
+
+/**
+ * 摇一摇事件回调（非 ISR，在驱动后台任务上下文里直接调用）
+ * 上层一般 Schedule 到主线程做业务（Alert/PlaySound/SendTextToAI）。
+ */
+typedef void (*sc7a20h_shake_cb_t)(void *user_ctx);
+
+/**
+ * 启动摇一摇后台检测任务
+ *
+ * 算法（项目硬编码 · 量产实测调优）：
+ *   - 100 ms 周期采样三轴
+ *   - 偏离 1g 重力 ≥1500 mg 视为强动帧
+ *   - 600 ms 滑动窗口内 ≥3 帧强动 = 触发
+ *   - 触发后 1500 ms 冷却防连发
+ *
+ * 任务参数：栈 2560 / 优先级 1 / Core 1（与 LVGL 共核但低优先级，CPU < 1%）
+ *
+ * @param cb        触发回调（不可为 NULL）
+ * @param user_ctx  透传给 cb 的上下文
+ *
+ * @return ESP_OK / ESP_ERR_INVALID_ARG / ESP_ERR_INVALID_STATE（重复启动）
+ *         / ESP_ERR_NO_MEM（任务创建失败）
+ */
+esp_err_t sc7a20h_start_shake_detect(sc7a20h_handle_t h,
+                                     sc7a20h_shake_cb_t cb,
+                                     void *user_ctx);
 
 #ifdef __cplusplus
 }

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <esp_log.h>
 #include <esp_sleep.h>
+#include <esp_timer.h>
 #include <driver/rtc_io.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -41,10 +42,21 @@ static const char *TAG = "sc7a20h";
 #define REG_INT1_THS       0x32
 #define REG_INT1_DURATION  0x33
 
+/* ============== 摇一摇检测参数（量产实测调优·硬编码） ============== */
+#define SHAKE_PERIOD_MS    100
+#define SHAKE_THRESH_MG_SQ (1500 * 1500)   /* 偏离 1g 阈值的平方 */
+#define SHAKE_GRAVITY_SQ   (1000 * 1000)   /* (1g)² */
+#define SHAKE_WINDOW       6               /* 600ms 滑动窗口 */
+#define SHAKE_TARGET       3               /* 窗口内 ≥3 帧强动 = 摇 */
+#define SHAKE_COOLDOWN_US  (1500 * 1000LL) /* 触发后冷却防连发 */
+
 /* ============== Driver state ============== */
 struct sc7a20h_dev_t {
     i2c_worker_handle_t   worker;
     i2c_worker_dev_t     *dev;
+    TaskHandle_t          shake_task;
+    sc7a20h_shake_cb_t    shake_cb;
+    void                 *shake_ctx;
 };
 
 /* ============== Low-level helpers (worker-routed) ============== */
@@ -148,5 +160,63 @@ esp_err_t sc7a20h_arm_wakeup(sc7a20h_handle_t h, gpio_num_t int1_gpio)
     rtc_gpio_pulldown_dis(int1_gpio);
 
     ESP_LOGI(TAG, "wakeup armed on GPIO%d", int1_gpio);
+    return ESP_OK;
+}
+
+/* ============== 摇一摇后台检测任务 ============== */
+static void shake_task_entry(void *arg)
+{
+    struct sc7a20h_dev_t *d = (struct sc7a20h_dev_t *)arg;
+    int32_t window[SHAKE_WINDOW] = {0};
+    int     wi = 0;
+    int64_t last_shake_us = 0;
+
+    TickType_t last_wake = xTaskGetTickCount();
+    const TickType_t period = pdMS_TO_TICKS(SHAKE_PERIOD_MS);
+
+    for (;;) {
+        vTaskDelayUntil(&last_wake, period);
+
+        int16_t x, y, z;
+        if (sc7a20h_read_mg(d, &x, &y, &z) != ESP_OK) continue;
+
+        /* 模长平方 - 重力平方（无 sqrt） */
+        int32_t mag_sq = (int32_t)x * x + (int32_t)y * y + (int32_t)z * z;
+        int32_t dev    = mag_sq - SHAKE_GRAVITY_SQ;
+        if (dev < 0) dev = -dev;
+        window[wi] = dev;
+        wi = (wi + 1) % SHAKE_WINDOW;
+
+        int strong = 0;
+        for (int i = 0; i < SHAKE_WINDOW; ++i) {
+            if (window[i] > SHAKE_THRESH_MG_SQ) strong++;
+        }
+
+        int64_t now_us = esp_timer_get_time();
+        if (strong >= SHAKE_TARGET && (now_us - last_shake_us) > SHAKE_COOLDOWN_US) {
+            last_shake_us = now_us;
+            ESP_LOGI(TAG, "shake detected (strong=%d/%d)", strong, SHAKE_WINDOW);
+            if (d->shake_cb) d->shake_cb(d->shake_ctx);
+        }
+    }
+}
+
+esp_err_t sc7a20h_start_shake_detect(sc7a20h_handle_t h,
+                                     sc7a20h_shake_cb_t cb,
+                                     void *user_ctx)
+{
+    if (!h || !cb) return ESP_ERR_INVALID_ARG;
+    if (h->shake_task) return ESP_ERR_INVALID_STATE;
+
+    h->shake_cb  = cb;
+    h->shake_ctx = user_ctx;
+
+    /* Core 1 与 LVGL 共核但低优先级；栈 2560 实测水位线 ~1KB */
+    BaseType_t r = xTaskCreatePinnedToCore(
+        shake_task_entry, "sc7a20_shake", 2560, h, 1, &h->shake_task, 1);
+    if (r != pdPASS) {
+        h->shake_task = NULL;
+        return ESP_ERR_NO_MEM;
+    }
     return ESP_OK;
 }
