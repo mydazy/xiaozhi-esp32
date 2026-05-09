@@ -45,13 +45,32 @@ LV_IMG_DECLARE(ui_img_start_logo_png);
 // ============================================================
 namespace {
 
-// 含 UTF-8 多字节字符即视为拼音（含声调 ā ē ǐ ò 等）
-// 纯 ASCII 视为英文。判定 left 段：top 字符串一进来就用。
-inline bool IsPinyin(const char* text) {
+// 判定文本是否含 CJK 汉字（U+4E00-U+9FFF）
+// 用于 ShowEduCard 内 mode 判定：main 含 CJK → PY-mode（汉字主秀），否则 EN-mode（英文主秀）
+//
+// ⚠ 早期版本错误地用 IsPinyin(top) 检测多字节 UTF-8 字符，但 Phonics 中点 `·`（U+00B7）
+// 也是多字节，会让 [basketball_篮球_bas·ket·ball] 这类合法三段式被误判为 PY-mode →
+// "basketball" 10 字符触发 PY-mode 的"≤ 4 汉字"阈值跳过激活。
+// 正确做法：判 main 是否含 CJK（基本汉字范围 0x4E00-0x9FFF）。
+inline bool ContainsCjk(const char* text) {
     if (!text) return false;
     while (*text) {
-        if ((unsigned char)*text >= 0x80) return true;
-        text++;
+        unsigned char b0 = (unsigned char)*text;
+        if ((b0 & 0xF0) == 0xE0) {
+            // 3 字节 UTF-8（U+0800-U+FFFF，CJK 在此范围内）
+            unsigned char b1 = (unsigned char)text[1];
+            unsigned char b2 = (unsigned char)text[2];
+            if (b1 == 0 || b2 == 0) break;
+            uint32_t cp = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
+            if (cp >= 0x4E00 && cp <= 0x9FFF) return true;
+            text += 3;
+        } else if ((b0 & 0xE0) == 0xC0) {
+            text += 2;     // 2 字节 UTF-8（拉丁补充 / 拼音声调 / Phonics 中点 U+00B7 等，不算 CJK）
+        } else if ((b0 & 0xF8) == 0xF0) {
+            text += 4;     // 4 字节（极少见）
+        } else {
+            text++;        // 1 字节 ASCII
+        }
     }
     return false;
 }
@@ -289,7 +308,8 @@ void UiDisplay::EnsureDisplayFonts() {
     load("font_maru_88_4.bin", clock_big_font_);
     load("font_maru_30_4.bin", clock_text_font_);
     load("font_maru_48_4.bin", edu_main_font_);
-    load("font_maru_56_1.bin", edu_main_56_font_);
+    // v8.1: 1bpp → 4bpp，16 灰度抗锯齿，圆角字大字渲染锯齿消失（~2.2 MB · ≤8M Flash）
+    load("font_maru_56_4.bin", edu_main_56_font_);
 
     if (edu_main_font_ && clock_text_font_) {
         const_cast<lv_font_t*>(edu_main_font_)->fallback = clock_text_font_;
@@ -1116,6 +1136,12 @@ void UiDisplay::BuildEduCard(const EduRow& top, const EduRow& main_row, const Ed
 
     lv_obj_remove_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(edu_card_overlay_);
+
+    // ⭐ 教育卡 overlay 盖住整屏，但底部提示字 bottom_bar_（如"长按说话"）必须保留可见
+    // 把 bottom_bar 重新提到最前，叠在 overlay 之上
+    // status_bar 同理（教育卡场景仍要让用户看到对话状态/网络通知）
+    if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
+    if (status_bar_) lv_obj_move_foreground(status_bar_);
 }
 
 // v8 启蒙定版：
@@ -1128,6 +1154,13 @@ void UiDisplay::ShowEduCard(const char* category, const char* main_text,
     if (!main_text || !main_text[0]) return;
     if (!category) category = "word";
 
+    // ⭐ font 模式（GIF 笔画动画）期间不抢屏 — 让 GIF 完整播放
+    // 教育卡触发延迟到下轮对话（GIF 退出后 current_is_font_=false，自然恢复）
+    if (current_is_font_) {
+        ESP_LOGI(TAG, "EduCard deferred: font GIF active, text=%s", main_text);
+        return;
+    }
+
     EnsureDisplayFonts();
     // 主秀 56 缺失退化到 48（v1 兼容路径），48 也缺失才彻底跳过
     if (!edu_main_font_ || !clock_text_font_) {
@@ -1136,10 +1169,13 @@ void UiDisplay::ShowEduCard(const char* category, const char* main_text,
         return;
     }
 
-    ResetFontMode();   // 防 GIF 笔画残留
+    // 保留 ResetFontMode 在 current_is_font_=false 时的副作用（清残留 emoji_image），
+    // 不会重新进入 font GIF 路径（已被上方 return 拦截）。
+    ResetFontMode();
 
-    // 模式判定：top 含 UTF-8 多字节字符（声调）→ PY-mode；否则 EN-mode
-    bool is_py_mode = IsPinyin(top);
+    // 模式判定：main 含 CJK 汉字 → PY-mode（汉字主秀）；否则 EN-mode（英文/算式/拼音主秀）
+    // 注意：判 main 而不是 top — 三段 [basketball_篮球_bas·ket·ball] 中 top 含 `·` 多字节但 main 是英文
+    bool is_py_mode = ContainsCjk(main_text);
 
     // 主秀字号选档 + 激活校验
     // 优先用 56；缺失时退化到 48（开发期/字体未刷入）
@@ -1170,10 +1206,12 @@ void UiDisplay::ShowEduCard(const char* category, const char* main_text,
     constexpr uint32_t kMainColor = 0xFFCA28;   // 主秀亮金
     constexpr uint32_t kHintColor = 0xA5D6A7;   // 顶部 / 副位薄荷绿
 
-    // 三行 EduRow（height 字段仅供旧 BuildEduCard 兼容用，新版按 mode 判定锚点）
-    EduRow t{top,       clock_text_font_, kHintColor, 2, 30};
-    EduRow m{main_text, main_font,        kMainColor, main_ls, main_h};
-    EduRow b{bottom,    clock_text_font_, kHintColor, 3, 20};
+    // 三行 EduRow · v8 spec：顶 30 / 主 56(48/88) / 副 20
+    //   ⚠ 副位必须用 g_text_font（20 px BUILTIN_TEXT_FONT），不能用 clock_text_font_(30 px)
+    //   旧 bug：用 30 px 渲染副位 → 实际显示比 spec 大 50%
+    EduRow t{top,       clock_text_font_, kHintColor, 2, 30};   // 顶部 30 px 拼音/类别
+    EduRow m{main_text, main_font,        kMainColor, main_ls, main_h};  // 主秀 56/48/88 px
+    EduRow b{bottom,    &g_text_font,     kHintColor, 3, 20};   // 副位 20 px 中文翻译
 
     BuildEduCard(t, m, b);
     ESP_LOGI(TAG, "EduCard v8[%s] mode=%s main=%s(%d) top=%s bottom=%s",
