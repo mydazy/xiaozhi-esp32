@@ -112,9 +112,10 @@ private:
     lv_obj_t* clock_time_label_ = nullptr;
     lv_obj_t* clock_date_label_ = nullptr;
     lv_obj_t* clock_week_label_ = nullptr;
-    const lv_font_t* clock_big_font_  = nullptr;   // 88px cbin（assets 就绪后加载）
-    const lv_font_t* clock_text_font_ = nullptr;   // 30px cbin（同时是教育卡副字 + hanzi main 字体）
-    const lv_font_t* edu_main_font_   = nullptr;   // 48px cbin（教育卡 word/pinyin main 大字，不含 CJK）
+    const lv_font_t* clock_big_font_  = nullptr;   // 88px cbin · 时钟数字 0-9 + : · v8 同时承载主动学习超大主秀 (英文+大小写+加减乘除·~89 KB)
+    const lv_font_t* clock_text_font_ = nullptr;   // 30px cbin · 主屏日期/星期 + 教育卡顶部拼音/Phonics + IPA (~79 KB)
+    const lv_font_t* edu_main_font_   = nullptr;   // 48px cbin · v8 EN 兜底 11-12 字符英文（仅 ASCII+拼音+Phonics·77 KB·v3 已砍中文）
+    const lv_font_t* edu_main_56_font_ = nullptr;  // 56px cbin · v8 主秀 Bold · GB 2312 一级 3755 字 + ASCII + 拼音 + Phonics · 1bpp 压缩 (~1.3 MB)
 
     // 通用二维码 overlay（配网 / 绑定 / 付费等场景共享，同时只有一个）
     lv_obj_t* qr_overlay_ = nullptr;
@@ -150,7 +151,8 @@ private:
     };
     void BuildEduCard(const EduRow& top, const EduRow& main_row, const EduRow& bottom);
     void EnsureEduCardOverlay();                                        // 懒创建 overlay + 3 label 槽
-    void UpdateEduRow(lv_obj_t* lbl, const EduRow& row, int y);         // 更新单个 label 槽（空文本则隐藏）
+    void UpdateEduRow(lv_obj_t* lbl, const EduRow& row, int y);         // 更新单个 label 槽（LV_ALIGN_TOP_MID）
+    void UpdateEduRowAtBottom(lv_obj_t* lbl, const EduRow& row, int dist_from_bottom);  // 副位定位（LV_ALIGN_BOTTOM_MID）
 
     // 整页双击 callback（仅显示左右色条时有效，用于切换模式）
     // 必须保活直到 HideQrCode，否则 lambda 析构后 click 事件触发 UAF

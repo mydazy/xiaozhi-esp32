@@ -41,6 +41,77 @@ LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_IMG_DECLARE(ui_img_start_logo_png);
 
 // ============================================================
+// 教育卡 v8 启蒙规则 helper（详见 docs/education-card-layout.html）
+// ============================================================
+namespace {
+
+// 含 UTF-8 多字节字符即视为拼音（含声调 ā ē ǐ ò 等）
+// 纯 ASCII 视为英文。判定 left 段：top 字符串一进来就用。
+inline bool IsPinyin(const char* text) {
+    if (!text) return false;
+    while (*text) {
+        if ((unsigned char)*text >= 0x80) return true;
+        text++;
+    }
+    return false;
+}
+
+// UTF-8 字符数（不是 byte 数）—— "猫" 是 1 字（不是 3 byte）
+inline int Utf8CharCount(const char* text) {
+    if (!text) return 0;
+    int count = 0;
+    while (*text) {
+        if ((*text & 0xC0) != 0x80) count++;
+        text++;
+    }
+    return count;
+}
+
+// 主秀字号选档 + 激活校验（v8 启蒙规则）
+//   PY-mode (汉字主秀): ≤ 4 字 → 56；> 4 字 → 跳过
+//   EN-mode (英文主秀): ≤ 10 字符走 56，11-12 字符走 48 兜底，> 12 跳过
+//   返回 nullptr 表示跳过激活，调用方应保持当前画面
+// 主秀字号选档 + 激活校验（v8 启蒙规则）
+//   PY-mode (汉字主秀): ≤ 4 字 → 56；> 4 字 → 跳过（88 暂无 CJK 字符集）
+//   EN-mode 默认 (被动触发): ≤ 10 字符 → 56；11-12 → 48 兜底；> 12 跳过
+//   ⭐ EN-mode super (主动学习 letter/phonics/math): ≤ 5 字符优先 88，否则降级链
+inline const lv_font_t* PickEduMainFont(const char* main_text, bool is_py_mode,
+                                         bool prefer_super,
+                                         const lv_font_t* font_88,
+                                         const lv_font_t* font_56,
+                                         const lv_font_t* font_48) {
+    if (!main_text || !main_text[0] || !font_56) return nullptr;
+    int n = Utf8CharCount(main_text);
+    if (n < 1) return nullptr;
+
+    if (is_py_mode) {
+        // 汉字组词：数据约定 ≤ 4 字
+        if (n > 4) return nullptr;
+        return font_56;
+    }
+
+    lv_point_t sz;
+
+    // ⭐ EN-mode super：主动学习 ≤ 5 字符优先 88（实测 280 兜底防 m/w 宽字符溢出）
+    if (prefer_super && n <= 5 && font_88) {
+        lv_text_get_size(&sz, main_text, font_88, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_EXPAND);
+        if (sz.x <= 280) return font_88;
+    }
+
+    // EN-mode 标准链：56 → 48 兜底 → 跳过
+    if (n > 12) return nullptr;
+    lv_text_get_size(&sz, main_text, font_56, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_EXPAND);
+    if (sz.x <= 280) return font_56;
+
+    if (!font_48) return nullptr;
+    lv_text_get_size(&sz, main_text, font_48, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_EXPAND);
+    if (sz.x <= 280) return font_48;
+    return nullptr;
+}
+
+}  // anonymous namespace
+
+// ============================================================
 // 构造 / 析构
 // ============================================================
 
@@ -218,10 +289,13 @@ void UiDisplay::EnsureDisplayFonts() {
     load("font_maru_88_4.bin", clock_big_font_);
     load("font_maru_30_4.bin", clock_text_font_);
     load("font_maru_48_4.bin", edu_main_font_);
-
+    load("font_maru_56_1.bin", edu_main_56_font_);
 
     if (edu_main_font_ && clock_text_font_) {
         const_cast<lv_font_t*>(edu_main_font_)->fallback = clock_text_font_;
+    }
+    if (edu_main_56_font_ && clock_text_font_) {
+        const_cast<lv_font_t*>(edu_main_56_font_)->fallback = clock_text_font_;
     }
 
     if (clock_big_font_  && clock_time_label_) lv_obj_set_style_text_font(clock_time_label_, clock_big_font_, 0);
@@ -415,10 +489,13 @@ void UiDisplay::UpdateFontGif(uint8_t* gif_buffer, size_t size) {
         heap_caps_free(gif_buffer);
         return;
     }
-    // 所有权转移给 LvglRawImage（其析构会 free buffer 含 GIF 解码资源）
+
     DisplayLockGuard lock(this);
+    current_is_font_ = false;  // 绕过 SetEmotion 守护，强制走 LcdDisplay::SetEmotion("font") 重启动画
     emoji_collection->ReplaceEmoji("font", new LvglRawImage(gif_buffer, size));
-    ESP_LOGI(TAG, "Font GIF replaced with PSRAM buffer (%u bytes)", (unsigned)size);
+    ESP_LOGI(TAG, "Font GIF replaced with PSRAM buffer (%u bytes), reloading animation",
+             (unsigned)size);
+    SetEmotion("font");
 }
 
 // ============================================================
@@ -962,7 +1039,7 @@ void UiDisplay::EnsureEduCardOverlay() {
     edu_bottom_label_ = make_label();
 }
 
-// 在已有 label 槽上更新内容（无则隐藏该槽）
+// 在已有 label 槽上更新内容（无则隐藏该槽）· LV_ALIGN_TOP_MID
 void UiDisplay::UpdateEduRow(lv_obj_t* lbl, const EduRow& row, int y) {
     if (!lbl) return;
     if (!row.text || !row.text[0]) {
@@ -977,6 +1054,25 @@ void UiDisplay::UpdateEduRow(lv_obj_t* lbl, const EduRow& row, int y) {
     lv_obj_remove_flag(lbl, LV_OBJ_FLAG_HIDDEN);
 }
 
+// 副位定位：LV_ALIGN_BOTTOM_MID + 距底距离（v8: EN 副行 bottom: 64）
+void UiDisplay::UpdateEduRowAtBottom(lv_obj_t* lbl, const EduRow& row, int dist_from_bottom) {
+    if (!lbl) return;
+    if (!row.text || !row.text[0]) {
+        lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_label_set_text(lbl, row.text);
+    lv_obj_set_style_text_font(lbl, row.font, 0);
+    lv_obj_set_style_text_color(lbl, lv_color_hex(row.color), 0);
+    lv_obj_set_style_text_letter_space(lbl, row.letter_space, 0);
+    lv_obj_align(lbl, LV_ALIGN_BOTTOM_MID, 0, -dist_from_bottom);
+    lv_obj_remove_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+}
+
+// v8 锚点（240 px 屏高 · 主副间距 20 px · 副位距底 64）：
+//   PY-mode (has_top, no bottom):    顶 50 / 主 100      [汉字组词 + 拼音顶]
+//   EN-mode (no top,   has bottom):  主 80 / 副 bottom:64 [英文 + 中文翻译]
+//   EN+Phonics (has_top, has bottom): 顶 28 / 主 80 / 副 bottom:64
 void UiDisplay::BuildEduCard(const EduRow& top, const EduRow& main_row, const EduRow& bottom) {
     DisplayLockGuard lock(this);
     HideQrCode();      // 与 QR overlay 互斥（同时只有一个 overlay）
@@ -984,67 +1080,104 @@ void UiDisplay::BuildEduCard(const EduRow& top, const EduRow& main_row, const Ed
     EnsureEduCardOverlay();
     if (!edu_card_overlay_) return;
 
-    // 教育卡布局（284×240 屏 · main 底部锚定屏幕中线 y=120）：
-    //   [top 30px]      ← MCP 拼读/拼音（空则隐藏该槽）
-    //   ↕ 12px (kTopGap)
-    //   main 48px (字符底部 = y=120)
-    //   ↕ 10px (kBottomGap)
-    //   bottom 30px (释义/组词)
-    constexpr int kTopGap    = 12;
-    constexpr int kBottomGap = 10;
+    bool has_bottom = bottom.text && bottom.text[0];
 
-    int main_top = LV_VER_RES / 2 - main_row.height;
-    if (main_top < 0) main_top = 0;
+    // 88 主秀（主动学习超大档）需要让出更多空间
+    bool is_super = (main_row.height >= 88);
 
-    int top_y = main_top - kTopGap - top.height;
-    if (top_y < 0) top_y = 0;
-    UpdateEduRow(edu_top_label_,    top,      top_y);
-    UpdateEduRow(edu_main_label_,   main_row, main_top);
-    UpdateEduRow(edu_bottom_label_, bottom,   main_top + main_row.height + kBottomGap);
+    int top_y, main_top;
+    if (is_super) {
+        // 88 主秀场景（letter/phonics/math 主动学习）
+        // 88 占屏 240*0.37=88px，居中布局：顶 28 / 主 80 (距顶 22) / 副 bottom:36
+        top_y    = 28;
+        main_top = 80;
+    } else if (has_bottom) {
+        // EN-mode 标准：主行 80 / 副 bottom:64，含 Phonics 顶部 28
+        top_y    = 28;
+        main_top = 80;
+    } else {
+        // PY-mode：顶部 50 / 主行 100，间距 20 px
+        top_y    = 50;
+        main_top = 100;
+    }
+
+    UpdateEduRow(edu_top_label_,  top,      top_y);
+    UpdateEduRow(edu_main_label_, main_row, main_top);
+
+    if (has_bottom) {
+        // 副位距底距离按主秀字号自适应：
+        //   88 主秀: 主底 168 → 副底 36（副顶 184，间距 16）
+        //   56 主秀: 主底 136 → 副底 64（副顶 156，间距 20）
+        int bottom_dist = is_super ? 36 : 64;
+        UpdateEduRowAtBottom(edu_bottom_label_, bottom, bottom_dist);
+    } else {
+        lv_obj_add_flag(edu_bottom_label_, LV_OBJ_FLAG_HIDDEN);
+    }
 
     lv_obj_remove_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(edu_card_overlay_);
 }
 
+// v8 启蒙定版：
+//   主秀 56 px Bold #FFCA28（金）· 顶部 30 px #A5D6A7（薄荷绿）· 副位 20 px #A5D6A7
+//   PY-mode（top=拼音）: 顶 50 / 主 100 · 数据约定 ≤ 4 字汉字
+//   EN-mode（top=Phonics 或空 + bottom=汉字翻译）: 顶 28 / 主 80 / 副 bottom:64
+//   激活校验：超 4 字汉字 / > 12 字符英文 / 56 实测装不下 → 跳过激活，保持当前画面
 void UiDisplay::ShowEduCard(const char* category, const char* main_text,
                              const char* top, const char* bottom) {
     if (!main_text || !main_text[0]) return;
     if (!category) category = "word";
 
     EnsureDisplayFonts();
-    // 防 crash：top 行永远用 clock_text_font_，main 行可能兜底到 clock_text_font_
-    // 任一缺失则跳过整张卡（assets 损坏的极端场景，量产保护）
+    // 主秀 56 缺失退化到 48（v1 兼容路径），48 也缺失才彻底跳过
     if (!edu_main_font_ || !clock_text_font_) {
-        ESP_LOGW(TAG, "EduCard skipped: fonts not loaded (edu=%p text=%p)",
+        ESP_LOGW(TAG, "EduCard skipped: base fonts not loaded (edu48=%p top30=%p)",
                  edu_main_font_, clock_text_font_);
         return;
     }
 
-    // 清场：当前若在 font 模式（GIF 笔画动画），切 neutral 防 GIF 残留
-    ResetFontMode();
+    ResetFontMode();   // 防 GIF 笔画残留
 
-    // main 颜色统一金黄 0xFFD54F（三种 category 不再单独区分配色）
-    constexpr uint32_t main_color = 0xFFD54F;
+    // 模式判定：top 含 UTF-8 多字节字符（声调）→ PY-mode；否则 EN-mode
+    bool is_py_mode = IsPinyin(top);
 
-    // 主体字号：默认 48px；以下两种情况降级 30px：
-    //   ① 长度 > 9 字节（长英文如 pronunciation）
-    //   ② 含空格（拼音组词如 "xiao niǎo" / "ban-an-a 拼读"）
-    const lv_font_t* main_font = edu_main_font_;
-    int main_h = 48;
-    if (strlen(main_text) > 9 || strchr(main_text, ' ') != nullptr) {
-        main_font = clock_text_font_;
-        main_h = 30;
+    // 主秀字号选档 + 激活校验
+    // 优先用 56；缺失时退化到 48（开发期/字体未刷入）
+    const lv_font_t* font_56 = edu_main_56_font_ ? edu_main_56_font_ : edu_main_font_;
+    const lv_font_t* font_48 = edu_main_font_;
+    // ⭐ 主动学习 category（letter / phonics / math）启用 88 超大主秀
+    // 被动触发（word / hanzi / poem / topic / color）继续用 56 主秀（不抢戏）
+    bool prefer_super = (category != nullptr) && (
+        strcmp(category, "letter")  == 0 ||   // 26 字母教学（Aa）
+        strcmp(category, "phonics") == 0 ||   // 拼音声母韵母
+        strcmp(category, "math")    == 0);    // 数学算式
+
+    const lv_font_t* main_font = PickEduMainFont(
+        main_text, is_py_mode, prefer_super,
+        clock_big_font_,    // 88 px (复用时钟大字字体，已扩展含字母 + 数学符号)
+        font_56, font_48);
+    if (!main_font) {
+        ESP_LOGI(TAG, "EduCard skipped (out of activation range): %s", main_text);
+        return;
     }
 
-    // 三行布局：top(可空 30px) + main(48px/30px 金黄) + bottom(48px 绿色 · 字距 4)
-    //   MCP 调用：top 传"自然拼读" / "拼音"等 → 30px 浅橙显示
-    //   聊天正则提取：top="" → 仅两行（main + bottom）
-    // CJK 字符走 edu_main_font_ → clock_text_font_ fallback 链以 30px 渲染
-    EduRow t{top,       clock_text_font_, 0xFFB74D, 0, 30};   // 30px 浅橙拼读/拼音
-    EduRow m{main_text, main_font,        main_color, 0, main_h};
-    EduRow b{bottom,    edu_main_font_,   0x81C784,   4, 48};   // letter_space=4 加宽
+    // 圆角字体（975MaruSC）字距：PY 主秀 ls=3，EN 主秀 ls=0；88 主秀 ls=4 (大字加间距)
+    int main_ls = is_py_mode ? 3 : (main_font == clock_big_font_ ? 4 : 0);
+    int main_h  = (main_font == clock_big_font_)   ? 88 :
+                  (main_font == edu_main_56_font_) ? 56 : 48;
+
+    // v8 配色：金 #FFCA28 / 薄荷绿 #A5D6A7
+    constexpr uint32_t kMainColor = 0xFFCA28;   // 主秀亮金
+    constexpr uint32_t kHintColor = 0xA5D6A7;   // 顶部 / 副位薄荷绿
+
+    // 三行 EduRow（height 字段仅供旧 BuildEduCard 兼容用，新版按 mode 判定锚点）
+    EduRow t{top,       clock_text_font_, kHintColor, 2, 30};
+    EduRow m{main_text, main_font,        kMainColor, main_ls, main_h};
+    EduRow b{bottom,    clock_text_font_, kHintColor, 3, 20};
+
     BuildEduCard(t, m, b);
-    ESP_LOGI(TAG, "EduCard[%s] main=%s top=%s (main_h=%d)",
-             category, main_text, top ? top : "", main_h);
+    ESP_LOGI(TAG, "EduCard v8[%s] mode=%s main=%s(%d) top=%s bottom=%s",
+             category, is_py_mode ? "PY" : "EN", main_text, main_h,
+             top ? top : "(none)", bottom ? bottom : "(none)");
 }
 
