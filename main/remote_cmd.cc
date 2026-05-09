@@ -72,7 +72,10 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "stt_url") == 0) OnSttUrl(msg);
     else if (strcmp(type, "music_play") == 0) OnMusicPlay(msg);
     else if (strcmp(type, "music_stop") == 0) OnMusicStop();
+    else if (strcmp(type, "music_pause") == 0) OnMusicPause();
+    else if (strcmp(type, "music_resume") == 0) OnMusicResume();
     else if (strcmp(type, "edu_pool") == 0) OnEduPool(msg);
+    else if (strcmp(type, "update_prompt") == 0) OnUpdatePrompt(msg);
     else {
         ESP_LOGW(TAG, "未知命令: %s", type);
         handled = false;
@@ -347,10 +350,14 @@ void RemoteCmd::OnSleep(const cJSON* msg) {
         if (app_->GetDeviceState() == kDeviceStateSpeaking) {
             app_->AbortSpeaking(kAbortReasonNone);
         }
-        app_->Alert("解绑设备", "进入休眠", "", Lang::Sounds::OGG_DISCONNECT);
+        app_->Alert("解绑设备", "进入休眠", "", Lang::Sounds::OGG_UNBUNDLE);
         vTaskDelay(pdMS_TO_TICKS(3000));
-        // TODO: V2 使用 Board 特定的深睡方法
-        ESP_LOGW(TAG, "Deep sleep not yet implemented in V2 RemoteCmd");
+
+        ESP_LOGI(TAG, "RemoteCmd 触发 EnterDeepSleep（gyro=%d）", enable_gyro_wakeup);
+        Board::GetInstance().EnterDeepSleep(enable_gyro_wakeup);
+
+        // 兜底：基类默认空实现（未 override 的板）才会走到这里，复位回安全态
+        ESP_LOGW(TAG, "EnterDeepSleep 未实现，降级 esp_restart");
         esp_restart();
     });
 }
@@ -527,6 +534,42 @@ void RemoteCmd::OnMusicStop() {
         }
         if (was_playing) {
             Board::GetInstance().GetDisplay()->ShowNotification("已停止播放", 1500);
+        }
+    });
+}
+
+// 远程暂停 / 恢复（与 BRTC SDK [E]:[CMD]:[REMOTE_PLAYER]:[PAUSE/RESUME] 概念一致，
+// 但作用对象是设备本地 MusicPlayer 流，而非云端 RTC 远端音乐流）
+void RemoteCmd::OnMusicPause() {
+    ESP_LOGI(TAG, "music_pause");
+    app_->Schedule([]() {
+        auto& mp = MusicPlayer::GetInstance();
+        if (mp.IsPlaying() && !mp.IsPaused()) mp.Pause();
+    });
+}
+
+void RemoteCmd::OnMusicResume() {
+    ESP_LOGI(TAG, "music_resume");
+    app_->Schedule([]() {
+        auto& mp = MusicPlayer::GetInstance();
+        if (mp.IsPaused()) mp.Resume();
+    });
+}
+
+// 远程下推 system prompt（教育卡冷启切档场景）
+//   {"type":"update_prompt","model_type":2,"prompt":"<识字老师 prompt>"}
+//   model_type 默认 2（视觉/教学槽），prompt 为空 = 恢复默认
+void RemoteCmd::OnUpdatePrompt(const cJSON* msg) {
+    auto* mt_item = cJSON_GetObjectItem(msg, "model_type");
+    auto* prompt_item = cJSON_GetObjectItem(msg, "prompt");
+    int model_type = cJSON_IsNumber(mt_item) ? mt_item->valueint : 2;
+    std::string prompt = (cJSON_IsString(prompt_item) && prompt_item->valuestring)
+                            ? prompt_item->valuestring : "";
+    ESP_LOGI(TAG, "update_prompt: type=%d len=%u", model_type, (unsigned)prompt.size());
+    app_->Schedule([this, model_type, prompt = std::move(prompt)]() {
+        bool ok = app_->UpdateSystemPrompt(model_type, prompt);
+        if (!ok) {
+            ESP_LOGW(TAG, "UpdateSystemPrompt failed (channel/protocol)");
         }
     });
 }

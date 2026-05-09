@@ -34,6 +34,9 @@ class Application;
  * │               │ {"type":"stt_url", "url":""}  清除STT回调                   │
  * │ music_play    │ {"type":"music_play","url":"https://xxx.mp3","title":"xxx"} │
  * │ music_stop    │ {"type":"music_stop"}                                       │
+ * │ music_pause   │ {"type":"music_pause"}                                      │
+ * │ music_resume  │ {"type":"music_resume"}                                     │
+ * │ update_prompt │ {"type":"update_prompt","model_type":2,"prompt":"..."}      │
  * │ mic_calibrate │ {"type":"mic_calibrate"}
  * └───────────────┴────────────────────────────────────────────────────────────┘
  *
@@ -67,7 +70,10 @@ private:
     void OnSttUrl(const cJSON* msg);
     void OnMusicPlay(const cJSON* msg);
     void OnMusicStop();
+    void OnMusicPause();
+    void OnMusicResume();
     void OnEduPool(const cJSON* msg);
+    void OnUpdatePrompt(const cJSON* msg);
 
     Application* app_;
     std::string stt_url_;  // 运行时缓存，启动时从 NVS 加载
