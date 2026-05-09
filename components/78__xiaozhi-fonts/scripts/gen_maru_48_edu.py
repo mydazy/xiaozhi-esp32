@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 """
-gen_maru_48_edu.py — 生成 48px 教育卡主体字库（含小学常用字 2500）
+gen_maru_48_edu.py — 生成 48px 英文兜底字库（v8 启蒙定版）
 
-字符集职责（v3 规划 · 48px 主视觉真大字）：
-  - ASCII A-Z a-z 0-9 + Latin-1（西欧基础变音）+ 拼音四声
-  - 中英标点（含全角）
-  - 🆕 数学符号（× ÷ ± ≈ ≠ ≤ ≥ √ π ∞ ² ³ ½ ¼ ¾）
-  - 🆕 货币单位（¥ $ € £ ° %）
-  - 🆕 装饰符号（• ★ ◆ ✓ ✗ →）
-  - 🆕 小学常用字（默认 GB2312 一级 3755；可通过 scripts/charset_primary.txt
-                  覆盖为《现代汉语常用字表》2500 字以剔除生僻字）
+【v8 角色变更】48px 不再是教育卡主秀！
+  v3 旧角色：教育卡主秀（含 3000 中文，~3.6 MB）→ 已被 56px 替代
+  v8 新角色：仅 EN-mode 主秀长词兜底（11-12 字符英文如 "information"）
+
+字符集职责（v8 spec · 48px 仅英文兜底）：
+  - ASCII A-Z a-z 0-9 + 基础标点（英文兜底主体）
+  - Latin-1 西欧基础变音（兼容外文绘本）
+  - 拼音四声（极少触发，但保留以防边界）
+  - Phonics 中点 · (U+00B7，自然拼读分隔)
+  - ❌ 不含 CJK 中文（中文都走 56 主秀；超 4 字直接跳过激活）
+  - ❌ 不含数学/货币/装饰/全角标点（这些是 v3 中文教学场景用的）
 
 设计意图：
-  P30 屏小，48px 是孩子的视觉焦点。3-10 岁启蒙阶段必须看清大字。
-  hanzi.main 真正以 48px 渲染，不再 fallback 到 30px。
-  word.main 短词 48px / pinyin.main 始终 48px。
+  v8 EN-mode：英文 ≤ 10 字符走 56 主秀；11-12 字符走 48 兜底；> 12 跳过。
+  48 不需要中文——副位汉字翻译走 20px 兜底字体（font_maru_common_20_4）。
 
 体积估算（4bpp）：
-  GB2312 一级全集 3755  → ~4.2 MB
-  小学常用 2500（推荐） → ~2.8 MB
-  ASCII + 拼音 + 标点 + 数学/货币/装饰 → ~80 KB
+  ASCII + Latin1 + 拼音 + 基础标点 → ~30-50 KB（vs v3 的 3.6 MB）
+  节省 ~3.5 MB Flash ✨
 
 输出：
   cbin/font_maru_48_4.bin
@@ -76,66 +77,41 @@ def load_primary_chars():
 def main():
     if not TTF_MARU.exists():
         sys.exit(f"FATAL: 975MaruSC 不存在: {TTF_MARU}")
-    if not TTF_QWEN.exists():
-        sys.exit(f"FATAL: noto-qwen 不存在: {TTF_QWEN}")
 
-    print("[1/4] 加载源字体 cmap + 小学常用字...")
-    qwen_cm = TTFont(str(TTF_QWEN)).getBestCmap()
+    print("[1/4] 加载源字体 cmap...")
     maru_cm = TTFont(str(TTF_MARU)).getBestCmap()
-    primary_chars = load_primary_chars()
+    print(f"  975MaruSC.ttf: {len(maru_cm)} glyphs")
 
-    # ── 拼音四声（含 ǖǘǚǜ + ě 等核心 24 个声调字符）──
+    # ── 拼音四声（v8 极少触发但保留以防边界 case）──
     PINYIN3 = {0x01CE, 0x01D0, 0x01D2, 0x01D4, 0x01D6, 0x01D8, 0x01DA, 0x01DC,
-               0x1E3F, 0x0144, 0x0148, 0x01F9, 0x01F5, 0x01F8, 0x0143, 0x0147,
                0x0101, 0x0113, 0x012B, 0x014D, 0x016B,           # ā ē ī ō ū
-               0x011B, 0x011A,                                    # ě Ě（修复：e 三声漏字）
+               0x011B, 0x011A,                                    # ě Ě
                0x00E1, 0x00E9, 0x00ED, 0x00F3, 0x00FA,           # á é í ó ú
                0x00E0, 0x00E8, 0x00EC, 0x00F2, 0x00F9,           # à è ì ò ù
                0x00FC, 0x00DC}                                    # ü Ü
 
-    # ── 数学/货币/装饰（启蒙小学算术 + 例题标记）──
-    MATH = {0x00D7, 0x00F7, 0x00B1, 0x2248, 0x2260,    # × ÷ ± ≈ ≠
-            0x2264, 0x2265, 0x221A, 0x03C0, 0x221E,    # ≤ ≥ √ π ∞
-            0x00B2, 0x00B3, 0x00BD, 0x00BC, 0x00BE,    # ² ³ ½ ¼ ¾
-            0x2153, 0x2154, 0x2155, 0x215B,            # ⅓ ⅔ ⅕ ⅛
-            0x2030, 0x2032, 0x2033}                    # ‰ ′ ″
-    CURRENCY = {0x00A5, 0x0024, 0x20AC, 0x00A3, 0x00B0, 0x0025,  # ¥ $ € £ ° %
-                0xFFE5, 0xFF04,                                    # ￥ ＄ 全角货币
-                0x2103}                                            # ℃ 摄氏度
-    SYMBOL = {0x2022, 0x2605, 0x2606, 0x25C6, 0x2713, 0x2717,  # • ★ ☆ ◆ ✓ ✗
-              0x2190, 0x2191, 0x2192, 0x2193,                   # ← ↑ → ↓
-              0x25CF, 0x25CB,                                    # ● ○
-              0x25B2, 0x25B3, 0x25BC, 0x25BD}                    # ▲ △ ▼ ▽
-    # 序号 ①-⑳ 启蒙图表步骤 / 多选题
-    NUMERIC_MARK = set(range(0x2460, 0x2474))                    # ①-⑳
+    # ── Phonics 中点（U+00B7，自然拼读分隔，"in·for·ma·tion" 兜底渲染必需）──
+    PHONICS = {0x00B7}
 
-    # ── 标点（中英全角 · 课本完整集）──
-    PUNCT = {0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2026,    # — ' ' " " …
-             0x3000, 0x3001, 0x3002,                              # (全角空格) 、 。
-             0xFF01, 0xFF0C, 0xFF0E, 0xFF1A, 0xFF1B, 0xFF1F,     # ！ ， ． ： ； ？
-             0xFF08, 0xFF09,                                      # （ ）
-             0x300A, 0x300B, 0x300C, 0x300D, 0x300E, 0x300F,     # 《》「」『』
-             0x3008, 0x3009}                                      # 〈〉
+    # ── 英文标点（基础：— ' ' " " … 已被 ASCII/Latin-1 覆盖）──
+    # 不含中文全角标点（这是 v8 EN 兜底场景，不会出现中文）
 
-    # ── 主体集合（975MaruSC 提供）──
-    maru_chars = primary_chars                                    # 小学常用字（CJK）
-    maru_chars |= set(range(0x0020, 0x007F))                      # ASCII
-    maru_chars |= set(range(0x00A0, 0x0100))                      # Latin-1（含 ü ñ ç à 等）
-    maru_chars |= PINYIN3                                          # 拼音四声
-    maru_chars |= MATH | CURRENCY | SYMBOL | NUMERIC_MARK | PUNCT # 教学辅助符号
-    maru_chars &= set(maru_cm.keys())                              # 975MaruSC 实际有的
+    # ── 主体集合（仅 ASCII + Latin-1 + 拼音 + Phonics）──
+    # ❌ 不含 CJK 中文（v8 中文都走 56 主秀，超 4 字跳过激活）
+    # ❌ 不含数学/货币/装饰/序号/全角标点（v3 中文教学场景，v8 不需要）
+    maru_chars = set(range(0x0020, 0x007F))     # ASCII
+    maru_chars |= set(range(0x00A0, 0x0100))    # Latin-1（西欧变音 ü ñ ç à 等）
+    maru_chars |= PINYIN3                        # 拼音四声
+    maru_chars |= PHONICS                        # · 自然拼读
+    maru_chars &= set(maru_cm.keys())            # 975MaruSC 实际有的
 
-    print(f"[2/4] 字符集汇总:")
-    print(f"  CJK 小学常用字   : {len(primary_chars & set(maru_cm.keys())):>4} 字")
-    print(f"  ASCII + Latin1   : {len(maru_chars & (set(range(0x0020, 0x0100)))):>4} 字")
-    print(f"  拼音四声          : {len(PINYIN3 & set(maru_cm.keys())):>4} 字")
-    print(f"  数学              : {len(MATH & set(maru_cm.keys())):>4} 字")
-    print(f"  货币(含℃￥＄)    : {len(CURRENCY & set(maru_cm.keys())):>4} 字")
-    print(f"  装饰/方向/形状    : {len(SYMBOL & set(maru_cm.keys())):>4} 字")
-    print(f"  序号 ①-⑳         : {len(NUMERIC_MARK & set(maru_cm.keys())):>4} 字")
-    print(f"  标点(中英全角)    : {len(PUNCT & set(maru_cm.keys())):>4} 字")
+    print(f"[2/4] 字符集汇总（v8 EN 兜底纯英文版）:")
+    print(f"  ASCII A-Z a-z 0-9   : {len(maru_chars & set(range(0x0020, 0x007F))):>4} 字")
+    print(f"  Latin-1 西欧变音     : {len(maru_chars & set(range(0x00A0, 0x0100))):>4} 字")
+    print(f"  拼音四声 (边界用)   : {len(PINYIN3 & set(maru_cm.keys())):>4} 字")
+    print(f"  Phonics 中点 ·      : {len(PHONICS & set(maru_cm.keys())):>4} 字")
     print(f"  ──────────────────────────────")
-    print(f"  975MaruSC 合计   : {len(maru_chars):>4} 字")
+    print(f"  合计                : {len(maru_chars):>4} 字 (v3 旧版 ~4000 字 → v8 仅保留英文兜底)")
 
     maru_str = ''.join(chr(cp) for cp in sorted(maru_chars))
 
