@@ -197,33 +197,10 @@ esp_err_t esp_blufi_host_init(void) {
 
   BLUFI_INFO("Initializing NimBLE host...");
 
-  // 【关键修复】必须在配置 ble_hs_cfg 之前调用 esp_nimble_init()
-  // 确保 controller 已经完全就绪
+  // 等控制器完全就绪后再起 host 栈
   vTaskDelay(pdMS_TO_TICKS(100));
 
-  // esp_nimble_init() 会跳过 FreeRTOS 适配层初始化
-  // 我们需要手动初始化，因为我们使用分离的控制器初始化
-#if CONFIG_BT_CONTROLLER_ENABLED
-  BLUFI_INFO(" Initializing NimBLE FreeRTOS adaptation layer...");
-
-  // 声明 NimBLE 内部初始化函数
-  extern void os_mempool_module_init(void);
-  extern void npl_freertos_funcs_init(void);
-  extern int npl_freertos_mempool_init(void);
-
-  // 按照 nimble_port.c 中的顺序初始化
-  os_mempool_module_init();
-  BLUFI_INFO("  → os_mempool_module_init() OK");
-
-  npl_freertos_funcs_init();
-  BLUFI_INFO("  → npl_freertos_funcs_init() OK");
-
-  npl_freertos_mempool_init();
-  BLUFI_INFO("  → npl_freertos_mempool_init() OK");
-
-  BLUFI_INFO("【IDF 5.4.3 FIX】FreeRTOS adaptation layer initialized successfully");
-#endif
-
+  // 注意：IDF 5.5 的 esp_nimble_init() 内部已完成 os_mempool_module_init /
   BLUFI_INFO("Calling esp_nimble_init()...");
   err = esp_nimble_init();
   if (err != ESP_OK) {
