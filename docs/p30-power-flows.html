@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · 电源管理</title>
+<style>
+:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+        --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
+        --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       margin: 0; background: #F5F5F5; color: var(--text); line-height: 1.55; font-size: 14px; }
+header { background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+         color: white; padding: 24px 40px; }
+header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 600; }
+header .meta { opacity: .9; font-size: 12px; }
+
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav { width: 180px; flex-shrink: 0; background: white; padding: 18px 0;
+      border-right: 1px solid var(--border); position: sticky; top: 0;
+      align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+nav h3 { margin: 0 14px 8px; font-size: 11px; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: .5px; }
+nav a { display: block; padding: 5px 14px; color: var(--text); text-decoration: none;
+        font-size: 13px; border-left: 3px solid transparent; }
+nav a:hover { background: var(--brand-light); border-left-color: var(--brand); color: var(--brand-deep); }
+
+main { flex: 1; padding: 24px 36px; max-width: 980px; }
+section { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
+             border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
+section h2 .num { display: inline-block; background: var(--brand); color: white;
+                  padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
+section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
+
+code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
+       font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px; color: #C2185B; }
+
+table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 13px; }
+th { background: #F5F5F5; padding: 6px 9px; text-align: left; border: 1px solid var(--border);
+     font-weight: 600; font-size: 12.5px; }
+td { padding: 5px 9px; border: 1px solid var(--border); vertical-align: top; font-size: 12.5px; }
+tr:nth-child(even) td { background: #FAFAFA; }
+
+.callout { padding: 10px 14px; border-radius: 6px; margin: 10px 0;
+           border-left: 4px solid var(--text-2); background: #FAFAFA; font-size: 13px; }
+.callout.ok    { border-left-color: var(--ok); background: #E8F5E9; }
+.callout.warn  { border-left-color: var(--warn); background: #FFF3E0; }
+
+.svgwrap { background: var(--bg); padding: 10px; border-radius: 6px; margin: 10px 0; overflow-x: auto; }
+.svgwrap svg { display: block; max-width: 100%; height: auto; }
+text { font-family: -apple-system, "PingFang SC", sans-serif; }
+.svg-title { font-size: 13px; font-weight: 600; fill: var(--brand-deep); }
+.svg-axis { font-size: 11px; fill: var(--text-2); }
+.node-text { font-size: 12px; fill: var(--text); text-anchor: middle; dominant-baseline: middle; }
+.node-text.sm { font-size: 10.5px; fill: var(--text-2); }
+
+ul.compact { padding-left: 18px; margin: 6px 0; }
+ul.compact li { margin: 2px 0; }
+
+.tag-4g { color: var(--core0-line); font-weight: 600; }
+.tag-wifi { color: var(--core1-line); font-weight: 600; }
+.todo { color: #999; font-size: 11px; }
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>MyDazy P30 · 电源管理</h1>
+  <div class="meta">v2.2.10 · 2026-05-11 · 4G + WiFi + P31 三板</div>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>目录</h3>
+  <a href="#overview">1. 概览</a>
+  <a href="#boot">2. 开机</a>
+  <a href="#shutdown">3. 关机</a>
+  <a href="#sleep">4. 自动休眠</a>
+  <a href="#wakeup">5. 唤醒源</a>
+  <a href="#triggers">6. 触发矩阵</a>
+  <a href="#diff">7. 三板差异</a>
+  <a href="#followup">8. 参考</a>
+</nav>
+
+<main>
+
+<!-- ================== 1. 概览 ================== -->
+<section id="overview">
+<h2><span class="num">1</span> 概览</h2>
+
+<h3>5 大宏观状态</h3>
+<table>
+  <thead><tr><th>状态</th><th>电流</th><th>背光</th><th>音频</th><th>网络</th><th>陀螺仪</th></tr></thead>
+  <tbody>
+    <tr><td><b>POWER_OFF</b></td><td>0 mA</td><td>关</td><td>关</td><td>关</td><td>关</td></tr>
+    <tr><td><b>BOOTING</b></td><td>~120 mA</td><td>80ms 后渐显</td><td>初始化</td><td>启动中</td><td>初始化</td></tr>
+    <tr><td><b>ACTIVE</b></td><td>~150-200 mA</td><td>用户设定</td><td>跟随 DeviceState</td><td>在线</td><td>摇一摇活跃</td></tr>
+    <tr><td><b>POWER_SAVE</b></td><td>~80-100 mA</td><td>15/100</td><td>跟随 DeviceState</td><td>在线（保活）</td><td>开</td></tr>
+    <tr><td><b>DEEP_SLEEP</b></td><td>&lt; 1 mA</td><td>关 + GPIO hold</td><td>断电</td><td>断</td><td>仅 INT1（拿起唤醒）</td></tr>
+  </tbody>
+</table>
+
+<h3>核心参数</h3>
+<table>
+  <thead><tr><th>参数</th><th>值</th><th>位置</th></tr></thead>
+  <tbody>
+    <tr><td>开机长按阈值</td><td><b>1500 ms</b></td><td>CheckBootHoldOnWakeup</td></tr>
+    <tr><td>关机长按阈值 + 缓冲</td><td><b>3000 + 800 ms</b></td><td>OnLongPress(3000) + esp_timer 800ms</td></tr>
+    <tr><td>自动省电（背光降）</td><td>Idle <b>120 s</b></td><td>PowerSaveTimer 第 1 参</td></tr>
+    <tr><td>自动深度睡眠</td><td>Idle <b>300 s</b></td><td>PowerSaveTimer 第 3 参</td></tr>
+    <tr><td>低电量强制关</td><td>非充电 + 电量过低</td><td>PowerManager 回调</td></tr>
+  </tbody>
+</table>
+
+<h3>NVS 字段</h3>
+<table>
+  <thead><tr><th>命名空间</th><th>字段</th><th>默认值</th><th>含义</th></tr></thead>
+  <tbody>
+    <tr><td>status</td><td>deepSleep</td><td>1</td><td>是否启用自动深度睡眠</td></tr>
+    <tr><td>status</td><td>pickupWake</td><td>1</td><td>是否启用拿起唤醒</td></tr>
+    <tr><td>wifi</td><td>blufi</td><td>1</td><td>配网默认走 BluFi（vs AP）</td></tr>
+    <tr><td>network（仅 4G）</td><td>type</td><td>1</td><td>0=WiFi 1=ML307</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ================== 2. 开机 ================== -->
+<section id="boot">
+<h2><span class="num">2</span> 开机流程</h2>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 460" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="bArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">冷启动 / 唤醒 → ACTIVE</text>
+
+  <ellipse cx="440" cy="55" rx="100" ry="20" fill="#FAFAFA" stroke="#666"/>
+  <text class="node-text" x="440" y="60" style="font-weight:600">⚡ 上电 / 唤醒</text>
+
+  <rect x="340" y="100" width="200" height="34" rx="6" fill="#FFF8E1" stroke="#F57F17"/>
+  <text class="node-text" x="440" y="121">HandleWakeupCause</text>
+
+  <rect x="20" y="170" width="180" height="58" rx="6" fill="#fff" stroke="#1976D2"/>
+  <text class="node-text" x="110" y="188" style="font-weight:600;font-size:11px">EXT0 · BOOT 键</text>
+  <text class="node-text sm" x="110" y="206">长按 ≥1500ms 才继续</text>
+  <text class="node-text sm" x="110" y="220" style="fill:#D32F2F">否则立即 EnterDeepSleep</text>
+
+  <rect x="220" y="170" width="180" height="58" rx="6" fill="#fff" stroke="#5E35B1"/>
+  <text class="node-text" x="310" y="188" style="font-weight:600;font-size:11px">EXT1 · 拿起</text>
+  <text class="node-text sm" x="310" y="206">SC7A20H INT1 触发</text>
+  <text class="node-text sm" x="310" y="220">直接走 Init</text>
+
+  <rect x="420" y="170" width="180" height="58" rx="6" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="510" y="188" style="font-weight:600;font-size:11px">TIMER · 闹钟</text>
+  <text class="node-text sm" x="510" y="206" style="fill:#FB8C00">字段未使用</text>
+  <text class="node-text sm" x="510" y="220" style="fill:#FB8C00">v33 移植 189 实现</text>
+
+  <rect x="620" y="170" width="180" height="58" rx="6" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="710" y="188" style="font-weight:600;font-size:11px">default · RST</text>
+  <text class="node-text sm" x="710" y="206">冷启动 / USB 复位</text>
+  <text class="node-text sm" x="710" y="220">first_boot=true</text>
+
+  <rect x="240" y="260" width="400" height="34" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="440" y="281">Init: GPIO → I2C → Touch → Display → 陀螺仪 → Buttons</text>
+
+  <rect x="240" y="304" width="400" height="34" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="440" y="325">PowerSaveTimer + Codec + ApplyDefaultSettings</text>
+
+  <rect x="240" y="348" width="400" height="44" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+  <text class="node-text" x="440" y="365" style="font-weight:600">WelcomeTask（仅 first_boot）</text>
+  <text class="node-text sm" x="440" y="382">delay 1500ms → RequestAutoChatOnIdle → OGG_WELCOME</text>
+
+  <ellipse cx="440" cy="425" rx="100" ry="18" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+  <text class="node-text" x="440" y="430" style="font-weight:600;fill:#2E7D32">🟢 ACTIVE</text>
+
+  <path d="M440,75 L440,100" stroke="#666" marker-end="url(#bArr)"/>
+  <path d="M440,134 L440,170" stroke="#666" marker-end="url(#bArr)"/>
+  <path d="M110,228 L380,260" stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#bArr)"/>
+  <path d="M310,228 L420,260" stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#bArr)"/>
+  <path d="M510,228 L460,260" stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#bArr)"/>
+  <path d="M710,228 L500,260" stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#bArr)"/>
+  <path d="M440,294 L440,304" stroke="#666" marker-end="url(#bArr)"/>
+  <path d="M440,338 L440,348" stroke="#666" marker-end="url(#bArr)"/>
+  <path d="M440,392 L440,407" stroke="#666" marker-end="url(#bArr)"/>
+</svg>
+</div>
+
+<div class="callout">
+  <b>用时</b>：冷启动 → ACTIVE 约 5 秒 · 拿起唤醒 → ACTIVE 约 2-3 秒（不走 WelcomeTask）。<br>
+  <b>WelcomeTask 1500ms 等待</b>：等 audio_service 启动 + LVGL 首帧 + codec EnableOutput · 不能去掉。
+</div>
+</section>
+
+<!-- ================== 3. 关机 ================== -->
+<section id="shutdown">
+<h2><span class="num">3</span> 关机流程</h2>
+
+<h3>3.1 三类关机触发</h3>
+<table>
+  <thead><tr><th>触发</th><th>提示文案</th><th>提示音</th><th>等待</th><th>陀螺唤醒</th></tr></thead>
+  <tbody>
+    <tr><td>长按 3s + 800ms 缓冲</td><td>"关机中" → "再见"</td><td>OGG_REBOOT</td><td>1500 ms</td><td>❌</td></tr>
+    <tr><td>4 连击</td><td>"再见"</td><td>OGG_SHUTDOWN</td><td>2500 ms</td><td>❌</td></tr>
+    <tr><td>低电量强制</td><td>"电量过低 / 强制关机"</td><td>OGG_LOW_BATTERY</td><td>3000 ms</td><td>❌</td></tr>
+    <tr><td>自动深度睡眠</td><td>"休眠中 / 拿起唤醒"</td><td>无</td><td>1500 ms</td><td>✅</td></tr>
+  </tbody>
+</table>
+
+<h3>3.2 长按关机时序（v2.2.9）</h3>
+<table>
+  <thead><tr><th>时间点</th><th>动作</th><th>取消</th></tr></thead>
+  <tbody>
+    <tr><td>0 ~ 3000 ms</td><td>无响应</td><td>松开 = 不响应</td></tr>
+    <tr><td><b>3000 ms</b></td><td>Alert "关机中" + OGG_REBOOT + 启 800ms timer</td><td>松开 → 取消 + esp_timer_stop（无声）</td></tr>
+    <tr><td>3000 ~ 3800 ms</td><td>等 timer 触发</td><td>松开 → 取消（同上）</td></tr>
+    <tr><td><b>3800 ms</b></td><td>ShutdownOrSleep("再见", 1500ms, gyro=false)</td><td>无法取消</td></tr>
+  </tbody>
+</table>
+
+<h3>3.3 EnterDeepSleep 10 步</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 460" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="sArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">EnterDeepSleep · 10 步</text>
+
+  <g font-size="12">
+    <rect x="180" y="50" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="70">1. AudioService::Stop() + delay 100ms</text>
+    <rect x="180" y="88" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="108">2. PowerSaveTimer disable + 关背光</text>
+    <rect x="180" y="126" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="146">3. ResetProtocol + delay 500ms（关 MQTT/WS）</text>
+    <rect x="180" y="164" width="520" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+    <text x="200" y="184" fill="#F57F17">4. 仅 4G · GracefulShutdownModem (AT+CFUN=4 + 800ms)</text>
+    <rect x="180" y="202" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="222">5. if (gyro_wakeup) sc7a20h_arm_wakeup(INT1)</text>
+    <rect x="180" y="240" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="260">6. ShutdownTouchAndAudioForSleep + AUDIO_PWR_EN hold</text>
+    <rect x="180" y="278" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="298">7. ConfigureDeepSleepWakeupSources（EXT0 + EXT1）</text>
+    <rect x="180" y="316" width="520" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+    <text x="200" y="336" fill="#F57F17">8. 网络栈停 · WiFi: WifiStation::Stop + 300ms</text>
+    <rect x="180" y="354" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="374">9. ResetAllGpiosForSleep（15 个 GPIO）</text>
+    <rect x="180" y="392" width="520" height="32" rx="4" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+    <text x="200" y="412" fill="#C62828" font-weight="600">10. GPIO 检查保险 · 死按 → esp_restart / 否则 esp_deep_sleep_start ⚫</text>
+
+    <line x1="440" y1="82" x2="440" y2="88" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="120" x2="440" y2="126" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="158" x2="440" y2="164" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="196" x2="440" y2="202" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="234" x2="440" y2="240" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="272" x2="440" y2="278" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="310" x2="440" y2="316" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="348" x2="440" y2="354" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="386" x2="440" y2="392" stroke="#666" marker-end="url(#sArr)"/>
+  </g>
+</svg>
+</div>
+<p class="sub">总耗时 ~3.6s（4G）/ ~3.0s（WiFi）· 橙色为板差异点。</p>
+</section>
+
+<!-- ================== 4. 自动休眠 ================== -->
+<section id="sleep">
+<h2><span class="num">4</span> 自动休眠 · PowerSaveTimer</h2>
+
+<p class="sub">三板配置统一：<code>PowerSaveTimer(120, 60, 300)</code> · 三参语义：(idle_to_save_s, debounce_s, save_to_shutdown_s)</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 220" xmlns="http://www.w3.org/2000/svg">
+  <text x="440" y="18" class="svg-title" text-anchor="middle">Idle 时间轴</text>
+
+  <line x1="60" y1="130" x2="820" y2="130" stroke="#666" stroke-width="2"/>
+  <polygon points="820,130 810,125 810,135" fill="#666"/>
+
+  <line x1="60" y1="120" x2="60" y2="140" stroke="#666"/>
+  <text class="svg-axis" x="60" y="160" text-anchor="middle">0s 用户停操作</text>
+
+  <line x1="320" y1="120" x2="320" y2="140" stroke="#1976D2" stroke-width="2"/>
+  <text class="svg-axis" x="320" y="160" text-anchor="middle" style="fill:#1976D2;font-weight:600">120s · 进省电</text>
+
+  <line x1="700" y1="120" x2="700" y2="140" stroke="#5E35B1" stroke-width="2"/>
+  <text class="svg-axis" x="700" y="160" text-anchor="middle" style="fill:#5E35B1;font-weight:600">300s · 入睡</text>
+
+  <rect x="60" y="60" width="260" height="60" fill="#E8F5E9" opacity=".5"/>
+  <text class="node-text" x="190" y="85" style="font-weight:600;fill:#2E7D32">🟢 ACTIVE</text>
+  <text class="node-text sm" x="190" y="103">背光：用户值</text>
+
+  <rect x="320" y="60" width="380" height="60" fill="#E3F2FD" opacity=".5"/>
+  <text class="node-text" x="510" y="85" style="font-weight:600;fill:#1976D2">🔵 POWER_SAVE</text>
+  <text class="node-text sm" x="510" y="103">背光 15/100 · 网络保活</text>
+
+  <rect x="700" y="60" width="120" height="60" fill="#EDE7F6" opacity=".5"/>
+  <text class="node-text" x="760" y="85" style="font-weight:600;fill:#5E35B1">🟣 DEEP_SLEEP</text>
+  <text class="node-text sm" x="760" y="103">"拿起唤醒"</text>
+
+  <text class="svg-axis" x="440" y="195" text-anchor="middle" style="font-weight:600">⚡ 任意 WakeUp 重置：触摸 / 音量 / 双击 / 状态转移 → 计时归零</text>
+</svg>
+</div>
+
+<div class="callout ok">
+  <b>设计意图</b> · <b>配网态 + 未激活态也走自动休眠</b>（不是 bug）：防"用户忘记操作 → 设备整夜耗电亏电变砖"。用户拿起或按 BOOT 键即恢复。
+</div>
+</section>
+
+<!-- ================== 5. 唤醒源 ================== -->
+<section id="wakeup">
+<h2><span class="num">5</span> 唤醒源</h2>
+
+<table>
+  <thead><tr><th>源</th><th>触发</th><th>校验</th><th>体感</th></tr></thead>
+  <tbody>
+    <tr><td><b>EXT0</b></td><td>BOOT 键低电平</td><td>必须长按 ≥1500 ms · 否则立即 EnterDeepSleep</td><td>主动按键开机</td></tr>
+    <tr><td><b>EXT1</b></td><td>SC7A20H INT1（拿起 / 移动）</td><td>无校验 · 直接 Init</td><td>拿起即用 · NVS pickupWake 控制</td></tr>
+    <tr><td>TIMER</td><td>RTC 定时</td><td>设 is_alarm_clock=true（未使用）</td><td>v33 闹钟功能后启用</td></tr>
+    <tr><td>default</td><td>RST / USB 插入 / Watchdog</td><td>—</td><td>插 USB 会自动开机（充电友好）</td></tr>
+  </tbody>
+</table>
+
+<h3>ConfigureDeepSleepWakeupSources</h3>
+<ol class="compact">
+  <li>arm EXT0：<code>esp_sleep_enable_ext0_wakeup(BOOT_GPIO, 0)</code> + 上拉</li>
+  <li>delay 200ms 让 RTC GPIO 配置生效</li>
+  <li>若 enable_gyro_wakeup + NVS pickupWake=1：arm EXT1 = SC7A20H_GPIO_INT1</li>
+</ol>
+<p class="sub">用户死按 BOOT 不松手 → 立即被 EXT0 触发重启 → CheckBootHoldOnWakeup(1.5s) → 显示 logo + 欢迎音 → 用户自然松手 · 链路自愈 · 不需要等松手兜底。</p>
+</section>
+
+<!-- ================== 6. 触发矩阵 ================== -->
+<section id="triggers">
+<h2><span class="num">6</span> 触发矩阵</h2>
+
+<h3>BOOT 按键</h3>
+<table>
+  <thead><tr><th>触发</th><th>动作</th><th>状态条件</th></tr></thead>
+  <tbody>
+    <tr><td>单击</td><td>Idle→OGG_WAKEUP+ToggleChat / Listening→OGG_EXITCHAT+ToggleChat / Speaking→ToggleChat / MP3→停 MP3</td><td>仅 Idle/Listening/Speaking</td></tr>
+    <tr><td>双击</td><td>出厂确认 / 配网态 BluFi↔AP 切换 / AEC 模式切换</td><td>多场景</td></tr>
+    <tr><td>3 连击</td><td><span class="tag-4g">4G: 配网↔4G↔WiFi 三态</span> / <span class="tag-wifi">WiFi: 配网↔在线 二态</span></td><td>任何态</td></tr>
+    <tr><td>4 连击</td><td>"再见" + OGG_SHUTDOWN + 直接关机</td><td>任何态</td></tr>
+    <tr><td>9 连击</td><td>恢复出厂确认（10s 内双击确认）</td><td>任何态</td></tr>
+    <tr><td>长按 3s + 800ms</td><td>"关机中" + OGG_REBOOT + 800ms 后真关 · 中途松开取消</td><td>任何态</td></tr>
+    <tr><td>长按 1.5s（深睡唤醒）</td><td>EXT0 唤醒后校验 · 不达即 EnterDeepSleep</td><td>仅 EXT0 唤醒分支</td></tr>
+  </tbody>
+</table>
+
+<h3>触摸</h3>
+<table>
+  <thead><tr><th>触发</th><th>动作</th><th>状态条件</th></tr></thead>
+  <tbody>
+    <tr><td>SingleClick</td><td>Idle→OGG_WAKEUP+ToggleChat / Speaking→AbortSpeaking</td><td>—</td></tr>
+    <tr><td>DoubleClick</td><td>AbortAnyConversation + Idle + OGG_EXITCHAT</td><td>仅 Listening/Speaking</td></tr>
+    <tr><td>Long/Swipe</td><td>显式忽略</td><td>—</td></tr>
+  </tbody>
+</table>
+
+<h3>音量按键</h3>
+<table>
+  <thead><tr><th>触发</th><th>动作</th></tr></thead>
+  <tbody>
+    <tr><td>Volume+ 单击</td><td>AdjustVolume(+10)</td></tr>
+    <tr><td>Volume− 单击</td><td>AdjustVolume(-10)</td></tr>
+  </tbody>
+</table>
+
+<h3>传感器 + 充电</h3>
+<table>
+  <thead><tr><th>触发</th><th>动作</th><th>状态条件</th></tr></thead>
+  <tbody>
+    <tr><td>摇一摇 SC7A20H</td><td>OGG_POPUP + SendTextToAI("摇一摇随机互动")</td><td>仅 Idle/Listening</td></tr>
+    <tr><td>拿起（深睡 EXT1）</td><td>EXT1 唤醒 + first_boot=true + 走 Init + WelcomeTask</td><td>NVS pickupWake=1</td></tr>
+    <tr><td>低电量</td><td>OGG_LOW_BATTERY + 3000ms + 强制关机</td><td>非充电状态</td></tr>
+    <tr><td>USB 插入</td><td>触发 ESP_RST_USB · 自动开机</td><td>充电时一并开机（设计行为）</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ================== 7. 三板差异 ================== -->
+<section id="diff">
+<h2><span class="num">7</span> 4G / WiFi / P31 三板差异</h2>
+
+<table>
+  <thead><tr><th>差异点</th><th>4G</th><th>WiFi</th><th>P31</th></tr></thead>
+  <tbody>
+    <tr><td>基类</td><td>DualNetworkBoard（含 ML307）</td><td>WifiBoard</td><td>DualNetworkBoard</td></tr>
+    <tr><td>EnterDeepSleep 多步</td><td>GracefulShutdownModem (AT+CFUN=4)</td><td>WifiStation::Stop</td><td>同 4G</td></tr>
+    <tr><td>boot_hold_grace 机制</td><td>✅ 含</td><td>✅ 含（已与 4G 对齐）</td><td>同 4G</td></tr>
+    <tr><td>3 连击行为</td><td>三态切换</td><td>二态切换</td><td>同 4G</td></tr>
+    <tr><td>ReportStatus 字段</td><td>csq + carrier</td><td>rssi</td><td>csq + carrier</td></tr>
+    <tr><td>自动休眠提示</td><td colspan="3">"拿起唤醒"（v2.2.10 三板统一）</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ================== 8. 参考 ================== -->
+<section id="followup">
+<h2><span class="num">8</span> 参考</h2>
+<div class="callout">
+  <b>相关文档</b>：<code>docs/p30-architecture.md</code> § 三/四/五 · <code>docs/ui-architecture-final.html</code> · <code>CLAUDE.md</code>
+</div>
+</section>
+
+</main>
+</div>
+
+</body>
+</html>

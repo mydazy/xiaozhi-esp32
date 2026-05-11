@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>MyDazy P30 · UI 最终架构（量产定版）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: #F5F5F7; color: #1D1D1F;
+    font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+    font-size: 14.5px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1280px; margin: 0 auto; padding: 56px 36px 80px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: #8E8E93; margin-bottom: 14px;
+  }
+  h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.015em; margin-bottom: 14px; }
+  .lede { font-size: 17px; color: #424245; max-width: 800px; margin-bottom: 28px; }
+  .chip-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 40px; }
+  .chip {
+    background: #FFFFFF; border: 1px solid #E5E5EA; color: #424245;
+    font-size: 12px; padding: 5px 11px; border-radius: 999px;
+  }
+  .chip.ok { background: #E8F5E9; border-color: #A5D6A7; color: #1B5E20; }
+  .chip.done { background: #E3F2FD; border-color: #64B5F6; color: #0D47A1; }
+
+  section { margin-bottom: 56px; }
+  .section-head { margin-bottom: 20px; }
+  .section-num {
+    display: inline-block; font-size: 13px; font-weight: 600;
+    color: #007AFF; letter-spacing: 0.04em; margin-bottom: 4px;
+  }
+  h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 6px; }
+  .section-sub { color: #6E6E73; font-size: 14px; max-width: 800px; }
+
+  .card {
+    background: #FFFFFF; border: 1px solid #E5E5EA; border-radius: 16px;
+    padding: 22px 26px; margin-bottom: 16px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #ECECF0; vertical-align: top; }
+  th {
+    font-size: 11.5px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: #6E6E73; background: #FAFAFC;
+  }
+  td.mono, code {
+    font-family: "SF Mono", "Menlo", monospace; font-size: 12px; color: #424245;
+  }
+  code { background: #F2F2F7; padding: 1px 5px; border-radius: 4px; }
+
+  /* 三角切换图 */
+  .trio { background: #0A0A0F; border-radius: 14px; padding: 30px; margin: 12px 0; overflow-x: auto; }
+  .trio svg { display: block; margin: 0 auto; }
+  .node-chat { fill: #1E88E5; stroke: #64B5F6; stroke-width: 2; }
+  .node-educard { fill: #FFCA28; stroke: #FFD54F; stroke-width: 2; }
+  .node-font { fill: #AB47BC; stroke: #BA68C8; stroke-width: 2; }
+  .node-text { fill: #FFFFFF; font-family: "SF Mono", monospace; font-size: 14px; font-weight: 700; }
+  .node-text-dark { fill: #1D1D1F; font-family: "SF Mono", monospace; font-size: 14px; font-weight: 700; }
+  .node-sub { fill: #FFFFFF; font-family: "SF Mono", monospace; font-size: 10.5px; }
+  .node-sub-dark { fill: #1D1D1F; font-family: "SF Mono", monospace; font-size: 10.5px; }
+  .arrow { stroke: #66BB6A; stroke-width: 2.5; fill: none; }
+  .arrow-label { fill: #ECEFF1; font-family: "SF Mono", monospace; font-size: 11px; font-weight: 600; }
+
+  /* 多线程数据流 */
+  .threads { background: #0A0A0F; border-radius: 14px; padding: 30px; margin: 12px 0; overflow-x: auto; }
+  .threads svg { display: block; margin: 0 auto; }
+  .thread-task { fill: #1B263B; stroke: #415A77; stroke-width: 2; }
+  .thread-task-main { fill: #1B5E20; stroke: #4CAF50; stroke-width: 2; }
+  .thread-task-label { fill: #FFFFFF; font-family: -apple-system; font-size: 15px; font-weight: 700; }
+  .thread-task-sub { fill: #B0BEC5; font-family: "SF Mono", monospace; font-size: 11px; }
+  .thread-task-sub-main { fill: #FFFFFF; font-family: "SF Mono", monospace; font-size: 11px; }
+  .barrier-rect { fill: #2E2E2E; stroke: #4CAF50; stroke-width: 2; stroke-dasharray: 4 3; }
+  .barrier-text { fill: #A5D6A7; font-family: "SF Mono", monospace; font-size: 12px; font-weight: 600; }
+  .thread-net { stroke: #EF5350; stroke-width: 2; fill: none; }
+  .thread-timer { stroke: #FFA726; stroke-width: 2; fill: none; }
+  .thread-mainline { stroke: #66BB6A; fill: none; }
+  .edge-label { fill: #B0BEC5; font-family: "SF Mono", monospace; font-size: 11px; }
+  .legend { display: flex; gap: 22px; margin-top: 12px; font-size: 12px; color: #6E6E73; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 2px; }
+
+  /* 状态机 */
+  .state-diagram { background: #0A0A0F; border-radius: 14px; padding: 30px; margin: 12px 0; overflow-x: auto; }
+  .state-diagram svg { display: block; margin: 0 auto; }
+  .state-box-boot     { fill: #455A64; stroke: #78909C; stroke-width: 2; }
+  .state-box-special  { fill: #5D4037; stroke: #A1887F; stroke-width: 2; }
+  .state-box-transient{ fill: #1565C0; stroke: #64B5F6; stroke-width: 2; }
+  .state-box-active   { fill: #C62828; stroke: #EF5350; stroke-width: 2; }
+  .state-box-idle     { fill: #2E7D32; stroke: #66BB6A; stroke-width: 2; }
+  .state-text { fill: #FFFFFF; font-family: "SF Mono", monospace; font-size: 13px; font-weight: 700; }
+  .state-text-hub { fill: #FFFFFF; font-family: "SF Mono", monospace; font-size: 15px; font-weight: 700; }
+  .scene-label { fill: #ECEFF1; font-family: "SF Mono", monospace; font-size: 10px; }
+  .edge { stroke: #B0BEC5; stroke-width: 1.5; fill: none; }
+
+  /* 路径卡片 */
+  .path-card {
+    border-left: 3px solid #4CAF50; padding: 14px 18px; margin: 12px 0;
+    background: #F1F8E9; border-radius: 4px;
+  }
+  .path-card .path-title { font-weight: 700; font-size: 13.5px; color: #1B5E20; margin-bottom: 6px; }
+  .path-card .path-flow {
+    font-family: "SF Mono", monospace; font-size: 12px;
+    background: #FFFFFF; padding: 10px 14px; border-radius: 6px;
+    margin: 8px 0; line-height: 1.8; border: 1px solid #ECECF0;
+  }
+  .path-card .verdict { margin-top: 8px; font-size: 13px; color: #1B5E20; }
+
+  pre { background: #1D1D1F; color: #F5F5F7; padding: 14px 18px;
+        border-radius: 8px; font-family: "SF Mono", Menlo, monospace;
+        font-size: 12px; line-height: 1.7; overflow-x: auto; margin: 8px 0; }
+  pre .kw { color: #80DEEA; }
+  pre .str { color: #A5D6A7; }
+  pre .com { color: #FFCA28; }
+
+  footer {
+    margin-top: 56px; padding-top: 24px;
+    border-top: 1px solid #E5E5EA;
+    font-size: 12px; color: #8E8E93;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <div class="eyebrow">MyDazy P30 · UI 最终架构（量产定版）</div>
+  <h1>UI 架构总览：场景 / API / 路径 / 数据流</h1>
+  <p class="lede">
+    本文档是 P30 UI 子系统的唯一权威架构文档。
+    覆盖：公共 API、5 个 SceneType 场景、3 态切换三角图、6 条切换路径、跨线程数据流、命名规范、量产验收。
+    与 <code>main/display/ui_display.h/cc</code> 当前实现完全对齐。
+  </p>
+  <div class="chip-row">
+    <span class="chip ok">6/6 路径流畅</span>
+    <span class="chip done">5 公共 API · 极简收敛</span>
+    <span class="chip done">跨线程 race 全部修复</span>
+    <span class="chip done">过度设计已回退</span>
+    <span class="chip done">量产可烧板</span>
+  </div>
+</header>
+
+<!-- ============ 01 公共 API ============ -->
+<section>
+  <div class="section-head">
+    <div class="section-num">01 · 公共 API</div>
+    <h2>5 个核心函数 · 2 个查询入口 · 2 个状态字段</h2>
+    <p class="section-sub">UI 子系统对外仅暴露这些。SceneType 是查询入口（外部判断当前场景），状态字段是私有内部实现。</p>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>分类</th><th>API</th><th>用途</th><th>调用方</th></tr></thead>
+      <tbody>
+      <tr>
+        <td rowspan="2"><strong>主屏切换</strong></td>
+        <td><code>SwitchToChatMode()</code></td>
+        <td>切到对话表情（emoji_box）</td>
+        <td>application.cc 状态机</td>
+      </tr>
+      <tr>
+        <td><code>SwitchToClockMode()</code></td>
+        <td>切到时钟主屏（Idle 默认）</td>
+        <td>application.cc + FinishBootAndShowClock</td>
+      </tr>
+      <tr>
+        <td rowspan="2"><strong>教育卡</strong></td>
+        <td><code>ShowEduCard(category, main, top, bottom)</code></td>
+        <td>显示教育卡 overlay（9 类 category 字符串）</td>
+        <td>application.cc 聊天正则 + MCP show_card</td>
+      </tr>
+      <tr>
+        <td><code>HideEduCard()</code></td>
+        <td>隐藏教育卡 overlay</td>
+        <td>内部 4 处 + application.cc 退出</td>
+      </tr>
+      <tr>
+        <td><strong>笔画 GIF</strong></td>
+        <td><code>FontGif(buffer, size)</code></td>
+        <td>装载 PSRAM GIF 进 font 槽位</td>
+        <td>MCP show_stroke 下载完成回调</td>
+      </tr>
+      <tr>
+        <td rowspan="3"><strong>音乐播放</strong></td>
+        <td><code>SwitchToPlayerMode(title)</code></td>
+        <td>进入音乐播放器页</td>
+        <td>MCP music_play</td>
+      </tr>
+      <tr>
+        <td><code>SwitchOutPlayerMode()</code></td>
+        <td>退出播放器，回时钟</td>
+        <td>唤醒词 / 停止播放</td>
+      </tr>
+      <tr>
+        <td><code>UpdatePlayerProgress()</code> / <code>SetPlayerPaused()</code></td>
+        <td>进度刷新（200ms 自动 + 主动）</td>
+        <td>PlayerTickCb / MCP 暂停</td>
+      </tr>
+      <tr>
+        <td rowspan="2"><strong>QR / 激活</strong></td>
+        <td><code>ShowQrCode(content, ...)</code></td>
+        <td>通用 QR overlay（配网/激活/付费）</td>
+        <td>配网 BLE / 激活流程</td>
+      </tr>
+      <tr>
+        <td><code>HideQrCode()</code></td>
+        <td>隐藏 QR overlay（异步删除）</td>
+        <td>切场景前清场</td>
+      </tr>
+      <tr>
+        <td rowspan="3"><strong>查询</strong></td>
+        <td><code>GetCurrentScene()</code></td>
+        <td>返回 SceneType</td>
+        <td>外部状态查询</td>
+      </tr>
+      <tr>
+        <td><code>IsEduCardActive()</code></td>
+        <td>教育卡 overlay 是否显示中</td>
+        <td>外部状态查询</td>
+      </tr>
+      <tr>
+        <td><code>IsClockMode() / IsPlayerMode()</code></td>
+        <td>SceneType 快捷判定</td>
+        <td>外部状态查询</td>
+      </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="background:#FAFAFC">
+    <h3 style="font-size:14px;font-weight:600;margin-bottom:6px">内部状态字段（私有）</h3>
+    <table>
+      <tbody>
+      <tr><td><code>active_scene_</code></td><td><code>SceneType</code> · 当前 UI 场景（Clock / Chat / Player / ConfigQr / ...）</td></tr>
+      <tr><td><code>in_font_mode_</code></td><td><code>bool</code> · 是否在笔画 GIF 模式（守护 SetEmotion("neutral") 屏蔽）</td></tr>
+      <tr><td><code>ResetFontMode()</code></td><td>私有清退方法 · 内部 5 处调用（SwitchTo* / ShowEduCard / OnFontExitClicked）</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 02 SceneType ============ -->
+<section>
+  <div class="section-head">
+    <div class="section-num">02 · SceneType 八态</div>
+    <h2>UI 场景维度 · 互斥独占 · 外部查询入口</h2>
+    <p class="section-sub">SceneType 是三维心智模型的 C 维度（A=DeviceState / B=ActivityType / C=SceneType）。当前已实现 5 个，预留 3 个。</p>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>值</th><th>名称</th><th>状态</th><th>触发 / 退出</th></tr></thead>
+      <tbody>
+      <tr><td><code>0</code></td><td><code>kClock</code></td><td>✅ 已实现</td><td>Idle 默认 · SwitchToClockMode</td></tr>
+      <tr><td><code>1</code></td><td><code>kChat</code></td><td>✅ 已实现（默认值）</td><td>Listening/Speaking · SwitchToChatMode</td></tr>
+      <tr><td><code>2</code></td><td><code>kPlayer</code></td><td>✅ 已实现</td><td>MCP music_play · 唤醒词退出</td></tr>
+      <tr><td><code>3</code></td><td><code>kConfigQr</code></td><td>✅ 已实现</td><td>配网 / 激活 · 完成自动隐藏</td></tr>
+      <tr><td><code>4</code></td><td><code>kControlCenter</code></td><td>✅ 已实现（stub）</td><td>预留入口 · 量产稳定期下线</td></tr>
+      <tr><td><code>5</code></td><td><code>kPomodoro</code></td><td>🟡 预留</td><td>番茄钟功能</td></tr>
+      <tr><td><code>6</code></td><td><code>kTodo</code></td><td>🟡 预留</td><td>待办清单</td></tr>
+      <tr><td><code>7</code></td><td><code>kRoleSwitcher</code></td><td>🟡 预留</td><td>AI 角色切换</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 03 三角切换 ============ -->
+<section>
+  <div class="section-head">
+    <div class="section-num">03 · 三角切换全景（高频路径）</div>
+    <h2>Chat ↔ EduCard ↔ FontGIF · 6 条路径</h2>
+    <p class="section-sub">日常对话高频切换的就是这三个态。Player / ConfigQr 是低频独立场景（详见 § 04 主状态机）。</p>
+  </div>
+
+  <div class="trio">
+    <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg">
+      <rect class="node-chat" x="400" y="40" width="200" height="80" rx="14"/>
+      <text class="node-text" x="500" y="72" text-anchor="middle">① Chat 默认</text>
+      <text class="node-sub" x="500" y="92" text-anchor="middle">表情 + 字幕 + 底部提示</text>
+      <text class="node-sub" x="500" y="108" text-anchor="middle">SceneType::kChat</text>
+
+      <rect class="node-educard" x="80" y="320" width="220" height="80" rx="14"/>
+      <text class="node-text-dark" x="190" y="352" text-anchor="middle">② EduCard 教育卡</text>
+      <text class="node-sub-dark" x="190" y="372" text-anchor="middle">overlay 盖屏 + 底部保留</text>
+      <text class="node-sub-dark" x="190" y="388" text-anchor="middle">ShowEduCard / HideEduCard</text>
+
+      <rect class="node-font" x="700" y="320" width="220" height="80" rx="14"/>
+      <text class="node-text" x="810" y="352" text-anchor="middle">③ FontGIF 笔画</text>
+      <text class="node-sub" x="810" y="372" text-anchor="middle">emoji_box 内 GIF</text>
+      <text class="node-sub" x="810" y="388" text-anchor="middle">FontGif / ResetFontMode</text>
+
+      <path class="arrow" d="M460,118 L240,322" marker-end="url(#grn)"/>
+      <text class="arrow-label" x="290" y="200" text-anchor="middle">ShowEduCard</text>
+      <text class="arrow-label" x="290" y="216" text-anchor="middle" fill="#80DEEA">a</text>
+
+      <path class="arrow" d="M280,322 L495,125" marker-end="url(#grn)"/>
+      <text class="arrow-label" x="425" y="230" text-anchor="middle">HideEduCard</text>
+      <text class="arrow-label" x="425" y="246" text-anchor="middle" fill="#80DEEA">b</text>
+
+      <path class="arrow" d="M540,120 L750,322" marker-end="url(#grn)"/>
+      <text class="arrow-label" x="710" y="200" text-anchor="middle">FontGif</text>
+      <text class="arrow-label" x="710" y="216" text-anchor="middle" fill="#80DEEA">c</text>
+
+      <path class="arrow" d="M730,322 L515,125" marker-end="url(#grn)"/>
+      <text class="arrow-label" x="585" y="230" text-anchor="middle">ResetFontMode</text>
+      <text class="arrow-label" x="585" y="246" text-anchor="middle" fill="#80DEEA">d</text>
+
+      <path class="arrow" d="M300,365 L700,365" marker-end="url(#grn)"/>
+      <text class="arrow-label" x="500" y="356" text-anchor="middle">FontGif</text>
+      <text class="arrow-label" x="500" y="354" text-anchor="middle" fill="#80DEEA">e</text>
+
+      <path class="arrow" d="M700,395 L300,395" marker-end="url(#grn)"/>
+      <text class="arrow-label" x="500" y="430" text-anchor="middle">ShowEduCard (预盖零闪)</text>
+      <text class="arrow-label" x="500" y="448" text-anchor="middle" fill="#80DEEA">f</text>
+
+      <defs>
+        <marker id="grn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#66BB6A"/>
+        </marker>
+      </defs>
+    </svg>
+  </div>
+
+  <div class="path-card">
+    <div class="path-title">路径 a · Chat → EduCard</div>
+    <div class="path-flow">
+      ShowEduCard(category, main, top, bottom)<br>
+      &nbsp;&nbsp;→ EnsureDisplayFonts() · 字号校验<br>
+      &nbsp;&nbsp;→ if (in_font_mode_) 预盖 overlay <span style="color:#6E6E73">// 路径 a 不触发</span><br>
+      &nbsp;&nbsp;→ ResetFontMode() <span style="color:#6E6E73">// no-op</span><br>
+      &nbsp;&nbsp;→ ContainsCjk(main) → PY/EN-mode<br>
+      &nbsp;&nbsp;→ IsSuperCategory(category) → letter/phonics/math 走 88px<br>
+      &nbsp;&nbsp;→ PickEduMainFont() → 88/56/48<br>
+      &nbsp;&nbsp;→ RenderEduCardLayout() → overlay 显示 + bottom_bar 提顶
+    </div>
+    <div class="verdict">✅ 触发：聊天正则 [apple_苹果] / MCP show_card</div>
+  </div>
+
+  <div class="path-card">
+    <div class="path-title">路径 b · EduCard → Chat</div>
+    <div class="path-flow">
+      HideEduCard()<br>
+      &nbsp;&nbsp;→ if (overlay && !HIDDEN) add_flag(HIDDEN)<br>
+      &nbsp;&nbsp;→ move_foreground(bottom_bar / status_bar)
+    </div>
+    <div class="verdict">✅ 触发：触摸卡片 / SwitchTo* 清场 · overlay 单例不删除</div>
+  </div>
+
+  <div class="path-card">
+    <div class="path-title">路径 c · Chat → FontGIF</div>
+    <div class="path-flow">
+      FontGif(gif_buffer, size)<br>
+      &nbsp;&nbsp;→ DisplayLockGuard lock<br>
+      &nbsp;&nbsp;→ in_font_mode_ = false <span style="color:#6E6E73">// 强制重启动画</span><br>
+      &nbsp;&nbsp;→ emoji_collection->ReplaceEmoji("font", LvglRawImage)<br>
+      &nbsp;&nbsp;→ SetEmotion("font") → bottom_bar HIDDEN + HideEduCard + HideQrCode + emoji_box 提顶<br>
+      &nbsp;&nbsp;→ in_font_mode_ = true
+    </div>
+    <div class="verdict">✅ 触发：MCP show_stroke → HTTP 下载 → Schedule(FontGif)</div>
+  </div>
+
+  <div class="path-card">
+    <div class="path-title">路径 d · FontGIF → Chat</div>
+    <div class="path-flow">
+      ResetFontMode() <span style="color:#6E6E73">// 内部调用</span><br>
+      &nbsp;&nbsp;→ if (!in_font_mode_) return<br>
+      &nbsp;&nbsp;→ in_font_mode_ = false<br>
+      &nbsp;&nbsp;→ SetEmotion("neutral") → bottom_bar RESHOW
+    </div>
+    <div class="verdict">✅ 触发：触摸 emoji_box / SwitchTo* 清场 · 先清标志规避守护反噬</div>
+  </div>
+
+  <div class="path-card">
+    <div class="path-title">路径 e · EduCard → FontGIF</div>
+    <div class="path-flow">
+      FontGif(...)<br>
+      &nbsp;&nbsp;→ ReplaceEmoji + SetEmotion("font")<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;→ HideEduCard() <span style="color:#6E6E73">// 同步清教育卡</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;→ move_foreground(emoji_box)
+    </div>
+    <div class="verdict">✅ 触发：教育卡显示中说"猫怎么写"</div>
+  </div>
+
+  <div class="path-card">
+    <div class="path-title">路径 f · FontGIF → EduCard（预盖零闪）</div>
+    <div class="path-flow">
+      ShowEduCard(...)<br>
+      &nbsp;&nbsp;→ <strong>if (in_font_mode_) 预盖：</strong><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;→ EnsureEduCardOverlay + remove HIDDEN + move_foreground(overlay)<br>
+      &nbsp;&nbsp;→ ResetFontMode() <span style="color:#6E6E73">// neutral 切换在 overlay 之下不可见</span><br>
+      &nbsp;&nbsp;→ RenderEduCardLayout()
+    </div>
+    <div class="verdict">
+      ✅ <strong>零闪</strong> · 仅 in_font_mode_=true 时执行预盖（避免 neutral PNG 闪 1-2 帧）
+    </div>
+  </div>
+</section>
+
+<!-- ============ 04 跨线程数据流 ============ -->
+<section>
+  <div class="section-head">
+    <div class="section-num">04 · 跨线程数据流</div>
+    <h2>3 个生产线程 · Schedule() 屏障 · main loop 单线程串行化</h2>
+    <p class="section-sub">教育卡 / 笔画 GIF 数据来自 3 个 FreeRTOS 任务，全部通过 Application::Schedule() 投回 main loop，避免跨线程 race 和 UAF。</p>
+  </div>
+
+  <div class="threads">
+    <svg viewBox="0 0 1200 540" xmlns="http://www.w3.org/2000/svg">
+      <rect class="thread-task" x="40" y="40" width="280" height="140" rx="10"/>
+      <text class="thread-task-label" x="60" y="68">📡 Network Task</text>
+      <text class="thread-task-sub" x="60" y="92">websocket/MQTT 回调</text>
+      <text class="thread-task-sub" x="60" y="115">• OnIncomingJson()</text>
+      <text class="thread-task-sub" x="60" y="135">• 解析 sentence_start</text>
+      <text class="thread-task-sub" x="60" y="155">• ExtractEduWordCards()</text>
+
+      <rect class="thread-task" x="40" y="220" width="280" height="120" rx="10"/>
+      <text class="thread-task-label" x="60" y="248">⏱ esp_timer_task</text>
+      <text class="thread-task-sub" x="60" y="272">高优先级独立任务</text>
+      <text class="thread-task-sub" x="60" y="295">• 教育卡 3.5s 链式触发</text>
+      <text class="thread-task-sub" x="60" y="315">• FlushNextEduCard()</text>
+
+      <rect class="thread-task" x="40" y="380" width="280" height="120" rx="10"/>
+      <text class="thread-task-label" x="60" y="408">⬇ HTTP Download Task</text>
+      <text class="thread-task-sub" x="60" y="432">PSRAM 栈，独立任务</text>
+      <text class="thread-task-sub" x="60" y="455">• show_stroke GIF 下载</text>
+      <text class="thread-task-sub" x="60" y="475">• 完成后 Schedule FontGif</text>
+
+      <rect class="barrier-rect" x="540" y="220" width="120" height="100" rx="10"/>
+      <text class="barrier-text" x="600" y="252" text-anchor="middle">🛡 Schedule()</text>
+      <text class="barrier-text" x="600" y="272" text-anchor="middle">投递屏障</text>
+      <text class="barrier-text" x="600" y="295" text-anchor="middle" font-size="10">所有跨线程</text>
+      <text class="barrier-text" x="600" y="310" text-anchor="middle" font-size="10">数据严格收口</text>
+
+      <rect class="thread-task-main" x="850" y="180" width="310" height="200" rx="10"/>
+      <text class="thread-task-label" x="870" y="208" fill="#A5D6A7">🎯 Main Event Loop</text>
+      <text class="thread-task-sub-main" x="870" y="232" fill="#A5D6A7">main_event_loop_task（单线程）</text>
+      <text class="thread-task-sub-main" x="870" y="258">• EnqueueEduCards</text>
+      <text class="thread-task-sub-main" x="870" y="278">• FlushNextEduCardOnMain</text>
+      <text class="thread-task-sub-main" x="870" y="298">• g_edu_queue 唯一访问者</text>
+      <text class="thread-task-sub-main" x="870" y="318">• state 检查 / UI 更新</text>
+      <text class="thread-task-sub-main" x="870" y="348" fill="#A5D6A7" font-weight="600">▶ 数据严格单线程，零 race</text>
+
+      <path class="thread-net" d="M320,110 Q420,110 540,250" marker-end="url(#redarr)"/>
+      <text class="edge-label" x="350" y="100" fill="#EF5350">Schedule</text>
+      <path class="thread-timer" d="M320,275 L540,275" marker-end="url(#oranarr)"/>
+      <text class="edge-label" x="370" y="265" fill="#FFA726">Schedule</text>
+      <path class="thread-net" d="M320,440 Q420,440 540,300" marker-end="url(#redarr)"/>
+      <text class="edge-label" x="350" y="465" fill="#EF5350">Schedule</text>
+      <path class="thread-mainline" d="M660,275 L850,275" marker-end="url(#grnarr)" stroke-width="3"/>
+
+      <defs>
+        <marker id="redarr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#EF5350"/>
+        </marker>
+        <marker id="oranarr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#FFA726"/>
+        </marker>
+        <marker id="grnarr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#66BB6A"/>
+        </marker>
+      </defs>
+    </svg>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#EF5350"></div>Network/HTTP 任务</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#FFA726"></div>Timer 任务</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#4CAF50"></div>Schedule 屏障</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#66BB6A"></div>Main loop（唯一可访问 g_edu_queue）</div>
+  </div>
+
+  <div class="card">
+    <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">关键不变量</h3>
+    <ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.9;color:#424245">
+      <li><code>g_edu_queue</code> 只在 main loop 读写（无 mutex 需求）</li>
+      <li><code>active_scene_ / in_font_mode_</code> 只在 LVGL 持锁的 main loop 内更新</li>
+      <li>LVGL 渲染调用必须持 <code>DisplayLockGuard</code>（除 timer/LV 内部异步）</li>
+      <li>FontGif 内 PSRAM buffer 所有权转移给 EmojiCollection（不再 free）</li>
+      <li>OnFontExitClicked / OnEduCardClicked 用 <code>Schedule()</code> 异步退出，避免 LVGL 事件回调内修改 src 触发链问题</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 05 DeviceState 主状态机 ============ -->
+<section>
+  <div class="section-head">
+    <div class="section-num">05 · DeviceState 主状态机</div>
+    <h2>11 态 · SceneType 标注 · 量产纪律：不新增枚举</h2>
+    <p class="section-sub">A 维度（DeviceState）由 application.cc 状态机维护；C 维度（SceneType）由 UI 子系统维护。本图标注两者关系。</p>
+  </div>
+
+  <div class="state-diagram">
+    <svg viewBox="0 0 1200 600" xmlns="http://www.w3.org/2000/svg">
+      <rect class="state-box-boot" x="40" y="40" width="170" height="50" rx="8"/>
+      <text class="state-text" x="125" y="62" text-anchor="middle">kStarting</text>
+      <text class="scene-label" x="125" y="78" text-anchor="middle">scene=kChat (logo)</text>
+
+      <rect class="state-box-special" x="40" y="130" width="170" height="50" rx="8"/>
+      <text class="state-text" x="125" y="152" text-anchor="middle">Activating</text>
+      <text class="scene-label" x="125" y="168" text-anchor="middle">+QR overlay</text>
+
+      <rect class="state-box-special" x="40" y="220" width="170" height="50" rx="8"/>
+      <text class="state-text" x="125" y="242" text-anchor="middle">WifiConfiguring</text>
+      <text class="scene-label" x="125" y="258" text-anchor="middle">+QR overlay</text>
+
+      <rect class="state-box-idle" x="480" y="260" width="200" height="70" rx="12"/>
+      <text class="state-text-hub" x="580" y="290" text-anchor="middle">kIdle</text>
+      <text class="scene-label" x="580" y="312" text-anchor="middle">scene=kClock 主屏</text>
+
+      <rect class="state-box-transient" x="800" y="80" width="170" height="50" rx="8"/>
+      <text class="state-text" x="885" y="102" text-anchor="middle">Connecting</text>
+      <text class="scene-label" x="885" y="118" text-anchor="middle">SwitchToChatMode</text>
+
+      <rect class="state-box-active" x="800" y="180" width="170" height="50" rx="8"/>
+      <text class="state-text" x="885" y="202" text-anchor="middle">Listening</text>
+      <text class="scene-label" x="885" y="218" text-anchor="middle">+HideEduCard</text>
+
+      <rect class="state-box-active" x="800" y="280" width="170" height="50" rx="8"/>
+      <text class="state-text" x="885" y="302" text-anchor="middle">Speaking</text>
+      <text class="scene-label" x="885" y="318" text-anchor="middle">+EduCard 链式</text>
+
+      <rect class="state-box-idle" x="990" y="450" width="170" height="50" rx="8"/>
+      <text class="state-text" x="1075" y="472" text-anchor="middle">Player Mode</text>
+      <text class="scene-label" x="1075" y="488" text-anchor="middle">scene=kPlayer</text>
+
+      <rect class="state-box-special" x="40" y="380" width="170" height="40" rx="8"/>
+      <text class="state-text" x="125" y="404" text-anchor="middle">AudioTesting</text>
+      <rect class="state-box-special" x="40" y="430" width="170" height="40" rx="8"/>
+      <text class="state-text" x="125" y="454" text-anchor="middle">Upgrading</text>
+      <rect class="state-box-special" x="40" y="480" width="170" height="40" rx="8"/>
+      <text class="state-text" x="125" y="504" text-anchor="middle">FatalError</text>
+
+      <path class="edge" d="M125,90 L125,130" marker-end="url(#arr)"/>
+      <text class="edge-label" x="135" y="115">NetworkConnected</text>
+      <path class="edge" d="M210,155 Q330,155 480,290" marker-end="url(#arr)"/>
+      <text class="edge-label" x="240" y="190">ActivationDone</text>
+      <path class="edge" d="M210,245 Q340,245 480,300" marker-end="url(#arr)"/>
+      <text class="edge-label" x="245" y="235">WifiConnected</text>
+      <path class="edge" d="M680,275 Q740,180 800,103" marker-end="url(#arr)"/>
+      <text class="edge-label" x="690" y="200">SendTextToTts</text>
+      <path class="edge" d="M885,130 L885,180" marker-end="url(#arr)"/>
+      <text class="edge-label" x="895" y="160">tts:start (sync)</text>
+      <path class="edge" d="M885,230 L885,280" marker-end="url(#arr)"/>
+      <text class="edge-label" x="895" y="260">tts:start (asr)</text>
+      <path class="edge" d="M800,303 Q740,310 680,310" marker-end="url(#arr)"/>
+      <text class="edge-label" x="690" y="298">tts:stop · 清队列</text>
+      <path class="edge" d="M680,290 Q740,250 800,200" marker-end="url(#arr)" stroke-dasharray="4 2"/>
+      <text class="edge-label" x="690" y="245">WakeWord</text>
+      <path class="edge" d="M680,330 Q830,400 990,470" marker-end="url(#arr)"/>
+      <text class="edge-label" x="780" y="395">MCP music_play</text>
+      <path class="edge" d="M990,470 Q820,440 680,320" marker-end="url(#arr)" stroke-dasharray="4 2"/>
+      <text class="edge-label" x="820" y="430">WakeWord / Stop</text>
+      <path class="edge" d="M480,310 Q300,360 210,400" marker-end="url(#arr)"/>
+
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#B0BEC5"/>
+        </marker>
+      </defs>
+    </svg>
+  </div>
+</section>
+
+<!-- ============ 06 教育卡链式 ============ -->
+<section>
+  <div class="section-head">
+    <div class="section-num">06 · 教育卡链式弹卡链路</div>
+    <h2>从 LLM 输出到屏幕渲染 · 7 步</h2>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>步骤</th><th>线程</th><th>函数</th><th>动作</th></tr></thead>
+      <tbody>
+      <tr><td>1</td><td>Network</td><td>OnIncomingJson(sentence_start)</td><td>解析 JSON，提取 LLM 文本中 <code>[apple_苹果]</code> 模式</td></tr>
+      <tr><td>2</td><td>Network</td><td>ExtractEduWordCards()</td><td>正则匹配每个 [...]，转 EduWordHit 结构 vector</td></tr>
+      <tr><td>3</td><td>Network → Main</td><td>EnqueueEduCards(hits)</td><td>Schedule 投递到 main loop，写入 g_edu_queue（单线程访问保证）</td></tr>
+      <tr><td>4</td><td>Main</td><td>FlushNextEduCardOnMain()</td><td>从队头取 1 张，校验 state==Speaking，调 ShowEduCard</td></tr>
+      <tr><td>5</td><td>Main / LVGL</td><td>ShowEduCard(category, ...)</td><td>预盖 overlay（仅 in_font_mode_）+ 字号选档 + RenderEduCardLayout</td></tr>
+      <tr><td>6</td><td>esp_timer</td><td>esp_timer_start_once(3500ms)</td><td>启动 3.5s 定时器，到时回调 FlushNextEduCard</td></tr>
+      <tr><td>7</td><td>esp_timer → Main</td><td>FlushNextEduCard → Schedule</td><td>定时器回调投回 main loop，继续弹下一张</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 07 流程交互合理性评审 ============ -->
+<section>
+  <div class="section-head">
+    <div class="section-num">07 · 流程交互合理性评审</div>
+    <h2>每环节是否合理 · 哪些可精简 · 哪些是必要 hack</h2>
+    <p class="section-sub">逐路径审视交互链每一步：是否原子？是否冗余？副作用是否隐式？hack 的根因是什么？给出量产期保留 / 未来打磨建议。</p>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr><th>路径</th><th>环节</th><th>判定</th><th>评审说明</th></tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td rowspan="3"><strong>a · Chat→EduCard</strong></td>
+        <td>EnsureDisplayFonts 延迟加载</td>
+        <td style="color:#1B5E20">✅ 合理</td>
+        <td>cbin 字体启动后才挂载，懒加载避开 boot 卡顿</td>
+      </tr>
+      <tr>
+        <td><code>if (in_font_mode_) 预盖</code> 守卫</td>
+        <td style="color:#1B5E20">✅ 合理</td>
+        <td>统一入口检查 · 路径 a 走 false 分支零开销 · 路径 f 复用同代码</td>
+      </tr>
+      <tr>
+        <td>RenderEduCardLayout 末尾把 bottom_bar 提到 overlay 之上</td>
+        <td style="color:#1B5E20">✅ 合理</td>
+        <td>产品决策（教育卡时保留"长按说话"提示），LVGL 缺少"反向 z 锁定"语义，move_foreground 是标准做法</td>
+      </tr>
+
+      <tr>
+        <td rowspan="2"><strong>b · EduCard→Chat</strong></td>
+        <td>overlay 单例 add_flag(HIDDEN)，不 lv_obj_del</td>
+        <td style="color:#1B5E20">✅ 合理（必要）</td>
+        <td>避免 lv_obj_del 与 label 异步 layout cb 的 race（LVGL 9 已知 UAF），是验证过的关键设计</td>
+      </tr>
+      <tr>
+        <td>层级复位：bottom_bar / status_bar 重新 move_foreground</td>
+        <td style="color:#1B5E20">✅ 合理</td>
+        <td>对称于 ShowEduCard 内的提顶，HideEduCard 必须复位否则下次显示层级错乱</td>
+      </tr>
+
+      <tr>
+        <td rowspan="3"><strong>c · Chat→FontGIF</strong></td>
+        <td>FontGif 内 <code>in_font_mode_ = false</code> 后才 SetEmotion("font")</td>
+        <td style="color:#BF360C">⚠ 必要 hack</td>
+        <td>根因：SetEmotion 检测"相同 emotion"会 short-circuit，导致 GIF 不重启；先清标志强制走完整切换</td>
+      </tr>
+      <tr>
+        <td>SetEmotion("font") 内含 HideEduCard / HideQrCode / move_foreground(emoji_box)</td>
+        <td style="color:#BF360C">⚠ 副作用隐式</td>
+        <td>违反单一职责，但收敛了 font 互斥逻辑。未来重构方向：SetEmotion 仅切表情 src，互斥副作用搬到 FontGif 显式调用</td>
+      </tr>
+      <tr>
+        <td>emoji_collection->ReplaceEmoji 原子 swap</td>
+        <td style="color:#1B5E20">✅ 合理</td>
+        <td>PSRAM buffer 所有权转移给 EmojiCollection，调用方不再 free，零内存泄漏</td>
+      </tr>
+
+      <tr>
+        <td rowspan="2"><strong>d · FontGIF→Chat</strong></td>
+        <td>ResetFontMode 先 <code>in_font_mode_ = false</code> 再 SetEmotion("neutral")</td>
+        <td style="color:#BF360C">⚠ 必要 hack</td>
+        <td>根因：SetEmotion 守护 <code>if (in_font_mode_ && neutral) return</code> 会反噬，先清标志才能切回 neutral · 与路径 c 同源根因</td>
+      </tr>
+      <tr>
+        <td>SetEmotion 内 <code>is_font != in_font_mode_</code> 检测切回 bottom_bar 显示</td>
+        <td style="color:#1B5E20">✅ 合理</td>
+        <td>边沿检测避免重复 set/remove HIDDEN flag · LVGL 操作幂等但少做总比多做好</td>
+      </tr>
+
+      <tr>
+        <td rowspan="2"><strong>e · EduCard→FontGIF</strong></td>
+        <td>SetEmotion("font") 隐式触发 HideEduCard</td>
+        <td style="color:#BF360C">⚠ 隐式</td>
+        <td>清场被埋在 SetEmotion 内，调用方不显式可见。同 c 路径的副作用问题</td>
+      </tr>
+      <tr>
+        <td>触发条件：教育卡显示中 LLM 调 show_stroke</td>
+        <td style="color:#1B5E20">✅ 合理</td>
+        <td>产品层决策（自然流），UI 层只需保证切换流畅</td>
+      </tr>
+
+      <tr>
+        <td rowspan="2"><strong>f · FontGIF→EduCard</strong></td>
+        <td>预盖 overlay 后再 ResetFontMode</td>
+        <td style="color:#BF360C">⚠ 必要 workaround</td>
+        <td>根因：ResetFontMode 切 neutral 会渲染 1-2 帧 PNG · 预盖让切换发生在黑屏下不可见。当前 workaround 已 stable，无需重构</td>
+      </tr>
+      <tr>
+        <td>预盖仅 in_font_mode_=true 时执行</td>
+        <td style="color:#1B5E20">✅ 合理</td>
+        <td>路径 a 跳过预盖（无 neutral 闪烁问题），路径 f 才执行 · 守卫精确</td>
+      </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="background:#FFF8E1;border-color:#FFD54F">
+    <h3 style="color:#B95000;font-weight:600;font-size:14px;margin-bottom:8px">⚠ 3 处必要 hack 同源根因</h3>
+    <div style="font-size:13px;line-height:1.8;color:#424245">
+      路径 c / d / e 的 3 处 hack 都源于<strong>同一耦合点</strong>：<code>SetEmotion</code> 一个函数承担了 4 个职责：
+      <ol style="margin:8px 0 8px 24px">
+        <li>切表情 src（父类 LcdDisplay::SetEmotion）</li>
+        <li>是 font 时屏蔽 neutral 切换（in_font_mode_ 守护）</li>
+        <li>是 font 时清教育卡 / QR 互斥 overlay</li>
+        <li>是 font 时隐藏 bottom_bar</li>
+      </ol>
+      职责 2-4 都依赖 in_font_mode_ 字段，导致调用方必须"前置清标志"才能绕开守护——这就是 3 处 hack 的根源。
+      <br><br>
+      <strong>重构方向（量产后）</strong>：把 2-4 的副作用从 SetEmotion 内移出，由 FontGif / ResetFontMode 显式调用：
+      <pre style="margin:8px 0;padding:10px 14px;background:#FFF;border-radius:6px;font-size:11.5px;line-height:1.6">
+<span style="color:#80DEEA">void</span> FontGif(uint8_t* buf, size_t size) {
+    DisplayLockGuard lock(this);
+    HideEduCard(); HideQrCode();        <span style="color:#FFA726">// 显式互斥清场</span>
+    bottom_bar HIDDEN;
+    emoji_collection->ReplaceEmoji("font", ...);
+    LcdDisplay::SetEmotion("font");     <span style="color:#FFA726">// 父类仅切 src，无守护</span>
+    move_foreground(emoji_box);
+    in_font_mode_ = true;
+}
+<span style="color:#80DEEA">void</span> ResetFontMode() {
+    <span style="color:#80DEEA">if</span> (!in_font_mode_) <span style="color:#80DEEA">return</span>;
+    DisplayLockGuard lock(this);
+    in_font_mode_ = false;
+    bottom_bar SHOW;
+    LcdDisplay::SetEmotion("neutral");  <span style="color:#FFA726">// 直接调父类，无守护</span>
+}
+<span style="color:#80DEEA">void</span> SetEmotion(<span style="color:#80DEEA">const char</span>* e) <span style="color:#80DEEA">override</span> {
+    <span style="color:#80DEEA">if</span> (in_font_mode_) <span style="color:#80DEEA">return</span>;  <span style="color:#FFA726">// 唯一守护：font 模式不响应外部 SetEmotion</span>
+    LcdDisplay::SetEmotion(e);
+}</pre>
+      <strong>取舍</strong>：行为零变更 · 路径 c/d/e 三 hack 消除 · SetEmotion 回归"仅切表情" · FontGif 长度从 16 行涨到 22 行（副作用显式化）
+      <br><br>
+      <strong>量产期建议</strong>：<u>当前 hack 已 stable 半年</u>，无新风险。重构属于"打磨项"，建议量产烧板 3 个月稳定后第 2 个迭代再做。
+    </div>
+  </div>
+
+  <div class="card" style="background:#F1F8E9;border-color:#4CAF50">
+    <h3 style="color:#1B5E20;font-weight:600;font-size:14px;margin-bottom:8px">✅ 6 条路径总评</h3>
+    <div style="font-size:13px;line-height:1.8;color:#424245">
+      <strong>功能完整性</strong>：6/6 全部覆盖 · 状态闭合<br>
+      <strong>视觉流畅性</strong>：路径 f 预盖后零闪 · 其他 5 路径本来流畅<br>
+      <strong>线程安全</strong>：DisplayLockGuard 全覆盖 · 跨线程 race 已修<br>
+      <strong>清场动作</strong>：每条路径都明确（HideEduCard / ResetFontMode / 层级复位）<br>
+      <strong>代码可读</strong>：3 处 hack 都有 root-cause 注释，未来重构有据可循<br><br>
+      <strong>结论</strong>：6 条路径作为量产架构合理 · 3 处 hack 不影响功能 · 重构是优化非必要
+    </div>
+  </div>
+</section>
+
+<!-- ============ 08 命名规范 ============ -->
+<section>
+  <div class="section-head">
+    <div class="section-num">08 · 命名规范 · 二轮精简后</div>
+    <h2>4 项保留 · 2 项回退（避免过度设计）</h2>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>分类</th><th>命名</th><th>选择理由</th></tr></thead>
+      <tbody>
+      <tr>
+        <td>SceneType</td>
+        <td><code>kChat</code>（而非 kEmoji）</td>
+        <td>产品语义对齐 SwitchToChatMode，不用 UI 元素名</td>
+      </tr>
+      <tr>
+        <td>笔画 GIF 入口</td>
+        <td><code>FontGif()</code>（而非 EnterFontMode / UpdateFontGif）</td>
+        <td>精简名词命名，与 ShowEduCard / ShowQrCode 风格统一；"Update" 误导，"Enter" 多余</td>
+      </tr>
+      <tr>
+        <td>笔画 GIF 退出</td>
+        <td><code>ResetFontMode()</code> 私有（无 ExitFontMode 公共 wrapper）</td>
+        <td>0 外部调用方，仅内部 5 处使用；wrapper 是死代码</td>
+      </tr>
+      <tr>
+        <td>教育卡分类</td>
+        <td><code>const char* category</code> 字符串（无 EduCategory enum）</td>
+        <td>调用入口都是 LLM JSON 字符串；9 enum + 双映射函数是死代码</td>
+      </tr>
+      <tr>
+        <td>教育卡渲染主体</td>
+        <td><code>RenderEduCardLayout()</code></td>
+        <td>"已知数据 → 画屏"语义清晰，避免与 ShowEduCard 公共 API 混淆</td>
+      </tr>
+      <tr>
+        <td>状态字段</td>
+        <td><code>active_scene_ / in_font_mode_</code></td>
+        <td>消除 "current_xx" 命名重复</td>
+      </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="background:#E3F2FD;border-color:#64B5F6">
+    <h3 style="color:#0D47A1;font-weight:600;font-size:14px;margin-bottom:8px">回退记录</h3>
+    <div style="font-size:13px;line-height:1.8;color:#424245">
+      首轮命名重构引入了 <code>ExitFontMode</code> 公共 wrapper 和 <code>EduCategory</code> enum + 双重载，
+      复盘发现属于过度设计——前者 0 外部调用方，后者所有调用入口都是 LLM 字符串，
+      9 个 enum 值实际只用 1 个 bool 信号（是否触发 88px 主秀）。
+      二轮回退共删除 ~50 行死代码 + 历史修复注释，公共 API 从 7 个收敛到 5 个。
+      <br><br>
+      <strong>设计原则</strong>：量产稳定期，<u>实际使用驱动 API 形态</u>，不为了"对称性 / 编译期类型安全"提前抽象。
+    </div>
+  </div>
+</section>
+
+<!-- ============ 08 量产验收 ============ -->
+<section>
+  <div class="section-head">
+    <div class="section-num">09 · 量产烧板验收清单</div>
+    <h2>7 项测试 · 覆盖 6 条三角路径 + 4 跨场景切换</h2>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>#</th><th>测试场景</th><th>预期</th><th>覆盖</th></tr></thead>
+      <tbody>
+      <tr><td>1</td><td>对话触发 <code>[apple_苹果]</code></td><td>Chat → 教育卡 overlay 显示 · 底部"长按说话"保留</td><td>路径 a</td></tr>
+      <tr><td>2</td><td>触摸教育卡退出</td><td>overlay 隐藏 · 回到 Chat 表情</td><td>路径 b</td></tr>
+      <tr><td>3</td><td>MCP show_stroke('好')</td><td>Chat → 笔画 GIF · 底部隐藏</td><td>路径 c</td></tr>
+      <tr><td>4</td><td>触摸 emoji_box 退 GIF</td><td>GIF → neutral 表情 · 底部恢复</td><td>路径 d</td></tr>
+      <tr><td>5</td><td>教育卡中说"猫怎么写"</td><td>教育卡 → 笔画 GIF（卡先 HIDDEN）</td><td>路径 e</td></tr>
+      <tr><td>6</td><td>GIF 中聊天触发 <code>[bird_鸟]</code></td><td>GIF → 教育卡 · <strong>无 neutral 闪烁</strong></td><td>路径 f 预盖</td></tr>
+      <tr><td>7</td><td>tts:stop 在教育卡显示中</td><td>队列清空 · 教育卡保留至触摸退出</td><td>状态机闭合</td></tr>
+      <tr><td>8</td><td>MCP music_play → Player</td><td>Chat/Clock → Player · 进度条 200ms 刷新</td><td>跨场景</td></tr>
+      <tr><td>9</td><td>Player 中唤醒词</td><td>Player → Chat / Clock</td><td>跨场景</td></tr>
+      <tr><td>10</td><td>开机 → 激活 → 联网 → 时钟</td><td>QR overlay 自动隐藏 · scene=kClock</td><td>前置态</td></tr>
+      <tr><td>11</td><td>连续触发 10 次 GIF→EduCard</td><td>无视觉闪烁、无内存增长（PSRAM swap）</td><td>压力</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 09 量产纪律 ============ -->
+<section>
+  <div class="section-head">
+    <div class="section-num">10 · 量产纪律</div>
+    <h2>不动状态机 · 不抽基类 · 必登记三维取值</h2>
+  </div>
+
+  <div class="card">
+    <ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.9;color:#424245">
+      <li><strong>状态机 12 态不新增枚举</strong>（DeviceState）—— 22 项功能盘点 0 项需要新增</li>
+      <li><strong>SceneType 8 值不轻易扩展</strong> —— 真有第 6 个全屏 Scene 且共享逻辑出现时才抽 SceneFactory</li>
+      <li><strong>不抽 ActivitySession / SceneNavigator 基类</strong> —— LVGL screen 已经是 Scene 抽象</li>
+      <li><strong>事件型扩展走 AudioSource enum</strong> —— Alarm / PomodoroBell / Reminder 禁止加新 IsXxx flag</li>
+      <li><strong>新增模块在 docs/p30-architecture.html § 一.5.2 落位表登记一行</strong>（A×B×C 三维坐标）</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  MyDazy P30 · UI 最终架构 · 2026-05-11 · 与代码 main/display/ui_display.{h,cc} 完全对齐<br>
+  关联：<a href="p30-architecture.html">P30 整体架构</a>
+</footer>
+
+</div>
+</body>
+</html>

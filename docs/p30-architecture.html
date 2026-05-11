@@ -2390,51 +2390,37 @@ T+稳态  Idle · 28 个应用层任务 + 框架任务全部就位</pre>
     <strong>量产期纪律</strong> · ① 文档采样率 + 帧长全文同步纠正；② AEC 软件回采缓冲挪 INT RAM 评估（量产后视红线压力决定）；③ FEC 启用属产品决策（带宽 vs 抗丢包）；④ 不动 Opus 编码核心参数（已成熟）。
   </div>
 
-  <h3>§ 五.A AcousticProfile 三档声学配置 + 上传链路增益注入点（2026-04-30）</h3>
-  <p class="sub">参考 <code>xiaozhi-esp32-189/main/audio/acoustic_calibration.cc</code> 简化版 · 新增 <code>main/audio/acoustic_profile.{h,cc}</code> 组件 + 诊断旁路。解决用户反馈"咪头不灵敏 / 服务器没听到"的根因（默认 input_gain=18 dB 偏低 + 缺乏 AEC 残留 vs 人声损失的诊断手段）。</p>
+  <h3>§ 五.A 上传链路增益注入点决策（2026-04-30 · 仅理论分析）</h3>
+  <p class="sub">完整上传链路 5 个候选注入点。当前仅 A 点（ES7210 PGA）落地 · 其余推迟到 v33。</p>
 
-  <div class="callout ok">
-    <strong>📦 三档预设</strong>（mic_gain 都是 ES7210 PGA 3 dB 整数倍 · 无数字补偿误差）
-    <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px">
-      <thead style="background:#F5F5F5">
-        <tr><th style="padding:6px;text-align:left;border:1px solid #ddd">档位</th><th style="padding:6px;text-align:center;border:1px solid #ddd">mic_gain</th><th style="padding:6px;text-align:left;border:1px solid #ddd">适用场景</th><th style="padding:6px;text-align:left;border:1px solid #ddd">AEC 风险</th></tr>
-      </thead>
-      <tbody>
-        <tr><td style="padding:6px;border:1px solid #ddd"><code>robust</code></td><td style="padding:6px;text-align:center;border:1px solid #ddd">15 dB</td><td style="padding:6px;border:1px solid #ddd">嘈杂环境 / 外放音乐 / 误唤醒严重</td><td style="padding:6px;border:1px solid #ddd">低</td></tr>
-        <tr style="background:#FFF8E1"><td style="padding:6px;border:1px solid #ddd"><strong>standard（默认）</strong></td><td style="padding:6px;text-align:center;border:1px solid #ddd"><strong>21 dB</strong></td><td style="padding:6px;border:1px solid #ddd">普通家庭近讲 30-80cm</td><td style="padding:6px;border:1px solid #ddd">中（平衡）</td></tr>
-        <tr><td style="padding:6px;border:1px solid #ddd"><code>sensitive</code></td><td style="padding:6px;text-align:center;border:1px solid #ddd">27 dB</td><td style="padding:6px;border:1px solid #ddd">远讲 &gt;1.5m / 卧室 / 咪头隔音差</td><td style="padding:6px;border:1px solid #ddd">高（接近 30 dB 上限）</td></tr>
-      </tbody>
-    </table>
-    <p style="margin:8px 0 0 0;font-size:12px;color:#666">升级路径：旧 NVS <code>input_gain=18</code> 设备 → 自动映射到 <strong>standard</strong>（升级即 18→21 dB · 解决"听不见"问题）</p>
+  <div class="callout warn" style="border-left-color:#FB8C00">
+    <strong>⚠ 2026-05-11 精简</strong>：原计划的 AcousticProfile 三档系统（robust/standard/sensitive）+ NVS <code>audio.ap_profile</code> + MCP <code>set_profile</code> / <code>diagnose_acoustic</code> + 诊断旁路 <code>SnoopInputForDiagnose</code> <strong>未落地</strong>，量产期价值不足。当前只保留底层 <code>BoxAudioCodec::SetInputGain</code>（默认 15 dB · NVS <code>audio.input_gain</code>）。未来若需档位抽象，参考 <code>xiaozhi-esp32-189/main/audio/acoustic_calibration.cc</code>（v33 备选）。
   </div>
 
   <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">上传链路 5 个增益注入点决策</h4>
   <table class="tbl-compact">
     <thead><tr><th>#</th><th>位置</th><th>信噪比</th><th>影响 AEC</th><th>影响 NS</th><th>影响 WakeNet</th><th>推荐</th></tr></thead>
     <tbody>
-      <tr style="background:#E8F5E9"><td><strong>A</strong></td><td>ES7210 PGA（已实现 · AcousticProfile.mic_gain）</td><td>★★★★★</td><td>⚠ 同时放大喇叭回采</td><td>同 NS 输入</td><td>影响（已训练阈值偏移）</td><td>✅ 第一档刀</td></tr>
+      <tr style="background:#E8F5E9"><td><strong>A</strong></td><td>ES7210 PGA · <code>BoxAudioCodec::SetInputGain</code></td><td>★★★★★</td><td>⚠ 同时放大喇叭回采</td><td>同 NS 输入</td><td>影响（已训练阈值偏移）</td><td>✅ 已落地</td></tr>
       <tr><td>B</td><td>WakeWord Feed 前</td><td>★★★★</td><td>—</td><td>—</td><td>❌ 阈值偏移</td><td>✗</td></tr>
       <tr><td>C</td><td>AFE Feed 前（AEC 输入端）</td><td>★★★★</td><td>❌ 双讲判错</td><td>❌ 学错噪声基线</td><td>—</td><td>✗</td></tr>
-      <tr style="background:#FFF8E1"><td><strong>D</strong></td><td>AfeAudioProcessor::output_callback_ 内</td><td>★★★</td><td>✅ 已完成</td><td>✅ 已完成</td><td>✅ 不影响</td><td>★ 唯一正确（待启用）</td></tr>
-      <tr><td>E</td><td>audio_service push encode 前</td><td>★★★</td><td>同 D</td><td>同 D</td><td>同 D</td><td>✅ 实现更干净</td></tr>
+      <tr><td><strong>D</strong></td><td>AfeAudioProcessor::output_callback_ 内</td><td>★★★</td><td>✅ 已完成</td><td>✅ 已完成</td><td>✅ 不影响</td><td>★ 理论最佳（待启用）</td></tr>
+      <tr><td>E</td><td>audio_service push encode 前</td><td>★★★</td><td>同 D</td><td>同 D</td><td>同 D</td><td>替代 D（实现更干净）</td></tr>
     </tbody>
   </table>
-  <p style="margin:8px 0 0 0;font-size:12px;color:#666"><strong>第一性原理</strong>：任何放大都会同时放大信号 + 噪声 + 残留回声。只有在 AEC + NS 全部完成之后放大，才是"纯粹放大用户人声"。<strong>189 版本对比</strong>：<code>AcousticCalibration::afe_linear_gain</code>（1.0~10.0×）就是放在 D 点 · 高/中/低三档咪头分别 3.0×/5.0×/8.0×。<strong>P30 当前</strong>：A 已落地 · D/E 暂未启用（量产实测后再决定 · 保守路径优先 PGA + 钳位防失真）。</p>
+  <p style="margin:8px 0 0 0;font-size:12px;color:#666"><strong>第一性原理</strong>：任何放大都会同时放大信号 + 噪声 + 残留回声。只有在 AEC + NS 全部完成之后放大，才是"纯粹放大用户人声"。<strong>189 版本对比</strong>：<code>AcousticCalibration::afe_linear_gain</code>（1.0~10.0×）就是放在 D 点 · 高/中/低三档咪头分别 3.0×/5.0×/8.0×。<strong>P30 v32 当前</strong>：A 已落地 · D/E 推迟 v33。</p>
 
-  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">MCP 工具入口（mcp_server.cc）</h4>
+  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">音频相关 MCP 工具（实际存在 · mcp_server.cc）</h4>
   <table class="tbl-compact">
     <thead><tr><th>工具名</th><th>用途</th><th>触发场景</th></tr></thead>
     <tbody>
-      <tr><td><code>self.audio.set_profile</code></td><td>切换三档（robust/standard/sensitive）</td><td>"听不见我说话" / "咪头不灵敏" / "环境太吵"</td></tr>
-      <tr><td><code>self.audio.get_profile</code></td><td>读当前档位 + tradeoff 提示</td><td>设置面板 / AI 自我决策</td></tr>
-      <tr><td><code>self.audio.diagnose_acoustic</code></td><td>抓 200ms 双通道 PCM 算 MIC/REF 比 · 输出 ratio_db + 建议</td><td>"有回声" / "喇叭声漏到识别"</td></tr>
-      <tr><td><code>self.audio.set_mic_gain</code></td><td>底层 mic_gain 直调（绕过 profile）</td><td>高级调试用</td></tr>
+      <tr><td><code>self.audio.set_aec</code></td><td>AEC 模式切换 (off/device)</td><td>"开启自然交流" / "关闭打断"</td></tr>
       <tr><td><code>self.audio.set_stt_popup</code></td><td>说话结束提示音开关</td><td>"关掉那个咚的声音"</td></tr>
+      <tr><td><code>self.audio.get_stt_popup</code></td><td>查询提示音状态</td><td>设置面板</td></tr>
+      <tr><td><code>self.audio_speaker.set_volume</code></td><td>音量调节 0-100</td><td>"调大音量"</td></tr>
     </tbody>
   </table>
-
-  <h4 style="margin-top:18px;font-size:14px;color:var(--brand-deep)">诊断旁路实现（audio_service.cc）</h4>
-  <p style="font-size:13px;color:#666"><code>SnoopInputForDiagnose(max_ms, ...)</code> 通过 <code>DiagnosticTap</code> struct + binary semaphore 在 <code>ReadAudioData()</code> 末尾加非侵入 hook，抓 200ms 双通道 [MIC, REF, MIC, REF, ...] 算 RMS² → ratio_db。零任务新增 · 单 mutex 保护 · 不打扰 AFE/AudioInputTask 主流程。健康区间 ±2 dB（参考 189 TARGET_RATIO=1.05 即 +0.4 dB）；&gt; +6 dB → AEC 残留高（建议切 robust）；&lt; -6 dB → 人声被吞（建议切 sensitive）。</p>
+  <p style="margin:8px 0 0 0;font-size:12px;color:#666">麦克风增益调节走 <strong>RemoteCmd</strong> <code>codec.set_input_gain</code> 通道（<code>remote_cmd.cc:191</code>）· 暂无 MCP 工具入口（设计上只在工厂调试 / 服务器后台使用）。</p>
 </section>
 
 <!-- ==================== § 七.x Display Overlay 层级 ==================== -->

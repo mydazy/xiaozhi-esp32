@@ -373,29 +373,23 @@ SetEnabled(false) → 关背光 → ResetProtocol（主动断 MQTT）→ vTaskDe
 | 持久化 | NVS `audio.stt_popup`（默认 1=开） | 跨重启保留 |
 | MCP 工具 | `self.audio.set_stt_popup` / `get_stt_popup` | AI 可直接切换 |
 
-#### B.7 · AcousticProfile 三档声学配置（2026-04-30 · 新增组件）
+#### B.7 · 麦克风增益基础设施（2026-04-30 · 仅保留底层）
 
-参考 `xiaozhi-esp32-189/main/audio/acoustic_calibration.cc` 简化版 · 新增 `main/audio/acoustic_profile.{h,cc}` + audio_service 诊断旁路 · 落地表见 § 五.A。
+⚠ **2026-05-11 精简删除**：原计划的 AcousticProfile 三档抽象（robust/standard/sensitive）+ NVS `audio.ap_profile` + MCP `set_profile` / `diagnose_acoustic` 工具**未落地**，量产期价值不足。当前只保留底层 mic_gain 调节，无 profile 包装。
 
-**核心：3 档预设**（mic_gain 都是 ES7210 PGA 3 dB 整数倍 · 无数字补偿误差）
+**保留的实际落地**：
 
-| 档位 | mic_gain (PGA) | 适用 | AEC 风险 |
-|---|---|---|---|
-| robust | 15 dB | 嘈杂/外放音乐/误唤醒多 | 低 |
-| **standard**（默认） | **21 dB** | 普通家庭近讲 30-80cm | 中 |
-| sensitive | 27 dB | 远讲>1.5m / 卧室 / 隔音差 | 高 |
+| 字段 | 默认值 | 触发接口 | 持久化 |
+|------|--------|----------|--------|
+| `BoxAudioCodec::input_gain_` | **15 dB**（NVS `audio.input_gain`） | `SetInputGain(float)` 实时下发 ES7210 PGA | ✅ |
+| `Es7111AudioCodec::input_gain_`（P31） | **24 dB** | `SetInputGain(float)` 同上 | ✅ |
+| `Application::stt_popup_enabled_` | true | MCP `self.audio.set_stt_popup` | ✅ NVS `audio.stt_popup` |
 
-**升级路径**：旧 NVS `input_gain=18` 设备 → 自动映射到 standard（升级即从 18 dB→21 dB · 解决"设备听不见"）。
+**调用入口**：
+- 远程命令 `codec.set_input_gain` → `remote_cmd.cc:191`
+- 量产期改默认 → 改 `box_audio_codec.cc:22` `settings.GetFloat("input_gain", 15.0f)` 第二参数
 
-**MCP 工具**（mcp_server.cc）：
-- `self.audio.set_profile` / `get_profile` — 档位切换 + 提示
-- `self.audio.diagnose_acoustic` — 抓 200ms 双通道 PCM 算 MIC/REF 比 · 输出 ratio_db + 建议
-- `self.audio.set_mic_gain` / `get_mic_gain` — 底层调试用（普通用户走 profile）
-
-**诊断旁路**（`audio_service.cc::SnoopInputForDiagnose`）：
-- 在 `ReadAudioData()` 末尾加非侵入 hook · semaphore + mutex 保护
-- 抓双通道 [MIC, REF, MIC, REF, ...] 算 RMS² · 不影响 AFE/AudioInputTask 主流程
-- ratio_db 健康区间 ±2 dB；> +6 dB 说明 AEC 残留高；< -6 dB 说明人声被吞
+**未来若需档位抽象**：参考 `xiaozhi-esp32-189/main/audio/acoustic_calibration.cc`（v33 备选）。
 
 ---
 
@@ -452,19 +446,18 @@ Application::Run() 拉取                    🔊 ES8311 → SPK
 - I2C_NUM_1 共用：AudioCodec（ES8311/ES7210/ES7111）+ Touch（AXS5106L，三板均有）
 - DMA 缓冲：必须内部 RAM（PSRAM 不可 DMA 直接访问）
 
-### 五、A · 上传链路增益注入点 5 选 1 决策（2026-04-30）
+### 五、A · 上传链路增益注入点 5 选 1 决策（2026-04-30 · 仅理论分析）
 
-ES7210 4ch TDM 中 CH0=MIC、CH1=REF（DAC 硬件回采），AFE 内部 AEC+NS+VAD 是 ESP-SR 黑盒。完整上传链路：
+ES7210 4ch TDM 中 CH0=MIC、CH1=REF（DAC 硬件回采），AFE 内部 AEC+NS+VAD 是 ESP-SR 黑盒。完整上传链路 5 个候选注入点：
 
 ```
-[L0 模拟] ES7210 PGA          ← 注入点 A · AcousticProfile 已用（mic_gain 0~30 dB）
+[L0 模拟] ES7210 PGA          ← 注入点 A · 当前唯一启用（mic_gain 0~30 dB）
    ↓ I2S TDM
 [L1] codec.Read()             [M0,R0,M1,R1,...]
    ↓
 [L2] AudioService::ReadAudioData (Core 1 P10)
    ├─ wake_word.Feed         注入点 B（不上传 · 不算）
-   ├─ audio_processor.Feed   注入点 C（AEC 输入端 · 影响双讲检测 · ❌不能用）
-   └─ DispatchDiagnosticTap  ← AcousticProfile.Diagnose 旁路
+   └─ audio_processor.Feed   注入点 C（AEC 输入端 · 影响双讲检测 · ❌不能用）
    ↓
 [L3] AfeAudioProcessor (Core 1 P7) · AEC + NS + VAD 黑盒
    ↓ output_callback_         ★ 注入点 D · AEC+NS 后干净 PCM · 唯一正确答案
@@ -476,17 +469,17 @@ ES7210 4ch TDM 中 CH0=MIC、CH1=REF（DAC 硬件回采），AFE 内部 AEC+NS+V
 
 | 注入点 | 信噪比 | 影响 AEC | 影响 NS | 影响 WakeNet | 推荐 |
 |---|---|---|---|---|---|
-| A · ES7210 PGA | ★★★★★ | ⚠ 同时放大喇叭回采 | 同 NS 输入 | 影响 | ✅ 第一档刀（已实现） |
+| A · ES7210 PGA | ★★★★★ | ⚠ 同时放大喇叭回采 | 同 NS 输入 | 影响 | ✅ 第一档刀（已落地） |
 | B · WakeWord 前 | ★★★★ | — | — | ❌ 阈值偏移 | ✗ |
 | C · AFE Feed 前 | ★★★★ | ❌ 双讲判错 | ❌ 学错噪声基线 | — | ✗ |
-| **D · AFE OnOutput 内** | ★★★ | ✅ 已完成 | ✅ 已完成 | ✅ 不影响 | **★ 唯一正确** |
-| E · push encode 前 | ★★★ | 同 D | 同 D | 同 D | ✅ 实现更干净 |
+| **D · AFE OnOutput 内** | ★★★ | ✅ 已完成 | ✅ 已完成 | ✅ 不影响 | ★ 理论最佳（待启用） |
+| E · push encode 前 | ★★★ | 同 D | 同 D | 同 D | 替代 D（实现更干净） |
 
 **第一性原理**：任何放大都会同时放大信号 + 噪声 + 残留回声。只有在 AEC + NS 全部完成之后放大，才是"纯粹放大用户人声"。
 
 **189 版本对比**：`AcousticCalibration::afe_linear_gain` 字段（1.0~10.0×）就是放在 D 点 · 高/中/低三档咪头分别 3.0×/5.0×/8.0×。
 
-**P30 当前状态**：注入点 A 已落地（AcousticProfile.mic_gain 三档 15/21/27 dB · 解决 standard 偏低听不见问题）。注入点 D/E 暂未启用 · 量产实测后再决定（保守路径优先 PGA 增益 + 钳位防失真）。
+**P30 v32 当前状态**：仅注入点 A 落地（`BoxAudioCodec::SetInputGain` · 默认 15 dB · NVS `audio.input_gain`）。D/E 注入点 + AFE linear gain + 双通道诊断旁路均**未实现** · 推迟到 v33（量产数据驱动决策）。
 
 ---
 
