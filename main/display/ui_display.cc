@@ -151,7 +151,7 @@ void UiDisplay::SetupUI() {
     if (emoji_box_) {
         lv_obj_set_style_opa(emoji_box_, LV_OPA_TRANSP, 0);
         // GIF 笔画字（font 模式）触屏退出 — 与教育卡 OnEduCardClicked 同款机制
-        // 永久注册，仅 font 模式回调内才执行 ResetFontMode（其他 emotion 不响应）
+        // 永久注册，仅 font 模式回调内才执行 HideFontGif（其他 emotion 不响应）
         lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(emoji_box_, OnFontExitClicked, LV_EVENT_CLICKED, this);
     }
@@ -342,7 +342,7 @@ void UiDisplay::SwitchToClockMode() {
     if (active_scene_ == SceneType::kPlayer) return;
 
     HideEduCard();   // 状态切换清场，防止教育卡遮挡时钟主屏
-    ResetFontMode(); // 同步清 font 状态，防止 GIF 笔画残留
+    HideFontGif();   // 同步清 font 状态，防止 GIF 笔画残留
 
     if (!clock_container_) CreateClockPage();
 
@@ -371,7 +371,7 @@ void UiDisplay::SwitchToChatMode() {
     if (active_scene_ != SceneType::kClock) return;
 
     HideEduCard();   // 状态切换清场，防止教育卡遮挡 emoji 表情
-    ResetFontMode(); // 同步清 font 状态，防止 GIF 笔画残留
+    HideFontGif();   // 同步清 font 状态，防止 GIF 笔画残留
 
     if (clock_container_) {
         lv_obj_add_flag(clock_container_, LV_OBJ_FLAG_HIDDEN);
@@ -399,8 +399,7 @@ void UiDisplay::SwitchToChatMode() {
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
     active_scene_ = SceneType::kChat;   // chat 主 widget = emoji_box
-    // 离开时钟回到 chat = 新一次对话语境，清掉上一次的 font 标记，让 neutral 能正常显示
-    in_font_mode_ = false;
+    // in_font_mode_ 已由前面 HideFontGif() 处理，此处无需重置
     ESP_LOGI(TAG, "Switched to chat mode");
 }
 
@@ -492,44 +491,36 @@ void UiDisplay::FontGif(uint8_t* gif_buffer, size_t size) {
     }
 
     DisplayLockGuard lock(this);
-    in_font_mode_ = false;  // 绕过 SetEmotion 守护，强制重启 font 动画
-    emoji_collection->ReplaceEmoji("font", new LvglRawImage(gif_buffer, size));
-    ESP_LOGI(TAG, "Font GIF loaded (%u bytes)", (unsigned)size);
-    SetEmotion("font");
-}
 
-// ============================================================
-// SetEmotion override：当前为 font 时仅跳过 neutral；其他 emotion 都允许替换
-// ============================================================
-void UiDisplay::SetEmotion(const char* emotion) {
-    if (!emotion) return;
-
-    if (in_font_mode_ && strcmp(emotion, "neutral") == 0) {
+    // 装载 GIF（owns_data=true · 所有权转移给 LvglRawImage · 析构时 heap_caps_free）
+    auto* raw = new (std::nothrow) LvglRawImage(gif_buffer, size, /*owns_data=*/true);
+    if (!raw) {
+        ESP_LOGW(TAG, "FontGif: LvglRawImage alloc failed, free buffer");
+        heap_caps_free(gif_buffer);
         return;
     }
 
-    bool is_font = (strcmp(emotion, "font") == 0);
+    // 互斥清场（显式 · 原 SetEmotion 内副作用搬出）
+    HideEduCard();
+    HideQrCode();
+    HideBottomBar();
+
+    emoji_collection->ReplaceEmoji("font", raw);
+    ESP_LOGI(TAG, "Font GIF loaded (%u bytes)", (unsigned)size);
+
+    // 切表情 src（直接调父类，绕守护避免 short-circuit）
+    LcdDisplay::SetEmotion("font");
+    if (emoji_box_) lv_obj_move_foreground(emoji_box_);
+    in_font_mode_ = true;
+}
+
+// SetEmotion override：仅切表情 src · font 模式时屏蔽所有外部 emotion 切换
+// 原 4 职责（守护 / 切 src / bottom_bar / 互斥清场）已解耦：副作用搬到 FontGif/HideFontGif
+void UiDisplay::SetEmotion(const char* emotion) {
+    if (!emotion) return;
+    // 守护：font 模式不响应外部 emotion（孩子聚焦写字时不被 LLM emotion 推送打断）
+    if (in_font_mode_) return;
     LcdDisplay::SetEmotion(emotion);
-
-    // 背景保持主题黑底
-    if (bottom_bar_ && is_font != in_font_mode_) {
-        DisplayLockGuard lock(this);
-        if (is_font) {
-            lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-
-    // font 模式（GIF 笔画）：与教育卡 / QR 互斥（show_stroke 期间不允许其他 overlay 共存）
-    if (is_font && emoji_box_) {
-        DisplayLockGuard lock(this);
-        HideEduCard();
-        HideQrCode();
-        lv_obj_move_foreground(emoji_box_);
-    }
-
-    in_font_mode_ = is_font;
 }
 
 // font 模式静默丢弃字幕。常规模式下根据文本宽度自适应 long_mode：
@@ -570,12 +561,28 @@ void UiDisplay::SetChatMessage(const char* role, const char* content) {
 // 调用方需自持 DisplayLockGuard
 // ============================================================
 
-// 清退 font 模式：切回 neutral 表情、恢复 bottom_bar
-// 必须先清标志再 SetEmotion，否则 SetEmotion 内 font→neutral 守护会反噬
-void UiDisplay::ResetFontMode() {
+// 退出笔画 GIF 模式（与 FontGif 对称）：恢复 bottom_bar + 切回 neutral 表情
+// 直接调 LcdDisplay::SetEmotion 绕过守护（自身就是守护清退点）
+void UiDisplay::HideFontGif() {
     if (!in_font_mode_) return;
+    DisplayLockGuard lock(this);
     in_font_mode_ = false;
-    SetEmotion("neutral");
+    ShowBottomBar();
+    LcdDisplay::SetEmotion("neutral");
+}
+
+// bottom_bar 显示（其他场景下让"长按说话"等字幕条可见）
+void UiDisplay::ShowBottomBar() {
+    if (!bottom_bar_) return;
+    DisplayLockGuard lock(this);
+    lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
+}
+
+// bottom_bar 隐藏（font 模式让用户聚焦写字 GIF）
+void UiDisplay::HideBottomBar() {
+    if (!bottom_bar_) return;
+    DisplayLockGuard lock(this);
+    lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
 }
 
 // 触屏点击 emoji_box 退出 font 模式
@@ -583,7 +590,7 @@ void UiDisplay::ResetFontMode() {
 void UiDisplay::OnFontExitClicked(lv_event_t* e) {
     auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
     if (!self || !self->in_font_mode_) return;
-    Application::GetInstance().Schedule([self]() { self->ResetFontMode(); });
+    Application::GetInstance().Schedule([self]() { self->HideFontGif(); });
 }
 
 void UiDisplay::SetTopBarIconsVisible(bool v) {
@@ -894,7 +901,7 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
     if (!player_container_) return;
 
     HideEduCard();   // 状态切换清场，防止教育卡遮挡 player UI
-    ResetFontMode(); // 同步清 font 状态，防止 GIF 笔画残留
+    HideFontGif();   // 同步清 font 状态，防止 GIF 笔画残留
 
     if (player_title_) {
         const char* t = (title && title[0]) ? title : "正在播放";
@@ -1106,23 +1113,22 @@ void UiDisplay::ShowEduCard(const char* category, const char* main_text,
     if (!main_text || !main_text[0]) return;
     if (!category) category = "word";
 
+    // ★ 产品决策（同轮屏蔽 · 不是 bug）：
+    //   FontGIF 显示中（in_font_mode_=true），聊天文本如出现 [word_中文] 也不渲染教育卡。
+    //   原因：孩子正在看笔画动画，不应被弹卡打断。
+    //   解锁路径：下一轮 Speaking 进入时 application.cc 调 HideFontGif() 清场，
+    //   in_font_mode_=false 后，新一轮的 ShowEduCard 即可正常显示。
+    if (in_font_mode_) {
+        ESP_LOGI(TAG, "EduCard skipped: font GIF active (same turn, will unlock at next Speaking)");
+        return;
+    }
+
     EnsureDisplayFonts();
     if (!edu_main_font_ || !clock_text_font_) {
         ESP_LOGW(TAG, "EduCard skipped: fonts not loaded (edu=%p top=%p)",
                  edu_main_font_, clock_text_font_);
         return;
     }
-
-    // font 模式切教育卡：先盖 overlay 黑屏，再 ResetFontMode 切 neutral 时不可见，避免闪烁
-    if (in_font_mode_) {
-        DisplayLockGuard lock(this);
-        EnsureEduCardOverlay();
-        if (edu_card_overlay_) {
-            lv_obj_remove_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(edu_card_overlay_);
-        }
-    }
-    ResetFontMode();
 
     bool is_py_mode  = ContainsCjk(main_text);
     bool is_super    = IsSuperCategory(category);

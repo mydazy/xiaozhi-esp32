@@ -13,6 +13,7 @@
 #include "i2c_bus_worker.h"
 #include "application.h"
 #include "audio/music_player.h"
+#include "alarm_manager.h"
 #include "button.h"
 #include "config.h"
 #include "settings.h"
@@ -55,6 +56,13 @@
 #include <math.h>
 
 #define TAG "MyDazyP30_4GBoard"
+
+// 上次进 sleep 的 RTC 时戳（每次 sleep 入口都更新 · 跨 deep sleep 保持）
+// 用途：EXT0 唤醒时若距上次 sleep < 500ms = 死按延续（硬件极速被触发）· 直接再 sleep
+// 真心开机必然 = 用户松手再按 · 间隔 ≥ 200ms · 实测远超 500ms
+#include <esp_sleep.h>
+RTC_DATA_ATTR static uint64_t s_last_sleep_us = 0;
+static constexpr uint64_t kDeadHoldWindowUs = 500 * 1000;  // 500ms
 
 namespace {
 // 小工具：处于 Speaking 时先 Abort，避免状态冲突
@@ -186,10 +194,21 @@ private:
         switch (wakeup_reason) {
             case ESP_SLEEP_WAKEUP_EXT0:
                 ESP_LOGI(TAG, "从开机键唤醒");
+                // 距上次 sleep < 500ms + GPIO 低 = 死按延续（硬件极速被 EXT0 触发）
+                // 直接重 arm + sleep · 永不"误判开机播欢迎音"· 用户死按多久都安全
+                if (s_last_sleep_us > 0) {
+                    uint64_t since_us = esp_rtc_get_time_us() - s_last_sleep_us;
+                    if (since_us < kDeadHoldWindowUs && gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+                        ESP_LOGW(TAG, "距 sleep %llu ms · 用户未松手 · 短路 sleep", since_us / 1000);
+                        s_last_sleep_us = esp_rtc_get_time_us();
+                        esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0);
+                        rtc_gpio_pullup_en(BOOT_BUTTON_GPIO);
+                        esp_deep_sleep_start();
+                    }
+                }
                 first_boot_ = true;
-                // 按 BOOT 键唤醒时，要求持续按住 2 秒才真正开机（防止口袋误触）
                 if (!CheckBootHoldOnWakeup()) {
-                    ESP_LOGI(TAG, "开机长按未达 2 秒，立即回深睡");
+                    ESP_LOGI(TAG, "开机长按未达 1.5 秒，立即回深睡");
                     EnterDeepSleep(true);  // 不会返回
                 }
                 break;
@@ -198,8 +217,10 @@ private:
                 first_boot_ = true;
                 break;
             case ESP_SLEEP_WAKEUP_TIMER:
-                ESP_LOGI(TAG, "从定时器唤醒");
+                ESP_LOGI(TAG, "从定时器唤醒 · 闹钟模式");
                 is_alarm_clock_ = true;
+                AlarmManager::MarkTimerWakeup();  // 允许未校时时用 RTC fallback 触发闹钟
+                first_boot_ = true;
                 break;
             default:
                 ESP_LOGI(TAG, "首次启动或复位 (wakeup=%d, reset=%d)", (int)wakeup_reason, (int)reset_reason);
@@ -564,14 +585,14 @@ private:
 
         ResetAllGpiosForSleep();
 
+        // 闹钟：arm RTC 定时唤醒（与 EXT0/EXT1 三源并存 · 含分段睡眠策略）
+        AlarmManager::GetInstance().FlushNvs();
+        AlarmManager::GetInstance().ConfigureTimerWakeup();
+
         ESP_LOGI(TAG, "准备进入深度睡眠");
         vTaskDelay(pdMS_TO_TICKS(200));
-        // 关机最后保险 · 用户死按 BOOT 不松手 → 直接 esp_restart（走 default 启动 · 显示 logo + 欢迎音）
-        // 比 esp_deep_sleep_start + EXT0 立即触发 + CheckBootHoldOnWakeup 链路少一次"假关机"
-        if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
-            ESP_LOGW(TAG, "用户长按未松手 · esp_restart 替代 deep sleep");
-            esp_restart();
-        }
+        // 每次进 sleep 都记时戳 · 唤醒后比较 < 500ms 即死按延续 · 直接短路 sleep
+        s_last_sleep_us = esp_rtc_get_time_us();
         esp_deep_sleep_start();
     }
 

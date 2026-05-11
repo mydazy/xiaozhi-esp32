@@ -69,6 +69,10 @@ public:
     // gif_buffer 由 heap_caps_malloc(MALLOC_CAP_SPIRAM) 分配，所有权转移给 EmojiCollection
     void FontGif(uint8_t* gif_buffer, size_t size);
 
+    // 退出笔画 GIF 模式（与 FontGif 对称）——切回 neutral 表情、恢复 bottom_bar
+    // 调用方：application.cc 下轮 Speaking 清场 + 触摸 emoji_box 退出
+    void HideFontGif();
+
     void SetEmotion(const char* emotion) override;
     void SetChatMessage(const char* role, const char* content) override;
     void ShowControlCenter() {}
@@ -87,6 +91,9 @@ public:
         return edu_card_overlay_ != nullptr &&
                !lv_obj_has_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
     }
+
+    // 笔画 GIF 是否显示中（供 application.cc 教育卡链式弹卡判定·避免 FontGIF 期间空转）
+    bool IsFontGifActive() const { return in_font_mode_; }
 
 private:
 
@@ -107,8 +114,12 @@ private:
     lv_obj_t* edu_bottom_label_ = nullptr;
     static void OnEduCardClicked(lv_event_t* e);
 
-    void ResetFontMode();
     static void OnFontExitClicked(lv_event_t* e);
+
+    // bottom_bar（屏幕底部字幕条 · "长按说话"等）显隐
+    //   font 模式下隐藏让用户聚焦写字 GIF；其他场景显示
+    void ShowBottomBar();
+    void HideBottomBar();
     struct EduRow {
         const char* text;            // null 或空字符串则该行不渲染
         const lv_font_t* font;

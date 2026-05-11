@@ -249,7 +249,7 @@ ul.compact li { margin: 2px 0; }
     <rect x="180" y="354" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
     <text x="200" y="374">9. ResetAllGpiosForSleep（15 个 GPIO）</text>
     <rect x="180" y="392" width="520" height="32" rx="4" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
-    <text x="200" y="412" fill="#C62828" font-weight="600">10. GPIO 检查保险 · 死按 → esp_restart / 否则 esp_deep_sleep_start ⚫</text>
+    <text x="200" y="412" fill="#C62828" font-weight="600">10. 记 RTC 时戳 + esp_deep_sleep_start · 死按 500ms 内自动循环 sleep ⚫</text>
 
     <line x1="440" y1="82" x2="440" y2="88" stroke="#666" marker-end="url(#sArr)"/>
     <line x1="440" y1="120" x2="440" y2="126" stroke="#666" marker-end="url(#sArr)"/>
@@ -402,7 +402,7 @@ ul.compact li { margin: 2px 0; }
 <section id="followup">
 <h2><span class="num">8</span> 参考</h2>
 <div class="callout">
-  <b>相关文档</b>：<code>docs/p30-architecture.md</code> § 三/四/五 · <code>docs/ui-architecture-final.html</code> · <code>CLAUDE.md</code>
+  <b>相关文档</b>：<code>docs/p30-architecture.md</code> § 三/四/五 · <code>docs/p30-ui-flows.html</code> · <code>CLAUDE.md</code>
 </div>
 </section>
 

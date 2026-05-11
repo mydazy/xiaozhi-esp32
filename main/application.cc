@@ -16,6 +16,7 @@
 #include "flow_engine.h"
 #include "device_state_event.h"
 #include "audio/music_player.h"
+#include "alarm_manager.h"
 
 #include <cstring>
 #include <vector>
@@ -97,8 +98,17 @@ void FlushNextEduCardOnMain() {
         g_edu_idx = 0;
         return;
     }
+    auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
+    // 同轮屏蔽：FontGIF 显示中放弃整队（产品决策 · 下轮 Speaking 由 application.cc 清场后重启）
+    if (ui && ui->IsFontGifActive()) {
+        ESP_LOGI(TAG, "EduCard queue dropped: font GIF active (%u cards skipped)",
+                 (unsigned)(g_edu_queue.size() - g_edu_idx));
+        g_edu_queue.clear();
+        g_edu_idx = 0;
+        return;
+    }
     auto hit = g_edu_queue[g_edu_idx++];
-    if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+    if (ui) {
         ui->ShowEduCard("word", hit.word.c_str(),
                         hit.top.c_str(), hit.bottom.c_str());
     }
@@ -307,6 +317,20 @@ void Application::Initialize() {
         }
     });
 
+    // 闹钟回调：响铃时 OGG_WAKEUP + AI 自然语言提醒（参 189 经验 · 不抢屏）
+    AlarmManager::GetInstance().SetAlarmCallback([this](const AlarmConfig& evt) {
+        PlaySound(Lang::Sounds::OGG_WAKEUP);
+        char prompt[160];
+        snprintf(prompt, sizeof(prompt),
+                 "闹钟响了，现在 %02d:%02d，提醒：%s。请用简短温馨的语气提醒主人",
+                 evt.hour, evt.minute, evt.message.c_str());
+        Schedule([text = std::string(prompt)]() {
+            Application::GetInstance().SendTextToAI(text);
+        });
+    });
+    // MCP 工具注册（self.alarm.add / list / delete / set_enabled）
+    AlarmManager::GetInstance().RegisterMcpTools();
+
     // Start network asynchronously
     board.StartNetwork();
 
@@ -401,7 +425,10 @@ void Application::Run() {
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
-        
+
+            // 闹钟检查（每秒 · 仅校时后生效 · 内部有防重触发）
+            AlarmManager::GetInstance().CheckAndTrigger();
+
             // Print debug info every 10 seconds
             if (clock_ticks_ % 10 == 0) {
                 SystemInfo::PrintHeapStats();
@@ -455,6 +482,9 @@ void Application::HandleActivationDoneEvent() {
     SetDeviceState(kDeviceStateIdle);
 
     has_server_time_ = ota_->HasServerTime();
+    if (has_server_time_) {
+        AlarmManager::MarkTimeSynced();   // 校时成功 · 启用闹钟检查
+    }
 
     auto display = Board::GetInstance().GetDisplay();
     // 隐藏激活期间的绑定 QR + "请绑定设备" 提示（之前有遗漏 → QR 一直停留在屏幕上）
@@ -1091,8 +1121,8 @@ void Application::HandleStateChangedEvent() {
             display->SetStatus("#FF3030 ●#");
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
-            // 下轮对话开始 → 自动清上一轮的教育卡（不依赖 SwitchToChatMode 的 kClock 守护）
-            if (lcd) lcd->HideEduCard();
+            // Listening 不清场：保留上一轮的教育卡 / FontGIF，让孩子能看着画面继续问
+            // 清场在 Speaking 进入时执行（真正的下一轮对话）
 
             // Make sure the audio processor is running
             if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {
@@ -1123,6 +1153,11 @@ void Application::HandleStateChangedEvent() {
             break;
         case kDeviceStateSpeaking:
             display->SetStatus("");
+            // 下一轮对话开始：清掉上一轮的教育卡 + 笔画 GIF（让新一轮的画面可以正常显示）
+            if (lcd) {
+                lcd->HideEduCard();
+                lcd->HideFontGif();
+            }
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);

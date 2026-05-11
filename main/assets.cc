@@ -274,6 +274,7 @@ bool Assets::LvglStrategy::Apply(Assets* assets, bool refresh_display_theme) {
                         ESP_LOGE(TAG, "Emoji %s image file %s is not found", name->valuestring, file->valuestring);
                         continue;
                     }
+                    // assets 子系统持有 ptr 生命周期（mmap / 常驻）· LvglRawImage 不接管（owns_data 默认 false）
                     custom_emoji_collection->AddEmoji(name->valuestring, new LvglRawImage(ptr, size));
                 }
             }
