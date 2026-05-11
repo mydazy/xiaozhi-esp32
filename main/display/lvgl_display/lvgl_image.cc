@@ -9,7 +9,8 @@
 #define TAG "LvglImage"
 
 
-LvglRawImage::LvglRawImage(void* data, size_t size) {
+LvglRawImage::LvglRawImage(void* data, size_t size, bool owns_data)
+    : owns_data_(owns_data) {
     bzero(&image_dsc_, sizeof(image_dsc_));
     image_dsc_.data_size = size;
     image_dsc_.data = static_cast<uint8_t*>(data);
@@ -17,6 +18,13 @@ LvglRawImage::LvglRawImage(void* data, size_t size) {
     image_dsc_.header.cf = LV_COLOR_FORMAT_RAW_ALPHA;
     image_dsc_.header.w = 0;
     image_dsc_.header.h = 0;
+}
+
+LvglRawImage::~LvglRawImage() {
+    if (owns_data_ && image_dsc_.data) {
+        heap_caps_free((void*)image_dsc_.data);
+        image_dsc_.data = nullptr;
+    }
 }
 
 bool LvglRawImage::IsGif() const {
