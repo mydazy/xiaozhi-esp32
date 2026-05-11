@@ -50,7 +50,7 @@ public:
     // ===== 主屏切换 =====
     void SwitchToClockMode();    // idle → 时钟主屏
     void SwitchToChatMode();     // 对话 → 聊天 UI
-    bool IsClockMode() const { return current_scene_ == SceneType::kClock; }
+    bool IsClockMode() const { return active_scene_ == SceneType::kClock; }
 
     // ===== 音乐播放器页（极简：曲名 + Play/Pause + 进度条）=====
     using PlayerPauseToggleCb = std::function<void()>;
@@ -59,44 +59,27 @@ public:
     void UpdatePlayerProgress(int position_ms, int total_ms);
     void SetPlayerPaused(bool paused);
     void OnPlayerPauseToggle(PlayerPauseToggleCb cb) { on_player_pause_toggle_ = std::move(cb); }
-    bool IsPlayerMode() const { return current_scene_ == SceneType::kPlayer; }
+    bool IsPlayerMode() const { return active_scene_ == SceneType::kPlayer; }
 
-    // 三维心智模型（C 维度）查询入口：UI 场景互斥维度（替代 is_clock_mode_ / is_player_mode_）
-    SceneType GetCurrentScene() const { return current_scene_; }
+    SceneType GetCurrentScene() const { return active_scene_; }
 
-    // 开机引导结束：logo fade_out → SwitchToClockMode（幂等）
-    // 仅由 Application::HandleStateChangedEvent(Idle) 调用，确保联网+激活完成才切时钟
     void FinishBootAndShowClock();
 
-    // 用 PSRAM GIF buffer 替换 emoji_collection 中 "font" 槽位（识字笔画动画）
-    // gif_buffer 由 heap_caps_malloc(MALLOC_CAP_SPIRAM) 分配，所有权转移给 EmojiCollection。
-    // 调用方完成调用后不要再 free buffer。
-    void UpdateFontGif(uint8_t* gif_buffer, size_t size);
+    // 显示笔画 GIF 动画（写字识字）——把 PSRAM buffer 装入 emoji_collection "font" 槽位
+    // gif_buffer 由 heap_caps_malloc(MALLOC_CAP_SPIRAM) 分配，所有权转移给 EmojiCollection
+    void FontGif(uint8_t* gif_buffer, size_t size);
 
-    // 教育卡专属：当前为 font 时跳过 neutral（application.cc 进 listening 默认注入），
-    // 其他 emotion 正常替换；font 模式额外隐藏 bottom_bar_ 让出底部视觉。
-    // 写字 GIF 原始尺寸 200×200，在 284×240 屏上居中即可，不做缩放。
     void SetEmotion(const char* emotion) override;
-
-    // font 模式（识字写字）静默丢弃字幕——避免 LLM 中途推送 SetChatMessage
-    // 把 bottom_bar_ 重新 unhide 出来，破坏写字 GIF 的沉浸感。
     void SetChatMessage(const char* role, const char* content) override;
-
-    // ===== 控制中心 =====
-    // [量产稳定期] ControlCenter 整体下线，保留接口为 stub 维持三个 board 的调用兼容
     void ShowControlCenter() {}
     void HideControlCenter() {}
     bool IsControlCenterVisible() const { return false; }
 
-    // ===== 教育卡（统一接口）=====
-    // overlay 模式，与 QR 同 — 不占 SceneType（C 维），盖在 chat/clock 之上
-    // 触屏点击退出。top/bottom 可空字符串（该行不显示）。
-    //
-    // category 取值（5-10 岁三年级以下儿童被动跟读场景）：
-    //   "word"   英文单词/拼写： top=拼读/音标, main=英文单词(金黄, 字距 4),     bottom=中文释义（带分隔线）
-    //   "hanzi"  汉字组词：       top=拼音,       main=汉字(白色, 字距 8 加宽),     bottom=组词
-    //   "pinyin" 拼音/声韵母：    top=类别,       main=声韵母(橙红, 字距 6),         bottom=例字
-    // 主体一律 48px（edu_main_font_，CJK 走 fallback 链）/ 副字一律 20px（g_text_font 含 GB2312 全字 fallback）
+    // 显示教育卡（overlay 模式，与 QR 同槽，盖在 chat/clock 之上）
+    // category 取值（MCP 协议字段）：
+    //   被动 56px 主秀：word / hanzi / pinyin / poem / topic / color
+    //   主动 88px 超大：letter / phonics / math
+    // top/bottom 可空字符串（该行不显示）。触屏点击退出。
     void ShowEduCard(const char* category, const char* main_text,
                      const char* top, const char* bottom);
     void HideEduCard();
@@ -117,31 +100,15 @@ private:
     const lv_font_t* edu_main_font_   = nullptr;   // 48px cbin · v8 EN 兜底 11-12 字符英文（仅 ASCII+拼音+Phonics·77 KB·v3 已砍中文）
     const lv_font_t* edu_main_56_font_ = nullptr;  // 56px cbin · v8 主秀 Bold · GB 2312 一级 3755 字 + ASCII + 拼音 + Phonics · 1bpp 压缩 (~1.3 MB)
 
-    // 通用二维码 overlay（配网 / 绑定 / 付费等场景共享，同时只有一个）
     lv_obj_t* qr_overlay_ = nullptr;
-
-    // 教育卡 overlay（单词 / 拼音 / 汉字组词）— 复用单一 overlay + 3 个 label
-    // 设计：第一次 ShowEduCard 时懒创建，后续仅更新 label 内容/字体/位置；
-    //      HideEduCard 只 set HIDDEN flag，不删 overlay → 杜绝 lv_obj_del 与 label 异步
-    //      layout cb 的 race，从根本上避免 LVGL 9 的 lv_event_mark_deleted UAF。
     lv_obj_t* edu_card_overlay_ = nullptr;
     lv_obj_t* edu_top_label_    = nullptr;
     lv_obj_t* edu_main_label_   = nullptr;
     lv_obj_t* edu_bottom_label_ = nullptr;
     static void OnEduCardClicked(lv_event_t* e);
 
-    // 清场 helper：font 模式（GIF 笔画）退出 + 状态切换前调用
-    // 防止 font 状态在 SwitchTo* 之间残留导致 emoji_image 仍显示 GIF
     void ResetFontMode();
-
-    // GIF 笔画字触屏退出回调（与教育卡 OnEduCardClicked 同款机制）
-    // 单击 emoji_box 区域 → ResetFontMode → 切回 neutral 表情
-    // 仅 font 模式生效（其他 emotion 时回调内 early return）
     static void OnFontExitClicked(lv_event_t* e);
-
-    // 教育卡布局：[top 30px] + main 48px + bottom 48px（top 可空 · 整体上下居中）
-    //   MCP 调用 show_card (category="word"/"pinyin") 传 top → 三行（拼读/拼音）
-    //   聊天正则提取 [part1-part2] 传 top="" → 两行（更紧凑）
     struct EduRow {
         const char* text;            // null 或空字符串则该行不渲染
         const lv_font_t* font;
@@ -149,13 +116,11 @@ private:
         int letter_space;
         int height;                  // 字体高度 px，用于布局计算
     };
-    void BuildEduCard(const EduRow& top, const EduRow& main_row, const EduRow& bottom);
+    void RenderEduCardLayout(const EduRow& top, const EduRow& main_row, const EduRow& bottom);
     void EnsureEduCardOverlay();                                        // 懒创建 overlay + 3 label 槽
     void UpdateEduRow(lv_obj_t* lbl, const EduRow& row, int y);         // 更新单个 label 槽（LV_ALIGN_TOP_MID）
     void UpdateEduRowAtBottom(lv_obj_t* lbl, const EduRow& row, int dist_from_bottom);  // 副位定位（LV_ALIGN_BOTTOM_MID）
 
-    // 整页双击 callback（仅显示左右色条时有效，用于切换模式）
-    // 必须保活直到 HideQrCode，否则 lambda 析构后 click 事件触发 UAF
     std::function<void()> qr_double_click_cb_;
     uint64_t              qr_last_click_us_ = 0;
     static void OnQrClicked(lv_event_t* e);
@@ -172,20 +137,11 @@ private:
     bool is_player_paused_       = false;
     PlayerPauseToggleCb on_player_pause_toggle_;
 
-    // 开机动画：logo 持续显示，结束时机由状态机驱动（FinishBootAndShowClock）
-
-    // [量产稳定期] ControlCenter 字段已下线（恢复时改回 std::unique_ptr<ControlCenter> control_center_）
-
-    // BUILTIN_TEXT_FONT 的补字字体：与主字体同名约定（font_maru_common_20_4.bin），
-    // 链入主字体仅 ~600 字常用文案，cbin 字体补 GB 2312 全字（7000+），LVGL 缺字自动 fallback。
     const lv_font_t* fallback_text_font_ = nullptr;
 
-    // 状态：UI 场景维度（详见 docs/p30-architecture.html § 一.5 三维心智模型 · C 维度）
-    // 默认 kEmoji（启动时 emoji_box 显 logo · 进 chat 后显表情都属此场景）
-    SceneType current_scene_ = SceneType::kEmoji;
+    SceneType active_scene_ = SceneType::kChat;
 
-    // 当前是否在显示 font GIF（仅用于 SetEmotion 判 "跳过 neutral"）
-    bool current_is_font_ = false;
+    bool in_font_mode_ = false;
 
     // ===== 内部方法 =====
     void CreateClockPage();
@@ -201,11 +157,9 @@ private:
 
     void StartBootAnimation();
 
-    // 三个 SwitchTo* 共享的状态栏管理 helper（去除重复）
     void SetTopBarIconsVisible(bool visible);   // network/battery/mute 三 icon 一次切换
     void RaiseStatusBar();                       // remove HIDDEN + opa COVER + move_foreground
 
-    // [量产稳定期] EnsureControlCenter / EnableStatusBarTapForControlCenter / OnStatusBarClicked 已下线
 };
 
 #endif  // UI_DISPLAY_H

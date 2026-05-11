@@ -294,10 +294,6 @@ private:
 
             switch (gesture) {
                 case TouchGesture::SingleClick: {
-                    Settings settings("status", false);
-                    int touch_interrupt = settings.GetInt("touchInterrupt", 1);
-                    if (!touch_interrupt) break;
-
                     auto& app = Application::GetInstance();
                     auto state = app.GetDeviceState();
 
@@ -427,9 +423,9 @@ private:
             int deep_sleep_enabled = settings.GetInt("deepSleep", 1);
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "✅ 深度睡眠已启用，5分钟无操作后进入深度睡眠");
-                // 自动休眠：仅屏幕提示 + 陀螺仪可唤醒（拍拍即醒）
+                // 自动休眠：仅屏幕提示 + 陀螺仪可唤醒（拿起即醒）
                 // 不播提示音 —— 用户没主动操作，夜间/会议中突然响会打扰
-                ShutdownOrSleep("休眠中", "拍拍唤醒", "", 1500, true);
+                ShutdownOrSleep("休眠中", "拿起唤醒", "", 1500, true);
             }
         });
 
@@ -572,7 +568,11 @@ private:
         ESP_LOGI(TAG, "准备进入深度睡眠");
         vTaskDelay(pdMS_TO_TICKS(200)); // 确保所有日志输出完成
 
-        // 进入深度休眠
+        // 关机最后保险 · 用户死按 BOOT 不松手 → 直接 esp_restart（走 default 启动）
+        if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+            ESP_LOGW(TAG, "用户长按未松手 · esp_restart 替代 deep sleep");
+            esp_restart();
+        }
         esp_deep_sleep_start();
     }
 
@@ -1446,7 +1446,7 @@ public:
 
         ESP_LOGI(TAG, "MyDazy P31 初始化完成 (ES7111+ES7210, 4G, NFC, GPS, 触摸屏)");
 
-        // 首次开机欢迎音（可开关：Settings("audio").playWelcome 默认开启）
+        // 首次开机欢迎音
          if (first_boot_) {
             TaskHandle_t temp_handle = nullptr;
             xTaskCreatePinnedToCore([](void* arg){
@@ -1462,20 +1462,11 @@ public:
                     return;
                 }
 
-                // 检查是否启用欢迎音（音频就绪后立即播放，无需等待联网）
-                Settings audio_settings("audio", false);
-                int enabled = audio_settings.GetInt("playWelcome", 1);
-                if (self->first_boot_ && enabled) {
+                if (self->first_boot_) {
+                    // A1 · 先 arm 自动对话（state listener 在首次进 Idle 时触发 ToggleChat）
+                    app.RequestAutoChatOnIdle();
                     ESP_LOGI(TAG, "✅ 播放欢迎音（音频就绪，开机即播）");
                     app.PlaySound(Lang::Sounds::OGG_WELCOME);
-                    vTaskDelay(pdMS_TO_TICKS(3000));
-                    if (app.GetDeviceState() == kDeviceStateIdle){
-                        ESP_LOGI(TAG, "欢迎音播放完成，自动开始对话");
-                        app.ToggleChatState();
-                    }
-                } else {
-                    ESP_LOGI(TAG, "跳过欢迎音播放（first_boot=%d, enabled=%d）",
-                             self->first_boot_, enabled);
                 }
 
                 // 任务完成，清空句柄

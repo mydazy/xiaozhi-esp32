@@ -128,6 +128,11 @@ public:
     // 说话结束提示音开关（持久化到 NVS · audio.stt_popup）
     void SetSttPopupEnabled(bool enabled);
     bool IsSttPopupEnabled() const { return stt_popup_enabled_; }
+
+    // 开机自动对话（A1 · 取代 board WelcomeTask 内 vTaskDelay+ToggleChat）
+    // board 在播欢迎音前调用 → state listener 在首次进 Idle 时自动 ToggleChat
+    void RequestAutoChatOnIdle();
+
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
 
@@ -170,6 +175,7 @@ private:
     // 跳过：① stt_popup_enabled_=false 关闭 ② 唤醒词首条 STT
     // Settings 字段："audio.stt_popup"（默认 1=开）
     bool stt_popup_enabled_ = true;
+    std::atomic<bool> auto_chat_pending_{false};  // 开机自动对话 pending（A1 · 见 RequestAutoChatOnIdle）
     std::atomic<bool> skip_next_stt_popup_{false};
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;

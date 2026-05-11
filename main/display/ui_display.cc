@@ -10,13 +10,6 @@
 
 #include "ui_display.h"
 
-// [量产稳定期] 切断 ui_display 对 main/display/ui 子目录的依赖
-// 恢复时取消下列 include 并恢复 ScreenConfig::* / ControlCenter 实现块
-// #include "ui/resources/ui_image_manager.h"
-// #include "ui/resources/ui_img_paths.h"
-// #include "ui/widgets/control_center.h"
-// #include "ui/theme/ui_config.h"
-
 #include "application.h"
 #include "audio_codec.h"
 #include "audio/music_player.h"
@@ -47,11 +40,6 @@ namespace {
 
 // 判定文本是否含 CJK 汉字（U+4E00-U+9FFF）
 // 用于 ShowEduCard 内 mode 判定：main 含 CJK → PY-mode（汉字主秀），否则 EN-mode（英文主秀）
-//
-// ⚠ 早期版本错误地用 IsPinyin(top) 检测多字节 UTF-8 字符，但 Phonics 中点 `·`（U+00B7）
-// 也是多字节，会让 [basketball_篮球_bas·ket·ball] 这类合法三段式被误判为 PY-mode →
-// "basketball" 10 字符触发 PY-mode 的"≤ 4 汉字"阈值跳过激活。
-// 正确做法：判 main 是否含 CJK（基本汉字范围 0x4E00-0x9FFF）。
 inline bool ContainsCjk(const char* text) {
     if (!text) return false;
     while (*text) {
@@ -86,14 +74,11 @@ inline int Utf8CharCount(const char* text) {
     return count;
 }
 
-// 主秀字号选档 + 激活校验（v8 启蒙规则）
-//   PY-mode (汉字主秀): ≤ 4 字 → 56；> 4 字 → 跳过
-//   EN-mode (英文主秀): ≤ 10 字符走 56，11-12 字符走 48 兜底，> 12 跳过
-//   返回 nullptr 表示跳过激活，调用方应保持当前画面
-// 主秀字号选档 + 激活校验（v8 启蒙规则）
-//   PY-mode (汉字主秀): ≤ 4 字 → 56；> 4 字 → 跳过（88 暂无 CJK 字符集）
-//   EN-mode 默认 (被动触发): ≤ 10 字符 → 56；11-12 → 48 兜底；> 12 跳过
-//   ⭐ EN-mode super (主动学习 letter/phonics/math): ≤ 5 字符优先 88，否则降级链
+// 主秀字号选档 + 激活校验
+//   PY-mode (汉字):    ≤ 4 字 → 56；> 4 跳过（88 暂无 CJK 字符集）
+//   EN-mode 被动:      ≤ 10 字符 → 56；11-12 → 48；> 12 跳过
+//   EN-mode 主动 (super): ≤ 5 字符优先 88（280px 实测兜底防 m/w 宽字符溢出），否则降级
+// 返回 nullptr 表示跳过激活，调用方保持当前画面
 inline const lv_font_t* PickEduMainFont(const char* main_text, bool is_py_mode,
                                          bool prefer_super,
                                          const lv_font_t* font_88,
@@ -104,14 +89,12 @@ inline const lv_font_t* PickEduMainFont(const char* main_text, bool is_py_mode,
     if (n < 1) return nullptr;
 
     if (is_py_mode) {
-        // 汉字组词：数据约定 ≤ 4 字
         if (n > 4) return nullptr;
         return font_56;
     }
 
     lv_point_t sz;
 
-    // ⭐ EN-mode super：主动学习 ≤ 5 字符优先 88（实测 280 兜底防 m/w 宽字符溢出）
     if (prefer_super && n <= 5 && font_88) {
         lv_text_get_size(&sz, main_text, font_88, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_EXPAND);
         if (sz.x <= 280) return font_88;
@@ -222,14 +205,14 @@ void UiDisplay::LoadFallbackTextFont() {
 // ============================================================
 
 void UiDisplay::UpdateStatusBar(bool update_all) {
-    if (current_scene_ == SceneType::kClock) {
+    if (active_scene_ == SceneType::kClock) {
         last_status_update_time_ = std::chrono::system_clock::now();
     }
     LvglDisplay::UpdateStatusBar(update_all);
     DisplayLockGuard lock(this);
 
     // clock 模式：1s tick 刷新时钟（cbin 字体尚未就绪时延迟加载）
-    if (current_scene_ == SceneType::kClock && clock_time_label_) {
+    if (active_scene_ == SceneType::kClock && clock_time_label_) {
         if (!clock_big_font_ || !clock_text_font_) EnsureDisplayFonts();
         UpdateClockTime();
     }
@@ -354,9 +337,9 @@ void UiDisplay::UpdateClockTime() {
 
 void UiDisplay::SwitchToClockMode() {
     DisplayLockGuard lock(this);
-    if (current_scene_ == SceneType::kClock) return;
+    if (active_scene_ == SceneType::kClock) return;
     if (!setup_ui_called_) return;
-    if (current_scene_ == SceneType::kPlayer) return;
+    if (active_scene_ == SceneType::kPlayer) return;
 
     HideEduCard();   // 状态切换清场，防止教育卡遮挡时钟主屏
     ResetFontMode(); // 同步清 font 状态，防止 GIF 笔画残留
@@ -379,13 +362,13 @@ void UiDisplay::SwitchToClockMode() {
     RaiseStatusBar();
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
-    current_scene_ = SceneType::kClock;
+    active_scene_ = SceneType::kClock;
     ESP_LOGI(TAG, "Switched to clock mode");
 }
 
 void UiDisplay::SwitchToChatMode() {
     DisplayLockGuard lock(this);
-    if (current_scene_ != SceneType::kClock) return;
+    if (active_scene_ != SceneType::kClock) return;
 
     HideEduCard();   // 状态切换清场，防止教育卡遮挡 emoji 表情
     ResetFontMode(); // 同步清 font 状态，防止 GIF 笔画残留
@@ -415,9 +398,9 @@ void UiDisplay::SwitchToChatMode() {
     RaiseStatusBar();
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
-    current_scene_ = SceneType::kEmoji;   // chat 主 widget = emoji_box
+    active_scene_ = SceneType::kChat;   // chat 主 widget = emoji_box
     // 离开时钟回到 chat = 新一次对话语境，清掉上一次的 font 标记，让 neutral 能正常显示
-    current_is_font_ = false;
+    in_font_mode_ = false;
     ESP_LOGI(TAG, "Switched to chat mode");
 }
 
@@ -455,10 +438,10 @@ void UiDisplay::StartBootAnimation() {
 
 void UiDisplay::FinishBootAndShowClock() {
     DisplayLockGuard lock(this);
-    if (current_scene_ == SceneType::kClock) return;   // 幂等：已切时钟，重复 Idle 事件忽略
+    if (active_scene_ == SceneType::kClock) return;   // 幂等：已切时钟，重复 Idle 事件忽略
     if (!setup_ui_called_) return;
     // 同 SwitchToClockMode：Player 模式下不切回时钟（OnMusicPlay 路径会触发 Idle 状态事件）
-    if (current_scene_ == SceneType::kPlayer) return;
+    if (active_scene_ == SceneType::kPlayer) return;
 
     // 清理可能残留的开机引导覆盖层（激活码 / 配网 QR），避免切到时钟后仍被 overlay 遮挡。
     HideQrCode();
@@ -492,29 +475,26 @@ void UiDisplay::FinishBootAndShowClock() {
     }
 }
 
-// ============================================================
-// 动态 GIF 注入（识字笔画等场景）：替换 emoji_collection "font" 槽位
-// ============================================================
-void UiDisplay::UpdateFontGif(uint8_t* gif_buffer, size_t size) {
+// 显示笔画 GIF 动画：注入 PSRAM buffer 到 emoji_collection "font" 槽位
+void UiDisplay::FontGif(uint8_t* gif_buffer, size_t size) {
     if (!gif_buffer || size == 0) return;
     auto* lvgl_theme = static_cast<LvglTheme*>(GetTheme());
     if (!lvgl_theme) {
-        ESP_LOGW(TAG, "UpdateFontGif: no theme, free buffer");
+        ESP_LOGW(TAG, "FontGif: no theme, free buffer");
         heap_caps_free(gif_buffer);
         return;
     }
     auto emoji_collection = lvgl_theme->emoji_collection();
     if (!emoji_collection) {
-        ESP_LOGW(TAG, "UpdateFontGif: no emoji_collection, free buffer");
+        ESP_LOGW(TAG, "FontGif: no emoji_collection, free buffer");
         heap_caps_free(gif_buffer);
         return;
     }
 
     DisplayLockGuard lock(this);
-    current_is_font_ = false;  // 绕过 SetEmotion 守护，强制走 LcdDisplay::SetEmotion("font") 重启动画
+    in_font_mode_ = false;  // 绕过 SetEmotion 守护，强制重启 font 动画
     emoji_collection->ReplaceEmoji("font", new LvglRawImage(gif_buffer, size));
-    ESP_LOGI(TAG, "Font GIF replaced with PSRAM buffer (%u bytes), reloading animation",
-             (unsigned)size);
+    ESP_LOGI(TAG, "Font GIF loaded (%u bytes)", (unsigned)size);
     SetEmotion("font");
 }
 
@@ -524,11 +504,7 @@ void UiDisplay::UpdateFontGif(uint8_t* gif_buffer, size_t size) {
 void UiDisplay::SetEmotion(const char* emotion) {
     if (!emotion) return;
 
-    if (current_is_font_ && strcmp(emotion, "font") != 0) {
-        return;
-    }
-
-    if (current_is_font_ && strcmp(emotion, "neutral") == 0) {
+    if (in_font_mode_ && strcmp(emotion, "neutral") == 0) {
         return;
     }
 
@@ -536,7 +512,7 @@ void UiDisplay::SetEmotion(const char* emotion) {
     LcdDisplay::SetEmotion(emotion);
 
     // 背景保持主题黑底
-    if (bottom_bar_ && is_font != current_is_font_) {
+    if (bottom_bar_ && is_font != in_font_mode_) {
         DisplayLockGuard lock(this);
         if (is_font) {
             lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
@@ -553,14 +529,14 @@ void UiDisplay::SetEmotion(const char* emotion) {
         lv_obj_move_foreground(emoji_box_);
     }
 
-    current_is_font_ = is_font;
+    in_font_mode_ = is_font;
 }
 
 // font 模式静默丢弃字幕。常规模式下根据文本宽度自适应 long_mode：
 // 单屏容得下 → LONG_WRAP 静态多行；超出 → LONG_SCROLL_CIRCULAR 横向跑马灯。
 // 速度参数 kChatScrollSpeedPps：3-10 岁孩子推荐 ~28 px/s（约 1.4 字/秒）。
 void UiDisplay::SetChatMessage(const char* role, const char* content) {
-    if (current_is_font_) return;
+    if (in_font_mode_) return;
 
     if (chat_message_label_ && content && content[0]) {
         DisplayLockGuard lock(this);
@@ -594,20 +570,19 @@ void UiDisplay::SetChatMessage(const char* role, const char* content) {
 // 调用方需自持 DisplayLockGuard
 // ============================================================
 
-// 清场：font 模式（GIF 笔画）状态切换前调用，避免 emoji_image src 仍指向 GIF
-// 状态切换路径必须先清 font 状态，否则切回 chat/clock 时仍显示 GIF 笔画字
+// 清退 font 模式：切回 neutral 表情、恢复 bottom_bar
+// 必须先清标志再 SetEmotion，否则 SetEmotion 内 font→neutral 守护会反噬
 void UiDisplay::ResetFontMode() {
-    if (!current_is_font_) return;
-    current_is_font_ = false;             // 绕过 SetEmotion font→neutral 守护
-    SetEmotion("neutral");                // 切回静态表情
+    if (!in_font_mode_) return;
+    in_font_mode_ = false;
+    SetEmotion("neutral");
 }
 
-// 触屏点击 emoji_box 退出 font 模式（与教育卡退出机制一致）
-// 仅 font 模式生效；非 font 时点击不响应（避免误触干扰 happy 等表情）
-// 用 Schedule 异步：避免在 LVGL 事件回调内修改 emoji src + flag 引发事件链问题
+// 触屏点击 emoji_box 退出 font 模式
+// 用 Schedule 异步：避免在 LVGL 事件回调内修改 emoji src 引发事件链问题
 void UiDisplay::OnFontExitClicked(lv_event_t* e) {
     auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
-    if (!self || !self->current_is_font_) return;
+    if (!self || !self->in_font_mode_) return;
     Application::GetInstance().Schedule([self]() { self->ResetFontMode(); });
 }
 
@@ -906,7 +881,7 @@ void UiDisplay::OnPlayerPlayPauseClicked(lv_event_t* e) {
 // 200ms tick：直接从 MusicPlayer 拉进度/暂停状态，自动刷新 UI
 void UiDisplay::PlayerTickCb(lv_timer_t* t) {
     auto* self = static_cast<UiDisplay*>(lv_timer_get_user_data(t));
-    if (!self || self->current_scene_ != SceneType::kPlayer) return;
+    if (!self || self->active_scene_ != SceneType::kPlayer) return;
     auto& mp = MusicPlayer::GetInstance();
     self->UpdatePlayerProgress(mp.GetPositionMs(), mp.GetTotalDurationMs());
     self->SetPlayerPaused(mp.IsPaused());
@@ -952,7 +927,7 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
     RaiseStatusBar();              // status_bar_ 永久不隐藏，必须提顶否则被 player_container_ 遮挡
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
-    current_scene_ = SceneType::kPlayer;   // 与 Clock / Emoji 互斥
+    active_scene_ = SceneType::kPlayer;   // 与 Clock / Chat 互斥
 
     // 启动 200ms 进度刷新 timer（懒创建）
     if (!player_tick_) player_tick_ = lv_timer_create(PlayerTickCb, 200, this);
@@ -963,18 +938,18 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
 
 void UiDisplay::SwitchOutPlayerMode() {
     DisplayLockGuard lock(this);
-    if (current_scene_ != SceneType::kPlayer) return;
+    if (active_scene_ != SceneType::kPlayer) return;
     if (player_container_) lv_obj_add_flag(player_container_, LV_OBJ_FLAG_HIDDEN);
     if (player_tick_) lv_timer_pause(player_tick_);
     // 先退出 Player 场景，让 SwitchToClockMode 内的 kPlayer 互斥判定通过
-    current_scene_ = SceneType::kEmoji;
+    active_scene_ = SceneType::kChat;
     SwitchToClockMode();
     ESP_LOGI(TAG, "Switched out player mode");
 }
 
 void UiDisplay::UpdatePlayerProgress(int position_ms, int total_ms) {
     DisplayLockGuard lock(this);
-    if (current_scene_ != SceneType::kPlayer || !player_progress_) return;
+    if (active_scene_ != SceneType::kPlayer || !player_progress_) return;
 
     char buf[16];
     if (player_time_cur_) {
@@ -1000,14 +975,6 @@ void UiDisplay::SetPlayerPaused(bool paused) {
 
 // ============================================================
 // 教育卡（单词 / 拼音 / 汉字组词）— overlay 模式（与 QR 同），不占 SceneType
-// 双行 48px 均分居中布局（284×240 屏）：
-//   ┌─────────────────────┐
-//   │                     │
-//   │     main (主色)      │ ← 48px（hanzi CJK 实际 fallback 30px）
-//   │                     │
-//   │     bottom (配色)    │ ← 48px（中文 CJK 实际 fallback 30px）
-//   │                     │
-//   └─────────────────────┘
 // 配色：main 金黄 0xFFD54F（三类统一）/ bottom 绿 0x81C784
 // ============================================================
 
@@ -1023,6 +990,8 @@ void UiDisplay::HideEduCard() {
     DisplayLockGuard lock(this);
     if (edu_card_overlay_ && !lv_obj_has_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_add_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
+        if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
+        if (status_bar_) lv_obj_move_foreground(status_bar_);
         ESP_LOGI(TAG, "隐藏教育卡");
     }
 }
@@ -1044,7 +1013,7 @@ void UiDisplay::EnsureEduCardOverlay() {
     lv_obj_set_style_pad_all(edu_card_overlay_, 0, 0);
     lv_obj_add_flag(edu_card_overlay_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(edu_card_overlay_, OnEduCardClicked, LV_EVENT_CLICKED, this);
-    lv_obj_add_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);  // 默认隐藏，等 BuildEduCard 显示
+    lv_obj_add_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);  // 默认隐藏，等 RenderEduCardLayout 显示
 
     auto make_label = [this]() {
         lv_obj_t* lbl = lv_label_create(edu_card_overlay_);
@@ -1089,47 +1058,25 @@ void UiDisplay::UpdateEduRowAtBottom(lv_obj_t* lbl, const EduRow& row, int dist_
     lv_obj_remove_flag(lbl, LV_OBJ_FLAG_HIDDEN);
 }
 
-// v8 锚点（240 px 屏高 · 主副间距 20 px · 副位距底 64）：
-//   PY-mode (has_top, no bottom):    顶 50 / 主 100      [汉字组词 + 拼音顶]
-//   EN-mode (no top,   has bottom):  主 80 / 副 bottom:64 [英文 + 中文翻译]
-//   EN+Phonics (has_top, has bottom): 顶 28 / 主 80 / 副 bottom:64
-void UiDisplay::BuildEduCard(const EduRow& top, const EduRow& main_row, const EduRow& bottom) {
+// 渲染教育卡 overlay（240px 屏高 · 主副间距 20px）
+//   有 bottom 或 88 主秀: 顶 28 / 主 80 · 副 bottom:36(88) 或 64(56)
+//   仅 top（PY-mode 汉字组词）: 顶 50 / 主 100
+void UiDisplay::RenderEduCardLayout(const EduRow& top, const EduRow& main_row, const EduRow& bottom) {
     DisplayLockGuard lock(this);
-    HideQrCode();      // 与 QR overlay 互斥（同时只有一个 overlay）
+    HideQrCode();      // 与 QR overlay 互斥
 
     EnsureEduCardOverlay();
     if (!edu_card_overlay_) return;
 
     bool has_bottom = bottom.text && bottom.text[0];
+    bool is_super   = (main_row.height >= 88);
+    bool top_high   = is_super || has_bottom;
 
-    // 88 主秀（主动学习超大档）需要让出更多空间
-    bool is_super = (main_row.height >= 88);
-
-    int top_y, main_top;
-    if (is_super) {
-        // 88 主秀场景（letter/phonics/math 主动学习）
-        // 88 占屏 240*0.37=88px，居中布局：顶 28 / 主 80 (距顶 22) / 副 bottom:36
-        top_y    = 28;
-        main_top = 80;
-    } else if (has_bottom) {
-        // EN-mode 标准：主行 80 / 副 bottom:64，含 Phonics 顶部 28
-        top_y    = 28;
-        main_top = 80;
-    } else {
-        // PY-mode：顶部 50 / 主行 100，间距 20 px
-        top_y    = 50;
-        main_top = 100;
-    }
-
-    UpdateEduRow(edu_top_label_,  top,      top_y);
-    UpdateEduRow(edu_main_label_, main_row, main_top);
+    UpdateEduRow(edu_top_label_,  top,      top_high ? 28 : 50);
+    UpdateEduRow(edu_main_label_, main_row, top_high ? 80 : 100);
 
     if (has_bottom) {
-        // 副位距底距离按主秀字号自适应：
-        //   88 主秀: 主底 168 → 副底 36（副顶 184，间距 16）
-        //   56 主秀: 主底 136 → 副底 64（副顶 156，间距 20）
-        int bottom_dist = is_super ? 36 : 64;
-        UpdateEduRowAtBottom(edu_bottom_label_, bottom, bottom_dist);
+        UpdateEduRowAtBottom(edu_bottom_label_, bottom, is_super ? 36 : 64);
     } else {
         lv_obj_add_flag(edu_bottom_label_, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1137,84 +1084,73 @@ void UiDisplay::BuildEduCard(const EduRow& top, const EduRow& main_row, const Ed
     lv_obj_remove_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(edu_card_overlay_);
 
-    // ⭐ 教育卡 overlay 盖住整屏，但底部提示字 bottom_bar_（如"长按说话"）必须保留可见
-    // 把 bottom_bar 重新提到最前，叠在 overlay 之上
-    // status_bar 同理（教育卡场景仍要让用户看到对话状态/网络通知）
+    // overlay 盖屏，但 bottom_bar（"长按说话"）和 status_bar 必须保留可见
     if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
     if (status_bar_) lv_obj_move_foreground(status_bar_);
 }
 
-// v8 启蒙定版：
-//   主秀 56 px Bold #FFCA28（金）· 顶部 30 px #A5D6A7（薄荷绿）· 副位 20 px #A5D6A7
-//   PY-mode（top=拼音）: 顶 50 / 主 100 · 数据约定 ≤ 4 字汉字
-//   EN-mode（top=Phonics 或空 + bottom=汉字翻译）: 顶 28 / 主 80 / 副 bottom:64
-//   激活校验：超 4 字汉字 / > 12 字符英文 / 56 实测装不下 → 跳过激活，保持当前画面
+// 教育卡：主动学习类（letter/phonics/math）启用 88px 超大主秀，其他用 56px
+static bool IsSuperCategory(const char* s) {
+    return s && (strcmp(s, "letter")  == 0 ||
+                 strcmp(s, "phonics") == 0 ||
+                 strcmp(s, "math")    == 0);
+}
+
+// 显示教育卡（参数语义见 ui_display.h）
+// 布局规则：
+//   PY-mode (main 含 CJK) :         顶 50 / 主 100               · 汉字组词
+//   EN-mode (main 英文/算式):        顶 28 / 主 80 / 副 bottom:64 · 英文+中文
+//   主动学习 (letter/phonics/math): 顶 28 / 主 80 / 副 bottom:36 · 88px 超大
 void UiDisplay::ShowEduCard(const char* category, const char* main_text,
                              const char* top, const char* bottom) {
     if (!main_text || !main_text[0]) return;
     if (!category) category = "word";
 
-    // ⭐ font 模式（GIF 笔画动画）期间不抢屏 — 让 GIF 完整播放
-    // 教育卡触发延迟到下轮对话（GIF 退出后 current_is_font_=false，自然恢复）
-    if (current_is_font_) {
-        ESP_LOGI(TAG, "EduCard deferred: font GIF active, text=%s", main_text);
-        return;
-    }
-
     EnsureDisplayFonts();
-    // 主秀 56 缺失退化到 48（v1 兼容路径），48 也缺失才彻底跳过
     if (!edu_main_font_ || !clock_text_font_) {
-        ESP_LOGW(TAG, "EduCard skipped: base fonts not loaded (edu48=%p top30=%p)",
+        ESP_LOGW(TAG, "EduCard skipped: fonts not loaded (edu=%p top=%p)",
                  edu_main_font_, clock_text_font_);
         return;
     }
 
-    // 保留 ResetFontMode 在 current_is_font_=false 时的副作用（清残留 emoji_image），
-    // 不会重新进入 font GIF 路径（已被上方 return 拦截）。
+    // font 模式切教育卡：先盖 overlay 黑屏，再 ResetFontMode 切 neutral 时不可见，避免闪烁
+    if (in_font_mode_) {
+        DisplayLockGuard lock(this);
+        EnsureEduCardOverlay();
+        if (edu_card_overlay_) {
+            lv_obj_remove_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(edu_card_overlay_);
+        }
+    }
     ResetFontMode();
 
-    // 模式判定：main 含 CJK 汉字 → PY-mode（汉字主秀）；否则 EN-mode（英文/算式/拼音主秀）
-    // 注意：判 main 而不是 top — 三段 [basketball_篮球_bas·ket·ball] 中 top 含 `·` 多字节但 main 是英文
-    bool is_py_mode = ContainsCjk(main_text);
+    bool is_py_mode  = ContainsCjk(main_text);
+    bool is_super    = IsSuperCategory(category);
 
-    // 主秀字号选档 + 激活校验
-    // 优先用 56；缺失时退化到 48（开发期/字体未刷入）
     const lv_font_t* font_56 = edu_main_56_font_ ? edu_main_56_font_ : edu_main_font_;
     const lv_font_t* font_48 = edu_main_font_;
-    // ⭐ 主动学习 category（letter / phonics / math）启用 88 超大主秀
-    // 被动触发（word / hanzi / poem / topic / color）继续用 56 主秀（不抢戏）
-    bool prefer_super = (category != nullptr) && (
-        strcmp(category, "letter")  == 0 ||   // 26 字母教学（Aa）
-        strcmp(category, "phonics") == 0 ||   // 拼音声母韵母
-        strcmp(category, "math")    == 0);    // 数学算式
-
     const lv_font_t* main_font = PickEduMainFont(
-        main_text, is_py_mode, prefer_super,
-        clock_big_font_,    // 88 px (复用时钟大字字体，已扩展含字母 + 数学符号)
+        main_text, is_py_mode, is_super,
+        clock_big_font_,   // 88px
         font_56, font_48);
     if (!main_font) {
         ESP_LOGI(TAG, "EduCard skipped (out of activation range): %s", main_text);
         return;
     }
 
-    // 圆角字体（975MaruSC）字距：PY 主秀 ls=3，EN 主秀 ls=0；88 主秀 ls=4 (大字加间距)
     int main_ls = is_py_mode ? 3 : (main_font == clock_big_font_ ? 4 : 0);
     int main_h  = (main_font == clock_big_font_)   ? 88 :
                   (main_font == edu_main_56_font_) ? 56 : 48;
 
-    // v8 配色：金 #FFCA28 / 薄荷绿 #A5D6A7
     constexpr uint32_t kMainColor = 0xFFCA28;   // 主秀亮金
     constexpr uint32_t kHintColor = 0xA5D6A7;   // 顶部 / 副位薄荷绿
 
-    // 三行 EduRow · v8 spec：顶 30 / 主 56(48/88) / 副 20
-    //   ⚠ 副位必须用 g_text_font（20 px BUILTIN_TEXT_FONT），不能用 clock_text_font_(30 px)
-    //   旧 bug：用 30 px 渲染副位 → 实际显示比 spec 大 50%
-    EduRow t{top,       clock_text_font_, kHintColor, 2, 30};   // 顶部 30 px 拼音/类别
-    EduRow m{main_text, main_font,        kMainColor, main_ls, main_h};  // 主秀 56/48/88 px
-    EduRow b{bottom,    &g_text_font,     kHintColor, 3, 20};   // 副位 20 px 中文翻译
+    EduRow t{top,       clock_text_font_, kHintColor, 2, 30};
+    EduRow m{main_text, main_font,        kMainColor, main_ls, main_h};
+    EduRow b{bottom,    &g_text_font,     kHintColor, 3, 20};
 
-    BuildEduCard(t, m, b);
-    ESP_LOGI(TAG, "EduCard v8[%s] mode=%s main=%s(%d) top=%s bottom=%s",
+    RenderEduCardLayout(t, m, b);
+    ESP_LOGI(TAG, "EduCard[%s] mode=%s main=%s(%d) top=%s bottom=%s",
              category, is_py_mode ? "PY" : "EN", main_text, main_h,
              top ? top : "(none)", bottom ? bottom : "(none)");
 }

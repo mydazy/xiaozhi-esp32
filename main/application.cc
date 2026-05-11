@@ -84,41 +84,51 @@ std::vector<EduWordHit> ExtractEduWordCards(const std::string& s) {
     return hits;
 }
 
-// 链式弹卡状态（main_event_loop 单线程访问，无并发）
+// 链式弹卡状态
 std::vector<EduWordHit> g_edu_queue;
 size_t                  g_edu_idx = 0;
 esp_timer_handle_t      g_edu_timer = nullptr;
 
-void FlushNextEduCard() {
+void FlushNextEduCardOnMain() {
     if (g_edu_idx >= g_edu_queue.size()) return;
+    auto state = Application::GetInstance().GetDeviceState();
+    if (state != kDeviceStateSpeaking) {
+        g_edu_queue.clear();
+        g_edu_idx = 0;
+        return;
+    }
     auto hit = g_edu_queue[g_edu_idx++];
-    Application::GetInstance().Schedule([hit]() {
-        if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
-            ui->ShowEduCard("word", hit.word.c_str(),
-                            hit.top.c_str(), hit.bottom.c_str());
-        }
-    });
+    if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+        ui->ShowEduCard("word", hit.word.c_str(),
+                        hit.top.c_str(), hit.bottom.c_str());
+    }
     if (g_edu_idx < g_edu_queue.size()) {
         esp_timer_start_once(g_edu_timer, (uint64_t)kEduCardIntervalMs * 1000);
     }
 }
 
+void FlushNextEduCard() {
+    Application::GetInstance().Schedule([]() { FlushNextEduCardOnMain(); });
+}
+
 void EnqueueEduCards(std::vector<EduWordHit> hits) {
     if (hits.empty()) return;
-    if (!g_edu_timer) {
-        esp_timer_create_args_t args = {
-            .callback = [](void*) { FlushNextEduCard(); },
-            .arg = nullptr,
-            .dispatch_method = ESP_TIMER_TASK,
-            .name = "edu_card_timer",
-            .skip_unhandled_events = true,
-        };
-        esp_timer_create(&args, &g_edu_timer);
-    }
-    esp_timer_stop(g_edu_timer);
-    g_edu_queue = std::move(hits);
-    g_edu_idx = 0;
-    FlushNextEduCard();
+    Application::GetInstance().Schedule([hits = std::move(hits)]() mutable {
+        if (!g_edu_timer) {
+            esp_timer_create_args_t args = {
+                .callback = [](void*) { FlushNextEduCard(); },
+                .arg = nullptr,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "edu_card_timer",
+                .skip_unhandled_events = true,
+            };
+            esp_timer_create(&args, &g_edu_timer);
+        }
+        esp_timer_stop(g_edu_timer);
+        g_edu_queue = std::move(hits);
+        g_edu_idx = 0;
+        FlushNextEduCardOnMain();   // 已在 main loop 内，直接调（不再 Schedule 嵌套）
+    });
 }
 }  // namespace
 
@@ -223,6 +233,13 @@ void Application::Initialize() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_STATE_CHANGED);
         // 广播设备状态变化事件（FlowEngine 等订阅方依赖此回调）
         DeviceStateEventManager::GetInstance().PostStateChangeEvent(old_state, new_state);
+
+        // A1 · 开机自动对话：首次进 Idle 时触发 ToggleChat
+        // board WelcomeTask 在播欢迎音前调 RequestAutoChatOnIdle() · 此处响应
+        if (new_state == kDeviceStateIdle && auto_chat_pending_.exchange(false)) {
+            ESP_LOGI(TAG, "开机自动对话：state→Idle 触发 ToggleChat");
+            Schedule([this]() { ToggleChatState(); });
+        }
     });
 
     // Start the clock timer to update the status bar
@@ -1423,6 +1440,15 @@ void Application::SetSttPopupEnabled(bool enabled) {
     Settings audio_settings("audio", true);
     audio_settings.SetInt("stt_popup", enabled ? 1 : 0);
     ESP_LOGI(TAG, "STT 提示音: %s（已持久化）", enabled ? "开启" : "关闭");
+}
+
+void Application::RequestAutoChatOnIdle() {
+    auto_chat_pending_.store(true);
+    // 边界：state 已经是 Idle（启动期罕见）→ 立即触发 · 否则 listener 自动响应
+    if (state_machine_.GetState() == kDeviceStateIdle && auto_chat_pending_.exchange(false)) {
+        ESP_LOGI(TAG, "开机自动对话：当前已 Idle 立即触发 ToggleChat");
+        Schedule([this]() { ToggleChatState(); });
+    }
 }
 
 void Application::ResetProtocol() {

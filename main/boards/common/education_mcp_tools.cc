@@ -103,7 +103,7 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
                          (unsigned)gsz, elapsed_ms, speed_kbs);
 
                 Application::GetInstance().Schedule([d, gif, gsz]() {
-                    d->UpdateFontGif(gif, gsz);   // PSRAM buffer 所有权转移给 EmojiCollection
+                    d->FontGif(gif, gsz);   // PSRAM buffer 所有权转移给 EmojiCollection
                 });
                 delete ctx;
                 vTaskDelete(NULL);
@@ -141,19 +141,17 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
             return std::string(ok ? "OK" : "切换失败");
         });
 
-    // 教育卡片渲染原语 — v8 启蒙版（9 类 category）
-    // ⭐ 主动学习类（letter/phonics/math）启用 88 px 超大主秀，被动触发类用 56 主秀
-    // 何时调用由云端 lesson_*** 工具（ai_mcp_tool_config）路由
+    // 教育卡渲染（9 类 category · 主动 letter/phonics/math 走 88px / 其他 56px）
     mcp.AddTool("self.education.show_card",
-        "渲染教育卡片(v8 九选一)，需要可视化展示字词/拼音/算式/古诗/科普时调用：\n"
-        "【被动触发 56 主秀】\n"
+        "渲染教育卡片(九选一)，需要可视化展示字词/拼音/算式/古诗/科普时调用：\n"
+        "【被动 56 主秀】\n"
         " word: top=自然拼读\"ap·ple\"(选填) / main=英文≤10 字母 / bottom=中文释义≤10 字；\n"
         " hanzi: top=带声调拼音\"niǎo\"(必填) / main=汉字≤4 字 / bottom=组词≤10 字；\n"
         " pinyin: top=类别\"韵母\"(必填) / main=带调字母≤8 字符 / bottom=例字≤10 字；\n"
         " poem: top=拼音(选填) / main=诗题≤4 字 / bottom=作者朝代；\n"
         " topic: top=拼音(选填) / main=主题词≤4 字 / bottom=类别(如\"昆虫\")；\n"
         " color: top=英文如\"red\"(选填) / main=中文颜色≤2 字 / bottom=英文翻译；\n"
-        "【主动学习 ⭐ 88 超大主秀】\n"
+        "【主动 88 超大主秀】\n"
         " letter: main=字母\"Aa\"(大小写并排≤5 字符) / bottom=首例词中文；\n"
         " phonics: top=类别\"声母\"(必填) / main=单声母\"b\"(≤5 字符) / bottom=例字\"爸 bà\"；\n"
         " math: main=算式\"3+5=8\"(≤5 字符) / bottom=读法\"三加五等于八\"。\n"
@@ -170,11 +168,11 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
             std::string top      = properties["top"].value<std::string>();
             std::string bottom   = properties["bottom"].value<std::string>();
             if (main_t.empty()) return std::string("请输入要展示的内容");
-            // v8 白名单：被动 6 类 + 主动 3 类 = 9 类
+            // 9 类白名单：被动 6（56px） + 主动 3（88px）
             static const char* kAllowed[] = {
-                "word", "hanzi", "pinyin",          // 被动触发 56
-                "poem", "topic", "color",           // 被动触发 56
-                "letter", "phonics", "math"         // ⭐ 主动学习 88（≤5 字符自动启用）
+                "word", "hanzi", "pinyin",
+                "poem", "topic", "color",
+                "letter", "phonics", "math"
             };
             bool ok = false;
             for (const char* c : kAllowed) {
