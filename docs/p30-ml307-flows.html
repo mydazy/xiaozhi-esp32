@@ -363,13 +363,9 @@ ul.compact li { margin: 2px 0; }
 <p class="sub">三角度：① 并发/资源 ② 状态机/时序 ③ 精简/可读 · 共 20 项 · 按量产风险分级。</p>
 
 <h3>8.1 P0 · 量产 blocker</h3>
-<table>
-<thead><tr><th>#</th><th>问题</th><th>位置</th><th>修复</th></tr></thead>
-<tbody>
-<tr><td><span class="pill p0">P0-1</span></td><td><b>ml307_http stoul 无 try-catch</b>：Content-Length 是用户可控（中间盒可注入 "-1"/"abc"）· 抛 invalid_argument → terminate → abort 重启</td><td><code>ml307_http.cc:355</code></td><td>加 try-catch 降级（at_uart 同类已修，此处漏修）</td></tr>
-<tr><td><span class="pill p0">P0-2</span></td><td><b>modem_receive + modem_event 未 Pin Core</b>：违反"每 task Pin Core"语义 · 可能漂到 Core 1 与 audio_input/LVGL 抢</td><td><code>at_uart.cc:164, 171</code></td><td><code>xTaskCreatePinnedToCore(..., 0, ...)</code> 与 ml307_net 同核</td></tr>
-</tbody>
-</table>
+<div class="callout ok">
+<b>✅ 2/2 已修复</b>（2026-05-12）· 详见 § 8.4 已修 log 末两行
+</div>
 
 <h3>8.2 P1 · 建议修</h3>
 <table>
@@ -418,12 +414,14 @@ ul.compact li { margin: 2px 0; }
 <tr><td>at_uart stod/stoi try-catch（同类崩溃修复 · http 漏修）</td><td><code>at_uart.cc:398-433</code></td></tr>
 <tr><td>binary mode 白名单 v2（加 MQTT/MMQTT/MIPSEND）</td><td><code>at_uart.cc:706-716</code></td></tr>
 <tr><td>command_mutex_ 改 timed_mutex + try_lock_for</td><td><code>at_uart.cc:718-724</code></td></tr>
+<tr><td><b>P0-1</b> · ml307_http stoul 加 try-catch（中间盒注入畸形 Content-Length 不再 abort）</td><td><code>ml307_http.cc:355-362</code></td></tr>
+<tr><td><b>P0-2</b> · modem_receive + modem_event Pin Core 0（与 ml307_net 同核 · 不抢 Core 1 实时音频）</td><td><code>at_uart.cc:164, 171</code></td></tr>
 </tbody>
 </table>
 
 <h3>8.5 推荐落地批次</h3>
-<div class="callout bad">
-<b>批次 A · P0 必修</b>：① ml307_http.cc:355 stoul 加 try-catch ② modem_receive/modem_event Pin Core 0
+<div class="callout ok">
+<b>✅ 批次 A · P0 必修</b>（2026-05-12 完成）：① ml307_http.cc:355 stoul 加 try-catch ② modem_receive/modem_event Pin Core 0
 </div>
 <div class="callout warn">
 <b>批次 B · P1 稳定性</b>：① ReceiveTask/EventTask 超时化 ② WaitForNetworkReady 默认 60s ③ wait_for_response 改 atomic ④ binary mode 白名单加 CEREG?/COPS? ⑤ CEREG 解析边界守卫 ⑥ MIPCALL 注释/代码对齐 ⑦ URC 回调异步化

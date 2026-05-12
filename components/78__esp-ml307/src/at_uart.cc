@@ -161,18 +161,18 @@ void AtUart::Initialize() {
     }
 
     // ReceiveTask: high priority, only handles DMA data reception
-    xTaskCreate([](void* arg) {
+    xTaskCreatePinnedToCore([](void* arg) {
         auto at_uart = (AtUart*)arg;
         at_uart->ReceiveTask();
         vTaskDelete(NULL);
-    }, "modem_receive", 1024, this, configMAX_PRIORITIES - 2, &receive_task_handle_);
+    }, "modem_receive", 1024, this, configMAX_PRIORITIES - 2, &receive_task_handle_, 0 /* Core 0 */);
 
     // EventTask: lower priority, handles parsing and URC callbacks
-    xTaskCreate([](void* arg) {
+    xTaskCreatePinnedToCore([](void* arg) {
         auto at_uart = (AtUart*)arg;
         at_uart->EventTask();
         vTaskDelete(NULL);
-    }, "modem_event", 2048 * 3, this, configMAX_PRIORITIES - 3, &event_task_handle_);
+    }, "modem_event", 2048 * 3, this, configMAX_PRIORITIES - 3, &event_task_handle_, 0 /* Core 0 */);
 
     initialized_ = true;
 }

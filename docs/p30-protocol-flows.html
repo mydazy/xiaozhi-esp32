@@ -79,7 +79,7 @@ ul.compact li { margin: 2px 0; }
 
 <header>
   <h1>MyDazy P30 · Protocol 切换架构梳理</h1>
-  <div class="meta">v2.2.11 · 2026-05-11 · <code>main/protocols/*</code> + <code>main/application.cc</code> · baidu 已启用 + 四家协议三遍审查版</div>
+  <div class="meta">v2.2.12 · 2026-05-12 · <code>main/protocols/*</code> + <code>main/application.cc</code> · baidu 全链路 60ms 协商（待联调验证）</div>
 </header>
 
 <div class="layout">
@@ -384,18 +384,12 @@ ul.compact li { margin: 2px 0; }
 <!-- ================== 6. WebsocketBaiduProtocol ================== -->
 <section id="baidu">
 <h2><span class="num">6</span> WebsocketBaiduProtocol · 百度 BRTC 大模型互动</h2>
-<p class="sub">v2.2.11 启用 · NVS <code>websocket.url</code> 含 <code>brtc</code> 或 <code>baidu</code> 子串即激活 · 1655 行 · 四家协议中最复杂。</p>
 
-<div class="callout ok">
-<b>启用变更（5 处）</b>：
-<ul style="margin:6px 0 0 18px">
-<li><code>websocket_baidu_protocol.h:43</code> <code>CloseAudioChannel</code> 签名加 <code>bool send_goodbye = true</code>（修复编译错误）</li>
-<li><code>websocket_baidu_protocol.cc:3</code> <code>#include "display.h"</code> → <code>#include "display/display.h"</code></li>
-<li><code>websocket_baidu_protocol.cc:317</code> 定义签名同步 + <code>(void)send_goodbye</code></li>
-<li><code>main/CMakeLists.txt</code> 加 <code>"protocols/websocket_baidu_protocol.cc"</code></li>
-<li><code>application.cc</code> <code>InitializeProtocol</code> 加 <code>brtc/baidu</code> 子串分支（优先于 joyinside）</li>
-</ul>
+<div class="callout info">
+<b>📘 深度文档</b>：本章节为<b>摘要</b> · 完整代码分区 / License 时序 / Token 缓存 / 3 Timer / AEC 双模 / 30+ 事件映射 / 断路器 / 4G UART 耦合 / BRTC SDK 差异 / NVS 全集 / 优化手册 见独立文档 <b><a href="p30-protocol-baidu.html">→ p30-protocol-baidu.html</a></b>（1655 行代码深度解析）。
 </div>
+
+<p class="sub">v2.2.11 启用 · v2.2.12 上下行 60ms 协商 · NVS <code>websocket.url</code> 含 <code>brtc</code> 或 <code>baidu</code> 子串即激活 · 1655 行 · 四家协议中最复杂。</p>
 
 <h3>6.1 启用条件 vs 三协议对比</h3>
 <table>
@@ -424,52 +418,46 @@ ul.compact li { margin: 2px 0; }
 </tbody>
 </table>
 
-<h3>6.3 核心机制 1：WS 保活复用</h3>
-<p class="sub">与另外三家"断开 → 重连"模式不同，baidu 把 WS 当作长连接保活。</p>
+<h3>6.3 核心机制速查（详情见独立文档）</h3>
 <table>
-<thead><tr><th>方法</th><th>行为</th></tr></thead>
+<thead><tr><th>机制</th><th>1 句话</th><th>详细章节</th></tr></thead>
 <tbody>
-<tr><td><code>CloseAudioChannel</code></td><td><b>不真正关 WS</b> · 仅置 media_ready_=false + 停 3 个 timer · 发 PREFIX_BREAK + CMD_MUSIC_STOP（如有）· WS 仍连</td></tr>
-<tr><td><code>OpenAudioChannel</code>（复用路径）</td><td>检测 <code>websocket_->IsConnected()</code> 为真 → 跳过 DNS/TCP/TLS/WS 握手 · 仅重发 device_info（如 AEC 切换）· media_ready_=true · 直接 return true</td></tr>
-<tr><td><code>OpenAudioChannel</code>（新建路径）</td><td>FetchSessionToken(HTTP) → ReplaceUrlParam → websocket_->Connect → 10 s 等 LICENSED 或 MEDIA_READY 事件</td></tr>
-<tr><td><code>DisconnectWebSocket</code>（独有 API）</td><td>真断 WS · 用于休眠/断网场景 · 不在 Protocol 基类接口</td></tr>
+<tr><td>WS 保活复用</td><td>CloseAudioChannel 不真关 WS · 下次 Open 跳过 DNS/TLS 握手 · 仅置 media_ready_=false</td><td><a href="p30-protocol-baidu.html#timers">深度 § 6</a></td></tr>
+<tr><td>License 三态</td><td>MUST/PASS/FAILED · ScheduleLicRetry 5 s 延迟避开 UART 忙 · 机会式重试（TTS_END / Abort）</td><td><a href="p30-protocol-baidu.html#license">深度 § 4</a></td></tr>
+<tr><td>Token 缓存</td><td>HTTP /baiduVoiceChat 预取 · OnDisconnect 清缓存重取 · xTaskCreate "bd_autoconn"</td><td><a href="p30-protocol-baidu.html#token">深度 § 5</a></td></tr>
+<tr><td>3 个 Timer</td><td>idle (5min 软关音频) / lic_retry (5s) / listening_to (30s)</td><td><a href="p30-protocol-baidu.html#timers">深度 § 6</a></td></tr>
+<tr><td>AEC ON/OFF 双模</td><td>读 aecMode.aec · DeviceInfo 字段动态切换 · dfda / disable_voice_auto_int / tts_end_delay 三参数联动</td><td><a href="p30-protocol-baidu.html#aec">深度 § 7</a></td></tr>
+<tr><td>6 类前缀路由</td><td>[E]/[Q]/[A]/[S]/[F]/[C] 单字符快速分发 · 30+ 子事件</td><td><a href="p30-protocol-baidu.html#prefix">深度 § 3</a> + <a href="p30-protocol-baidu.html#events">§ 9</a></td></tr>
+<tr><td>断路器 + 快速重试</td><td>音频/控制独立计数 · 3 次跳 / 10 次关 WS · WiFi 50ms / 控制 200ms 内重试</td><td><a href="p30-protocol-baidu.html#circuit">深度 § 10</a></td></tr>
+<tr><td>4G UART 阻塞耦合</td><td>ML307R UART 单线程 · License 5s 延迟 + 机会式重试是为绕开 UART 忙</td><td><a href="p30-protocol-baidu.html#uart">深度 § 11</a></td></tr>
 </tbody>
 </table>
 
-<h3>6.4 核心机制 2：License 激活 + Token 缓存</h3>
+<h3>6.4 v2.2.12 上下行帧长协商（联调中）</h3>
 <table>
+<thead><tr><th>改动</th><th>位置</th></tr></thead>
 <tbody>
-<tr><td>License key 来源</td><td>NVS baidu.license_key · 缺省 fallback 硬编码值</td></tr>
-<tr><td>激活时机</td><td>WS 连上后服务端推 [LIC] 事件 → 客户端发 EVENT_LIC_ACTIVE · 失败由 lic_retry_timer 5 s 后在 main_app 重试</td></tr>
-<tr><td>Token 缓存</td><td>连接方式 1（URL 含 <code>&id=&t=</code>）走 FetchSessionToken（HTTP）· 缓存 cached_instance_id_/cached_token_ · 断连后清除并 Prefetch</td></tr>
-<tr><td>预取异步任务</td><td><code>PrefetchSessionTokenAsync</code> → Schedule 派发 → 内含 <code>xTaskCreate(.., "bd_autoconn", 6144)</code> 自动建立 WS · <b>裸 xTaskCreate · 违反 § 四.1 落位表纪律</b></td></tr>
+<tr><td>NVS <code>server_frame_duration</code> 默认 20→60</td><td>cc:112</td></tr>
+<tr><td>SendInitialDeviceInfo 加 3 个候选字段（<code>audio_frame_duration_ms</code> / <code>tts_frame_duration_ms</code> / <code>frame_duration_ms</code> = 60）</td><td>cc:1213-1215</td></tr>
+<tr><td>HandleBinaryMessage 首帧 OPUS TOC 解析日志</td><td>cc:786-796</td></tr>
 </tbody>
 </table>
 
-<h3>6.5 核心机制 3：消息前缀路由</h3>
-<table>
-<thead><tr><th>前缀</th><th>语义</th><th>处理函数</th></tr></thead>
-<tbody>
-<tr><td><code>[E]:[LIC]:...</code></td><td>License 事件</td><td>HandleLicenseEvent</td></tr>
-<tr><td><code>[E]:[TTS_BEGIN_SPEAKING]</code> / <code>[TTS_END_SPEAKING]</code></td><td>TTS 开始/结束</td><td>HandleEvent · NotifyTtsState</td></tr>
-<tr><td><code>[E]:[REMOTE_PLAYER_BEGIN]</code> / <code>[REMOTE_PLAYER_END]</code></td><td>云端音乐播放控制</td><td>HandleEvent · is_playing_music_</td></tr>
-<tr><td><code>[E]:[CMD]:[REMOTE_PLAYER]:[STOP/PAUSE/RESUME]</code></td><td>云端推音乐控制</td><td>HandleRemoteMusicCommand → MusicPlayer 联动</td></tr>
-<tr><td><code>[Q]:</code> / <code>[Q]:[M]:[C]:</code></td><td>ASR 中间/最终结果</td><td>HandleAsrResult · 2 s 内同文本去重</td></tr>
-<tr><td><code>[A]:</code> / <code>[A]:[M]:</code></td><td>LLM 答复</td><td>HandleLLMResult · StripEmoji 过滤 4 字节 UTF-8</td></tr>
-<tr><td><code>[S]:</code></td><td>服务器状态/版本</td><td>仅日志</td></tr>
-<tr><td><code>[F]:</code></td><td>Function Call</td><td>HandleFunctionCall</td></tr>
-<tr><td><code>[C]:</code></td><td>自定义数据（云端推送）</td><td>HandleCustomData · 转 application.cc custom 消息</td></tr>
-<tr><td>裸 JSON <code>{type:"xxx"}</code></td><td>OTA/reboot 等命令</td><td>转 HandleCustomData</td></tr>
-</tbody>
-</table>
+<div class="callout bad">
+<b>联调判读</b>：<code>[BD][PROBE] first opus packet=N bytes · config=X</code>
+<ul style="margin:6px 0 0 18px">
+<li>N≈100 + config 0-11（SILK）= ✅ 60ms 协商成功</li>
+<li>N≈40 + config 16-23（CELT 20ms）= ⚠ 服务端未识别协商，仍发 20ms · <b>NVS 写 server_frame_duration=20 立即回滚</b></li>
+</ul>
+完整 4 种判读结果 + 回滚步骤 + 失败模式分析见 <a href="p30-protocol-baidu.html#frame">深度文档 § 8</a> + <a href="p30-protocol-baidu.html#tune">§ 15</a>。
+</div>
 
-<h3>6.6 启用后已知风险（详见 § 13 / § 15）</h3>
+<h3>6.5 已知风险（量产前必修）</h3>
 <ul class="compact">
-<li><b>license_key 硬编码</b> · 用户未在 NVS 配 → 用 fallback · 该 key 来源/有效期未文档化</li>
-<li><b>裸 xTaskCreate "bd_autoconn"</b>（PrefetchSessionTokenAsync 内）· 6 KB 栈 · 未挂 Core 或登记</li>
-<li><b>OpenAudioChannel 10 s 阻塞 main_app</b>（与其他三家共有的 R2，但 baidu 含 FetchSessionToken HTTP 额外延迟）</li>
-<li><b>client_frame_duration=20 ms</b> 已生效（应用层 SendAudio 不读此方法）· 实际帧时长仍按 OPUS_FRAME_DURATION_MS 编码</li>
-<li><b>3 个 timer 析构顺序</b>：dtor 先 prevent_destroy_guard_ 置 false → stop+delete 三个 timer · 但 timer cb 内部可能正在 Schedule lambda 排队 · 依赖 main_app 在析构后不再处理 = 实际依赖 ResetProtocol 异步窗口</li>
+<li><b>license_key 硬编码 fallback</b> <code>"759877c9b68b4aa082cc05390be0cea9"</code> · 量产前应去掉 + NVS 强制配 → <a href="p30-protocol-baidu.html#tune">深度 § 15.1</a></li>
+<li><b>裸 xTaskCreate "bd_autoconn"</b>（PrefetchSessionTokenAsync 内）· 未挂 Core / 未登记 § 四.1</li>
+<li><b>OpenAudioChannel 10 s 阻塞 main_app</b>（含 FetchSessionToken HTTP，4G 慢时叠加）</li>
+<li><b>v2.2.12 帧长协商未联调验证</b> · 失败模式：TTS 沙沙声 → NVS 回滚</li>
 </ul>
 </section>
 

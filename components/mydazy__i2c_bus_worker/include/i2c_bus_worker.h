@@ -50,13 +50,6 @@ typedef struct {
 } i2c_worker_config_t;
 
 /** 默认配置宏
- * task_core = 1（v1.2，2026-05-09）：原 0 在 BLE 启动期被 NimBLE/phy_init 饿
- *   - Core 0 已塞满：WiFi/LWIP/NimBLE/opus_codec/audio_output/main_app/ml307_net
- *   - I2C 主调用方在 Core 1：触摸屏(LVGL)、shake_task、codec ctrl
- *   - 移 Core 1 = 减少跨核排队 + 避开 BLE/WiFi 启动期的 Core 0 高占
- *   - worker prio=10 == audio_input(P10) 不抢 AFE，单 op < 5ms 不卡 LVGL
- *   - 触发现象：日志 "submit timeout — worker may still be executing" 在 BLE 主机栈注册 GATT 时出现
- *
  * err_streak_for_reset = 20（v1.1）：原 3 太敏感
  *   - 设备 NACK（chip 未上电完成 / 出厂空白未烧固件 / 4G RF 临时干扰）算"设备层"错误
  *   - bus_reset 只能修复"总线层"锁死（SDA 被拉低不释放），无法修复设备层

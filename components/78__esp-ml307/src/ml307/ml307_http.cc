@@ -352,7 +352,12 @@ bool Ml307Http::FetchHeaders() {
 
     auto it = response_headers_.find("Content-Length");
     if (it != response_headers_.end()) {
-        content_length_ = std::stoul(it->second);
+        try {
+            content_length_ = std::stoul(it->second);
+        } catch (const std::exception& e) {
+            ESP_LOGW(TAG, "Bad Content-Length '%s': %s · 视作 0", it->second.c_str(), e.what());
+            content_length_ = 0;
+        }
     }
 
     ESP_LOGI(TAG, "HTTP request successful, status code: %d, Content-Length: %u",

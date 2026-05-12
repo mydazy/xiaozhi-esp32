@@ -371,11 +371,13 @@ ul.compact li { margin: 2px 0; }
 <p class="sub">三角度：① 并发/资源 ② 状态机/时序 ③ 精简/可读 · 共 18 项 · 按量产风险分级。</p>
 
 <h3>8.1 P0 · 量产 blocker</h3>
+<div class="callout ok">
+<b>✅ P0-2 已修复</b>（2026-05-12 · P30-4G/WiFi 量产 blocker 清零）· 详见 § 8.4 已修 log 末行
+</div>
 <table>
-<thead><tr><th>#</th><th>问题</th><th>位置</th><th>修复</th></tr></thead>
+<thead><tr><th>#</th><th>问题</th><th>位置</th><th>修复</th><th>状态</th></tr></thead>
 <tbody>
-<tr><td><span class="pill p0">P0-1</span></td><td><b>P31 编译失败</b>：仍用 v1.x C++ class API（new Axs5106lTouch · SetWakeCallback · TouchGesture::SingleClick）· 驱动组件已删 class</td><td><code>p31_board.cc:130, 288-403</code></td><td>照搬 wifi/4g 板 axs5106l_touch_config_t + 静态 trampoline + 保留 P31 独有的 swipe→ControlCenter 分支</td></tr>
-<tr><td><span class="pill p0">P0-2</span></td><td><b>LONG_PRESS_TIME 注释代码不一致</b>：代码 300ms · 注释/.h 写 500ms · 儿童误触体验关键</td><td><code>axs5106l_touch.c:73</code> + h:34</td><td>裁决保留 300 或 500 后改一致</td></tr>
+<tr><td><span class="pill p0">P0-1</span></td><td><b>P31 编译失败</b>：仍用 v1.x C++ class API（new Axs5106lTouch · SetWakeCallback · TouchGesture::SingleClick）· 驱动组件已删 class</td><td><code>p31_board.cc:130, 288-403</code></td><td>照搬 wifi/4g 板 axs5106l_touch_config_t + 静态 trampoline + 保留 P31 独有的 swipe→ControlCenter 分支</td><td><b>P31-only</b> · 不阻塞 P30-4G/WiFi 量产</td></tr>
 </tbody>
 </table>
 
@@ -418,6 +420,7 @@ ul.compact li { margin: 2px 0; }
 <tr><td>LVGL attach 失败置 touch_driver_=nullptr</td></tr>
 <tr><td>INT-edge storm 检测 12 edges/s · 2s mute</td></tr>
 <tr><td>"tap→拒绝 swipe→tap" 误配 double 清 last_click_time</td></tr>
+<tr><td><b>P0-2</b> · LONG_PRESS_TIME 注释代码对齐到 300ms（PTT 已下线 · 板级无 listener · 注释 .c L64 + .h L33）— <code>axs5106l_touch.c:59-68</code> + <code>axs5106l_touch.h:33</code></td></tr>
 </tbody>
 </table>
 

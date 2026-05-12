@@ -780,6 +780,17 @@ void WebsocketBaiduProtocol::HandleBinaryMessage(const char* data, size_t len) {
     // 百度协议文档无最小帧限制，OPUS RFC 6716 允许 1 字节 DTX 静音帧（仅 TOC byte）
     // 丢弃有效小帧会导致 TTS 播放断断续续（dfda=false 时服务器下发静音填充）
     if (on_incoming_audio_ && len > 0) {
+        if (audio_rx_frames_ == 0 && len >= 4) {
+            uint8_t toc = (uint8_t)data[0];
+            uint8_t config = toc >> 3;
+            const char* frame_hint = (config >= 24) ? "60ms?" :
+                                     (config >= 16) ? "20ms?" :
+                                     (config >= 14) ? "10ms?" : "5ms or smaller?";
+            ESP_LOGI(TAG, "[BD][PROBE] first opus packet=%d bytes · TOC=0x%02X · config=%d · %s "
+                          "(expecting %d ms per NVS)",
+                     (int)len, toc, (int)config, frame_hint, server_frame_duration_);
+        }
+
         auto packet = std::make_unique<AudioStreamPacket>();
         packet->sample_rate = server_sample_rate_;
         packet->frame_duration = server_frame_duration_;
@@ -1190,6 +1201,10 @@ void WebsocketBaiduProtocol::SendInitialDeviceInfo() {
         cJSON_AddNumberToObject(json, "tts_fast_send_second", 2);
         cJSON_AddNumberToObject(json, "tts_fast_send_ratio", 2.0f);
     }
+
+    cJSON_AddNumberToObject(json, "audio_frame_duration_ms", 60);
+    cJSON_AddNumberToObject(json, "tts_frame_duration_ms", 60);
+    cJSON_AddNumberToObject(json, "frame_duration_ms", 60);
 
     char* str = cJSON_PrintUnformatted(json);
     ESP_LOGI(TAG, "DeviceInfo: %s", str);

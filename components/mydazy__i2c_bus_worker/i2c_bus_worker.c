@@ -246,9 +246,6 @@ static esp_err_t submit_and_wait(i2c_worker_handle_t w, op_t *op, uint32_t total
     op->result_sem = sem;
     op->result_out = &op_result;
 
-    /* 拆分 timeout：入队应 us 级（仅等 worker 调度抖动 / 优先级反转），
-       绝大部分预算留给 worker 执行（含 i2c_master 硬件超时）。
-       原实现 50/50 拆分在 BLE/WiFi 启动期容易 50ms 入队不够 → 误报 timeout。 */
     TickType_t tick_total = pdMS_TO_TICKS(total_timeout_ms);
     TickType_t tick_send  = pdMS_TO_TICKS(10);
     if (tick_send > tick_total) tick_send = (tick_total > 1) ? (tick_total / 4) : 1;

@@ -359,12 +359,14 @@ ul.compact li { margin: 2px 0; }
 <p class="sub">三角度：① 并发/资源 ② 状态机/时序 ③ 精简/可读 · 共 17 项 · 按量产风险分级。</p>
 
 <h3>8.1 P0 · 量产 blocker</h3>
+<div class="callout ok">
+<b>✅ P0-2 已修复</b>（2026-05-12 · P30-4G/WiFi 量产 blocker 清零）· 详见 § 8.4 已修 log 末行
+</div>
 <table>
-<thead><tr><th>#</th><th>问题</th><th>位置</th><th>修复</th></tr></thead>
+<thead><tr><th>#</th><th>问题</th><th>位置</th><th>修复</th><th>状态</th></tr></thead>
 <tbody>
-<tr><td><span class="pill p0">P0-1</span></td><td><b>P31 板编译失败</b>：用 v1.0.x C++ Sc7a20h 类 + new 构造 · 驱动 v4.0 已删 class</td><td><code>p31_board.cc:121, 270</code></td><td>迁移到 v4.0 C handle（参 wifi/4g 板复制 + 接 i2c_worker）</td></tr>
-<tr><td><span class="pill p0">P0-2</span></td><td><b>arm_wakeup 时序窗口 ~500ms</b>：arm 后到 deep_sleep 之间任何强动作会让 INT1 拉低瞬间唤醒</td><td><code>4g_board.cc:593-605</code> + <code>wifi_board.cc</code></td><td>arm_wakeup 挪到 vTaskDelay 200 之后、esp_deep_sleep_start 之前</td></tr>
-<tr><td><span class="pill p0">P0-3</span></td><td><b>P31 EXT1 缺清 latch</b>：手写 enable_ext1 没读 INT1_SRC · v2.1 修过的"立即唤醒" bug 在 P31 仍存在</td><td><code>p31_board.cc:537-542</code></td><td>同 P0-1 迁移到 v4.0 后自动用 arm_wakeup</td></tr>
+<tr><td><span class="pill p0">P0-1</span></td><td><b>P31 板编译失败</b>：用 v1.0.x C++ Sc7a20h 类 + new 构造 · 驱动 v4.0 已删 class</td><td><code>p31_board.cc:121, 270</code></td><td>迁移到 v4.0 C handle</td><td><b>P31-only</b> · 不阻塞 P30-4G/WiFi 量产</td></tr>
+<tr><td><span class="pill p0">P0-3</span></td><td><b>P31 EXT1 缺清 latch</b>：手写 enable_ext1 没读 INT1_SRC · v2.1 修过的"立即唤醒" bug 在 P31 仍存在</td><td><code>p31_board.cc:537-542</code></td><td>P0-1 修完自动覆盖</td><td><b>P31-only</b></td></tr>
 </tbody>
 </table>
 
@@ -403,15 +405,16 @@ ul.compact li { margin: 2px 0; }
 <tr><td>A1 OnShake 加 TryStopAlarmRinger("shake") 抢占 ✓（4g:339 / wifi:343）</td></tr>
 <tr><td>INT1 极性注释 active high → active LOW 修正 ✓</td></tr>
 <tr><td>v3.0+ i2c_worker 共线保护（codec/touch/sensor）✓</td></tr>
+<tr><td><b>P0-2</b> · arm_wakeup 挪到 esp_deep_sleep_start 前最后一刻（窗口 ~500ms → <5ms · 修"睡前晃动立即唤醒"）— <code>wifi_board.cc:595-625 / 4g_board.cc:593-624</code></td></tr>
 </tbody>
 </table>
 
 <h3>8.5 推荐落地批次</h3>
-<div class="callout bad">
-<b>批次 A · P0 量产前必修</b><br>
-① P31 板迁移到 v4.0 C handle（消除编译失败 + 拿起唤醒残留 bug · 与触屏 P0 一起修）<br>
-② arm_wakeup 挪到 vTaskDelay 200 后 + esp_deep_sleep_start 前（最小化窗口）<br>
-③ P31 手写 EXT1 改用 arm_wakeup（P0-1 修完自动覆盖）
+<div class="callout ok">
+<b>✅ 批次 A · P30-4G/WiFi 量产 blocker</b>（2026-05-12 完成）：arm_wakeup 挪到 esp_deep_sleep_start 前最后一刻（窗口 ~500ms → <5ms）
+</div>
+<div class="callout warn">
+<b>批次 A' · P31 编译失败</b>（后续 P31 量产前修）：① P31 板加速计迁移到 v4.0 C handle ② P31 手写 EXT1 改用 arm_wakeup（① 修完自动覆盖）· 与触屏 P31 P0 一起做
 </div>
 <div class="callout warn">
 <b>批次 B · P1 量产稳定</b><br>

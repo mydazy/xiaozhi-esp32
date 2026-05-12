@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · Baidu BRTC 协议深度文档</title>
+<style>
+:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+        --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
+        --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       margin: 0; background: #F5F5F5; color: var(--text); line-height: 1.55; font-size: 14px; }
+header { background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+         color: white; padding: 24px 40px; }
+header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 600; }
+header .meta { opacity: .9; font-size: 12px; }
+
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav { width: 220px; flex-shrink: 0; background: white; padding: 18px 0;
+      border-right: 1px solid var(--border); position: sticky; top: 0;
+      align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+nav h3 { margin: 0 14px 8px; font-size: 11px; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: .5px; }
+nav a { display: block; padding: 5px 14px; color: var(--text); text-decoration: none;
+        font-size: 13px; border-left: 3px solid transparent; }
+nav a:hover { background: var(--brand-light); border-left-color: var(--brand); color: var(--brand-deep); }
+nav a.back { background: #FFF8E1; border-left-color: #F57F17; color: #E65100; margin-bottom: 6px; }
+
+main { flex: 1; padding: 24px 36px; max-width: 980px; }
+section { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
+             border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
+section h2 .num { display: inline-block; background: var(--brand); color: white;
+                  padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
+section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section h4 { margin: 12px 0 4px 0; font-size: 13.5px; color: var(--text); }
+section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
+
+code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
+       font-family: "SF Mono", Menlo, monospace; font-size: 12.5px; color: #C7254E; }
+
+table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; font-size: 13px; }
+th { background: #FAFAFA; color: var(--text); text-align: left; padding: 6px 8px;
+     border-bottom: 2px solid var(--border); font-weight: 600; }
+td { padding: 6px 8px; border-bottom: 1px solid #EEE; vertical-align: top; }
+td.center, th.center { text-align: center; }
+td.mono, th.mono { font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
+
+.callout { background: #FFF8E1; border-left: 4px solid #F57F17; padding: 10px 12px;
+           border-radius: 4px; margin: 10px 0; font-size: 13px; }
+.callout.ok   { background: #E8F5E9; border-color: #2E7D32; }
+.callout.bad  { background: #FFEBEE; border-color: #C62828; }
+.callout.info { background: #E3F2FD; border-color: #1976D2; }
+
+.pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px;
+        font-weight: 600; margin-right: 4px; }
+.pill.lic { background: #F3E5F5; color: #6A1B9A; }
+.pill.tok { background: #E0F7FA; color: #006064; }
+.pill.tts { background: #FFF3E0; color: #E65100; }
+.pill.asr { background: #E3F2FD; color: #1976D2; }
+.pill.cmd { background: #FFEBEE; color: #C62828; }
+.pill.ok  { background: #E8F5E9; color: #2E7D32; }
+.pill.warn { background: #FFF3E0; color: #E65100; }
+.pill.bad  { background: #FFEBEE; color: #C62828; }
+
+.svgwrap { background: #FCFCFC; border: 1px dashed #DDD; border-radius: 6px;
+           padding: 10px; margin: 8px 0; overflow-x: auto; }
+.svgwrap svg { display: block; max-width: 100%; height: auto; }
+.svg-title { font-size: 13px; font-weight: 600; fill: var(--brand-deep); }
+.svg-axis  { font-size: 11px; fill: var(--text-2); }
+.node-text { font-size: 11.5px; fill: var(--text); text-anchor: middle; dominant-baseline: middle; }
+.node-text.sm { font-size: 10.5px; fill: var(--text-2); }
+
+ul.compact { padding-left: 18px; margin: 6px 0; }
+ul.compact li { margin: 2px 0; }
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>MyDazy P30 · Baidu BRTC 协议深度文档</h1>
+  <div class="meta">v2.2.12 · 2026-05-12 · <code>main/protocols/websocket_baidu_protocol.cc</code>（1655 行）· 配套 <a href="p30-protocol-flows.html" style="color:#FFE0B2">总协议文档</a></div>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>目录</h3>
+  <a href="p30-protocol-flows.html" class="back">← 返回协议总览</a>
+  <a href="#identity">1. 协议身份与启用</a>
+  <a href="#layout">2. 代码分区图</a>
+  <a href="#prefix">3. 6 大消息前缀路由</a>
+  <a href="#license">4. License 三态时序</a>
+  <a href="#token">5. Token 预取与缓存</a>
+  <a href="#timers">6. 三个 Timer 全景</a>
+  <a href="#aec">7. AEC ON/OFF 双模</a>
+  <a href="#frame">8. 上下行帧长协商（v2.2.12）</a>
+  <a href="#events">9. 全部事件 30+ 完整映射</a>
+  <a href="#circuit">10. 断路器 + 失败追踪</a>
+  <a href="#uart">11. 4G UART 阻塞耦合</a>
+  <a href="#vsbrtc">12. 与 BRTC SDK 差异</a>
+  <a href="#api">13. Public API 全清单</a>
+  <a href="#nvs">14. NVS 配置全集</a>
+  <a href="#tune">15. 优化手册</a>
+</nav>
+
+<main>
+
+<!-- ================== 1. 协议身份 ================== -->
+<section id="identity">
+<h2><span class="num">1</span> 协议身份与启用</h2>
+<table>
+<tbody>
+<tr><td>类名</td><td><code>WebsocketBaiduProtocol</code> · 继承 <code>Protocol</code></td></tr>
+<tr><td>用途</td><td>百度智能云 BRTC 大模型互动 · WebSocket 直连（绕过 BRTC SDK）</td></tr>
+<tr><td>代码量</td><td><code>.cc</code> 1477 行 + <code>.h</code> 178 行 = <b>1655 行</b>（四家协议中最重，约其它三家代码总和 1.5×）</td></tr>
+<tr><td>启用条件</td><td>NVS <code>websocket.url</code> 含 <code>brtc</code> 或 <code>baidu</code> 子串（优先于 joyinside · application.cc:626）</td></tr>
+<tr><td>典型 URL</td><td><code>wss://rtc-aiotgw.exp.bcelive.com/v1/realtime?a=&lt;app&gt;&ak=&lt;ak&gt;&sk=&lt;sk&gt;&ac=opus</code></td></tr>
+<tr><td>License 来源</td><td>NVS <code>baidu.license_key</code> · fallback 硬编码 <code>"759877c9b68b4aa082cc05390be0cea9"</code></td></tr>
+<tr><td>Token 来源</td><td>HTTP GET <code>&lt;ota_url&gt;/baiduVoiceChat</code> · 返回 instance_id + token（连接方式一）</td></tr>
+</tbody>
+</table>
+
+<h3>两种连接方式</h3>
+<table>
+<thead><tr><th>方式</th><th>URL 必含参数</th><th>Token 获取</th><th>典型部署</th></tr></thead>
+<tbody>
+<tr><td><b>方式一（id+t）</b></td><td><code>&id=xxx&t=xxx</code></td><td>HTTP 预取并替换 URL 参数 · 缓存到 cached_instance_id_ / cached_token_</td><td>客户端动态会话 · token 时效短</td></tr>
+<tr><td><b>方式二（ak+sk）</b></td><td><code>&ak=xxx&sk=xxx</code></td><td>不预取 · 直接用 URL 中的 ak/sk 鉴权</td><td>固定鉴权 · 长期密钥</td></tr>
+</tbody>
+</table>
+<p class="sub">判断逻辑：<code>OpenAudioChannel</code> 检查 URL 是否同时含 <code>&id=</code> 和 <code>&t=</code> → 走方式一。</p>
+</section>
+
+<!-- ================== 2. 代码分区图 ================== -->
+<section id="layout">
+<h2><span class="num">2</span> 代码分区图（1477 行分布）</h2>
+<div class="svgwrap">
+<svg viewBox="0 0 880 460" xmlns="http://www.w3.org/2000/svg">
+  <text x="440" y="20" class="svg-title" text-anchor="middle">websocket_baidu_protocol.cc · 函数地图</text>
+
+  <rect x="20" y="40" width="200" height="60" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+  <text class="node-text" x="120" y="58" style="font-weight:600">L1-100 · 常量定义</text>
+  <text class="node-text sm" x="120" y="76">6 类前缀 + 30+ 事件</text>
+  <text class="node-text sm" x="120" y="92">TranslateEmotion 表</text>
+
+  <rect x="240" y="40" width="200" height="60" rx="6" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="340" y="58" style="font-weight:600">L106-208 · 构造/析构/Start</text>
+  <text class="node-text sm" x="340" y="76">NVS 读 + 3 timer 创建</text>
+  <text class="node-text sm" x="340" y="92">prevent_destroy_guard</text>
+
+  <rect x="460" y="40" width="200" height="60" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="560" y="58" style="font-weight:600">L210-310 · SendAudio/Text</text>
+  <text class="node-text sm" x="560" y="76">断路器 + 快速重试</text>
+  <text class="node-text sm" x="560" y="92">TTS 期音频策略</text>
+
+  <rect x="680" y="40" width="180" height="60" rx="6" fill="#F3E5F5" stroke="#6A1B9A"/>
+  <text class="node-text" x="770" y="58" style="font-weight:600">L312-368 · Channel 控制</text>
+  <text class="node-text sm" x="770" y="76">CloseAudioChannel</text>
+  <text class="node-text sm" x="770" y="92">DisconnectWebSocket</text>
+
+  <rect x="20" y="120" width="200" height="60" rx="6" fill="#E0F7FA" stroke="#006064"/>
+  <text class="node-text" x="120" y="138" style="font-weight:600">L371-489 · Token 路径</text>
+  <text class="node-text sm" x="120" y="156">FetchSessionToken (HTTP)</text>
+  <text class="node-text sm" x="120" y="172">PrefetchSessionTokenAsync</text>
+
+  <rect x="240" y="120" width="200" height="60" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text class="node-text" x="340" y="138" style="font-weight:600">L503-672 · OpenAudioChannel</text>
+  <text class="node-text sm" x="340" y="156">10 步建链 · 复用/新建</text>
+  <text class="node-text sm" x="340" y="172">10s 等 LIC|MEDIA_READY</text>
+
+  <rect x="460" y="120" width="400" height="60" rx="6" fill="#FFF8E1" stroke="#F57F17"/>
+  <text class="node-text" x="660" y="138" style="font-weight:600">L675-806 · Text/Binary 消息分发</text>
+  <text class="node-text sm" x="660" y="156">HandleTextMessage 前缀路由 + HandleBinaryMessage</text>
+  <text class="node-text sm" x="660" y="172">PROBE 日志（v2.2.12）+ media_ready 过滤</text>
+
+  <rect x="20" y="200" width="200" height="60" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+  <text class="node-text" x="120" y="218" style="font-weight:600">L807-993 · 处理函数</text>
+  <text class="node-text sm" x="120" y="236">HandleAsrResult + LLMResult</text>
+  <text class="node-text sm" x="120" y="252">HandleEvent · 12+ 分支</text>
+
+  <rect x="240" y="200" width="200" height="60" rx="6" fill="#F3E5F5" stroke="#6A1B9A"/>
+  <text class="node-text" x="340" y="218" style="font-weight:600">L995-1024 · License 流程</text>
+  <text class="node-text sm" x="340" y="236">HandleLicenseEvent</text>
+  <text class="node-text sm" x="340" y="252">MUST/PASS/FAILED 三态</text>
+
+  <rect x="460" y="200" width="200" height="60" rx="6" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="560" y="218" style="font-weight:600">L1026-1097 · FunctionCall</text>
+  <text class="node-text sm" x="560" y="236">百度 FC → JSONRPC 2.0</text>
+  <text class="node-text sm" x="560" y="252">tools/call 映射</text>
+
+  <rect x="680" y="200" width="180" height="60" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="770" y="218" style="font-weight:600">L1099-1122 · CustomData</text>
+  <text class="node-text sm" x="770" y="236">[C]: → custom JSON</text>
+  <text class="node-text sm" x="770" y="252">→ remote_cmd</text>
+
+  <rect x="20" y="280" width="200" height="60" rx="6" fill="#F3E5F5" stroke="#6A1B9A"/>
+  <text class="node-text" x="120" y="298" style="font-weight:600">L1125-1171 · License 重试</text>
+  <text class="node-text sm" x="120" y="316">SendLicenseActivation</text>
+  <text class="node-text sm" x="120" y="332">TryFlushPending/ScheduleLicRetry</text>
+
+  <rect x="240" y="280" width="200" height="60" rx="6" fill="#FFF8E1" stroke="#F57F17"/>
+  <text class="node-text" x="340" y="298" style="font-weight:600">L1173-1214 · DeviceInfo</text>
+  <text class="node-text sm" x="340" y="316">AEC 双模配置</text>
+  <text class="node-text sm" x="340" y="332">+ 帧长协商（v2.2.12）</text>
+
+  <rect x="460" y="280" width="200" height="60" rx="6" fill="#E0F7FA" stroke="#006064"/>
+  <text class="node-text" x="560" y="298" style="font-weight:600">L1225-1267 · 文本/Prompt/音乐</text>
+  <text class="node-text sm" x="560" y="316">SendTextToAI/Tts</text>
+  <text class="node-text sm" x="560" y="332">UpdateSystemPrompt</text>
+
+  <rect x="680" y="280" width="180" height="60" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+  <text class="node-text" x="770" y="298" style="font-weight:600">L1273-1300 · 音乐控制</text>
+  <text class="node-text sm" x="770" y="316">HandleRemoteMusicCommand</text>
+  <text class="node-text sm" x="770" y="332">→ MusicPlayer</text>
+
+  <rect x="20" y="360" width="200" height="60" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text class="node-text" x="120" y="378" style="font-weight:600">L1335-1408 · ASR 控制</text>
+  <text class="node-text sm" x="120" y="396">SendStartListening 模式切换</text>
+  <text class="node-text sm" x="120" y="412">SendStopListening/Abort</text>
+
+  <rect x="240" y="360" width="200" height="60" rx="6" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="340" y="378" style="font-weight:600">L1302-1334 · 扩展 API</text>
+  <text class="node-text sm" x="340" y="396">SendInterrupt/Pause/Resume</text>
+  <text class="node-text sm" x="340" y="412">SendFunctionCallResult</text>
+
+  <rect x="460" y="360" width="200" height="60" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="560" y="378" style="font-weight:600">L1410-1486 · Timer 实现</text>
+  <text class="node-text sm" x="560" y="396">StartListeningTimer / IdleTimer</text>
+  <text class="node-text sm" x="560" y="412">CheckIdleTimeout（含嵌套 timer）</text>
+
+  <rect x="680" y="360" width="180" height="60" rx="6" fill="#FFF8E1" stroke="#F57F17"/>
+  <text class="node-text" x="770" y="378" style="font-weight:600">辅助 / static</text>
+  <text class="node-text sm" x="770" y="396">TranslateEmotion / StripEmoji</text>
+  <text class="node-text sm" x="770" y="412">ReplaceUrlParam</text>
+</svg>
+</div>
+</section>
+
+<!-- ================== 3. 6 大前缀路由 ================== -->
+<section id="prefix">
+<h2><span class="num">3</span> 6 大消息前缀路由完整映射</h2>
+<p class="sub">服务端→设备所有文本消息都用 <code>[X]:</code> 单字符前缀路由 · HandleTextMessage 内部按 <code>data[1]</code> 字符快速分发。</p>
+
+<table>
+<thead><tr><th>前缀</th><th>路由函数</th><th>子格式</th><th>语义</th><th>典型 Action</th></tr></thead>
+<tbody>
+<tr><td><span class="pill cmd">[E]:</span></td><td>HandleEvent / HandleLicenseEvent</td><td>30+ 子事件</td><td>事件消息（最复杂分支）</td><td>TTS 状态 / 音乐 / 打断 / License</td></tr>
+<tr><td><span class="pill asr">[Q]:</span></td><td>HandleAsrResult</td><td>4 种子前缀</td><td>ASR 中间/最终结果</td><td>STT 文本上抛</td></tr>
+<tr><td><span class="pill tts">[A]:</span></td><td>HandleLLMResult</td><td>2 种子前缀</td><td>LLM 答复</td><td>TTS sentence_start</td></tr>
+<tr><td><span class="pill">[S]:</span></td><td>仅日志</td><td>—</td><td>服务器状态/版本</td><td>调试信息</td></tr>
+<tr><td><span class="pill">[F]:</span></td><td>HandleFunctionCall</td><td>JSON</td><td>百度 Function Call</td><td>转 JSONRPC 2.0 tools/call</td></tr>
+<tr><td><span class="pill">[C]:</span></td><td>HandleCustomData</td><td>任意 JSON</td><td>自定义控制指令</td><td>转 custom 消息 → remote_cmd</td></tr>
+<tr><td>裸 <code>{type:"xxx"}</code></td><td>HandleCustomData（fallback）</td><td>JSON</td><td>OTA/reboot 等系统命令</td><td>同上</td></tr>
+</tbody>
+</table>
+
+<h3>[Q]: ASR 子前缀完整列表</h3>
+<table>
+<thead><tr><th>子前缀</th><th>含义</th><th>final 字段</th></tr></thead>
+<tbody>
+<tr><td><code>[Q]:</code></td><td>ASR 最终结果</td><td>true</td></tr>
+<tr><td><code>[Q]:[M]:</code></td><td>ASR 中间结果</td><td>false</td></tr>
+<tr><td><code>[Q]:[C]:</code></td><td>ASR 追加最终（asr_vad_append 模式）</td><td>true · 2s 内去重</td></tr>
+<tr><td><code>[Q]:[M]:[C]:</code></td><td>ASR 追加中间</td><td>false</td></tr>
+</tbody>
+</table>
+
+<h3>[A]: LLM 子前缀</h3>
+<table>
+<thead><tr><th>子前缀</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td><code>[A]:</code></td><td>LLM 最终回复（整句）</td></tr>
+<tr><td><code>[A]:[M]:</code></td><td>LLM 中间回复（流式）</td></tr>
+<tr><td><code>[A]:[H]:</code></td><td>LLM 引导语（welcome / hint）</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<b>StripEmoji 过滤</b>：所有 LLM 输出文本都经过 4 字节 UTF-8 emoji 过滤（U+10000+），仅保留 ASCII + 3 字节 CJK + Font Awesome PUA。原因：设备字库不支持 emoji。
+</div>
+</section>
+
+<!-- ================== 4. License 三态时序 ================== -->
+<section id="license">
+<h2><span class="num">4</span> License 三态时序（LIC_MUST / PASS / FAILED）</h2>
+<p class="sub">百度服务端鉴权流程 · 与 OpenAudioChannel 10s 等待事件位耦合。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 900 420" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="lArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="450" y="20" class="svg-title" text-anchor="middle">License 三态状态机</text>
+
+  <rect x="50" y="50" width="160" height="40" rx="6" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="130" y="74">WS Connect 成功</text>
+
+  <rect x="50" y="120" width="160" height="40" rx="6" fill="#FFF8E1" stroke="#F57F17"/>
+  <text class="node-text" x="130" y="144" style="font-weight:600">收到 [E]:[LIC]:[MUST]:</text>
+
+  <rect x="250" y="120" width="200" height="60" rx="6" fill="#F3E5F5" stroke="#6A1B9A"/>
+  <text class="node-text" x="350" y="138" style="font-weight:600">lic_active_pending_=true</text>
+  <text class="node-text sm" x="350" y="156">ScheduleLicRetry()</text>
+  <text class="node-text sm" x="350" y="172">5s 延迟避开 UART 忙</text>
+
+  <rect x="490" y="120" width="200" height="60" rx="6" fill="#E0F7FA" stroke="#006064"/>
+  <text class="node-text" x="590" y="138" style="font-weight:600">lic_retry_timer 触发</text>
+  <text class="node-text sm" x="590" y="156">→ Schedule(main_app)</text>
+  <text class="node-text sm" x="590" y="172">→ TryFlushPendingLicActive</text>
+
+  <rect x="730" y="120" width="160" height="60" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text class="node-text" x="810" y="138" style="font-weight:600">SendLicenseActivation</text>
+  <text class="node-text sm" x="810" y="156">SendText([E]:[LIC]:</text>
+  <text class="node-text sm" x="810" y="172">[ACTIVE]:{...})</text>
+
+  <rect x="490" y="220" width="200" height="60" rx="6" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+  <text class="node-text" x="590" y="238" style="font-weight:600">收到 [LIC]:[RES]:[PASS]:</text>
+  <text class="node-text sm" x="590" y="256">licensed_ = true</text>
+  <text class="node-text sm" x="590" y="272">SetBits(LICENSED_EVENT)</text>
+
+  <rect x="730" y="220" width="160" height="60" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+  <text class="node-text" x="810" y="238" style="font-weight:600">收到 [LIC]:[RES]:[FAILED]:</text>
+  <text class="node-text sm" x="810" y="256" style="fill:#D32F2F">SetError "授权失败"</text>
+  <text class="node-text sm" x="810" y="272">stop lic_retry_timer</text>
+
+  <rect x="50" y="220" width="380" height="60" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="240" y="238" style="font-weight:600">同时：OpenAudioChannel 在主线程 wait</text>
+  <text class="node-text sm" x="240" y="256">EventGroupWaitBits(LIC | MEDIA, 10s)</text>
+  <text class="node-text sm" x="240" y="272">PASS / MEDIA_READY → 跳出</text>
+
+  <rect x="180" y="330" width="200" height="60" rx="6" fill="#FFF8E1" stroke="#F57F17"/>
+  <text class="node-text" x="280" y="348" style="font-weight:600">TTS_END / REMOTE_PLAYER_END</text>
+  <text class="node-text sm" x="280" y="366">ScheduleLicRetry()</text>
+  <text class="node-text sm" x="280" y="382">→ TryFlush（如还 pending）</text>
+
+  <rect x="450" y="330" width="200" height="60" rx="6" fill="#FFF3E0" stroke="#E65100"/>
+  <text class="node-text" x="550" y="348" style="font-weight:600">SendAbortSpeaking 末尾</text>
+  <text class="node-text sm" x="550" y="366">TryFlushPendingLicActive()</text>
+  <text class="node-text sm" x="550" y="382">机会式重试</text>
+
+  <line x1="130" y1="90" x2="130" y2="120" stroke="#666" marker-end="url(#lArr)"/>
+  <line x1="210" y1="140" x2="250" y2="140" stroke="#666" marker-end="url(#lArr)"/>
+  <line x1="450" y1="140" x2="490" y2="140" stroke="#666" stroke-dasharray="3 2" marker-end="url(#lArr)"/>
+  <line x1="690" y1="140" x2="730" y2="140" stroke="#666" marker-end="url(#lArr)"/>
+  <line x1="810" y1="180" x2="810" y2="220" stroke="#666" stroke-dasharray="3 2" marker-end="url(#lArr)"/>
+  <line x1="590" y1="180" x2="590" y2="220" stroke="#2E7D32" marker-end="url(#lArr)"/>
+  <text class="svg-axis" x="605" y="200" style="fill:#2E7D32">服务端响应</text>
+  <line x1="590" y1="280" x2="430" y2="280" stroke="#1976D2" marker-end="url(#lArr)"/>
+  <line x1="280" y1="330" x2="280" y2="280" stroke="#666" stroke-dasharray="3 2" marker-end="url(#lArr)"/>
+  <line x1="550" y1="330" x2="550" y2="280" stroke="#666" stroke-dasharray="3 2" marker-end="url(#lArr)"/>
+</svg>
+</div>
+
+<h3>设计要点</h3>
+<ul class="compact">
+<li><b>永不立即发送 LIC_ACTIVE</b>：WS 刚建立时 ML307R UART 仍在处理 TLS/WS 帧 · 立即发送必失败 · 浪费 TCP 失败名额</li>
+<li><b>5s 延迟（lic_retry_timer）</b>：等 modem UART 空闲 · 大幅降低失败率</li>
+<li><b>机会式重试</b>：TTS_END / REMOTE_PLAYER_END / SendAbortSpeaking 都调 TryFlushPendingLicActive（UART 此时必空闲）</li>
+<li><b>FAILED 永久停止重试</b>：服务端拒绝 = 客户端无救 · 立即 SetError</li>
+<li><b>license_key 空</b>：跳过整个流程 · 直接置 MEDIA_READY · 用于本地测试或 token-only 鉴权场景</li>
+</ul>
+</section>
+
+<!-- ================== 5. Token 预取与缓存 ================== -->
+<section id="token">
+<h2><span class="num">5</span> Token 预取与缓存（连接方式一）</h2>
+
+<h3>Token 生命周期</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 340" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="tArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">Session Token 状态机</text>
+
+  <ellipse cx="100" cy="60" rx="80" ry="20" fill="#FAFAFA" stroke="#666"/>
+  <text class="node-text" x="100" y="65" style="font-weight:600">Start() 调用</text>
+
+  <rect x="220" y="40" width="200" height="40" rx="6" fill="#E0F7FA" stroke="#006064"/>
+  <text class="node-text" x="320" y="64">PrefetchSessionTokenAsync</text>
+
+  <rect x="460" y="40" width="200" height="40" rx="6" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="560" y="64">FetchSessionToken (HTTP)</text>
+
+  <rect x="700" y="40" width="160" height="40" rx="6" fill="#FFF8E1" stroke="#F57F17"/>
+  <text class="node-text" x="780" y="64">HTTP GET</text>
+
+  <rect x="220" y="120" width="200" height="60" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text class="node-text" x="320" y="138" style="font-weight:600">cached_instance_id_</text>
+  <text class="node-text sm" x="320" y="156">cached_token_</text>
+  <text class="node-text sm" x="320" y="172">session_token_fetched_ = true</text>
+
+  <rect x="460" y="120" width="200" height="60" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text class="node-text" x="560" y="138" style="font-weight:600">xTaskCreate("bd_autoconn")</text>
+  <text class="node-text sm" x="560" y="156">6 KB stack · P1</text>
+  <text class="node-text sm" x="560" y="172">→ OpenAudioChannel</text>
+
+  <rect x="700" y="120" width="160" height="60" rx="6" fill="#FFF3E0" stroke="#E65100"/>
+  <text class="node-text" x="780" y="138" style="font-weight:600">⚠ 裸 xTaskCreate</text>
+  <text class="node-text sm" x="780" y="156">违 § 四.1 落位表</text>
+  <text class="node-text sm" x="780" y="172">应改 PinnedToCore</text>
+
+  <rect x="40" y="220" width="200" height="60" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+  <text class="node-text" x="140" y="238" style="font-weight:600">WS OnDisconnected</text>
+  <text class="node-text sm" x="140" y="256">清空缓存</text>
+  <text class="node-text sm" x="140" y="272">→ PrefetchSessionTokenAsync</text>
+
+  <rect x="260" y="220" width="200" height="60" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+  <text class="node-text" x="360" y="238" style="font-weight:600">CloseAudioChannel</text>
+  <text class="node-text sm" x="360" y="256">清 session_token_fetched_</text>
+  <text class="node-text sm" x="360" y="272">下次 Open 重新拿</text>
+
+  <rect x="480" y="220" width="200" height="60" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="580" y="238" style="font-weight:600">OpenAudioChannel 复用</text>
+  <text class="node-text sm" x="580" y="256">已有 cached_* → 跳过 HTTP</text>
+  <text class="node-text sm" x="580" y="272">ReplaceUrlParam id/t</text>
+
+  <line x1="180" y1="60" x2="220" y2="60" stroke="#666" marker-end="url(#tArr)"/>
+  <line x1="420" y1="60" x2="460" y2="60" stroke="#666" marker-end="url(#tArr)"/>
+  <line x1="660" y1="60" x2="700" y2="60" stroke="#666" marker-end="url(#tArr)"/>
+  <line x1="320" y1="80" x2="320" y2="120" stroke="#666" marker-end="url(#tArr)"/>
+  <line x1="560" y1="80" x2="560" y2="120" stroke="#666" marker-end="url(#tArr)"/>
+  <line x1="780" y1="80" x2="780" y2="120" stroke="#666" stroke-dasharray="3 2" marker-end="url(#tArr)"/>
+</svg>
+</div>
+
+<h3>FetchSessionToken 关键路径</h3>
+<table>
+<tbody>
+<tr><td>API 端点</td><td><code>&lt;ota_url&gt;/baiduVoiceChat</code>（OTA URL 拼接）</td></tr>
+<tr><td>HTTP 方法</td><td>GET</td></tr>
+<tr><td>Headers</td><td>Device-Id (MAC) · Client-Id (UUID) · User-Agent · Content-Type: application/json</td></tr>
+<tr><td>响应字段 1</td><td><code>ai_agent_instance_id</code>（数字 · 用 valuedouble 防溢出）</td></tr>
+<tr><td>响应字段 2</td><td><code>context.token</code> 或 <code>data.context.token</code></td></tr>
+<tr><td>替换 URL</td><td><code>ReplaceUrlParam(url, "id", instance_id)</code> + <code>ReplaceUrlParam(url, "t", token)</code></td></tr>
+</tbody>
+</table>
+
+<div class="callout bad">
+<b>风险：HTTP 同步阻塞 main_app</b><br>
+FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 PrefetchSessionTokenAsync 的 Schedule lambda 内执行 · 主任务 main_app 被卡住直到 HTTP 完成。4G CSQ 差时可能 5-10 s。<br>
+<b>缓解</b>：用 xTaskCreate "bd_autoconn" 把 OpenAudioChannel 挪出主任务（已实现，但 Prefetch 阶段的 HTTP 仍在 main_app 跑）。
+</div>
+</section>
+
+<!-- ================== 6. 三个 Timer ================== -->
+<section id="timers">
+<h2><span class="num">6</span> 三个 Timer 全景（idle / lic_retry / listening）</h2>
+
+<table>
+<thead><tr><th>Timer</th><th>类型</th><th>周期</th><th>触发条件</th><th>回调动作</th><th>停止时机</th></tr></thead>
+<tbody>
+<tr><td><code>idle_timer</code></td><td>周期</td><td>30 s 检查</td><td>StartIdleTimer (OpenAudio 后)</td><td>CheckIdleTimeout · 5 min 无活动 → SendTextToAI("再见") + 3 s 后关音频通道</td><td>StopIdleTimer / CloseAudioChannel</td></tr>
+<tr><td><code>lic_retry_timer</code></td><td>一次性</td><td>5 s</td><td>ScheduleLicRetry (LIC_MUST 收到时)</td><td>Schedule → TryFlushPendingLicActive · 在 main_app 主线程发送</td><td>FAILED / 成功 PASS</td></tr>
+<tr><td><code>listening_timer</code></td><td>一次性</td><td>30 s</td><td>StartListeningTimer (SendStartListening 等)</td><td>Schedule → 警告 "Listening timeout" + CloseAudioChannel</td><td>收到 ASR 结果 / StopListeningTimer</td></tr>
+</tbody>
+</table>
+
+<h3>Idle 超时分级降级（保 WS 连接）</h3>
+<p class="sub">CheckIdleTimeout 不直接 reset · 而是"软关闭音频通道，保留 WS 连接"用于服务端推送。</p>
+
+<table>
+<thead><tr><th>步骤</th><th>动作</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>idle &gt; 5 min · idle_goodbye_sent_=false</td><td>判定空闲</td></tr>
+<tr><td>2</td><td>idle_goodbye_sent_=true · Schedule lambda</td><td>派发到主线程</td></tr>
+<tr><td>3</td><td>SendTextToAI("我要先去忙了，你跟我说再见吧")</td><td>云端 TTS 道别</td></tr>
+<tr><td>4</td><td>嵌套创建 idle_dc timer 3 s</td><td>等 TTS 播放</td></tr>
+<tr><td>5</td><td>3 s 后 ResetDecoder + media_ready_=false + on_audio_channel_closed_</td><td>关音频通道 · WS 不动</td></tr>
+<tr><td>6</td><td>xTimerDelete(idle_dc)</td><td>清理嵌套 timer</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<b>嵌套 timer 析构风险</b>：idle_dc 由 CheckIdleTimeout 内动态创建 · 析构靠回调内 xTimerDelete · 如果 WebsocketBaiduProtocol 在 idle_dc 触发之前析构，会通过 prevent_destroy_guard 防止访问悬空 this，但 timer 本身泄漏。**实际场景**：仅在 esp_restart 前发生，restart 后所有 timer 都被清，无累积。
+</div>
+</section>
+
+<!-- ================== 7. AEC 双模 ================== -->
+<section id="aec">
+<h2><span class="num">7</span> AEC ON/OFF 双模配置对照（SendInitialDeviceInfo）</h2>
+<p class="sub">读 NVS <code>aecMode.aec</code> 判定 · 同一 DeviceInfo 消息根据 AEC 开关下发不同参数 · 服务端按此调整 ASR/TTS/打断策略。</p>
+
+<table>
+<thead><tr><th>字段</th><th>AEC ON（has_local_aec_ = 1）</th><th>AEC OFF（= 0）</th><th>语义</th></tr></thead>
+<tbody>
+<tr><td><code>model</code></td><td>BOARD_TYPE</td><td>BOARD_TYPE</td><td>板型号 · 服务端做统计</td></tr>
+<tr><td><code>dfda</code></td><td><b>true</b>（全双工）</td><td>false（半双工）</td><td>服务端是否允许"边播 TTS 边接收上行音频"</td></tr>
+<tr><td><code>disable_voice_auto_int</code></td><td><b>false</b>（启用服务端自动打断）</td><td>true（关闭）</td><td>云端是否在 TTS 中检测人声主动 [B] 打断</td></tr>
+<tr><td><code>tts_end_delay_ms</code></td><td><b>100</b></td><td>300</td><td>TTS 末尾延迟（AEC 模式更紧凑）</td></tr>
+<tr><td><code>tts_enable_fast_send</code></td><td><b>true</b></td><td>—</td><td>弱网下加速下发 TTS 包</td></tr>
+<tr><td><code>tts_fast_send_second</code></td><td>2</td><td>—</td><td>开启 fast send 前 N 秒</td></tr>
+<tr><td><code>tts_fast_send_ratio</code></td><td>2.0</td><td>—</td><td>fast send 加速倍数</td></tr>
+<tr><td><code>audio_frame_duration_ms</code></td><td>60（v2.2.12）</td><td>60（v2.2.12）</td><td>v2.2.12 协商 · 服务端识别即用 60ms 下发</td></tr>
+<tr><td><code>tts_frame_duration_ms</code></td><td>60</td><td>60</td><td>同上 · 候选字段名</td></tr>
+<tr><td><code>frame_duration_ms</code></td><td>60</td><td>60</td><td>同上 · 候选字段名</td></tr>
+</tbody>
+</table>
+
+<h3>两种模式的端到端行为对比</h3>
+<table>
+<thead><tr><th>场景</th><th>AEC ON</th><th>AEC OFF</th></tr></thead>
+<tbody>
+<tr><td>用户在 TTS 中说话</td><td>上行干净音频 → 服务端 VAD 检测到 → 推 [B] 打断</td><td>本地 WakeNet 唤醒"小智" → 客户端 SendAbortSpeaking</td></tr>
+<tr><td>TTS 中 mic 上传</td><td>持续上传（has_local_aec_=true 时 SendAudio 不停）</td><td>暂停上传（is_speaking_ && !has_local_aec_ → SendAudio return false）</td></tr>
+<tr><td>打断响应延迟</td><td>~400-500 ms（含网络往返）</td><td>~200 ms（本地 WakeNet 即时）</td></tr>
+<tr><td>误打断风险</td><td>云端 VAD 可能误触（环境噪声）</td><td>低（唤醒词严格匹配）</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 8. 帧长协商 ================== -->
+<section id="frame">
+<h2><span class="num">8</span> 上下行帧长协商（v2.2.12）</h2>
+<p class="sub">详见 <a href="p30-protocol-flows.html#baidu">总文档 § 6.7</a> · 此处补充诊断细节。</p>
+
+<h3>OPUS TOC byte 解析速查</h3>
+<p class="sub">TOC byte 高 5 位 <code>config</code> 字段定义帧长（RFC 6716 § 3.1）：</p>
+
+<table>
+<thead><tr><th>config 值</th><th>模式</th><th>采样率</th><th>帧长</th></tr></thead>
+<tbody>
+<tr><td>0-3</td><td>SILK NB</td><td>8 kHz</td><td>10/20/40/60 ms</td></tr>
+<tr><td>4-7</td><td>SILK MB</td><td>12 kHz</td><td>10/20/40/60 ms</td></tr>
+<tr><td>8-11</td><td>SILK WB</td><td>16 kHz</td><td>10/20/40/60 ms</td></tr>
+<tr><td>12-13</td><td>Hybrid SWB</td><td>24 kHz</td><td>10/20 ms</td></tr>
+<tr><td>14-15</td><td>Hybrid FB</td><td>48 kHz</td><td>10/20 ms</td></tr>
+<tr><td><b>16-19</b></td><td>CELT NB</td><td>8 kHz</td><td>2.5/5/10/<b>20</b> ms</td></tr>
+<tr><td><b>20-23</b></td><td>CELT WB</td><td>16 kHz</td><td>2.5/5/10/<b>20</b> ms</td></tr>
+<tr><td><b>24-27</b></td><td>CELT SWB</td><td>24 kHz</td><td>2.5/5/10/<b>20</b> ms ← 多帧情况</td></tr>
+<tr><td><b>28-31</b></td><td>CELT FB</td><td>48 kHz</td><td>2.5/5/10/<b>20</b> ms</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<b>注意</b>：单帧 OPUS 包只能表示≤20ms · <b>60ms 必然是 multi-frame packet</b>（CELT 模式不支持 60ms，必须用 SILK / Hybrid 多帧打包）。所以 PROBE 日志 config 字段需要结合 packet length 判断：
+<ul style="margin:6px 0 0 18px">
+<li>config 0-11 + 60ms 帧长 = SILK 60ms 单帧（最可能）</li>
+<li>config 12-15 + ~60ms = Hybrid 多帧（不常见）</li>
+<li>config 16-31 + ~60ms = CELT 3 × 20ms 多帧（罕见）</li>
+</ul>
+</div>
+
+<h3>预期 PROBE 日志样本</h3>
+<table>
+<thead><tr><th>真实下发帧长</th><th>预期日志</th><th>解读</th></tr></thead>
+<tbody>
+<tr><td>20ms @ 24kHz</td><td><code>packet=~40B · TOC=0x68 · config=13 · 20ms?</code></td><td>服务端未识别 v2.2.12 协商 → 回滚</td></tr>
+<tr><td>60ms @ 24kHz SILK</td><td><code>packet=~120B · TOC=0x38 · config=7 · 60ms?</code></td><td>协商成功 ✓</td></tr>
+<tr><td>60ms @ 16kHz SILK WB</td><td><code>packet=~100B · TOC=0x58 · config=11 · 60ms?</code></td><td>协商成功 + 降采样了</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 9. 全部事件 ================== -->
+<section id="events">
+<h2><span class="num">9</span> 全部事件 30+ 完整映射</h2>
+
+<h3>9.1 TTS 与音乐事件</h3>
+<table>
+<thead><tr><th>事件</th><th>状态变更</th><th>侧效</th><th>上抛系统消息</th></tr></thead>
+<tbody>
+<tr><td><code>[E]:[TTS_BEGIN_SPEAKING]</code></td><td>is_speaking_ = true</td><td>StopListeningTimer · 音乐播放中 → CMD_MUSIC_PAUSE</td><td>tts/start + emotion=happy</td></tr>
+<tr><td><code>[E]:[TTS_END_SPEAKING]</code></td><td>is_speaking_ = false</td><td>ResetDecoder · ScheduleLicRetry · 音乐恢复 → CMD_MUSIC_RESUME</td><td>tts/stop + emotion=neutral</td></tr>
+<tr><td><code>[E]:[REMOTE_PLAYER_BEGIN]</code></td><td>is_playing_music_ = true · is_speaking_ = true</td><td>StopListeningTimer</td><td>tts/start（无 emotion）</td></tr>
+<tr><td><code>[E]:[REMOTE_PLAYER_END]</code></td><td>is_playing_music_ = false · is_speaking_ = false</td><td>ScheduleLicRetry</td><td>tts/stop（无 emotion）</td></tr>
+<tr><td><code>[E]:[VOICE_COMING]</code></td><td>AEC ON + is_speaking_ → false</td><td>—</td><td>tts/stop（仅 AEC ON 模式）</td></tr>
+<tr><td><code>[E]:[VOICE_DISAPPEAR]</code></td><td>未处理（仅日志）</td><td>—</td><td>—</td></tr>
+<tr><td><code>[E]:[MEDIA]:[READY]:</code></td><td>media_ready_ = true</td><td>SetBits(MEDIA_READY_EVENT)</td><td>—</td></tr>
+<tr><td><code>[E]:[AGENTID]:</code></td><td>media_ready_ = true</td><td>同上</td><td>—</td></tr>
+</tbody>
+</table>
+
+<h3>9.2 License 事件</h3>
+<table>
+<thead><tr><th>事件</th><th>动作</th></tr></thead>
+<tbody>
+<tr><td><code>[E]:[LIC]:[MUST]:</code></td><td>lic_active_pending_ = true · ScheduleLicRetry()</td></tr>
+<tr><td><code>[E]:[LIC]:[RES]:[PASS]:</code></td><td>licensed_ = true · SetBits(LICENSED_EVENT)</td></tr>
+<tr><td><code>[E]:[LIC]:[RES]:[FAILED]:</code></td><td>SetError("设备授权失败") · stop lic_retry_timer</td></tr>
+</tbody>
+</table>
+
+<h3>9.3 云端 → 设备音乐控制</h3>
+<table>
+<thead><tr><th>事件</th><th>HandleRemoteMusicCommand</th></tr></thead>
+<tbody>
+<tr><td><code>[E]:[CMD]:[REMOTE_PLAYER]:[PAUSE]</code></td><td>action = "pause" → MusicPlayer.Pause()</td></tr>
+<tr><td><code>[E]:[CMD]:[REMOTE_PLAYER]:[RESUME]</code></td><td>action = "resume" → MusicPlayer.Resume()</td></tr>
+<tr><td><code>[E]:[CMD]:[REMOTE_PLAYER]:[STOP]</code></td><td>action = "stop" → MusicPlayer.Stop()</td></tr>
+</tbody>
+</table>
+<p class="sub"><b>匹配顺序敏感</b>：PAUSE / RESUME 必须在 STOP 之前匹配，否则 STOP 短前缀会吃掉。</p>
+
+<h3>9.4 设备 → 云端 ASR 模式控制</h3>
+<table>
+<thead><tr><th>命令</th><th>语义</th><th>触发时机</th></tr></thead>
+<tbody>
+<tr><td><code>[E]:[CMD]:[ASR_ENABLE_REALTIME]</code></td><td>切实时模式（连续 ASR）</td><td>kListeningModeRealtime / AutoStop</td></tr>
+<tr><td><code>[E]:[CMD]:[ASR_DISABLE_REALTIME]</code></td><td>切手动模式</td><td>kListeningModeManualStop</td></tr>
+<tr><td><code>[E]:[CMD]:[ASR_START_LONGTEXT_REC]</code></td><td>开始一段录音</td><td>SendStartListening manual</td></tr>
+<tr><td><code>[E]:[CMD]:[ASR_STOP_LONGTEXT_REC]</code></td><td>结束录音</td><td>SendStopListening / CloseAudio</td></tr>
+<tr><td><code>[E]:[CMD]:[AUTO_INT]:[TRUE/FALSE]</code></td><td>是否自动打断</td><td>Realtime → ON / Manual → OFF</td></tr>
+</tbody>
+</table>
+
+<h3>9.5 教育卡 / 系统</h3>
+<table>
+<thead><tr><th>消息</th><th>处理</th></tr></thead>
+<tbody>
+<tr><td><code>[SET]:[UPDATE_SYSTEM_PROMPT]:</code></td><td>UpdateSystemPrompt(model_type, prompt) · 教育卡 P0</td></tr>
+<tr><td><code>[E]:[SYSTEM_PROMPT_UPDATED]:</code></td><td>云端回执 · ShowNotification("已切换教学模式")</td></tr>
+<tr><td><code>[SET]:[DEVICE_INFO]:</code></td><td>设备信息上传（OpenAudio 后一次性）</td></tr>
+<tr><td><code>[B]:</code> / <code>[B]:[BEGIN]:N</code></td><td>打断 TTS（手动 / 唤醒词带 N ms 丢音频）</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 10. 断路器 ================== -->
+<section id="circuit">
+<h2><span class="num">10</span> 断路器 + 快速重试（音频/控制双独立）</h2>
+<p class="sub">百度协议独有 · 设计目标：4G 弱 CSQ 下避免无谓的 Ml307Tcp 5 s 超时堆积。</p>
+
+<h3>音频通道断路器（SendAudio）</h3>
+<table>
+<thead><tr><th>状态</th><th>条件</th><th>行为</th></tr></thead>
+<tbody>
+<tr><td>正常</td><td>failures = 0</td><td>正常发送 · 失败计数+1 + 记 first_audio_failure_time</td></tr>
+<tr><td>跳过</td><td>failures ≥ 3</td><td>不再尝试发送 · failures 继续累加 · 每 50 次记日志</td></tr>
+<tr><td>关连接</td><td>failures ≥ 10 && elapsed ≥ 5 s</td><td>websocket_->Close() · 触发 OnDisconnected 重连</td></tr>
+<tr><td>恢复</td><td>任一帧成功</td><td>failures 清零 · "Audio recovered after N failures"</td></tr>
+</tbody>
+</table>
+
+<h3>控制面断路器（SendText）</h3>
+<table>
+<tbody>
+<tr><td>独立计数</td><td>control_send_failures_ · 与音频隔离避免相互污染</td></tr>
+<tr><td>恢复策略</td><td>同音频 · 任一成功清零</td></tr>
+</tbody>
+</table>
+
+<h3>快速重试（时间感知）</h3>
+<table>
+<thead><tr><th>路径</th><th>第一次失败耗时</th><th>动作</th></tr></thead>
+<tbody>
+<tr><td>SendAudio</td><td>&lt; 50 ms</td><td>立即重试一次 · WiFi 瞬时失败常见</td></tr>
+<tr><td>SendAudio</td><td>≥ 50 ms</td><td>不重试 · 4G 慢超时跳过避免堆积</td></tr>
+<tr><td>SendText</td><td>&lt; 200 ms</td><td>立即重试一次（控制面阈值更宽松）</td></tr>
+<tr><td>SendText</td><td>≥ 200 ms</td><td>不重试</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 11. 4G UART 耦合 ================== -->
+<section id="uart">
+<h2><span class="num">11</span> 4G UART 阻塞耦合（ML307R 专属风险）</h2>
+
+<div class="callout bad">
+<b>核心机制</b>：P30-4G 板用 ML307R Modem，其 UART 是<b>单线程串行</b>。任何时刻只能发一帧 PPP 数据。WS 帧 + LIC_ACTIVE + 音频帧若挤在 UART 队列，后到的全部 5 s 超时。
+</div>
+
+<h3>容易踩坑的场景</h3>
+<table>
+<thead><tr><th>场景</th><th>UART 占用</th><th>百度协议应对</th></tr></thead>
+<tbody>
+<tr><td>WS 刚连上立即发 LIC_ACTIVE</td><td>WS 握手 TLS 帧仍在 UART · LIC 排队 → 5 s 超时</td><td>✅ ScheduleLicRetry 5 s 延迟（避开 TLS 阶段）</td></tr>
+<tr><td>TTS 播放中持续上行音频</td><td>每 60 ms 一帧上行 + 每 60 ms 一帧下行 · UART 双向忙</td><td>⚠ 上行有断路器（&gt;3 失败跳过）· 下行无控制</td></tr>
+<tr><td>TTS_END 回调立即发 LIC_ACTIVE</td><td>TTS_END 文本帧还在收 · 立即发会撞 · 5 s 超时</td><td>✅ TTS_END 内调 ScheduleLicRetry（不直接 TryFlush）</td></tr>
+<tr><td>断网 + 自动重连</td><td>FetchSessionToken HTTP + WS Reconnect 并发抢 UART</td><td>⚠ 无显式锁 · 依赖 Schedule 串行</td></tr>
+</tbody>
+</table>
+
+<h3>UART 友好的发送时机（机会式重试）</h3>
+<table>
+<thead><tr><th>时机</th><th>UART 状态</th><th>百度协议利用</th></tr></thead>
+<tbody>
+<tr><td>TTS_END_SPEAKING 后</td><td>下行音频流停 → UART 半空</td><td>HandleEvent 内调 ScheduleLicRetry</td></tr>
+<tr><td>REMOTE_PLAYER_END 后</td><td>同上</td><td>同上</td></tr>
+<tr><td>SendAbortSpeaking 末尾</td><td>用户主动打断 → 音频流即将停</td><td>TryFlushPendingLicActive 立即重试（不走 timer）</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 12. 与 BRTC SDK 差异 ================== -->
+<section id="vsbrtc">
+<h2><span class="num">12</span> 与百度 BRTC SDK 的差异点（我们绕过 SDK 直连）</h2>
+
+<div class="callout info">
+<b>设计选择</b>：P30 不集成 BRTC SDK，直接用 WebSocket 与百度服务端通信 · 原因：BRTC SDK ~3 MB Flash + ESP32 移植成本高 + 不需要 WebRTC 完整能力。
+</div>
+
+<table>
+<thead><tr><th>维度</th><th>BRTC SDK（标准方式）</th><th>P30 WebsocketBaiduProtocol（本实现）</th><th>风险点</th></tr></thead>
+<tbody>
+<tr><td>连接层</td><td>QUIC / WebRTC RTP</td><td>WebSocket</td><td>无 RTP 重传 · 弱网丢包不可恢复</td></tr>
+<tr><td>音频上行</td><td>RTP 包含 timestamp + ssrc + seq</td><td>裸 OPUS payload</td><td>无序列号 · 服务端无法检测乱序丢帧</td></tr>
+<tr><td>音频下行</td><td>RTP 解包</td><td>裸 OPUS payload + TOC 自解析</td><td>无 PLC（丢包隐藏）</td></tr>
+<tr><td>帧长</td><td>SDK 内部固定 20 ms（与 WebRTC 对齐）</td><td>客户端可配（v2.2.12 60 ms）</td><td>服务端是否兼容需联调</td></tr>
+<tr><td>License</td><td>SDK 内部处理 · 透明</td><td>客户端手动 LIC_ACTIVE / 重试</td><td>UART 阻塞需自己规避</td></tr>
+<tr><td>Token</td><td>SDK 自动刷新</td><td>客户端 HTTP 预取 + 缓存 + 失效重取</td><td>HTTP 失败时 fallback 路径有限</td></tr>
+<tr><td>AEC</td><td>SDK 内置回声消除</td><td>设备端 AFE + 服务端 dfda 配合</td><td>无 SDK 的端到端调优 · 自己做参数</td></tr>
+<tr><td>音乐控制</td><td>SDK 提供 RemotePlayer API</td><td>手写 CMD_MUSIC_* 文本协议</td><td>协议升级时需要同步</td></tr>
+<tr><td>Flash 占用</td><td>~3 MB</td><td>~50 KB（仅 .cc 编译产物）</td><td>—</td></tr>
+<tr><td>调试可视化</td><td>SDK 内置统计 + 日志</td><td>手写 audio_tx_frames/bytes + PROBE 日志</td><td>—</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 13. Public API ================== -->
+<section id="api">
+<h2><span class="num">13</span> Public API 全清单</h2>
+
+<h3>13.1 Protocol 基类覆写</h3>
+<table>
+<thead><tr><th>方法</th><th>百度实现要点</th></tr></thead>
+<tbody>
+<tr><td><code>Start()</code></td><td>仅 PrefetchSessionTokenAsync · 不真连 WS</td></tr>
+<tr><td><code>OpenAudioChannel()</code></td><td>10 步建链 / 复用 · 10 s 等 LIC|MEDIA_READY · 含 HTTP token 预取</td></tr>
+<tr><td><code>CloseAudioChannel(send_goodbye)</code></td><td>仅置 media_ready_=false · WS 保活 · send_goodbye 忽略</td></tr>
+<tr><td><code>IsAudioChannelOpened()</code></td><td>websocket_ &amp;&amp; IsConnected &amp;&amp; !error &amp;&amp; media_ready_</td></tr>
+<tr><td><code>SendAudio(packet)</code></td><td>断路器 + 快速重试 + AEC OFF 时 TTS 期不发</td></tr>
+<tr><td><code>SendWakeWordDetected(word)</code></td><td>非音乐播放 → SendTextToAI(word) · greeting_sent_=true</td></tr>
+<tr><td><code>SendStartListening(mode)</code></td><td>切换 realtime/manual 模式 · 首次发 greeting "你好"</td></tr>
+<tr><td><code>SendStopListening()</code></td><td>仅非实时模式发 CMD_ASR_STOP</td></tr>
+<tr><td><code>SendAbortSpeaking(reason)</code></td><td>WakeWord 用 [B]:[BEGIN]:N 丢音频 · 其它直接 [B]</td></tr>
+<tr><td><code>SendMcpMessage(payload)</code></td><td>SendText([F]: + payload)</td></tr>
+<tr><td><code>SendTextToAI(text)</code></td><td>[T]: + text</td></tr>
+<tr><td><code>SendTextToTts(text)</code></td><td>[TTS]: + text</td></tr>
+<tr><td><code>UpdateSystemPrompt(type, prompt)</code></td><td>[SET]:[UPDATE_SYSTEM_PROMPT]: + JSON</td></tr>
+<tr><td><code>SendRemoteMusicControl(action)</code></td><td>stop/pause/resume → CMD_MUSIC_*</td></tr>
+<tr><td><code>client_frame_duration()</code></td><td>60 ms（v2.2.12 统一）</td></tr>
+</tbody>
+</table>
+
+<h3>13.2 百度独有 API</h3>
+<table>
+<thead><tr><th>方法</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>SendInterrupt()</code></td><td>立即发 [B]: 打断 TTS（外部调用方便接口）</td></tr>
+<tr><td><code>SetAutoInterrupt(bool)</code></td><td>切换 CMD_AUTO_INT_ON/OFF</td></tr>
+<tr><td><code>PauseAsr() / ResumeAsr()</code></td><td>ASR 暂停/恢复</td></tr>
+<tr><td><code>SendFunctionCallResult(session, result, msg)</code></td><td>FunctionCall 回包给云端</td></tr>
+<tr><td><code>DisconnectWebSocket()</code></td><td>真断 WS（休眠/断网用，与 CloseAudioChannel 保活不同）</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 14. NVS 配置 ================== -->
+<section id="nvs">
+<h2><span class="num">14</span> NVS 配置全集</h2>
+
+<table>
+<thead><tr><th>命名空间</th><th>Key</th><th>默认</th><th>语义</th><th>修改后是否需要重启</th></tr></thead>
+<tbody>
+<tr><td><code>websocket</code></td><td>url</td><td>—（必须配）</td><td>BRTC WSS 连接地址 · 必须含 brtc / baidu 子串</td><td>是（InitializeProtocol 选型）</td></tr>
+<tr><td><code>baidu</code></td><td>server_sample_rate</td><td>24000</td><td>下行 TTS 采样率（Hz）</td><td>是</td></tr>
+<tr><td><code>baidu</code></td><td><b>server_frame_duration</b></td><td><b>60</b>（v2.2.12）</td><td>下行 TTS OPUS 帧长（ms）· 必须与服务端实际下发一致</td><td>是 · 联调失败立即改 20 回滚</td></tr>
+<tr><td><code>baidu</code></td><td>break_delay_ms</td><td>500</td><td>唤醒词打断时丢弃音频毫秒（避免回声进 ASR）</td><td>否</td></tr>
+<tr><td><code>baidu</code></td><td>idle_timeout</td><td>300</td><td>空闲 N 秒自动 SendTextToAI("再见") + 关音频通道</td><td>否</td></tr>
+<tr><td><code>baidu</code></td><td>license_key</td><td>硬编码 fallback</td><td>百度 license · 量产前应去硬编码改 NVS 强制</td><td>是</td></tr>
+<tr><td><code>baidu</code></td><td>audiocodec</td><td>opus</td><td>URL <code>ac=</code> 参数值 · 当前仅支持 opus</td><td>是</td></tr>
+<tr><td><code>aecMode</code></td><td>aec</td><td>0</td><td>0=关 / 1=开 · 影响 DeviceInfo dfda/disable_voice_auto_int</td><td>是（OpenAudioChannel 时读）</td></tr>
+<tr><td><code>wifi</code></td><td>ota_url</td><td>—</td><td>FetchSessionToken 的 baseURL（拼 /baiduVoiceChat）</td><td>是</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 15. 优化手册 ================== -->
+<section id="tune">
+<h2><span class="num">15</span> 优化手册（量产前 + 量产后）</h2>
+
+<h3>15.1 量产前必修（P0）</h3>
+<table>
+<thead><tr><th>项</th><th>动作</th><th>影响</th></tr></thead>
+<tbody>
+<tr><td><b>v2.2.12 帧长协商联调验证</b></td><td>实测一次完整对话 · 看 [BD][PROBE] 日志 · 失败立即 NVS 回滚 server_frame_duration=20</td><td>避免 TTS 沙沙声</td></tr>
+<tr><td>license_key 去硬编码 fallback</td><td>NVS 未配 → SetError 而不是用 fallback · OTA 后端强制下发</td><td>防止 demo key 误上线</td></tr>
+<tr><td>bd_autoconn 裸 xTaskCreate 登记/改 PinnedToCore</td><td><code>xTaskCreatePinnedToCoreWithCaps(.., Core 0)</code> + § 四.1 落位表登记</td><td>符合量产纪律</td></tr>
+</tbody>
+</table>
+
+<h3>15.2 量产后第一批 PR（P1）</h3>
+<table>
+<thead><tr><th>项</th><th>动作</th></tr></thead>
+<tbody>
+<tr><td>FetchSessionToken 异步化</td><td>挪出 main_app 任务 · 避免 4G 慢网卡 5-10 s</td></tr>
+<tr><td>HandleBinaryMessage 加 OPUS TOC 自动适配</td><td>真"动态帧长"实现 · 服务端发什么客户端就解什么 · 不依赖 NVS 默认</td></tr>
+<tr><td>idle_dc 嵌套 timer 改为成员变量</td><td>避免动态创建/销毁 · 析构期残留风险</td></tr>
+<tr><td>UART 调度互斥锁</td><td>FetchToken HTTP + WS Reconnect 并发场景上锁</td></tr>
+<tr><td>音频上行 timestamp 补充</td><td>当前 packet->timestamp=0 · 服务端无法精确 AEC · 加 RTP 风格 timestamp</td></tr>
+</tbody>
+</table>
+
+<h3>15.3 长期优化（量产稳定期）</h3>
+<table>
+<thead><tr><th>项</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>状态机化 OpenAudioChannel</td><td>当前 10 步同步阻塞 · 改 connecting / waiting_lic / ready 显式状态</td></tr>
+<tr><td>全局动态帧长</td><td>详见总文档 § 14.4 · 涉及 audio_service 重构 · ROI 取决于 baidu 服务端是否真期望 20ms</td></tr>
+<tr><td>License 续期机制</td><td>当前 PASS 后永久信任 · 若百度 license 有时效，需加过期检测</td></tr>
+<tr><td>Token TTL</td><td>cached_token_ 当前不带过期时间 · 失效时只能等 OnDisconnected 触发重取</td></tr>
+</tbody>
+</table>
+
+<h3>15.4 联调阶段最常踩的 5 个坑</h3>
+<table>
+<thead><tr><th>症状</th><th>根因</th><th>排查日志</th><th>修复</th></tr></thead>
+<tbody>
+<tr><td>"Session response: ..." 后立即失败</td><td>OTA URL 没配 baiduVoiceChat 接口</td><td>Fetch session token: &lt;URL&gt;</td><td>后端加 /baiduVoiceChat 端点</td></tr>
+<tr><td>"LIC_FAILED" + SetError</td><td>license_key 无效 / 过期</td><td>&lt;&lt; LIC_FAILED</td><td>更新 NVS license_key</td></tr>
+<tr><td>"Wait timeout, continue (AK/SK mode)"</td><td>10 s 没收到 LIC|MEDIA_READY · 但 AK/SK 模式可继续</td><td>Wait timeout 后是否继续工作</td><td>正常 · AK/SK 模式不需等 LIC</td></tr>
+<tr><td>TTS 沙沙声 / 无声</td><td>v2.2.12 帧长协商失败 · decoder 配置错</td><td>[BD][PROBE] config 值 vs server_frame_duration_</td><td>NVS server_frame_duration=20 回滚</td></tr>
+<tr><td>"Audio circuit open" 频繁</td><td>4G CSQ 差或 UART 阻塞</td><td>failures 计数 · CSQ 数值</td><td>查 4G 信号 · 检查 LIC_ACTIVE 是否撞 UART</td></tr>
+</tbody>
+</table>
+</section>
+
+</main>
+</div>
+
+</body>
+</html>

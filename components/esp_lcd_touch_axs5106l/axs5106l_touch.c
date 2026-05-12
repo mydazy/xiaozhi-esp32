@@ -61,7 +61,7 @@ static const char *TAG = "axs5106l_touch";
  *   CLICK_MIN_FRAMES  3→2（≥2 帧 ~60ms @ 30ms LVGL）
  *   CLICK_MAX_MOVE   20→25（手抖容忍）
  *   JITTER_LIMIT_FOR_TAP 24→32（震动容忍）
- *   LONG_PRESS_TIME_US 500ms 保持（与 BOOT 长按节奏一致）
+ *   LONG_PRESS_TIME_US 500→300ms（PTT 已下线 · 板级无 listener · 仅作内部状态机收尾标识 · 注释代码 P0 对齐 2026-05-12）
  *
  * 配套 RF 防御不变：storm 检测 + INT 防抖 + trajectory gate。
  * 风险：CLICK_MIN_FRAMES=2 会让单帧 RF 脉冲更易误识别为 tap，
@@ -120,8 +120,10 @@ static const char *TAG = "axs5106l_touch";
  *     them with 2.5× margin while passing real fingers untouched.
  *   - LVGL drag-into-click is now blocked by per-widget PRESS_LOCK, so we no
  *     longer need the storm detector to fire on borderline cases. */
-#define INT_STORM_THRESHOLD   12       /* edges/s above which RF storm declared */
+#define INT_STORM_THRESHOLD          12       /* default edges/s above which RF storm declared */
+#define INT_STORM_THRESHOLD_HOT       6       /* during recent-storm window (RF still hot) */
 #define INT_STORM_MUTE_US     2000000  /* mute touch reads for 2 s after storm */
+#define INT_STORM_HOT_WINDOW_US   30000000  /* 30 s post-storm sensitive mode */
 
 /* ---------- I2C ---------- */
 #define I2C_TIMEOUT_MS  100
@@ -205,6 +207,7 @@ struct axs5106l_touch_t {
     uint32_t                int_edge_window_baseline;
     uint64_t                int_edge_window_start_us;
     uint64_t                storm_mute_until_us;
+    uint64_t                storm_hot_until_us;   /* dynamic-threshold window (see INT_STORM_HOT_WINDOW_US) */
     bool                    isr_installed;
 
     touch_state_t           touch;
@@ -401,6 +404,7 @@ esp_err_t axs5106l_touch_resume(axs5106l_touch_handle_t self)
     self->int_edge_window_start_us = esp_timer_get_time();
     self->int_edge_window_baseline = self->int_edge_count;
     self->storm_mute_until_us      = 0;
+    self->storm_hot_until_us       = 0;
     if (self->isr_installed) gpio_intr_enable(self->int_gpio);
     return ESP_OK;
 }
@@ -453,12 +457,19 @@ static bool storm_detected(axs5106l_touch_handle_t self, uint64_t now)
 
     if (now - self->int_edge_window_start_us >= INT_STORM_WINDOW_US) {
         uint32_t edges = self->int_edge_count - self->int_edge_window_baseline;
-        if (edges >= INT_STORM_THRESHOLD) {
-            ESP_LOGW(TAG, "RF storm: %lu INT edges in last %lu ms, mute %lu ms",
+        /* Dynamic threshold: tighter inside the hot window (recent storm = RF still active). */
+        uint32_t threshold = (now < self->storm_hot_until_us)
+                                ? INT_STORM_THRESHOLD_HOT
+                                : INT_STORM_THRESHOLD;
+        if (edges >= threshold) {
+            ESP_LOGW(TAG, "RF storm: %lu INT edges in last %lu ms (thr=%lu%s), mute %lu ms",
                      (unsigned long)edges,
                      (unsigned long)((now - self->int_edge_window_start_us) / 1000),
+                     (unsigned long)threshold,
+                     (threshold == INT_STORM_THRESHOLD_HOT) ? " hot" : "",
                      (unsigned long)(INT_STORM_MUTE_US / 1000));
             self->storm_mute_until_us = now + INT_STORM_MUTE_US;
+            self->storm_hot_until_us  = now + INT_STORM_HOT_WINDOW_US;
             /* Drop any latched press so LVGL sees a clean release. */
             self->touch.pressed       = false;
             self->touch.press_pending = false;
@@ -690,6 +701,10 @@ static bool read_touch(axs5106l_touch_handle_t self, uint16_t *out_x, uint16_t *
     if (!self->touch.pressed) {
         if (self->touch.int_low_since == 0) self->touch.int_low_since = now;
         if (now - self->touch.int_low_since < INT_DEBOUNCE_US) return false;
+        esp_rom_delay_us(1);
+        if (gpio_get_level(self->int_gpio) != 0) { self->touch.int_low_since = 0; return false; }
+        esp_rom_delay_us(1);
+        if (gpio_get_level(self->int_gpio) != 0) { self->touch.int_low_since = 0; return false; }
     }
 
     uint8_t buf[6] = {0};

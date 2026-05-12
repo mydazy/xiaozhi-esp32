@@ -404,17 +404,8 @@ ul.compact li { margin: 2px 0; }
 
 <h3>8.1 P0 · 量产 blocker</h3>
 <div class="callout ok">
-✅ 4 个 P0 全部修复完成（2026-05-12）
+<b>✅ 4/4 已修复</b>（2026-05-12）· 详见 § 8.4 已修 log 末四行
 </div>
-<table>
-<thead><tr><th>#</th><th>修复项</th><th>位置</th></tr></thead>
-<tbody>
-<tr><td><span class="pill p0">P0-1</span></td><td><b>connect_queue_ 加 mutex</b>：HandleScanResult/Start/Stop/GotIp 4 处 lock_guard · unique_lock 在调 StartConnect 前显式 unlock 防死锁</td><td><code>wifi_station.h:165</code> + <code>cc:305/417/465/664</code></td></tr>
-<tr><td><span class="pill p0">P0-2</span></td><td><b>is_scanning_ atomic exchange 抢占</b>：TriggerScan/STA_START/WiFiScanTimer 三处 <code>exchange(true)</code> 后再 scan_start · 失败回滚</td><td><code>wifi_station.cc:75/566/863</code></td></tr>
-<tr><td><span class="pill p0">P0-3</span></td><td><b>SmartConnect 重试 2→4 · 首次 3s→5s</b></td><td><code>wifi_board.cc:28-29</code></td></tr>
-<tr><td><span class="pill p0">P0-4</span></td><td><b>重连风暴上限</b>：第 20 次后切稀疏 5 min 一次 · 防密码/SSID 改场景永远在线日志</td><td><code>wifi_station.cc:23-31, 624-640</code></td></tr>
-</tbody>
-</table>
 
 <h3>8.2 P1 · 建议修</h3>
 <table>
@@ -459,16 +450,16 @@ ul.compact li { margin: 2px 0; }
 <tr><td>配网 10 分钟超时进深睡</td></tr>
 <tr><td>SmartConnect 失败后释放 Blufi 静态 RAM ~30 KB</td></tr>
 <tr><td>重连退避指数化（替代旧 5 次放弃）</td></tr>
+<tr><td><b>P0-1</b> · connect_queue_ 加 mutex（HandleScanResult/Start/Stop/GotIp 4 处 lock_guard · StartConnect 前 unlock 防死锁）— <code>wifi_station.h:165 / cc:305/417/465/664</code></td></tr>
+<tr><td><b>P0-2</b> · is_scanning_ atomic exchange 抢占（TriggerScan/STA_START/WiFiScanTimer 三处）— <code>wifi_station.cc:75/566/863</code></td></tr>
+<tr><td><b>P0-3</b> · SmartConnect 重试 2→4 · 首次 3s→5s — <code>wifi_board.cc:28-29</code></td></tr>
+<tr><td><b>P0-4</b> · 重连风暴上限：第 20 次后切稀疏 5 min（防密码/SSID 改场景永远在线日志）— <code>wifi_station.cc:23-31, 624-640</code></td></tr>
 </tbody>
 </table>
 
 <h3>8.5 推荐落地批次</h3>
-<div class="callout bad">
-<b>批次 A · P0 安全（量产前）</b><br>
-① connect_queue_ 加 mutex<br>
-② is_scanning_ atomic exchange<br>
-③ SmartConnect retry 2 → 4 + 首次 5s<br>
-④ 重连风暴上限：第 20 次后切 5 分钟稀疏退避
+<div class="callout ok">
+<b>✅ 批次 A · P0 安全</b>（2026-05-12 完成）：① connect_queue_ 加 mutex ② is_scanning_ atomic exchange ③ SmartConnect retry 2→4 + 首次 5s ④ 重连风暴上限第 20 次切 5min 稀疏
 </div>
 <div class="callout warn">
 <b>批次 B · P1 稳定性</b><br>

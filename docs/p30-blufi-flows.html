@@ -66,7 +66,7 @@ ul.compact li { margin: 2px 0; }
 
 <header>
   <h1>MyDazy P30 · 蓝牙 / BLUFI</h1>
-  <div class="meta">v3.1 · 2026-05-12 · NimBLE-only · 二轮三遍评审完成（隐藏 bug 23 + 精简点 18 · 配网体验聚焦）</div>
+  <div class="meta">v3.2 · 2026-05-12 · NimBLE-only 单连接 · 刚需必修 11 项（聚焦 Android/华为兼容）</div>
 </header>
 
 <div class="layout">
@@ -112,24 +112,37 @@ ul.compact li { margin: 2px 0; }
 </div>
 
 <div class="callout bad">
-<b>🔴 三遍分析后的高风险清单</b>（详细分析见 §2 · 按"crash 概率 × 量产影响"排序）
+<b>🔴 刚需必修 11 项</b>（业务定位：单连接配网 · 重点 Android/华为 · iOS 已 OK · 详 §8.3.1）<br>
+<small>分 ABC 三组：A 防 crash/brick · B 配网失败/卡死 · C Android/华为兼容</small>
 <table>
 <thead><tr><th>#</th><th>问题（一句话）</th><th>位置</th><th>触发条件</th></tr></thead>
 <tbody>
-<tr><td><b>B2</b></td><td><b>blufi_aes_encrypt/decrypt 无 NULL 检查</b> · <code>blufi_sec-&gt;iv</code> 直接解引用</td><td><code>blufi_security.c:161/178</code></td><td>BLE_DISCONNECT 后 NimBLE 缓冲队列里的延迟加密帧</td></tr>
-<tr><td><b>B3</b></td><td><b>Blufi::Stop 不调 blufi_security_deinit</b> · 全局指针残留 dhm/aes 上下文</td><td><code>blufi.cc:186-234</code></td><td>第二次 Start 重入时 mbedtls 状态 stale</td></tr>
-<tr><td><b>B4</b></td><td><b>DH_PARAM_LEN 数据越界读</b> · <code>(data[1]&lt;&lt;8)|data[2]</code> 无 len ≥ 3 检查</td><td><code>blufi_security.c:81</code></td><td>手机或攻击者发短包</td></tr>
-<tr><td><b>B6</b></td><td><b>跨任务共享 bool 全部裸读写</b>（ble_connected_ / scanning_ / initialized_ / advertising_ / stopping_）</td><td><code>blufi.h:67-72</code></td><td>BLE_CONNECT 与 OnScanDone 跨 task 时序窗口</td></tr>
-<tr><td><b>B16</b></td><td><b>Stop 与 BLE_DISCONNECT 事件 race</b> · disconnect→host_deinit→deinit 与 callback 排队</td><td><code>blufi.cc:198-233</code></td><td>OnConfigSuccess 主路径 · 概率中</td></tr>
-<tr><td><b>T8</b></td><td><b>RECV_CUSTOM_DATA 全当 binding_code 写 NVS</b> · 无类型区分</td><td><code>blufi.cc:642-650</code></td><td>手机发任何自定义命令都触发 flash op</td></tr>
-<tr><td><b>B12</b></td><td><b>NVS 写在 NimBLE host task 上下文</b> · flash op 禁用 cache + PSRAM 栈双异常风险</td><td><code>blufi.cc:648-649</code></td><td>配网期写 binding_code 时 opus_codec/cdc_console 调度</td></tr>
-<tr><td>R1</td><td>nimble_port_stop 最多阻塞 2s（已在 config_done task 缓解，但仍轮询）</td><td><code>blufi_init.c:287-293</code></td><td>OnConfigSuccess 期间</td></tr>
-<tr><td>R2</td><td>INIT_FINISH 超时仅 WARN 继续</td><td><code>blufi.cc:178-181</code></td><td>NimBLE 初始化异常</td></tr>
-<tr><td>R3</td><td>BLE_CONNECT 后 adv_stop 早于 security_init</td><td><code>blufi.cc:453-455</code></td><td>security 失败时无法重连</td></tr>
-<tr><td>T11</td><td>BLE_DISCONNECT 后立即 adv_start 无 100ms 等待</td><td><code>blufi.cc:522-525</code></td><td>偶发广播启动失败</td></tr>
-<tr><td>B8</td><td>retry_timer start_once 与 Stop exchange 时序竞态</td><td><code>blufi.cc:339-342</code></td><td>OnScanDone 期间 Stop</td></tr>
-<tr><td>R4</td><td><code>wifi_config_mode_</code> 跨任务裸 <code>bool</code></td><td><code>wifi_board.h:14</code></td><td>违反规则 · 实际单写多读</td></tr>
-<tr><td>R5/R6/R7</td><td>DH clamp / sem 释放序 / msys MTU 对齐</td><td>—</td><td>低概率 · 见 §8</td></tr>
+<tr><td colspan="4" style="background:#FFEBEE;font-weight:600">配网体验杀手（持锁阻塞链）— 用户最直观感知</td></tr>
+<tr><td><b>N12</b></td><td><b>Start 等 WiFi 扫描结束阻塞最多 3s</b>（30×100ms 轮询）</td><td><code>blufi.cc:130-138</code></td><td>主线程持 LVGL 锁 · 屏幕卡死</td></tr>
+<tr><td><b>N13</b></td><td><b>esp_blufi_host_init vTaskDelay 100ms</b> 叠加 N12</td><td><code>blufi_init.c:201</code></td><td>持锁总时长可达 6s+（含 R2）</td></tr>
+<tr><td><b>R2</b></td><td>INIT_FINISH 超时仅 WARN · 异常时再吃 3s</td><td><code>blufi.cc:178-181</code></td><td>NimBLE 异常 → 总持锁 6.7s</td></tr>
+
+<tr><td colspan="4" style="background:#FFEBEE;font-weight:600">crash / 数据损坏类 · 配网核心稳定性</td></tr>
+<tr><td><b>B2</b></td><td><b>aes_encrypt/decrypt 无 NULL 检查</b></td><td><code>blufi_security.c:161/178</code></td><td>BLE_DISCONNECT 后延迟帧</td></tr>
+<tr><td><b>B3</b></td><td><b>Stop 不调 blufi_security_deinit</b></td><td><code>blufi.cc:186-234</code></td><td>SwitchConfigMode 切换路径（N10）</td></tr>
+<tr><td><b>B4</b></td><td><b>DH_PARAM_LEN 越界读</b>（无 len≥3）</td><td><code>blufi_security.c:81</code></td><td>手机短包或攻击</td></tr>
+<tr><td><b>B12</b></td><td><b>NVS 写在 NimBLE host task</b> · flash op + PSRAM 栈双异常</td><td><code>blufi.cc:648-649</code></td><td>RECV_CUSTOM_DATA 触发</td></tr>
+<tr><td><b>B16</b></td><td><b>Stop vs BLE_DISCONNECT race</b></td><td><code>blufi.cc:198-233</code></td><td>OnConfigSuccess 主路径</td></tr>
+<tr><td><b>N14</b></td><td><b>host_and_cb_init 失败未 host_deinit</b> · 资源泄漏</td><td><code>blufi.cc:167-174</code></td><td>失败重试累积 → OOM</td></tr>
+
+<tr><td colspan="4" style="background:#FFF3E0;font-weight:600">多系统兼容（Android/iOS/HarmonyOS）</td></tr>
+<tr><td><b>B6</b></td><td><b>5 个跨任务 bool 裸读写</b></td><td><code>blufi.h:67-72</code></td><td>iOS/Android 时序差异下偶发</td></tr>
+<tr><td><b>R3</b></td><td>BLE_CONNECT 后 adv_stop 早于 security_init</td><td><code>blufi.cc:453-455</code></td><td>security 失败时</td></tr>
+<tr><td><b>T11</b></td><td>BLE_DISCONNECT 立即 adv_start 无延迟</td><td><code>blufi.cc:522-525</code></td><td>Android 5/6 老机型</td></tr>
+<tr><td><b>N9</b></td><td>ble_gap_update_params 失败仅 WARN</td><td><code>blufi.cc:470-475</code></td><td>iOS 13- 不支持 6s · 退回 720ms</td></tr>
+<tr><td><b>T8</b></td><td>RECV_CUSTOM_DATA 全当 binding_code</td><td><code>blufi.cc:642-650</code></td><td>非 binding 包也写 NVS</td></tr>
+
+<tr><td colspan="4" style="background:#F5F5F5;font-weight:600">跨 task 调用 · 库内部依赖</td></tr>
+<tr><td><b>N3</b></td><td>OnScanDone 在 WiFi event task 调 BT</td><td><code>blufi.cc:367</code></td><td>esp_blufi 库锁依赖</td></tr>
+<tr><td><b>N18</b></td><td>blufi_wifi task 调 send_conn_report</td><td><code>blufi.cc:558-574</code></td><td>同上</td></tr>
+
+<tr><td colspan="4" style="background:#F5F5F5;font-weight:600">低风险（标注后续完善）</td></tr>
+<tr><td>R1/R4/R5/R6/R7/B8/B11/B17</td><td>各种边界条件 · 详 §8.3.3</td><td>—</td><td>实测未触发</td></tr>
 </tbody>
 </table>
 </div>
@@ -207,6 +220,86 @@ ul.compact li { margin: 2px 0; }
 <div class="callout bad">
 <b>T8 + B12 安全风险链</b>：恶意手机连上 BLUFI（无配对）→ 发大量 RECV_CUSTOM_DATA → 每包都写 NVS → Flash 写入次数耗尽（NVS 寿命 100k 次擦写）+ 期间频繁 cache 禁用导致 Core 0 PSRAM 栈任务 crash → 设备 brick。
 </div>
+
+<h3>2.5 第二轮深度评审 · 新发现（2026-05-12 v3.1）</h3>
+<p class="sub">在第一轮 §2.1-2.3 基础上，针对配网体验 + 跨 task 调用 + 上游 example 残留做更深扫描，新增 8 个隐藏 bug 和 2 个精简点。</p>
+
+<h4>2.5.1 配网体验杀手（持锁阻塞链）</h4>
+<table>
+<thead><tr><th>#</th><th>问题</th><th>位置</th><th>影响</th></tr></thead>
+<tbody>
+<tr><td><span class="pill risk">N12</span></td><td><b>Start 等 WiFi 扫描结束最多 3s</b>（30 × 100ms 轮询）· 主线程持 LVGL 锁期间</td><td><code>blufi.cc:130-138</code></td><td>LVGL 帧率掉 0 长达 3s · 用户看到屏幕完全卡死</td></tr>
+<tr><td><span class="pill risk">N13</span></td><td><b>esp_blufi_host_init 内 vTaskDelay(100ms)</b> · 主线程持 LVGL 锁继续被阻塞</td><td><code>blufi_init.c:201</code></td><td>叠加 N12 + INIT_FINISH 等待 3s · <b>总持锁时间可达 6s+</b></td></tr>
+<tr><td><span class="pill risk">N14</span></td><td><b>esp_blufi_host_and_cb_init 失败时未调 host_deinit</b>：blufi.cc 只清 controller，host 内部已 esp_nimble_init 的资源泄漏</td><td><code>blufi.cc:167-174</code></td><td>失败重试 N 次 → NimBLE 内存累积泄漏 → 最终 OOM</td></tr>
+</tbody>
+</table>
+
+<h4>2.5.2 跨 task BT 调用安全性</h4>
+<table>
+<thead><tr><th>#</th><th>问题</th><th>位置</th><th>影响</th></tr></thead>
+<tbody>
+<tr><td><span class="pill risk">N3</span></td><td><b>OnScanDone 在 WiFi event task 调 esp_blufi_send_wifi_list</b> · 跨 task BT 操作</td><td><code>blufi.cc:367</code></td><td>依赖 esp_blufi 库内部锁 · 量产实测未 panic 但理论需验证</td></tr>
+<tr><td><span class="pill risk">N18</span></td><td><b>blufi_wifi task（Core 0）调 esp_blufi_send_wifi_conn_report + send_custom_data</b> · 跨 NimBLE host task</td><td><code>blufi.cc:558-574</code></td><td>同 N3 · 依赖库线程安全 · 与 BLE_CONNECT 顺序耦合</td></tr>
+<tr><td><span class="pill risk">N5</span></td><td><b>Stop 主线程调 esp_blufi_disconnect</b> · 异步触发 BLE_DISCONNECT · 等 100ms 不一定够</td><td><code>blufi.cc:198-202</code></td><td>是 B16 race 的具体触发场景</td></tr>
+<tr><td><span class="pill risk">N10</span></td><td><b>SwitchConfigMode 路径不重启就 Stop+Start</b> · 是 B3 的具体触发场景</td><td><code>wifi_board.cc:208</code></td><td>BLUFI↔AP 切换时 DH/AES 状态残留 → 第二次配网握手失败</td></tr>
+</tbody>
+</table>
+
+<h4>2.5.3 单连接业务（双连业务不支持）</h4>
+<div class="callout">
+<b>业务定位</b>：BLUFI 配网仅支持<b>一台手机连接</b> · 不需要并发连接逻辑 · 简化路径如下：
+<ul class="compact" style="margin-top:6px">
+<li>✅ <b>BLE_CONNECT 立即 adv_stop</b> 已防止第二台搜到 · 当前实现已对齐业务</li>
+<li>📌 <b>建议把 GATT_MAX_CONNECTIONS 从 3 改到 1</b>（<code>sdkconfig:BT_NIMBLE_MAX_CONNECTIONS</code>）· 进一步省 ~2KB INT RAM</li>
+<li>📌 <b>建议 BLE_CONNECT 首行加防御</b>：<code>if (ble_connected_) { esp_blufi_disconnect(); return; }</code> · 极端情况（adv_stop 与第二台 CONNECT 事件 race）兜底</li>
+</ul>
+<small>原 N8 多设备抢连降级为"业务不需要" · 但留兜底防御代码（5 行）</small>
+</div>
+<table>
+<thead><tr><th>#</th><th>问题</th><th>位置</th><th>影响</th></tr></thead>
+<tbody>
+<tr><td><span class="pill todo">N9</span></td><td><b>ble_gap_update_params 失败仅 WARN</b>：iOS 13- / 部分 Android 老机型不支持 6s supervision</td><td><code>blufi.cc:470-475</code></td><td>降回默认监管超时（iOS 720ms）→ 浏览 wifi 列表期间断连</td></tr>
+</tbody>
+</table>
+
+<h4>2.5.4 新精简项</h4>
+<table>
+<tbody>
+<tr><td><span class="pill lean">N20</span> <b>blufi_security_deinit 多余 memset</b>：<code>memset(blufi_sec, 0, sizeof)</code> 后立即 <code>free(blufi_sec)</code> · 全 0 内存释放无意义（<code>blufi_security.c:228</code>）</td></tr>
+<tr><td><span class="pill lean">N11</span> <b>blufi.cc 重复 #include "settings.h"</b>：第 8 行 + 第 23 行各一次</td></tr>
+</tbody>
+</table>
+
+<h4>2.5.5 持锁阻塞链总览（最严重的体验问题）</h4>
+<div class="callout bad">
+<b>EnterWifiConfigMode 主线程持 LVGL 锁路径</b>（按时间累加）：
+<table style="margin-top:6px">
+<thead><tr><th>步骤</th><th>耗时</th><th>原因</th></tr></thead>
+<tbody>
+<tr><td>InitializeController + vTaskDelay 200ms</td><td>200-400 ms</td><td>BT controller 稳态等待</td></tr>
+<tr><td><b>N12 wait WiFi.IsScanning</b></td><td><b>0-3000 ms</b></td><td>30 × 100ms 轮询</td></tr>
+<tr><td><b>N13 esp_blufi_host_init vTaskDelay</b></td><td><b>100 ms</b></td><td>等控制器就绪</td></tr>
+<tr><td>esp_nimble_init</td><td>50-200 ms</td><td>NimBLE 栈初始化</td></tr>
+<tr><td>注册 GATT profile</td><td>50-100 ms</td><td>—</td></tr>
+<tr><td><b>R2 等 INIT_FINISH 信号量</b></td><td><b>0-3000 ms</b></td><td>正常 &lt; 100ms · 异常时 3s 超时</td></tr>
+<tr><td><b>合计最坏</b></td><td><b>~6.7 s 持 LVGL 锁</b></td><td>用户看到 6 秒黑屏</td></tr>
+</tbody>
+</table>
+<small>修复方向：① 改异步事件 + 状态机 ② 锁外做阻塞 ③ 进度提示替代死等</small>
+</div>
+
+<h4>2.5.6 二轮评审之后的总账（业务定位：单连接配网）</h4>
+<table>
+<thead><tr><th>类别</th><th>第一轮</th><th>第二轮新增</th><th>合计</th></tr></thead>
+<tbody>
+<tr><td>🔴 高风险（必修 · 配网核心）</td><td>5</td><td>+3 (N12 N13 N14)</td><td><b>8</b></td></tr>
+<tr><td>🟡 中风险（建议修 · 多系统兼容）</td><td>5</td><td>+4 (N3 N18 N9 + N10/N5 并入 B3/B16)</td><td><b>9</b></td></tr>
+<tr><td>🟢 低风险（标注后续）</td><td>5</td><td>0</td><td><b>5</b></td></tr>
+<tr><td>⚪ 精简点</td><td>16</td><td>+3 (N20 N11 · 单连接 MAX_CONNECTIONS=1)</td><td><b>19</b></td></tr>
+<tr><td>❌ <b>降级（业务不需要）</b></td><td>—</td><td>N8 多设备抢连 · 仅留 5 行兜底防御</td><td>—</td></tr>
+<tr><td><b>隐藏 bug 总数</b></td><td>15</td><td>+7</td><td><b>22</b></td></tr>
+</tbody>
+</table>
 </section>
 
 <!-- =============== 3 模块与参数 =============== -->
@@ -510,52 +603,65 @@ ul.compact li { margin: 2px 0; }
 </tbody>
 </table>
 
-<h3>8.3 待办分类（按方向调整 · 2026-05-12）</h3>
+<h3>8.3 待办分类（v3.2 · 刚需聚焦）</h3>
 <div class="callout">
-<b>定位明确</b>：蓝牙主要用于<b>配网</b>，未来扩展信标传送数据（iBeacon stub 已就位）· 优先级 = <b>配网体验 + Android/iOS 兼容</b>，其它问题先标注后续完善。
+<b>业务定位</b>：① 蓝牙仅用于<b>单台手机</b>配网 · ② 信标后续扩展 · ③ Android/华为体验<b>稍可接受差些</b> · iOS 重点。<br>
+<b>"刚需"标准</b>：会触发 crash / brick / 配网失败 / Android-华为明显卡顿 · 其余全部下沉到"后续完善"。
 </div>
 
-<h3>8.3.1 🔴 必修 · 配网核心稳定性</h3>
+<h3>8.3.1 🔴 刚需必修 11 项（按工作量排序 · 一个 PR 完成）</h3>
 <table>
-<thead><tr><th>#</th><th>修复</th><th>位置</th><th>为何必修</th></tr></thead>
+<thead><tr><th>#</th><th>修复</th><th>位置</th><th>改动</th><th>为何"刚需"</th></tr></thead>
 <tbody>
-<tr><td><span class="pill risk">B2</span></td><td>aes_encrypt/decrypt 加 NULL 检查</td><td><code>blufi_security.c:155-187</code></td><td>BLE_DISCONNECT 后延迟帧 → 配网期 crash</td></tr>
-<tr><td><span class="pill risk">B3</span></td><td>Stop 调 blufi_security_deinit</td><td><code>blufi.cc:Stop()</code></td><td>SwitchConfigMode 不重启切换时 DH 握手失败</td></tr>
-<tr><td><span class="pill risk">B4</span></td><td>DH_PARAM_LEN len ≥ 3 检查</td><td><code>blufi_security.c:81</code></td><td>越界读 · 多系统手机包格式差异下偶发</td></tr>
-<tr><td><span class="pill risk">B12</span></td><td>RECV_CUSTOM_DATA 不在 host task 写 NVS</td><td><code>blufi.cc:642-651</code></td><td>flash op + PSRAM 栈双异常 · 配网期高频写</td></tr>
-<tr><td><span class="pill risk">B16</span></td><td>Stop 序列：等 BLE_DISCONNECT 确认再 host_deinit</td><td><code>blufi.cc:Stop()</code></td><td>OnConfigSuccess 主路径 · 概率中</td></tr>
-<tr><td><span class="pill risk">T8</span></td><td>RECV_CUSTOM_DATA 加协议头判断</td><td><code>blufi.cc:642-651</code></td><td>容错性 + 防异常手机包写 NVS</td></tr>
+<tr><td colspan="5" style="background:#FFEBEE;font-weight:600">A. 防 crash / brick（4 项 · 共 ~28 行）</td></tr>
+<tr><td><span class="pill risk">B2</span></td><td>aes_encrypt/decrypt 首行 NULL 检查</td><td><code>blufi_security.c:155-187</code></td><td>4 行</td><td>BLE 断开后延迟帧空指针 crash</td></tr>
+<tr><td><span class="pill risk">B4</span></td><td>DH_PARAM_LEN handler 加 <code>if (len &lt; 3) return;</code></td><td><code>blufi_security.c:81</code></td><td>3 行</td><td>越界读 crash · Android 部分小程序包结构差异易触发</td></tr>
+<tr><td><span class="pill risk">B12+T8</span></td><td>RECV_CUSTOM_DATA 改：① 加协议头判断 ② 仅缓存到内存，OnConfigSuccess 后台 task 写 NVS</td><td><code>blufi.cc:642-651</code></td><td>~15 行</td><td>flash op + PSRAM 栈 = Double exception · 异常包高频写 NVS = brick</td></tr>
+<tr><td><span class="pill risk">N14</span></td><td>host_and_cb_init 失败补 <code>esp_blufi_host_deinit() + esp_nimble_deinit()</code></td><td><code>blufi.cc:167-174</code></td><td>5 行</td><td>失败重试 N 次累积泄漏 → OOM brick</td></tr>
+
+<tr><td colspan="5" style="background:#FFEBEE;font-weight:600">B. 配网失败/卡死（3 项 · 共 ~36 行）</td></tr>
+<tr><td><span class="pill risk">N12+N13</span></td><td><b>持锁阻塞链拆解</b>：Start 不再阻塞等 WiFi 扫描 · host_init delay 挪到 lvgl_port_unlock 之后</td><td><code>blufi.cc:130-138</code> + <code>blufi_init.c:201</code></td><td>~25 行</td><td>主线程持 LVGL 锁 6s+ → 屏幕黑屏 · <b>Android/华为机型 LCD 刷新慢 黑屏感更强</b></td></tr>
+<tr><td><span class="pill risk">R2</span></td><td>INIT_FINISH 超时返回 false + Alert("BLE 启动失败，请重试")</td><td><code>blufi.cc:178-181</code></td><td>5 行</td><td>异常时死等 3s 后无反馈 · 用户以为设备坏了</td></tr>
+<tr><td><span class="pill risk">B3</span></td><td>Stop 末尾追加 <code>blufi_security_deinit()</code></td><td><code>blufi.cc:Stop()</code></td><td>1 行</td><td>SwitchConfigMode（BLUFI↔AP 切换）后第二次配网必失败</td></tr>
+<tr><td><span class="pill risk">B16+N5</span></td><td>Stop 序列：esp_blufi_disconnect → 等 DISCONNECT 事件 200ms / 超时 → host_deinit → security_deinit</td><td><code>blufi.cc:Stop()</code></td><td>~10 行</td><td>OnConfigSuccess 主路径 race 偶发 crash</td></tr>
+
+<tr><td colspan="5" style="background:#FFEBEE;font-weight:600">C. Android / 华为兼容（4 项 · 共 ~22 行）</td></tr>
+<tr><td><span class="pill risk">B6</span></td><td>5 个跨任务 bool 改 <code>std::atomic&lt;bool&gt;</code></td><td><code>blufi.h:67-72</code></td><td>6 行</td><td>Android/华为 BT 实现时序与 iOS 差异大 · 偶发状态机紊乱</td></tr>
+<tr><td><span class="pill risk">R3</span></td><td>BLE_CONNECT 顺序：security_init 提到 adv_stop 之前</td><td><code>blufi.cc:453-455</code></td><td>2 行</td><td>security 失败时广播已停 · 华为机型重连困难</td></tr>
+<tr><td><span class="pill risk">T11</span></td><td>BLE_DISCONNECT 后用 esp_timer 延迟 100ms 再 adv_start（不阻塞 host task）</td><td><code>blufi.cc:522-525</code></td><td>~8 行</td><td><b>Android 5/6/华为 EMUI 9 老机型</b> BT controller 处理 disconnect 慢 · 立即重启偶发失败</td></tr>
+<tr><td><span class="pill risk">N9</span></td><td>ble_gap_update_params 失败降级：6s → 3s（华为部分机型不支持 6s supervision）</td><td><code>blufi.cc:470-475</code></td><td>~6 行</td><td>不降级则华为浏览 wifi 列表期间断连</td></tr>
+</tbody>
+</table>
+<div class="callout warn">
+<b>合计 11 项 · ~86 行 · 单个 PR 完成</b> · 全部位于 <code>main/blufi/</code> 内（B16 跨到 wifi_board.cc 的 SwitchConfigMode 调用方）· 修完即满足"配网核心 + Android 华为兼容"刚需。
+</div>
+
+<h3>8.3.2 ✅ 已修兼容项（无需再动）</h3>
+<table>
+<thead><tr><th>项</th><th>系统差异覆盖</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td>MTU 247 字节首选</td><td>iOS 协商 ~185 / Android 247 · 解决大 wifi 列表丢包</td><td><code>blufi_init.c:249</code></td></tr>
+<tr><td>BLE 监管超时 6s</td><td>iOS / Android / 华为 浏览 wifi 列表期间不断连</td><td><code>blufi.cc:467</code></td></tr>
+<tr><td>BLE_CONNECT 事件丢失自愈</td><td>HarmonyOS / 部分华为机型 GATT_NOTIFY 顺序异常</td><td><code>blufi.cc:404-431</code></td></tr>
+<tr><td>设备名"nimble"覆盖修复</td><td>所有系统 · 直传 device_name_</td><td><code>blufi.cc:283</code></td></tr>
 </tbody>
 </table>
 
-<h3>8.3.2 🟡 必修 · 多系统兼容（Android / iOS / HarmonyOS）</h3>
-<table>
-<thead><tr><th>#</th><th>问题</th><th>系统差异</th><th>建议</th></tr></thead>
-<tbody>
-<tr><td><span class="pill done">已修</span></td><td>MTU 247 字节</td><td>iOS 协商 ~185 / Android 协商 247 / 默认 23 → 大列表丢包</td><td>已 ✅（<code>blufi_init.c:249</code>）</td></tr>
-<tr><td><span class="pill done">已修</span></td><td>BLE 监管超时 6s</td><td>iOS 默认 ~720ms / Android 5-20s · 浏览 wifi 列表期间易断</td><td>已 ✅（<code>blufi.cc:467</code>）</td></tr>
-<tr><td><span class="pill done">已修</span></td><td>BLE_CONNECT 事件丢失自愈</td><td>HarmonyOS 部分机型 GATT_NOTIFY 顺序异常导致 CONNECT 事件错过</td><td>已 ✅（<code>blufi.cc:404-431</code>）</td></tr>
-<tr><td><span class="pill risk">R3</span></td><td>BLE_CONNECT security 顺序</td><td>所有系统 · security 失败时广播已停 → 用户看到"已连接但无 wifi 列表"</td><td>security_init 提到 adv_stop 之前</td></tr>
-<tr><td><span class="pill risk">T11</span></td><td>BLE_DISCONNECT 后立即 adv_start 失败</td><td>Android 旧机型（5/6.0）BT controller 处理 disconnect ~150ms</td><td>vTaskDelay(100ms) 后 adv_start</td></tr>
-<tr><td><span class="pill risk">B6</span></td><td>跨任务 bool 全部 atomic</td><td>所有系统 · iOS 主动断开时序与 Android 不同 · 偶发状态机紊乱</td><td>5 个 bool 改 std::atomic</td></tr>
-<tr><td><span class="pill risk">R2</span></td><td>INIT_FINISH 超时返回 false</td><td>Android 配网 App 死等 3s 无反应 → 体验差</td><td>超时返回 false + 主动 Alert("BLE 启动失败")</td></tr>
-<tr><td><span class="pill todo">新</span></td><td>iOS 配对弹窗抑制</td><td>iOS 13+ 部分场景弹"是否配对" · 当前未配置 sm_io_cap</td><td>验证 ble_hs_cfg.sm_io_cap=4 (NoInputNoOutput) 对 iOS 行为</td></tr>
-<tr><td><span class="pill todo">新</span></td><td>小程序 BLE API 兼容</td><td>微信/支付宝/抖音小程序 BLE 实现差异</td><td>设备端固定行为 · 兼容工作主要在小程序端</td></tr>
-</tbody>
-</table>
-
-<h3>8.3.3 ⚪ 标注后续完善（量产稳定后再处理）</h3>
+<h3>8.3.3 ⚪ 标注后续完善（不算刚需 · 量产稳定后再处理）</h3>
 <table>
 <thead><tr><th>#</th><th>问题</th><th>暂缓原因</th></tr></thead>
 <tbody>
-<tr><td><span class="pill todo">R1</span></td><td>nimble_port_stop 2s 轮询改回调</td><td>当前在独立 task 已不阻塞主线程 · 用户感知影响小</td></tr>
+<tr><td><span class="pill todo">N3+N18</span></td><td>跨 task BT 调用（OnScanDone / blufi_wifi 调 esp_blufi_send_*）</td><td>esp_blufi 库内部有锁 · 实测未 panic · 修需重构成 host task 转发</td></tr>
+<tr><td><span class="pill todo">R1</span></td><td>nimble_port_stop 2s 轮询改回调</td><td>已在 config_done 独立 task · 不阻塞主线程</td></tr>
 <tr><td><span class="pill todo">R4</span></td><td>wifi_config_mode_ 改 atomic</td><td>实际单写多读 · 概率极低</td></tr>
-<tr><td><span class="pill todo">R5</span></td><td>DH 长度 clamp ≤2048</td><td>量产闭环信任手机端 · B4 修复后基本 cover</td></tr>
-<tr><td><span class="pill todo">R6</span></td><td>init_done_sem_ 释放顺序</td><td>残余 Give 在 NimBLE 已 deinit 后几乎不可能</td></tr>
+<tr><td><span class="pill todo">R5</span></td><td>DH 长度 clamp ≤2048</td><td>B4 修复后基本 cover · 量产信任手机端</td></tr>
+<tr><td><span class="pill todo">R6/B17</span></td><td>init_done_sem_ 释放顺序</td><td>残余 Give 在 NimBLE 已 deinit 后几乎不可能</td></tr>
 <tr><td><span class="pill todo">R7</span></td><td>msys block 调 256 对齐 MTU</td><td>性能损耗 ~5% · 不影响功能</td></tr>
-<tr><td><span class="pill todo">B8</span></td><td>retry_timer start_once 时序</td><td>需 Stop 与 OnScanDone 极小窗口同时 · 实测未触发</td></tr>
-<tr><td><span class="pill todo">B17</span></td><td>init_done_sem_ 双指针顺序</td><td>同 R6</td></tr>
-<tr><td><span class="pill todo">T2/T4/T7</span></td><td>Start 重入名字校验 / OnScanDone 去重 / SendData atomic</td><td>都是低概率 · B6 修复后 T7 顺带解决</td></tr>
+<tr><td><span class="pill todo">B8</span></td><td>retry_timer start_once 时序</td><td>需极小窗口同时 · 实测未触发</td></tr>
+<tr><td><span class="pill todo">B11</span></td><td>initialized_/advertising_ memory barrier</td><td>B6 atomic 修复后顺带解决</td></tr>
+<tr><td><span class="pill todo">T2/T4/T7</span></td><td>Start 重入名字 / OnScanDone 去重 / SendData atomic</td><td>低概率 · B6 修复后 T7 顺带解决</td></tr>
+<tr><td><span class="pill todo">iOS 配对弹窗</span></td><td>验证 ble_hs_cfg.sm_io_cap=4 对 iOS 13+ 行为</td><td>iOS 体验非刚需 · 实测无明显问题再说</td></tr>
+<tr><td><span class="pill todo">小程序 BLE API 差异</span></td><td>微信/支付宝/抖音 BLE 实现差异</td><td>设备端固定行为 · 兼容工作主要在小程序端</td></tr>
 </tbody>
 </table>
 
@@ -572,6 +678,8 @@ ul.compact li { margin: 2px 0; }
 <tr><td><span class="pill lean">S13</span> <b>BlufiCallback 拆 case handler</b>：260 行函数违反 ≤50 行规则</td></tr>
 <tr><td><span class="pill lean">S15</span> <b>"[N/8]" 步骤号 LOG 量产降级 LOGD</b>：减少 UART 带宽占用</td></tr>
 <tr><td><span class="pill lean">S14</span> <b>ibeacon.h 加 stub 注释或同步条件编译</b>：当前 Start() 总返回 false 但调用方不知</td></tr>
+<tr><td><span class="pill lean">N20</span> <b>blufi_security_deinit 多余 memset</b>：<code>memset(blufi_sec, 0, sizeof)</code> 后立即 free · 全 0 内存释放无意义（<code>blufi_security.c:228</code>）</td></tr>
+<tr><td><span class="pill lean">N11</span> <b>blufi.cc 重复 #include "settings.h"</b>：第 8 行 + 第 23 行各一次</td></tr>
 </tbody>
 </table>
 
@@ -584,55 +692,79 @@ ul.compact li { margin: 2px 0; }
 <section id="next">
 <h2><span class="num">9</span> 下一步行动</h2>
 
-<p class="sub">方向锁定：<b>配网核心稳定性 + Android/iOS 多系统兼容</b>为重点，其它问题先标注后续完善。</p>
+<p class="sub">业务定位：<b>单连接配网</b> · iOS 已 OK · <b>刚需 = Android / 华为体验稍可接受差些</b> · 其它后续完善。</p>
 
 <div class="callout bad">
-<b>批次 A · 配网核心稳定性（今天-本周必修）</b>
-<ol class="compact" style="margin-top:6px">
-<li><b>提交 wifi_station 并发改造</b>：当前 diff 已编译验证 · 单独 commit</li>
-<li><b>B2 aes encrypt/decrypt NULL 检查</b>：函数首行 <code>if (!blufi_sec) return -1;</code> · 改动 4 行 · 防 BLE 断开后延迟帧 crash</li>
-<li><b>B3 Stop 调 blufi_security_deinit</b>：Stop() 末尾追加调用 · 改动 1 行 · 防 SwitchConfigMode 路径 DH 状态 stale</li>
-<li><b>B4 DH_PARAM_LEN 越界检查</b>：handler 首行 <code>if (len &lt; 3) { btc_blufi_report_error(); return; }</code> · 改动 3 行</li>
-<li><b>B6 五个跨任务 bool 改 atomic</b>：blufi.h:67-72 的 controller_initialized_/initialized_/advertising_/ble_connected_/stopping_/scanning_ → <code>std::atomic&lt;bool&gt;</code> · 改动 6 行</li>
-<li><b>B12+T8 RECV_CUSTOM_DATA 重构</b>：① 加协议头判断（首字节区分 binding_code vs 其它）② 仅缓存到内存，OnConfigSuccess 后台 task 写 NVS · 防 NimBLE host task flash op 触发 PSRAM 栈双异常</li>
-<li><b>B16 Stop 序列化</b>：esp_blufi_disconnect → 等 BLE_DISCONNECT 事件 200ms 或超时 → 再 host_deinit → blufi_security_deinit · 防 callback queue race</li>
-</ol>
-<small style="color:var(--text-2)">合计 ~50 行改动 · 全部在 main/blufi/ 目录 · 一个 PR 完成</small>
+<b>批次 A · 刚需 11 项 · 一个 PR · ~86 行（详见 §8.3.1）</b>
+<table style="margin-top:6px">
+<thead><tr><th>组</th><th>项</th><th>行数</th><th>核心收益</th></tr></thead>
+<tbody>
+<tr><td><b>A 防 crash/brick</b></td><td>B2 / B4 / B12+T8 / N14</td><td>~28</td><td>aes NULL · DH 越界 · NVS 异步 · 资源泄漏</td></tr>
+<tr><td><b>B 配网失败/卡死</b></td><td>N12+N13 / R2 / B3 / B16+N5</td><td>~36</td><td>持锁 6s→200ms · 异常提示 · SwitchConfigMode 修复 · Stop race</td></tr>
+<tr><td><b>C Android/华为兼容</b></td><td>B6 / R3 / T11 / N9</td><td>~22</td><td>atomic · BLE_CONNECT 顺序 · disconnect 100ms · supervision 降级</td></tr>
+</tbody>
+</table>
+<small style="color:var(--text-2)"><b>+ 顺手</b>：sdkconfig <code>BT_NIMBLE_MAX_CONNECTIONS=1</code>（省 2KB INT · 1 行）· wifi_station 并发 diff 提交（独立 commit）</small>
 </div>
 
 <div class="callout warn">
-<b>批次 B · 多系统兼容（本周-下周）</b>
+<b>批次 B · Android / 华为重点测试（本周）</b>
 <ol class="compact" style="margin-top:6px">
-<li><b>R3 BLE_CONNECT 顺序调整</b>：security_init 提到 adv_stop 之前 · 失败时广播仍在，用户立即重连而非等 6s 监管超时</li>
-<li><b>T11 BLE_DISCONNECT 后 100ms 延迟</b>：Android 5/6.0 老机型 BT controller 处理 disconnect 慢 · 立即 adv_start 偶发失败</li>
-<li><b>R2 INIT_FINISH 超时改返回 false + Alert</b>：Android 配网 App 死等 3s 体验差 · 主动给用户提示</li>
-<li><b>iOS sm_io_cap 验证</b>：实测 iOS 13/14/15/16/17 是否弹配对窗 · 必要时改 sm_sc=0</li>
-<li><b>三系统多机型测试矩阵</b>：iOS 15/17 + Android 8/12/14 + HarmonyOS 3/4 + 微信/支付宝/抖音小程序 各跑 5 次配网</li>
+<li><b>真机测试矩阵</b>：Android 8 / 12 / 14（每代至少 1 台）+ 华为 EMUI 9 / EMUI 11 / HarmonyOS 3 / HarmonyOS 4 + iOS 15 / iOS 17（参考）</li>
+<li><b>每机型 5 次完整配网</b>：成功率 ≥ 95% 才算通过</li>
+<li><b>压测场景</b>：① 反复 BLUFI/AP 切换 5 次 ② 配网中途断电/锁屏/切后台 ③ wifi 列表 20 AP 大场景</li>
+<li><b>客户端</b>：微信小程序 + 支付宝小程序 + 抖音小程序 各跑 3 次（小程序差异主要在客户端）</li>
 </ol>
 </div>
 
 <div class="callout ok">
 <b>批次 C · 标注后续完善（量产稳定 2 周后）</b>
 <ol class="compact" style="margin-top:6px">
-<li>R1/R4/R5/R6/R7/B8/B17 + T2/T4/T7（详见 §8.3.3）· 都是低概率边界，量产稳定数据上来后再决定优先级</li>
-<li>S1/S5/S6/S8/S12 等精简项 · 删上游残留 + 修常量错误 · 减少代码体积约 130 行</li>
-<li><b>iBeacon 信标扩展</b>：决策启用时机 · 需评估 OBSERVER 角色重开后 25-35KB INT 占用 + 与配网期 RF 时分冲突</li>
+<li>§8.3.3 列出的低风险边界（R1/R4/R5/R6/R7/B8/B11/B17/T2/T4/T7/N3/N18）· 量产数据上来后看真实触发率再排</li>
+<li>§8.4 精简项（S1/S5/S6/S8/S12 + N20/N11）· 删上游残留 + 修常量 · 减少 ~130 行代码</li>
+<li><b>iBeacon 信标扩展</b>：未来扩展信标传送数据时启用 · 需评估 OBSERVER 角色重开后 25-35KB INT 占用</li>
 </ol>
 </div>
 
-<h3>9.1 验收清单（批次 A+B 落地后必跑）</h3>
+<h3>9.1 验收清单（批次 A 落地后必跑 · Android/华为为重点）</h3>
+
+<h4>静态检查（commit 前自检）</h4>
 <ul class="compact">
 <li>[ ] 全板编译通过（4G / WiFi / P31）· <code>python scripts/release.py</code></li>
-<li>[ ] grep <code>xTaskCreate\b</code> main/ 仍 0 命中</li>
-<li>[ ] grep <code>volatile</code> + <code>bool</code> in main/blufi/ · 0 命中（全 atomic）</li>
-<li>[ ] 真机：首次开机 BLUFI 配网成功 · log 看到 <code>esp_bt_mem_release</code> 释放 25-35KB</li>
-<li>[ ] 真机：BLUFI 期间 + 配网完成后 内部 RAM 始终 &gt; 60KB</li>
-<li>[ ] 真机压测：连续 20 次"重置→配网→重启"无 panic 无内存泄漏</li>
-<li>[ ] 多系统矩阵：iOS 15/17 × Android 8/12/14 × HarmonyOS 3/4 = <b>每个组合 5 次配网，成功率 ≥ 95%</b></li>
-<li>[ ] 微信小程序 + 支付宝小程序 + 抖音小程序 各 3 次完整配网</li>
-<li>[ ] Android 大列表场景（20 AP）三次下发不丢包</li>
-<li>[ ] SwitchConfigMode（BLUFI ↔ AP 不重启切换）3 次后仍能正常配网（验证 B3 修复）</li>
-<li>[ ] 配网期间手机突然断电/锁屏/切后台 三场景设备能恢复广播</li>
+<li>[ ] <code>grep xTaskCreate\b main/</code> 仍 0 命中</li>
+<li>[ ] <code>grep "bool " main/blufi/blufi.h</code> · 5 个跨任务字段 0 命中（全 atomic）</li>
+<li>[ ] sdkconfig <code>BT_NIMBLE_MAX_CONNECTIONS=1</code> 生效（idf.py reconfigure 后 grep 确认）</li>
+</ul>
+
+<h4>核心稳定性（任一台真机即可验证）</h4>
+<ul class="compact">
+<li>[ ] <b>EnterWifiConfigMode 持 LVGL 锁时长 &lt; 500ms</b>（log 打 esp_timer_get_time · 验证 N12+N13 修复 · 之前 6s+）</li>
+<li>[ ] <b>mock NimBLE init 失败：3s 内返回错误并 Alert</b>（验证 R2）</li>
+<li>[ ] <b>失败重试 50 次后 NimBLE INT RAM 不累积</b>（验证 N14）</li>
+<li>[ ] 真机首次配网成功 · log 看到 <code>esp_bt_mem_release</code> 释放 25-35KB</li>
+<li>[ ] 配网期间 + 完成后 内部 RAM 始终 &gt; 60KB</li>
+<li>[ ] 连续 20 次"重置→配网→重启"无 panic 无内存泄漏</li>
+<li>[ ] SwitchConfigMode（BLUFI↔AP 不重启切换）3 次后仍能配网（验证 B3 修复）</li>
+<li>[ ] 配网中途手机断电/锁屏/切后台 三场景设备能恢复广播</li>
+</ul>
+
+<h4>🔴 Android / 华为兼容矩阵（刚需 · 全部跑过才能量产）</h4>
+<table>
+<thead><tr><th>系统/版本</th><th>测试机型示例</th><th>5 次配网成功率</th><th>额外检查</th></tr></thead>
+<tbody>
+<tr><td><b>Android 8/9</b></td><td>小米/OPPO 老机</td><td>≥ 95%</td><td>BLE_DISCONNECT 后 100ms adv_start 不失败（T11）</td></tr>
+<tr><td><b>Android 12/13/14</b></td><td>小米/OPPO/vivo 主流</td><td>≥ 95%</td><td>大列表（20 AP）下发不丢包（MTU 247）</td></tr>
+<tr><td><b>EMUI 9 / 11（华为旧）</b></td><td>P30/Mate 20 系列</td><td>≥ 90%</td><td>supervision 降级生效（N9）· 浏览 wifi 列表 60s 不断连</td></tr>
+<tr><td><b>HarmonyOS 3 / 4</b></td><td>P40 / Mate 50 / Pura 70</td><td>≥ 90%</td><td>BLE_CONNECT 事件不丢失（已修自愈兜底）</td></tr>
+<tr><td>iOS 15 / 17（参考）</td><td>iPhone 12/15</td><td>≥ 95%</td><td>—</td></tr>
+</tbody>
+</table>
+
+<h4>客户端兼容（刚需）</h4>
+<ul class="compact">
+<li>[ ] 微信小程序 配网 3 次完整成功</li>
+<li>[ ] 支付宝小程序 配网 3 次完整成功</li>
+<li>[ ] 抖音小程序 配网 3 次完整成功</li>
 </ul>
 
 <h3>9.2 信标扩展前置准备（未来路径）</h3>
