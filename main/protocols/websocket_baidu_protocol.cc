@@ -109,7 +109,7 @@ WebsocketBaiduProtocol::WebsocketBaiduProtocol() {
     // 集中读取 NVS 配置（避免运行时反复读 NVS）
     Settings baidu_settings("baidu", false);
     server_sample_rate_ = baidu_settings.GetInt("server_sample_rate", 24000);
-    server_frame_duration_ = baidu_settings.GetInt("server_frame_duration", 20);
+    server_frame_duration_ = baidu_settings.GetInt("server_frame_duration", 60);
     break_delay_ms_ = baidu_settings.GetInt("break_delay_ms", 500);
     idle_timeout_seconds_ = baidu_settings.GetInt("idle_timeout", 300);
     license_key_ = baidu_settings.GetString("license_key", "759877c9b68b4aa082cc05390be0cea9");
