@@ -169,15 +169,14 @@ const char* Ml307Board::GetNetworkStateIcon() {
 }
 
 std::string Ml307Board::GetBoardJson() {
-    // Set the board type for OTA
     std::string board_json = std::string("{\"type\":\"" BOARD_TYPE "\",");
     board_json += "\"name\":\"" BOARD_NAME "\",";
     board_json += "\"revision\":\"" + modem_->GetModuleRevision() + "\",";
-    board_json += "\"carrier\":\"" + modem_->GetCarrierName() + "\",";
-    board_json += "\"csq\":\"" + std::to_string(modem_->GetCsq()) + "\",";
+    board_json += "\"carrier\":\"" + modem_->GetCarrierNameCached() + "\",";
+    board_json += "\"csq\":\"" + std::to_string(modem_->GetCsqCached()) + "\",";
     board_json += "\"imei\":\"" + modem_->GetImei() + "\",";
     board_json += "\"iccid\":\"" + modem_->GetIccid() + "\",";
-    board_json += "\"cereg\":" + modem_->GetRegistrationState().ToString() + "}";
+    board_json += "\"cereg\":" + modem_->GetRegistrationStateCached().ToString() + "}";
     return board_json;
 }
 

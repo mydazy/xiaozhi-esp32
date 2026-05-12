@@ -581,6 +581,21 @@ private:
         // 优雅释放 4G PPP（必须在 ResetProtocol 之后、断电前 — 此时 4G 仍可用）
         GracefulShutdownModem();
 
+        // ⚠ arm_wakeup 必须在 ShutdownTouchAndAudioForSleep（AUDIO_PWR_EN=0）之前 ·
+        // 否则失电的 ES8311/ES7210 通过 ESD 二极管把 SDA/SCL 钉死 → i2c_master_transmit_receive
+        // 返回 INVALID_STATE → INT1_SRC 清 latch 失败（2026-05-12 量产二阶根因实测复现）。
+        // 配合驱动 v4.0.1 LIR_INT1=0 改动，本调用现在也兼具 defense-in-depth。
+        if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
+            Settings settings("status", false);
+            int32_t pickup_wake = settings.GetInt("pickupWake", 1);
+            if (pickup_wake) {
+                esp_err_t r = sc7a20h_arm_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
+                if (r != ESP_OK) {
+                    ESP_LOGW(TAG, "sc7a20h_arm_wakeup failed: %s", esp_err_to_name(r));
+                }
+            }
+        }
+
         ShutdownTouchAndAudioForSleep();
         ConfigureDeepSleepWakeupSources(enable_gyro_wakeup);
 
@@ -593,24 +608,10 @@ private:
         AlarmManager::GetInstance().ConfigureTimerWakeup();
 
         ESP_LOGI(TAG, "准备进入深度睡眠");
-        // 让 AUDIO_PWR_EN=0 引发的瞬态机械振动衰减（>100ms 实测充裕），
-        // 避免 arm_wakeup 清完 INT1_SRC 后又被音频咔哒声重新 latch。
+        // 让 AUDIO_PWR_EN=0 引发的瞬态机械振动衰减（>100ms 实测充裕）·
+        // LIR_INT1=0 后即使瞬态振动也不会留 latch，只要静下来 INT1 自动回 HIGH。
         vTaskDelay(pdMS_TO_TICKS(200));
 
-        // ⚠ arm_wakeup 必须在 ResetAllGpiosForSleep 之前 · I2C 总线（GPIO11/12）必须仍存活，
-        // 否则 INT1_SRC 清 latch 静默失败 → ext1 立即唤醒（量产实测复现，2026-05-12）。
-        if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
-            Settings settings("status", false);
-            int32_t pickup_wake = settings.GetInt("pickupWake", 1);
-            if (pickup_wake) {
-                esp_err_t r = sc7a20h_arm_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
-                if (r != ESP_OK) {
-                    ESP_LOGW(TAG, "sc7a20h_arm_wakeup failed: %s", esp_err_to_name(r));
-                }
-            }
-        }
-
-        // arm_wakeup 完成后才允许 reset I2C 引脚 · 顺序对调 = 误唤醒回潮
         ResetAllGpiosForSleep();
 
         // 每次进 sleep 都记 RTC 时戳 · 唤醒后比较 < 500ms 即死按延续 · 直接短路 sleep

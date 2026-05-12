@@ -630,12 +630,12 @@ void Application::InitializeProtocol() {
     if (ota_->HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
     } else if (ota_->HasWebsocketConfig()) {
-        // WebSocket 分发优先级：Baidu (brtc/baidu) → JoyAI (joyinside) → 普通 WS 兜底
-        // 子串匹配 · 与 OTA 配置解耦 · 凭 NVS websocket.url 形态判别
+        // WebSocket 分发：Baidu (bcelive 域名) → JoyAI (joyinside) → 普通 WS 兜底
+        // bcelive = Baidu Cloud Engine Live · 百度 RTC 服务统一域名 wss://*.bcelive.com
         Settings ws_settings("websocket", false);
         std::string ws_url = ws_settings.GetString("url", "");
-        if (ws_url.find("baidu") != std::string::npos) {
-            ESP_LOGI(TAG, "Using Baidu BRTC WebSocket protocol (url=%s)", ws_url.c_str());
+        if (ws_url.find("bcelive") != std::string::npos) {
+            ESP_LOGI(TAG, "Using Baidu BRTC WebSocket protocol");
             protocol_ = std::make_unique<WebsocketBaiduProtocol>();
         } else if (ws_url.find("joyinside") != std::string::npos) {
             ESP_LOGI(TAG, "Using JoyAI WebSocket protocol");

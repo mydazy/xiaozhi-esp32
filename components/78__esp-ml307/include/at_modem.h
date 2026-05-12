@@ -73,6 +73,10 @@ public:
     std::string GetCarrierName();
     int GetCsq();
 
+    int GetCsqCached() const { return csq_; }
+    const std::string& GetCarrierNameCached() const { return carrier_name_; }
+    const CeregState& GetRegistrationStateCached() const { return cereg_state_; }
+
     // 状态查询
     bool pin_ready() const { return pin_ready_; }
     bool network_ready() const { return network_ready_; }

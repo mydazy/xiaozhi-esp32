@@ -111,7 +111,13 @@ sc7a20h_handle_t sc7a20h_init(i2c_worker_handle_t worker,
     vTaskDelay(pdMS_TO_TICKS(10));
     write_reg(d, REG_CTRL_REG4, 0x10 | 0x88);           /* ±4g + BDU + HR */
     write_reg(d, REG_CTRL_REG2, 0x01);                  /* HPF → INT1 */
-    write_reg(d, REG_CTRL_REG5, 0x08);                  /* latch INT1 */
+    /* INT1 non-latched (LIR_INT1=0)：拿起场景下用户持续移动 ≥100ms 必然落入
+       ext1 LOW 窗口而触发唤醒；不 latch 的好处是 sleep teardown 期任何短暂运动
+       不会把 INT1 钉死 → 避免 esp_deep_sleep_start 瞬间被旧锁存唤醒。
+       原 0x08 (latch INT1) 在 2026-05-12 量产实测引发"睡眠秒醒"链路：
+       AUDIO_PWR_EN=0 让 codec 失电短路 SDA/SCL → INT1_SRC clear 失败 →
+       任何残留锁存（甚至 boot 后 7 分钟内任意一次摇动）都把 INT1 钉 LOW。 */
+    write_reg(d, REG_CTRL_REG5, 0x00);                  /* INT1 non-latched (was 0x08) */
     write_reg(d, REG_CTRL_REG3, 0x40);                  /* AOI1 → INT1 */
     write_reg(d, REG_CTRL_REG6, 0x02);                  /* INT1 active LOW */
     write_reg(d, REG_INT1_THS, ths);

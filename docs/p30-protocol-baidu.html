@@ -118,7 +118,7 @@ ul.compact li { margin: 2px 0; }
 <tr><td>类名</td><td><code>WebsocketBaiduProtocol</code> · 继承 <code>Protocol</code></td></tr>
 <tr><td>用途</td><td>百度智能云 BRTC 大模型互动 · WebSocket 直连（绕过 BRTC SDK）</td></tr>
 <tr><td>代码量</td><td><code>.cc</code> 1477 行 + <code>.h</code> 178 行 = <b>1655 行</b>（四家协议中最重，约其它三家代码总和 1.5×）</td></tr>
-<tr><td>启用条件</td><td>NVS <code>websocket.url</code> 含 <code>brtc</code> 或 <code>baidu</code> 子串（优先于 joyinside · application.cc:626）</td></tr>
+<tr><td>启用条件</td><td>NVS <code>websocket.url</code> 含 <code>bcelive</code> 子串 · 百度 RTC 服务统一域名 <code>*.bcelive.com</code> · 优先于 joyinside</td></tr>
 <tr><td>典型 URL</td><td><code>wss://rtc-aiotgw.exp.bcelive.com/v1/realtime?a=&lt;app&gt;&ak=&lt;ak&gt;&sk=&lt;sk&gt;&ac=opus</code></td></tr>
 <tr><td>License 来源</td><td>NVS <code>baidu.license_key</code> · fallback 硬编码 <code>"759877c9b68b4aa082cc05390be0cea9"</code></td></tr>
 <tr><td>Token 来源</td><td>HTTP GET <code>&lt;ota_url&gt;/baiduVoiceChat</code> · 返回 instance_id + token（连接方式一）</td></tr>

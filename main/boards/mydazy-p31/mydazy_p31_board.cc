@@ -517,6 +517,20 @@ private:
             vTaskDelay(pdMS_TO_TICKS(100)); // 等待触摸屏完全关闭
         }
 
+        // ⚠ arm_wakeup 必须在 AUDIO_PWR_EN=0 之前 · 失电的 ES8311/ES7210 通过 ESD
+        // 二极管把 SDA/SCL 钉死 → INT1_SRC 清 latch 会失败（4G/WiFi 板 2026-05-12 量产实测）。
+        // 配合驱动 v4.0.1 LIR_INT1=0 改动，本调用也兼具 defense-in-depth。
+        if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
+            Settings settings("status", false);
+            int32_t pickup_wake = settings.GetInt("pickupWake", 1);
+            if (pickup_wake) {
+                esp_err_t r = sc7a20h_arm_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
+                if (r != ESP_OK) {
+                    ESP_LOGW(TAG, "sc7a20h_arm_wakeup failed: %s", esp_err_to_name(r));
+                }
+            }
+        }
+
         ESP_LOGI(TAG, "[2/8] 关闭音频电源");
         gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
         rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
@@ -549,20 +563,8 @@ private:
         ESP_LOGI(TAG, "[3/8] 关闭显示背光");
         gpio_set_level(DISPLAY_BACKLIGHT, 0);
 
-        // ⚠ arm_wakeup 必须在 reset I2C 引脚（GPIO11/12）之前 · I2C 总线必须仍存活 ·
-        // 否则 INT1_SRC 清 latch 静默失败 → ext1 立即唤醒（4G/WiFi 板 2026-05-12 量产实测复现）。
-        // 200ms 让 AUDIO_PWR_EN=0 引发的机械咔哒振动衰减，避免 INT1 在 latch 清完后再次被触发。
+        // 200ms 让 AUDIO_PWR_EN=0 引发的机械咔哒振动衰减（LIR_INT1=0 后不会留 latch）
         vTaskDelay(pdMS_TO_TICKS(200));
-        if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
-            Settings settings("status", false);
-            int32_t pickup_wake = settings.GetInt("pickupWake", 1); // 默认启用拿起唤醒
-            if (pickup_wake) {
-                esp_err_t r = sc7a20h_arm_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
-                if (r != ESP_OK) {
-                    ESP_LOGW(TAG, "sc7a20h_arm_wakeup failed: %s", esp_err_to_name(r));
-                }
-            }
-        }
 
         // 8. 重置音频相关GPIO（此时 SC7A20H 已 arm，I2C 总线可安全 reset）
         ESP_LOGI(TAG, "重置音频GPIO");

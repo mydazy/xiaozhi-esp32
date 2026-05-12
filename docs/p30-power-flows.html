@@ -72,7 +72,7 @@ ul.compact li { margin: 2px 0; }
 
 <header>
   <h1>MyDazy P30 · 电源管理</h1>
-  <div class="meta">v2.2.11 · 2026-05-12 · 4G + WiFi + P31 三板 · 修复"睡眠后立刻唤醒"顺序 bug</div>
+  <div class="meta">v2.2.12 · 2026-05-12 · 4G + WiFi + P31 三板 · 修复"睡眠秒醒"二阶 bug（LIR_INT1=0 + arm 提前）</div>
 </header>
 
 <div class="layout">
@@ -223,7 +223,7 @@ ul.compact li { margin: 2px 0; }
   </tbody>
 </table>
 
-<h3>3.3 EnterDeepSleep 11 步（v2.2.11 修复顺序）</h3>
+<h3>3.3 EnterDeepSleep 11 步（v2.2.12 修复顺序）</h3>
 <div class="svgwrap">
 <svg viewBox="0 0 880 540" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="sArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
@@ -238,21 +238,21 @@ ul.compact li { margin: 2px 0; }
     <text x="200" y="136">3. ResetProtocol + delay 500ms（关 MQTT/WS）</text>
     <rect x="180" y="154" width="520" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
     <text x="200" y="174" fill="#F57F17">4. 仅 4G · GracefulShutdownModem (AT+CFUN=4 + 800ms)</text>
-    <rect x="180" y="192" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
-    <text x="200" y="212">5. ShutdownTouchAndAudioForSleep（AUDIO_PWR_EN hold · 触发音频咔哒）</text>
-    <rect x="180" y="230" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
-    <text x="200" y="250">6. ConfigureDeepSleepWakeupSources（只 arm EXT0 · 200ms 让 RTC 生效）</text>
-    <rect x="180" y="268" width="520" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
-    <text x="200" y="288" fill="#F57F17">7. 网络栈停 · WiFi: WifiStation::Stop + 300ms / 4G: 步骤 4 已停</text>
-    <rect x="180" y="306" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
-    <text x="200" y="326">8. AlarmManager::FlushNvs() + ConfigureTimerWakeup()</text>
-    <rect x="180" y="344" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
-    <text x="200" y="364">9. ESP_LOGI "准备进入深度睡眠" + delay 200ms（让音频咔哒振动衰减）</text>
-    <rect x="180" y="382" width="520" height="40" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
-    <text x="200" y="400" fill="#2E7D32" font-weight="600">10. sc7a20h_arm_wakeup（清 INT1_SRC + arm EXT1）</text>
-    <text x="200" y="416" fill="#2E7D32" font-size="11">    ⚠ 必须在 ResetAllGpios 之前 · I2C 总线（GPIO11/12）必须仍存活</text>
+    <rect x="180" y="192" width="520" height="40" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+    <text x="200" y="210" fill="#2E7D32" font-weight="600">5. sc7a20h_arm_wakeup（清 INT1_SRC + arm EXT1）</text>
+    <text x="200" y="226" fill="#2E7D32" font-size="11">    ⚠ 必须在 ShutdownTouchAndAudioForSleep 之前 · I2C 总线必须仍有电</text>
+    <rect x="180" y="240" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="260">6. ShutdownTouchAndAudioForSleep（AUDIO_PWR_EN=0 · I2C 总线在此刻死亡）</text>
+    <rect x="180" y="278" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="298">7. ConfigureDeepSleepWakeupSources（只 arm EXT0 · 200ms 让 RTC 生效）</text>
+    <rect x="180" y="316" width="520" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+    <text x="200" y="336" fill="#F57F17">8. 网络栈停 · WiFi: WifiStation::Stop + 300ms / 4G: 步骤 4 已停</text>
+    <rect x="180" y="354" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="374">9. AlarmManager::FlushNvs() + ConfigureTimerWakeup()</text>
+    <rect x="180" y="392" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="412">10. ESP_LOGI + delay 200ms（让音频咔哒振动衰减 · LIR=0 无 latch 残留）</text>
     <rect x="180" y="430" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
-    <text x="200" y="450">11. ResetAllGpiosForSleep（15 个 GPIO · 含 I2C SDA/SCL · 此时已可安全 reset）</text>
+    <text x="200" y="450">11. ResetAllGpiosForSleep（15 个 GPIO · 含 I2C SDA/SCL）</text>
     <rect x="180" y="468" width="520" height="32" rx="4" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
     <text x="200" y="488" fill="#C62828" font-weight="600">12. 记 RTC 时戳 + esp_deep_sleep_start · 死按 500ms 内自动循环 sleep ⚫</text>
 
@@ -260,12 +260,12 @@ ul.compact li { margin: 2px 0; }
     <line x1="440" y1="110" x2="440" y2="116" stroke="#666" marker-end="url(#sArr)"/>
     <line x1="440" y1="148" x2="440" y2="154" stroke="#666" marker-end="url(#sArr)"/>
     <line x1="440" y1="186" x2="440" y2="192" stroke="#666" marker-end="url(#sArr)"/>
-    <line x1="440" y1="224" x2="440" y2="230" stroke="#666" marker-end="url(#sArr)"/>
-    <line x1="440" y1="262" x2="440" y2="268" stroke="#666" marker-end="url(#sArr)"/>
-    <line x1="440" y1="300" x2="440" y2="306" stroke="#666" marker-end="url(#sArr)"/>
-    <line x1="440" y1="338" x2="440" y2="344" stroke="#666" marker-end="url(#sArr)"/>
-    <line x1="440" y1="376" x2="440" y2="382" stroke="#666" marker-end="url(#sArr)"/>
-    <line x1="440" y1="422" x2="440" y2="430" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="232" x2="440" y2="240" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="272" x2="440" y2="278" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="310" x2="440" y2="316" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="348" x2="440" y2="354" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="386" x2="440" y2="392" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="424" x2="440" y2="430" stroke="#666" marker-end="url(#sArr)"/>
     <line x1="440" y1="462" x2="440" y2="468" stroke="#666" marker-end="url(#sArr)"/>
   </g>
 </svg>
@@ -273,25 +273,25 @@ ul.compact li { margin: 2px 0; }
 <p class="sub">总耗时 ~3.6s（4G）/ ~3.0s（WiFi）· 橙色为板差异点 · 绿色为关键顺序点。</p>
 
 <div class="callout warn">
-  <b>⚠ 量产实测 bug（2026-05-12 修复，v2.2.11）</b>：原代码把 <code>sc7a20h_arm_wakeup</code> 放在
-  <code>ResetAllGpiosForSleep</code> <b>之后</b> · I2C 引脚（GPIO11/12）已被 reset · 驱动里
-  <code>i2c_worker_write_read(INT1_SRC)</code> 静默失败（早期版本 <code>(void)</code> 吞了返回值，
-  v2.2.11 加了 <code>LOGW</code> 诊断）· INT1 锁存位（CTRL_REG5=0x08 LIR_INT1）残留 LOW ·
-  <code>esp_deep_sleep_start</code> 一看 GPIO3 已经 LOW → ext1 立即触发 → 设备瞬间重启。
+  <b>⚠ 量产二阶根因（2026-05-12 实测复现 · v2.2.12 修复）</b>
   <br><br>
-  <b>修复要点</b>：
+  v2.2.11 把 <code>sc7a20h_arm_wakeup</code> 移到了 <code>ResetAllGpiosForSleep</code> 之前，
+  期待 I2C 总线还存活；但实测 LOGW 显示 <code>INT1_SRC clear failed (ESP_ERR_INVALID_STATE)</code>
+  在 reset 之前就已经发生。<b>真凶</b>：<code>AUDIO_PWR_EN=0</code> 让 ES8311/ES7210
+  失电，其 I2C 引脚的 ESD 保护二极管把 SDA/SCL <b>电气性钉死到 GND</b> ·
+  <code>i2c_master_transmit_receive</code> 返回 INVALID_STATE · INT1_SRC 永远清不了。
+  <br><br>
+  <b>双层修复</b>：
   <ul class="compact">
-    <li>SC7A20H 与 audio codec <b>共用 I2C_NUM_1</b>（SDA=11 / SCL=12）· 顺序必须严格</li>
-    <li>音频电源切断（AUDIO_PWR_EN=0）→ 留 ≥200ms 让机械振动衰减后再读 INT1_SRC</li>
-    <li>arm_wakeup 紧贴 esp_deep_sleep_start 之前 · 中间不能再做任何 vTaskDelay/log</li>
-    <li>EXT1 仅由 arm_wakeup 负责 · ConfigureDeepSleepWakeupSources 只管 EXT0（避免重复 arm）</li>
+    <li><b>驱动层（核心）</b>：<code>CTRL_REG5: 0x08 → 0x00</code> · 关闭 LIR_INT1 锁存 ·
+      INT1 仅反映即时状态 · 拿起持续运动 100ms+ 仍能触发 ext1 LOW · 但任何短暂运动
+      不会留 stale latch。详见 <code>components/mydazy__esp_sc7a20h/sc7a20h.c</code>。</li>
+    <li><b>板级（defense-in-depth）</b>：<code>arm_wakeup</code> 提前到
+      <code>ShutdownTouchAndAudioForSleep</code> 之前调用，确保 I2C 仍存活时完成 ext1 RTC 注册。</li>
   </ul>
-</div>
-
-<div class="callout warn">
-  <b>P31 板已知缺陷</b>（待 P31 切换 v4.0 C 驱动后修复）：P31 用旧 C++ <code>Sc7a20h</code> 类 inline
-  arm EXT1，<b>从未</b>读 INT1_SRC 清 latch。已在
-  <code>main/boards/mydazy-p31/mydazy_p31_board.cc</code> EnterDeepSleep 加注释。
+  <br>
+  <b>受影响代码</b>：<code>main/boards/mydazy-p30-4g</code> / <code>mydazy-p30-wifi</code> /
+  <code>mydazy-p31</code> 的 <code>EnterDeepSleep</code> · 三板同步修改。
 </div>
 </section>
 
@@ -359,13 +359,14 @@ ul.compact li { margin: 2px 0; }
 </ol>
 <p class="sub">用户死按 BOOT 不松手 → 立即被 EXT0 触发重启 → CheckBootHoldOnWakeup(1.5s) → 显示 logo + 欢迎音 → 用户自然松手 · 链路自愈 · 不需要等松手兜底。</p>
 
-<h3>sc7a20h_arm_wakeup（v2.2.11 后唯一的 EXT1 入口）</h3>
+<h3>sc7a20h_arm_wakeup（v2.2.12 后唯一的 EXT1 入口）</h3>
 <ol class="compact">
-  <li>读 <code>REG_INT1_SRC</code>（清 latch · 失败时 LOGW 出诊断）</li>
+  <li>读 <code>REG_INT1_SRC</code>（清旧 latch · LIR=0 后纯防御性 · 失败 LOGW）</li>
   <li><code>esp_sleep_enable_ext1_wakeup_io(SC7A20H_GPIO_INT1, ANY_LOW)</code></li>
   <li><code>rtc_gpio_pullup_en(INT1)</code> + <code>rtc_gpio_pulldown_dis(INT1)</code></li>
 </ol>
-<p class="sub">必须紧贴 <code>esp_deep_sleep_start</code> 之前调用 · I2C 总线必须仍存活（GPIO11/12 不能先被 reset）。</p>
+<p class="sub">必须在 <code>ShutdownTouchAndAudioForSleep</code>（<code>AUDIO_PWR_EN=0</code>）<b>之前</b>调用 · 失电的
+audio codec 会通过 ESD 二极管把 I2C 总线钉死，I2C 总线必须在调用时仍有电。</p>
 </section>
 
 <!-- ================== 6. 触发矩阵 ================== -->

@@ -395,11 +395,12 @@ ul.compact li { margin: 2px 0; }
 <table>
 <thead><tr><th>NVS websocket.url 子串</th><th>选中协议</th><th>判断顺序</th></tr></thead>
 <tbody>
-<tr><td><code>brtc</code> 或 <code>baidu</code></td><td><b>WebsocketBaiduProtocol</b></td><td>1（最高优先）</td></tr>
+<tr><td><code>bcelive</code>（百度 BRTC 统一域名）</td><td><b>WebsocketBaiduProtocol</b></td><td>1（最高优先）</td></tr>
 <tr><td><code>joyinside</code></td><td>WebsocketJoeaiProtocol</td><td>2</td></tr>
 <tr><td>其他</td><td>WebsocketProtocol（兜底）</td><td>3</td></tr>
 </tbody>
 </table>
+<p class="sub">百度 RTC 所有服务统一走 <code>*.bcelive.com</code> 域名（Baidu Cloud Engine Live），单 bcelive 子串足够。</p>
 
 <h3>6.2 复杂度速览 · 远超另外三家</h3>
 <table>
