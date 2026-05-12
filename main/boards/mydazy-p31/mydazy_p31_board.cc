@@ -12,6 +12,7 @@
 #include "esp_lcd_jd9853.h"
 #include "axs5106l_touch.h"
 #include "sc7a20h.h"
+#include "i2c_bus_worker.h"
 #include "application.h"
 #include "audio/music_player.h"
 #include "button.h"
@@ -113,12 +114,13 @@ static bool ReadAdcMv(adc_oneshot_unit_handle_t handle, adc_cali_handle_t cali_h
 class MyDazyP31Board : public DualNetworkBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
+    i2c_worker_handle_t     i2c_worker_ = nullptr;   /* v4.0 SC7A20H 走串行 worker */
     Button boot_button_;
     Button volume_up_button_;
     Button volume_down_button_;
 
-    // SC7A20H 三轴加速度传感器
-    Sc7a20h* sc7a20h_sensor_ = nullptr;
+    // SC7A20H 三轴加速度传感器（v4.0 C 驱动 · 程序生命周期内不释放）
+    sc7a20h_handle_t sc7a20h_sensor_ = nullptr;
     bool sc7a20h_initialized_ = false;
 
     // 显示
@@ -165,6 +167,12 @@ private:
             },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+
+        // v4.0 SC7A20H 驱动只接受 i2c_worker · codec / NFC / touch 仍直接走 i2c_bus_
+        // （worker 仅串行化自己 add_device 的从机；与外部直接访问互不锁定，
+        //   P31 上 SC7A20H 唯一访问者就是它本身，无并发风险）
+        i2c_worker_config_t wcfg = I2C_WORKER_DEFAULT_CONFIG(i2c_bus_);
+        ESP_ERROR_CHECK(i2c_worker_create(&wcfg, &i2c_worker_));
     }
 
     void InitializeSpi() {
@@ -266,21 +274,14 @@ private:
 
 
     void InitializeSc7a20h() {
-        // 初始化SC7A20H传感器
-        sc7a20h_sensor_ = new Sc7a20h(i2c_bus_, 0x19); // 默认I2C地址
-
-        if (sc7a20h_sensor_->Initialize()) {
-            ESP_LOGI(TAG, "SC7A20H传感器初始化成功");
-
-            // 启用运动检测（INT1 → ESP32 GPIO，深睡时通过 ext1_wakeup 唤醒主 CPU）
-            sc7a20h_sensor_->SetMotionDetection(true);
-            sc7a20h_initialized_ = true;
-            ESP_LOGI(TAG, "SC7A20H传感器初始化完成，已启用防抖处理和运动检测");
+        // v4.0 C 驱动：一行 init 覆盖 WHO_AM_I 校验 + ODR 100Hz + AOI1 + INT1 latch + 阈值。
+        // 拿起阈值 320mg / 100ms 与 4G/WiFi 板对齐（量产实测调优）。
+        sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 320 /*mg*/, 100 /*ms*/);
+        sc7a20h_initialized_ = (sc7a20h_sensor_ != nullptr);
+        if (!sc7a20h_initialized_) {
+            ESP_LOGE(TAG, "SC7A20H 初始化失败（worker/WHO_AM_I 校验未过）");
         } else {
-            ESP_LOGE(TAG, "SC7A20H传感器初始化失败");
-            delete sc7a20h_sensor_;
-            sc7a20h_sensor_ = nullptr;
-            sc7a20h_initialized_ = false;
+            ESP_LOGI(TAG, "SC7A20H 初始化完成（v4.0 C 驱动 · INT1 已 arm motion detection）");
         }
     }
 
@@ -531,17 +532,7 @@ private:
 
         vTaskDelay(pdMS_TO_TICKS(200)); // 等待音频芯片完全断电
 
-        // 3. 陀螺仪唤醒配置（仅在自动休眠时启用）
-        if (enable_gyro_wakeup) {
-            Settings settings("status", false);
-            int32_t pickup_wake = settings.GetInt("pickupWake", 1); // 默认启用拿起唤醒（陀螺仪唤醒）
-            if(pickup_wake && sc7a20h_initialized_){
-                ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io((1ULL << SC7A20H_GPIO_INT1), ESP_EXT1_WAKEUP_ANY_LOW));
-                ESP_ERROR_CHECK(rtc_gpio_pullup_en(SC7A20H_GPIO_INT1));
-                ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(SC7A20H_GPIO_INT1));
-                ESP_LOGI(TAG, "SC7A20H唤醒源配置完成，GPIO%d", SC7A20H_GPIO_INT1);
-            }
-        }
+        // 3. 陀螺仪唤醒：实际 arm 推迟到 GPIO reset 块之前 · 见下方注释
 
         // 5. 处理WiFi连接（WiFi版本固定断开WiFi）
         if (GetNetworkType() == NetworkType::WIFI) {
@@ -558,7 +549,22 @@ private:
         ESP_LOGI(TAG, "[3/8] 关闭显示背光");
         gpio_set_level(DISPLAY_BACKLIGHT, 0);
 
-        // 8. 重置音频相关GPIO
+        // ⚠ arm_wakeup 必须在 reset I2C 引脚（GPIO11/12）之前 · I2C 总线必须仍存活 ·
+        // 否则 INT1_SRC 清 latch 静默失败 → ext1 立即唤醒（4G/WiFi 板 2026-05-12 量产实测复现）。
+        // 200ms 让 AUDIO_PWR_EN=0 引发的机械咔哒振动衰减，避免 INT1 在 latch 清完后再次被触发。
+        vTaskDelay(pdMS_TO_TICKS(200));
+        if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
+            Settings settings("status", false);
+            int32_t pickup_wake = settings.GetInt("pickupWake", 1); // 默认启用拿起唤醒
+            if (pickup_wake) {
+                esp_err_t r = sc7a20h_arm_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
+                if (r != ESP_OK) {
+                    ESP_LOGW(TAG, "sc7a20h_arm_wakeup failed: %s", esp_err_to_name(r));
+                }
+            }
+        }
+
+        // 8. 重置音频相关GPIO（此时 SC7A20H 已 arm，I2C 总线可安全 reset）
         ESP_LOGI(TAG, "重置音频GPIO");
         gpio_reset_pin(AUDIO_I2S_GPIO_MCLK);
         gpio_reset_pin(AUDIO_I2S_GPIO_BCLK);
@@ -1038,76 +1044,37 @@ private:
     static constexpr bool kEnablePeriodicStatusReport = false;
 
     // 上报设备状态 → POST OTA_URL/status
+    // 字段拼装 / idle / music 防御全部在 Ota::ReportStatus()，板级仅负责调用时机。
+    // GPS 通过覆写 GetDeviceStatusJson() 注入 status.gps（见下方 override）。
     void ReportStatus() {
-        // 仅在 idle 上报；对话期让位给音频上传和 TTS，避免 HTTPS/TLS 抢资源。
-        auto state = Application::GetInstance().GetDeviceState();
-        if (state != kDeviceStateIdle) {
-            ESP_LOGD(TAG, "skip status report, state=%d (仅 idle 上报)", (int)state);
-            return;
-        }
-        // 防御性：MP3 流式播放期间禁止上报（与 OSS Range 续传抢 TLS/带宽，
-        // P31 同时挂 GNSS/iBeacon 数据流，状态上报更易触发 mp3 SSL -76 链路超时）
-        if (MusicPlayer::GetInstance().IsPlaying()) {
-            ESP_LOGD(TAG, "skip status report, music playing");
-            return;
-        }
-
-        // 精简后上报：电量 + 音量 + 亮度 + theme + 网络信号 + 定位（P31 唯一带 GNSS 的板）
-        int battery = power_manager_ ? power_manager_->GetBatteryLevel() : -1;
-        bool charging = power_manager_ ? power_manager_->IsCharging() : false;
-        auto* codec = GetAudioCodec();
-        int volume = codec ? codec->output_volume() : -1;
-        auto* bl = GetBacklight();
-        int brightness = bl ? bl->brightness() : -1;
-        std::string theme;
-        auto* disp = GetDisplay();
-        if (disp && disp->GetTheme()) {
-            theme = disp->GetTheme()->name();
-        }
-        bool fixed = gnss_fixed_.load();
-        int sats = gnss_satellites_.load();
-        auto pos = GetGnssPos();
-        double lat = pos.lat, lon = pos.lon;
-
-        // 网络信息
-        int csq = -1;
-        std::string carrier;
-        if (GetNetworkType() == NetworkType::ML307) {
-            auto& ml307 = dynamic_cast<Ml307Board&>(GetCurrentBoard());
-            auto* modem = ml307.GetModem();
-            if (modem) {
-                csq = modem->GetCsq();
-                carrier = modem->GetCarrierName();
-            }
-        }
-
-        Application::GetInstance().Schedule(
-            [battery, charging, volume, brightness, theme, fixed, sats, lat, lon, csq, carrier]() {
-            cJSON* p = cJSON_CreateObject();
-
-            cJSON_AddNumberToObject(p, "battery_level", battery);   // 服务端解析字段（snake_case）
-            cJSON_AddBoolToObject(p, "charging", charging);
-            if (volume >= 0)     cJSON_AddNumberToObject(p, "volume", volume);
-            if (brightness >= 0) cJSON_AddNumberToObject(p, "brightness", brightness);
-            if (!theme.empty())  cJSON_AddStringToObject(p, "theme", theme.c_str());
-
-            cJSON* gps = cJSON_CreateObject();
-            cJSON_AddBoolToObject(gps, "fixed", fixed);
-            cJSON_AddNumberToObject(gps, "satellites", sats);
-            if (fixed) {
-                cJSON_AddNumberToObject(gps, "latitude", lat);
-                cJSON_AddNumberToObject(gps, "longitude", lon);
-            }
-            cJSON_AddItemToObject(p, "gps", gps);
-
-            cJSON* net = cJSON_CreateObject();
-            cJSON_AddStringToObject(net, "type", "cellular");
-            if (!carrier.empty()) cJSON_AddStringToObject(net, "carrier", carrier.c_str());
-            if (csq >= 0) cJSON_AddNumberToObject(net, "csq", csq);
-            cJSON_AddItemToObject(p, "network", net);
-
-            Ota::ReportStatus(p);
+        Application::GetInstance().Schedule([]() {
+            Ota ota; ota.ReportStatus();
         });
+    }
+
+    // P31 独有：在标准 status JSON 上注入 gps 子对象。
+    // 基类 DualNetworkBoard::GetDeviceStatusJson 委托给 current_board_（Ml307Board 或 WifiBoard），
+    // 我们再 parse → 追加 gps → 重新序列化。
+    std::string GetDeviceStatusJson() override {
+        std::string base = DualNetworkBoard::GetDeviceStatusJson();
+        cJSON* root = cJSON_Parse(base.c_str());
+        if (root == nullptr) return base;
+
+        cJSON* gps = cJSON_CreateObject();
+        cJSON_AddBoolToObject(gps, "fixed", gnss_fixed_.load());
+        cJSON_AddNumberToObject(gps, "satellites", gnss_satellites_.load());
+        if (gnss_fixed_.load()) {
+            auto pos = GetGnssPos();
+            cJSON_AddNumberToObject(gps, "latitude", pos.lat);
+            cJSON_AddNumberToObject(gps, "longitude", pos.lon);
+        }
+        cJSON_AddItemToObject(root, "gps", gps);
+
+        char* str = cJSON_PrintUnformatted(root);
+        std::string result(str ? str : "{}");
+        cJSON_free(str);
+        cJSON_Delete(root);
+        return result;
     }
 
     // 启动 90 秒定时状态上报（默认关闭，唤醒触发一次性上报代替）
@@ -1575,11 +1542,9 @@ public:
             vol_down_task_ = NULL;
         }
 
-        // 清理SC7A20H传感器
-        if (sc7a20h_sensor_) {
-            delete sc7a20h_sensor_;
-            sc7a20h_sensor_ = nullptr;
-        }
+        // v4.0 C 驱动按"程序生命周期内不释放"设计，无 del API · 这里仅清状态位
+        sc7a20h_sensor_ = nullptr;
+        sc7a20h_initialized_ = false;
 
         // 清理其他资源
         if (power_manager_) {

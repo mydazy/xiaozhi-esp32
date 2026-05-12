@@ -21,8 +21,6 @@ public:
     /// @param data 附加数据（调用后自动释放）
     static esp_err_t RequestSwitch(const std::string& type, cJSON* data);
 
-    /// POST OTA_URL/status — 上报设备状态（GPS、电量等）
-    static esp_err_t ReportStatus(cJSON* payload);
     bool ReportStatus();
     bool HasActivationChallenge() { return has_activation_challenge_; }
     bool HasNewVersion() { return has_new_version_; }

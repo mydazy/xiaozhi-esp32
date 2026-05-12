@@ -529,24 +529,15 @@ private:
         rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
     }
 
-    void ConfigureDeepSleepWakeupSources(bool enable_gyro_wakeup) {
-        // 按键唤醒（低电平 = 按下）· 不等松手：用户死按不松会立即被 EXT0 触发重启,
-        // 走 CheckBootHoldOnWakeup(1.5s) → logo + 欢迎音 → 用户自然松手 · 链路自愈
+    void ConfigureDeepSleepWakeupSources(bool /*enable_gyro_wakeup*/) {
+        // 此函数只负责 EXT0（BOOT 键）：EXT1（SC7A20H INT1）由 sc7a20h_arm_wakeup 负责，
+        // 必须紧贴 esp_deep_sleep_start 之前调用，否则 ResetAllGpiosForSleep 会先 reset
+        // 共用的 I2C 引脚（GPIO11/12），让 INT1_SRC clear 静默失败 → 睡后立即唤醒。
         ESP_ERROR_CHECK(esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0));
         ESP_ERROR_CHECK(rtc_gpio_pullup_en(BOOT_BUTTON_GPIO));
         ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(BOOT_BUTTON_GPIO));
 
         vTaskDelay(pdMS_TO_TICKS(200));
-
-        if (!enable_gyro_wakeup) return;
-        Settings settings("status", false);
-        int32_t pickup_wake = settings.GetInt("pickupWake", 1);
-        if (pickup_wake && sc7a20h_initialized_) {
-            ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io(
-                (1ULL << SC7A20H_GPIO_INT1), ESP_EXT1_WAKEUP_ANY_LOW));
-            ESP_ERROR_CHECK(rtc_gpio_pullup_en(SC7A20H_GPIO_INT1));
-            ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(SC7A20H_GPIO_INT1));
-        }
     }
 
     void ResetAllGpiosForSleep() {
@@ -599,16 +590,17 @@ private:
         // STA_STOP 事件链（典型 ~150-300ms），再断电源。
         vTaskDelay(pdMS_TO_TICKS(300));
 
-        ResetAllGpiosForSleep();
-
         // 闹钟：arm RTC 定时唤醒（与 EXT0/EXT1 三源并存 · 含分段睡眠策略）
         AlarmManager::GetInstance().FlushNvs();
         AlarmManager::GetInstance().ConfigureTimerWakeup();
 
         ESP_LOGI(TAG, "准备进入深度睡眠");
+        // 让 AUDIO_PWR_EN=0 引发的瞬态机械振动衰减（>100ms 实测充裕），
+        // 避免 arm_wakeup 清完 INT1_SRC 后又被音频咔哒声重新 latch。
         vTaskDelay(pdMS_TO_TICKS(200));
 
-        // ⚠ arm_wakeup 必须最后做 · 之前任何 vTaskDelay/log 都可能让 INT1 在睡前误触发
+        // ⚠ arm_wakeup 必须在 ResetAllGpiosForSleep 之前 · I2C 总线（GPIO11/12）必须仍存活，
+        // 否则 INT1_SRC 清 latch 静默失败 → ext1 立即唤醒（量产实测复现，2026-05-12）。
         if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
             Settings settings("status", false);
             int32_t pickup_wake = settings.GetInt("pickupWake", 1);
@@ -619,6 +611,9 @@ private:
                 }
             }
         }
+
+        // arm_wakeup 完成后才允许 reset I2C 引脚 · 顺序对调 = 误唤醒回潮
+        ResetAllGpiosForSleep();
 
         // 每次进 sleep 都记 RTC 时戳 · 唤醒后比较 < 500ms 即死按延续 · 直接短路 sleep
         s_last_sleep_us = NowRtcUs();
@@ -833,55 +828,10 @@ private:
     // ========================================================
 
     // 状态上报（仅唤醒事件触发：进省电前 PowerSaveTimer::OnEnterSleepMode 调一次）
+    // 字段拼装 / idle / music 防御全部在 Ota::ReportStatus()，板级仅负责调用时机。
     void ReportStatus() {
-        // 仅在 idle 上报；对话期让位给音频上传和 TTS，避免 HTTPS/TLS 抢资源。
-        auto state = Application::GetInstance().GetDeviceState();
-        if (state != kDeviceStateIdle) {
-            ESP_LOGD(TAG, "skip status report, state=%d (仅 idle 上报)", (int)state);
-            return;
-        }
-        // 防御性：MP3 流式播放期间禁止上报（POST /status 与 OSS Range 续传抢 TLS/带宽，
-        // 实测会导致 mp3 socket 超时 -76 触发 Range 重连甚至 retry 用尽。详见 2026-04-30 日志）
-        if (MusicPlayer::GetInstance().IsPlaying()) {
-            ESP_LOGD(TAG, "skip status report, music playing");
-            return;
-        }
-
-        // 精简后上报：电量 + 音量 + 亮度 + theme + 网络信号（P30-WiFi 无定位）
-        int battery = power_manager_ ? power_manager_->GetBatteryLevel() : -1;
-        bool charging = power_manager_ ? power_manager_->IsCharging() : false;
-        auto* codec = GetAudioCodec();
-        int volume = codec ? codec->output_volume() : -1;
-        auto* bl = GetBacklight();
-        int brightness = bl ? bl->brightness() : -1;
-        std::string theme;
-        auto* disp = GetDisplay();
-        if (disp && disp->GetTheme()) {
-            theme = disp->GetTheme()->name();
-        }
-
-        // WiFi RSSI（连接时获取信号强度）
-        int rssi = 0;
-        wifi_ap_record_t ap_info;
-        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-            rssi = ap_info.rssi;
-        }
-
-        Application::GetInstance().Schedule(
-            [battery, charging, volume, brightness, theme, rssi]() {
-            cJSON* p = cJSON_CreateObject();
-            cJSON_AddNumberToObject(p, "battery", battery);
-            cJSON_AddBoolToObject(p, "charging", charging);
-            if (volume >= 0)     cJSON_AddNumberToObject(p, "volume", volume);
-            if (brightness >= 0) cJSON_AddNumberToObject(p, "brightness", brightness);
-            if (!theme.empty())  cJSON_AddStringToObject(p, "theme", theme.c_str());
-
-            cJSON* net = cJSON_CreateObject();
-            cJSON_AddStringToObject(net, "type", "wifi");
-            if (rssi != 0) cJSON_AddNumberToObject(net, "rssi", rssi);
-            cJSON_AddItemToObject(p, "network", net);
-
-            Ota::ReportStatus(p);
+        Application::GetInstance().Schedule([]() {
+            Ota ota; ota.ReportStatus();
         });
     }
 

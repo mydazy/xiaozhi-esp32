@@ -3,6 +3,7 @@
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
+#include "audio/music_player.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -327,16 +328,6 @@ esp_err_t Ota::RequestSwitch(const std::string& type, cJSON* data) {
 // ============================================================
 // /status — 上报设备状态
 // ============================================================
-
-esp_err_t Ota::ReportStatus(cJSON* payload) {
-    auto state = Application::GetInstance().GetDeviceState();
-    if (state != kDeviceStateIdle) {
-        ESP_LOGD(TAG, "skip /status POST, state=%d (仅 idle 上报)", (int)state);
-        cJSON_Delete(payload);
-        return ESP_ERR_INVALID_STATE;
-    }
-    return PostToOta("/status", payload);
-}
 
 void Ota::MarkCurrentVersionValid() {
     auto partition = esp_ota_get_running_partition();
@@ -723,6 +714,10 @@ bool Ota::ReportStatus() {
         ESP_LOGD(TAG, "skip /status POST, state=%d (仅 idle 上报)", (int)state);
         return false;
     }
+    if (MusicPlayer::GetInstance().IsPlaying()) {
+        ESP_LOGD(TAG, "skip /status POST, music playing");
+        return false;
+    }
 
     std::string url = GetCheckVersionUrl();
     if (url.length() < 10) {
@@ -759,47 +754,6 @@ bool Ota::ReportStatus() {
     if (code != 200 && code != 202 && code != 204) {
         ESP_LOGW(TAG, "Status post code: %d", code);
         return false;
-    }
-
-    if (!resp.empty()) {
-        auto *resp_ptr = new std::string(std::move(resp));
-        // 重入保护：CheckVersion 由 Activation 串行调用，物理不可能两次同时跑（依赖时序）
-        constexpr uint32_t kStatusAssetsStackSize = 4096;
-        static StackType_t s_status_assets_stack[kStatusAssetsStackSize / sizeof(StackType_t)];
-        static StaticTask_t s_status_assets_tcb;
-        TaskHandle_t task_created = xTaskCreateStaticPinnedToCore([](void* p) {
-            std::unique_ptr<std::string> holder(static_cast<std::string*>(p));
-            cJSON* root = cJSON_Parse(holder->c_str());
-            if (!root) { vTaskDelete(NULL); return; }
-
-            // 同步服务器时间（统一走 ApplyServerUtcTime helper · 与 CheckVersion 共享逻辑）
-            ApplyServerUtcTime(cJSON_GetObjectItem(root, "server_time"));
-
-            // 处理远程设置控制
-            cJSON* settings_obj = cJSON_GetObjectItem(root, "settings");
-            if (cJSON_IsObject(settings_obj)) {
-                cJSON* status_obj = cJSON_GetObjectItem(settings_obj, "status");
-                if (cJSON_IsObject(status_obj)) {
-                    Settings status_settings("status", true);
-                    const char* keys[] = {"deepSleep", "report", "autoStart", "pickupWake"};
-                    for (const char* key : keys) {
-                        cJSON* val = cJSON_GetObjectItem(status_obj, key);
-                        if (cJSON_IsNumber(val)) {
-                            status_settings.SetInt(key, val->valueint);
-                            ESP_LOGI(TAG, "Remote setting status.%s = %d", key, val->valueint);
-                        }
-                    }
-                }
-            }
-
-            cJSON_Delete(root);
-            vTaskDelete(NULL);
-        }, "status_assets", kStatusAssetsStackSize / sizeof(StackType_t),
-           resp_ptr, 4, s_status_assets_stack, &s_status_assets_tcb, 0);
-
-        if (task_created == nullptr) {
-            delete resp_ptr;
-        }
     }
 
     return true;

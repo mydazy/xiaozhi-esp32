@@ -149,9 +149,17 @@ esp_err_t sc7a20h_arm_wakeup(sc7a20h_handle_t h, gpio_num_t int1_gpio)
     if (!h) return ESP_ERR_INVALID_ARG;
 
     /* Clear INT1_SRC latch — 防止 stale 事件让 deep_sleep_start 立即唤醒。
-       I2C 失败不阻塞唤醒注册（总线可能已被调用方关电）。 */
+       I2C 失败不阻塞唤醒注册（总线可能已被调用方关电），但必须 LOGW 出来：
+       SC7A20H 与 audio codec 共用 I2C_NUM_1，调用方若先 reset 了 SDA/SCL，
+       这里就会静默失败 → INT1 锁存不清 → ext1 立即唤醒。出现 WARN 必查顺序。*/
     uint8_t reg = REG_INT1_SRC, src = 0;
-    (void)i2c_worker_write_read(h->dev, &reg, 1, &src, 1, I2C_TIMEOUT_MS);
+    esp_err_t clr = i2c_worker_write_read(h->dev, &reg, 1, &src, 1, I2C_TIMEOUT_MS);
+    if (clr != ESP_OK) {
+        ESP_LOGW(TAG, "INT1_SRC clear failed (%s) · I2C 可能已 reset · ext1 或误唤醒",
+                 esp_err_to_name(clr));
+    } else if (src & 0x40) {
+        ESP_LOGI(TAG, "INT1_SRC stale latch cleared (src=0x%02X)", src);
+    }
 
     esp_err_t ret = esp_sleep_enable_ext1_wakeup_io(
         (1ULL << int1_gpio), ESP_EXT1_WAKEUP_ANY_LOW);

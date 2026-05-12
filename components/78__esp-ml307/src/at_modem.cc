@@ -3,7 +3,6 @@
 // EC801E / NT26K 模组支持已精简（mydazy 三 SKU 全部使用 ML307R · 2026-04-29）
 #include <esp_log.h>
 #include <esp_err.h>
-#include <esp_timer.h>
 #include <sstream>
 #include <iomanip>
 #include <cstring>
@@ -164,21 +163,13 @@ std::string AtModem::GetCarrierName() {
 }
 
 int AtModem::GetCsq() {
-    uint64_t updated = csq_updated_us_.load(std::memory_order_acquire);
-    if (updated == 0) return -1;   // 从未刷新过
-    uint64_t now = (uint64_t)esp_timer_get_time();
-    if (now - updated > kCsqStaleUs) return -1;
-    return csq_.load(std::memory_order_relaxed);
-}
-
-int AtModem::RefreshCsq() {
     if (at_uart_->GetHttpBinaryMode()) {
-        return csq_.load(std::memory_order_relaxed);
+        return csq_;
     }
     if (!at_uart_->SendCommand("AT+CSQ", 100)) {
         ESP_LOGE(TAG, "Failed to send AT+CSQ command");
     }
-    return csq_.load(std::memory_order_relaxed);
+    return csq_;
 }
 
 CeregState AtModem::GetRegistrationState() {
@@ -196,8 +187,7 @@ void AtModem::HandleUrc(const std::string& command, const std::vector<AtArgument
     } else if (command == "COPS" && arguments.size() >= 4) {
         carrier_name_ = arguments[2].string_value;
     } else if (command == "CSQ" && arguments.size() >= 1) {
-        csq_.store(arguments[0].int_value, std::memory_order_relaxed);
-        csq_updated_us_.store((uint64_t)esp_timer_get_time(), std::memory_order_release);
+        csq_ = arguments[0].int_value;
     } else if (command == "CEREG" && arguments.size() >= 1) {
         cereg_state_ = CeregState{};
         if (arguments.size() == 1) {

@@ -132,34 +132,14 @@ void Ml307Board::NetworkTask() {
     ESP_LOGI(TAG, "ML307 Revision: %s", module_revision.c_str());
     ESP_LOGI(TAG, "ML307 IMEI: %s", imei.c_str());
     ESP_LOGI(TAG, "ML307 ICCID: %s", iccid.c_str());
-
-    // ─── CSQ 异步刷新常驻循环 (v32 P0 修复) ───────────────────────────────
-    // 动机:原 GetCsq 同步发 AT 阻塞主循环 100ms × 每 10s 一次 → 改异步。
-    //   主循环 UpdateStatusBar → modem->GetCsq() 改为纯读缓存(μs 级)。
-    //   后台本任务 5s 一次 RefreshCsq → AT+CSQ → URC 回填 csq_ + csq_updated_us_。
-    //   binary mode (mp3) 期间 SendCommand 被拒,csq_updated_us_ 不更新,
-    //   30s 超阈值 GetCsq 返 -1 → icon 显示 SIGNAL_OFF (staleness 守护)。
-    // 复用本 ml307_net 任务(P5 Core 0 · 栈 4096),不新增任务节省 INT RAM。
-    constexpr TickType_t kCsqRefreshIntervalMs = 5000;
-    // 网络注册成功立即首刷一次 CSQ,消除"已联网但 icon=SIGNAL_OFF"的 5s 启动窗口
-    (void)modem_->RefreshCsq();
-    ESP_LOGI(TAG, "首次 CSQ=%d · 进入后台刷新循环 (周期 %d ms)",
-             modem_->GetCsq(), (int)kCsqRefreshIntervalMs);
-    while (true) {
-        vTaskDelay(pdMS_TO_TICKS(kCsqRefreshIntervalMs));
-        if (modem_ && modem_->network_ready()) {
-            (void)modem_->RefreshCsq();
-        }
-    }
 }
 
 void Ml307Board::StartNetwork() {
-    // NetworkTask 末尾进入常驻 CSQ 刷新循环,本任务永不返回
-    // (lambda 末尾 vTaskDelete 实际上不会被执行,保留作防御性)
+
     xTaskCreatePinnedToCore([](void* arg) {
         Ml307Board* board = static_cast<Ml307Board*>(arg);
         board->NetworkTask();
-        vTaskDelete(NULL);  // dead code (NetworkTask 内无限循环) · 保留防 NetworkTask 异常 return
+        vTaskDelete(NULL);
     }, "ml307_net", 4096, this, 5, NULL, 0);
 }
 
