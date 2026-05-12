@@ -1086,6 +1086,17 @@ void Application::HandleStateChangedEvent() {
             display->SetStatus("#FF3030 ●#");
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
+            // 🔴 兜底切场景：修复"时钟主屏卡死，换新后无表情"
+            //   触发路径：用户对话结束 → channel 复用未关闭 → 再次按键/唤醒
+            //   → HandleToggleChat / HandleStartListening / HandleWakeWord 内
+            //     channel opened 分支直接 SetListeningMode(mode) → SetDeviceState(Listening)
+            //   → 跳过 Connecting case · SwitchToChatMode 永不调用
+            //   → active_scene_ 卡在 kClock · 表情/字幕不显示
+            //   SwitchToChatMode 早退守护 `if (active_scene_ != kClock) return` 保证幂等：
+            //     - 正常 Connecting→Listening：active_scene_=kChat → 早退（保留 EduCard/FontGif）
+            //     - Speaking→Listening 同轮继续问：早退（符合"Listening 不清场"设计）
+            //     - Idle 直跳 Listening（channel 已开）：active_scene_=kClock → 切 Chat ✅
+            if (lcd) lcd->SwitchToChatMode();
             // Listening 不清场：保留上一轮的教育卡 / FontGIF，让孩子能看着画面继续问
             // 清场在 Speaking 进入时执行（真正的下一轮对话）
 

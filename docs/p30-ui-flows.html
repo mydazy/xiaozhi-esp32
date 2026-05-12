@@ -471,6 +471,33 @@ ul.compact li { margin: 2px 0; }
 </div>
 
 <div class="callout warn">
+<b>🔴 时钟主屏卡死 bug 闭合（2026-05-12 · 实测最高优先级）</b><br>
+<b>用户实测现象</b>：调用一次对话后回到时钟主屏，<b>下次按键/唤醒不切换到表情</b>，UI 卡在时钟页面。
+<b>根因（不是 UI 层 bug · 是状态机调度跳过）</b>：
+<ol style="margin:6px 0 6px 22px">
+  <li>对话结束后 <code>protocol_</code> 的 audio channel <b>不关闭</b>（复用以减少建连延迟）</li>
+  <li>第二次唤醒 <code>HandleToggleChat / HandleStartListening / HandleWakeWord</code> 内
+       <code>state==Idle && IsAudioChannelOpened()</code> 分支
+       <b>直接 <code>SetListeningMode → SetDeviceState(Listening)</code></b>，
+       跳过 <code>SetDeviceState(Connecting)</code></li>
+  <li>主循环消费 <code>STATE_CHANGED</code> 时 <code>GetState()=Listening</code> → 直接走 <code>case kDeviceStateListening</code>，
+       <b>跳过 <code>case kDeviceStateConnecting</code> 内的 <code>SwitchToChatMode()</code></b></li>
+  <li><code>case kDeviceStateListening</code> 旧设计"不清场"（保留 EduCard/FontGif），<b>不调任何 UI 切换</b></li>
+  <li><code>active_scene_</code> 保持 <code>kClock</code> · clock_container_ 全屏 LV_OPA_COVER 不透明覆盖 · emoji_box_ 被隐藏 → 用户看不到表情</li>
+</ol>
+<b>设计意图（application.cc:886 注释）</b>：<code>// Schedule to let the state change be processed first (UI update)</code> ——
+channel 未开路径已遵循此设计（Connecting + Schedule 异步开 channel），但 channel 已开路径漏掉了"先走 Connecting"。
+<b>修复</b>：<code>case kDeviceStateListening</code> 内追加 <code>if (lcd) lcd->SwitchToChatMode()</code> 兜底。
+<code>SwitchToChatMode</code> 早退守护 <code>if (active_scene_ != kClock) return</code> 保证幂等：
+<ul style="margin:6px 0 6px 22px">
+  <li>正常 Connecting→Listening：<code>active_scene_=kChat</code> → 早退（无副作用 · 保留 EduCard/FontGif）</li>
+  <li>Speaking→Listening 同轮继续问：早退（符合"Listening 不清场"设计）</li>
+  <li>Idle 直跳 Listening（channel 已开）：<code>active_scene_=kClock</code> → 切 Chat ✅</li>
+</ul>
+<b>影响 3 处入口</b>：HandleToggleChat:892 · HandleStartListening:944 · HandleWakeWord:1001（line 1001 因 ContinueWakeWordInvoke 内 <code>!= Connecting return</code> 实际是 dead code，但 case Listening 兜底覆盖）。
+</div>
+
+<div class="callout warn">
 <b>🔴 视觉遮挡 bug 闭合（2026-05-12 · 实测优先）</b><br>
 <b>用户实测现象</b>：调用一次 FontGif 后，<b>之后所有对话底部都不显示字幕</b>。
 <b>根因（不是 token race）</b>：
@@ -555,6 +582,7 @@ ContentOverlay overlay_mode_ = ContentOverlay::kNone;
     <tr><td><b>14</b></td><td>FontGIF 显示中 LLM 推 SetEmotion("happy")</td><td>被守护屏蔽 · 表情 src 不切 · GIF 继续播</td><td>M1 解耦</td></tr>
     <tr><td><b>15 🔴</b></td><td><b>连续 16 次 MCP show_stroke 不同字</b></td><td>PSRAM 可用空间稳定（不递减）· <code>heap_caps_get_free_size(MALLOC_CAP_SPIRAM)</code> 验证</td><td><b>M3 泄漏回归</b></td></tr>
     <tr><td><b>16 🔴</b></td><td><b>show_stroke 下载途中（耗时 1-3s）立刻按键唤醒 → 进入新一轮 Speaking</b></td><td>log 出现 <code>[font_gif] hide: was_in_font=...</code> 后 <code>FontGif: stale token N (active=0), drop X bytes</code> · 屏幕保持 chat 模式 · 新一轮 LLM 字幕正常显示 · bottom_bar 显示无残留 HIDDEN</td><td><b>跨轮 race 回归（2026-05-12 修）</b></td></tr>
+    <tr><td><b>17 🔴</b></td><td><b>对话完回时钟主屏 → 再次按键/唤醒（channel 保持连接）</b></td><td>UI 从时钟切到 Chat 模式 · 显示 emoji 表情 · bottom_bar 显示 LLM 字幕 · 不卡在时钟页面</td><td><b>Idle→Listening 跳过 Connecting 兜底（2026-05-12 修）</b></td></tr>
   </tbody>
 </table>
 
