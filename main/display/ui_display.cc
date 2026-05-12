@@ -19,6 +19,7 @@
 #include "lvgl_theme.h"
 
 #include <cstring>
+#include <string>
 #include <time.h>
 #include <font_awesome.h>
 #include <esp_log.h>
@@ -550,6 +551,11 @@ void UiDisplay::SetEmotion(const char* emotion) {
 // font 模式静默丢弃字幕。常规模式下根据文本宽度自适应 long_mode：
 // 单屏容得下 → LONG_WRAP 静态多行；超出 → LONG_SCROLL_CIRCULAR 横向跑马灯。
 // 速度参数 kChatScrollSpeedPps：3-10 岁孩子推荐 ~28 px/s（约 1.4 字/秒）。
+//
+// 🔴 多行文本压平规则：LLM 朗诵诗 / 多段对话含 \n，bottom_bar LV_SIZE_CONTENT 模式
+//   会按 \n 撑高 5-6 行 → 遮挡 emoji_box 表情区。
+//   策略：清洗 \n/\r/\t/连续空格 → 单空格 · 让长文本统一走横向滚动展示。
+//   产品意图：1.83" 小屏 + 孩子辅助字幕，不保留格式，只保留语义。
 void UiDisplay::SetChatMessage(const char* role, const char* content) {
     if (in_font_mode_) {
         ESP_LOGI(TAG, "[chat_msg] dropped (in_font_mode): role=%s len=%d",
@@ -557,19 +563,42 @@ void UiDisplay::SetChatMessage(const char* role, const char* content) {
         return;
     }
 
-    if (chat_message_label_ && content && content[0]) {
+    // 清洗换行/连续空白 → 单空格（避免 LONG_WRAP 按 \n 撑高 bottom_bar 遮挡表情）
+    std::string cleaned;
+    if (content && content[0]) {
+        cleaned.reserve(strlen(content));
+        bool prev_space = false;
+        for (const char* p = content; *p; ++p) {
+            unsigned char c = (unsigned char)*p;
+            bool is_ws = (c == '\n' || c == '\r' || c == '\t' || c == ' ');
+            if (is_ws) {
+                if (!prev_space && !cleaned.empty()) {
+                    cleaned += ' ';
+                    prev_space = true;
+                }
+            } else {
+                cleaned += (char)c;
+                prev_space = false;
+            }
+        }
+        while (!cleaned.empty() && cleaned.back() == ' ') cleaned.pop_back();
+    }
+    const char* display_content = cleaned.c_str();   // 空字符串时 c_str()=""，安全传给父类
+
+    if (chat_message_label_ && display_content[0]) {
         DisplayLockGuard lock(this);
         constexpr int kChatScrollSpeedPps = 30;  // pixel/second ≈ 2 字/秒
         const lv_font_t* font = lv_obj_get_style_text_font(chat_message_label_, LV_PART_MAIN);
-        int char_w = font ? lv_font_get_line_height(font) : 20;
-        int chars = 0;
-        for (size_t i = 0; content[i]; ) {
-            uint8_t b = (uint8_t)content[i];
-            i += (b < 0x80) ? 1 : (b < 0xC0) ? 1 : (b < 0xE0) ? 2 : (b < 0xF0) ? 3 : 4;
-            ++chars;
-        }
+        if (!font) font = &g_text_font;
+
+        // 用 lv_text_get_size 精确测宽（替代 chars×line_height 的粗估）
+        //   旧逻辑用行高当字宽：CJK ≈ 行高 OK，但 ASCII 实际宽 ≈ 0.5 行高 → 长 ASCII 错走 SCROLL
+        //   现在 LVGL 自己按 cmap 算每个字符精确宽度，混合文本（中英数字标点）都准确
+        lv_point_t sz;
+        lv_text_get_size(&sz, display_content, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_EXPAND);
+        int total_w = sz.x;
         int label_w = lv_obj_get_width(chat_message_label_);
-        int total_w = chars * char_w;
+
         if (total_w > label_w) {
             lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
             // LVGL 9 不再有 set_style_anim_speed，用 anim_duration（一轮滚动总时长 ms）等效
@@ -581,7 +610,7 @@ void UiDisplay::SetChatMessage(const char* role, const char* content) {
         }
     }
 
-    LcdDisplay::SetChatMessage(role, content);
+    LcdDisplay::SetChatMessage(role, display_content);   // 传清洗后的文本给父类
 }
 
 // ============================================================
