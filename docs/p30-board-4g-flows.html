@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · P30-4G Board 梳理</title>
+<style>
+:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+        --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
+        --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       margin: 0; background: #F5F5F5; color: var(--text); line-height: 1.55; font-size: 14px; }
+header { background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+         color: white; padding: 24px 40px; }
+header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 600; }
+header .meta { opacity: .9; font-size: 12px; }
+
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav { width: 200px; flex-shrink: 0; background: white; padding: 18px 0;
+      border-right: 1px solid var(--border); position: sticky; top: 0;
+      align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+nav h3 { margin: 0 14px 8px; font-size: 11px; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: .5px; }
+nav a { display: block; padding: 5px 14px; color: var(--text); text-decoration: none;
+        font-size: 13px; border-left: 3px solid transparent; }
+nav a:hover { background: var(--brand-light); border-left-color: var(--brand); color: var(--brand-deep); }
+
+main { flex: 1; padding: 24px 36px; max-width: 980px; }
+section { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
+             border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
+section h2 .num { display: inline-block; background: var(--brand); color: white;
+                  padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
+section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
+
+code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
+       font-family: "SF Mono", Menlo, monospace; font-size: 12.5px; color: #C7254E; }
+
+table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; font-size: 13px; }
+th { background: #FAFAFA; color: var(--text); text-align: left; padding: 6px 8px;
+     border-bottom: 2px solid var(--border); font-weight: 600; }
+td { padding: 6px 8px; border-bottom: 1px solid #EEE; vertical-align: top; }
+td.center, th.center { text-align: center; }
+td.mono, th.mono { font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
+
+.callout { background: #FFF8E1; border-left: 4px solid #F57F17; padding: 10px 12px;
+           border-radius: 4px; margin: 10px 0; font-size: 13px; }
+.callout.ok   { background: #E8F5E9; border-color: #2E7D32; }
+.callout.bad  { background: #FFEBEE; border-color: #C62828; }
+.callout.info { background: #E3F2FD; border-color: #1976D2; }
+
+.pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px;
+        font-weight: 600; margin-right: 4px; }
+.pill.core0 { background: var(--core0); color: var(--core0-line); }
+.pill.core1 { background: var(--core1); color: var(--core1-line); }
+.pill.ram   { background: #FFEBEE; color: #C62828; }
+.pill.psram { background: #F3E5F5; color: #6A1B9A; }
+.pill.ok    { background: #E8F5E9; color: #2E7D32; }
+.pill.warn  { background: #FFF3E0; color: #E65100; }
+.pill.bad   { background: #FFEBEE; color: #C62828; }
+
+.svgwrap { background: #FCFCFC; border: 1px dashed #DDD; border-radius: 6px;
+           padding: 10px; margin: 8px 0; overflow-x: auto; }
+.svgwrap svg { display: block; max-width: 100%; height: auto; }
+.svg-title { font-size: 13px; font-weight: 600; fill: var(--brand-deep); }
+.svg-axis  { font-size: 11px; fill: var(--text-2); }
+.node-text { font-size: 11.5px; fill: var(--text); text-anchor: middle; dominant-baseline: middle; }
+.node-text.sm { font-size: 10.5px; fill: var(--text-2); }
+
+ul.compact { padding-left: 18px; margin: 6px 0; }
+ul.compact li { margin: 2px 0; }
+
+.tag-4g { color: var(--core0-line); font-weight: 600; }
+.tag-wifi { color: var(--core1-line); font-weight: 600; }
+.todo { color: #999; font-size: 11px; }
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>MyDazy P30 · P30-4G Board 梳理</h1>
+  <div class="meta">v2.2.10 · 2026-05-11 · <code>main/boards/mydazy-p30-4g/mydazy_p30_4g_board.cc</code> · 1091 行</div>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>目录</h3>
+  <a href="#overview">1. 板身份与拓扑</a>
+  <a href="#gpio">2. GPIO 物理映射</a>
+  <a href="#ldo">3. 共享 LDO 关键拓扑</a>
+  <a href="#ctor">4. 构造函数 11 步时序</a>
+  <a href="#wakeup">5. HandleWakeupCause 4 分支</a>
+  <a href="#buttons">6. 按键事件 7 类</a>
+  <a href="#touch">7. 触摸 / 摇一摇</a>
+  <a href="#power">8. 电源 / 省电 / 深睡</a>
+  <a href="#restart">9. ShutdownHandler 重启钩子</a>
+  <a href="#switch">10. SwitchNetworkType</a>
+  <a href="#report">11. ReportStatus</a>
+  <a href="#nvs">12. NVS / RTC 字段</a>
+  <a href="#vmethods">13. virtual 重写覆盖面</a>
+  <a href="#diff">14. 与 WiFi / P31 板差异</a>
+  <a href="#smell">15. 量产前观察点</a>
+  <a href="#review">16. 三遍评审 · 风险推演</a>
+</nav>
+
+<main>
+
+<!-- ================== 1. 板身份与拓扑 ================== -->
+<section id="overview">
+<h2><span class="num">1</span> 板身份与拓扑</h2>
+
+<h3>身份</h3>
+<table>
+<tbody>
+<tr><td>类名</td><td><code>MyDazyP30_4GBoard</code></td></tr>
+<tr><td>继承</td><td><code>DualNetworkBoard</code>（同时持有 WiFi/ML307 两套栈，运行时切换）</td></tr>
+<tr><td>SKU</td><td>P30-4G（双网 + 加速计 + 触摸 + 电池 + 共享 LDO；<b>无</b> GNSS/NFC/iBeacon/耳机）</td></tr>
+<tr><td>SoC</td><td>ESP32-S3 · 16MB Flash · 8MB PSRAM</td></tr>
+<tr><td>音频</td><td>ES8311 DAC + ES7210 ADC（老版本硬件 · <code>BoxAudioCodec</code> 包装）</td></tr>
+<tr><td>显示</td><td>JD9853 圆角矩形 LCD · SPI2 · 284×240 · 横屏旋转（MIRROR_X + SWAP_XY）</td></tr>
+<tr><td>触摸</td><td>AXS5106L · 共享 I2C_NUM_1 · INT/RST 独立</td></tr>
+<tr><td>陀螺仪</td><td>SC7A20H 三轴加速度 · 共享 I2C_NUM_1 · INT1 走 RTC GPIO 唤醒</td></tr>
+<tr><td>4G 模块</td><td>ML307R · UART · <b>电源由共享 LDO（GPIO9）控制 · 无独立 PWR/RST 引脚</b></td></tr>
+<tr><td>电池</td><td>1000 mAh · ADC1_CH7（GPIO8）测压 · GPIO21 开漏检测充电状态</td></tr>
+</tbody>
+</table>
+
+<h3>类成员结构</h3>
+<table>
+<thead><tr><th>成员</th><th>类型</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>i2c_bus_</code> / <code>i2c_worker_</code></td><td>I2C handle / worker</td><td>v3.0+ 共享总线串行化（codec + touch + sc7a20h 三个 7 位地址）</td></tr>
+<tr><td><code>boot_button_</code></td><td>Button</td><td>BOOT 多功能：单/双/3/4/9 连击 + 长按 + PressUp</td></tr>
+<tr><td><code>volume_up_button_</code> / <code>volume_down_button_</code></td><td>Button</td><td>音量 ±10，clamp 到 [0,100]</td></tr>
+<tr><td><code>sc7a20h_sensor_</code></td><td>handle</td><td>摇一摇 + 拿起唤醒（EXT1）</td></tr>
+<tr><td><code>touch_driver_</code></td><td>handle</td><td>AXS5106L 司机；进 sleep 时置 null</td></tr>
+<tr><td><code>display_</code></td><td>Display*</td><td>编译期二选一：<code>EmoteDisplay</code> 或 <code>UiDisplay</code></td></tr>
+<tr><td><code>audio_codec_</code></td><td>BoxAudioCodec*</td><td>懒构造（构造函数末显式触发 <code>GetAudioCodec()</code>）</td></tr>
+<tr><td><code>power_manager_</code></td><td>PowerManager*</td><td>电量 + 充电状态 + 低电回调</td></tr>
+<tr><td><code>power_save_timer_</code></td><td>PowerSaveTimer*</td><td>(120, 60, 300) → 省电 / 防抖 / 关机</td></tr>
+<tr><td><code>first_boot_</code></td><td>bool</td><td>只有冷启动/拿起唤醒/USB/SW 重置才放欢迎音</td></tr>
+<tr><td><code>shutdown_armed_</code></td><td>atomic_bool</td><td>3 s 长按 → 800 ms 缓冲期间的关机意向</td></tr>
+<tr><td><code>boot_hold_grace_active_</code></td><td>atomic_bool</td><td>开机长按 grace（避免误触 3 s 关机）</td></tr>
+<tr><td><code>waiting_factory_reset_confirm_</code></td><td>atomic_bool</td><td>9 连击 → 10 s 内双击确认</td></tr>
+<tr><td><code>shutdown_delay_timer_</code></td><td>esp_timer</td><td>3 s 长按后 800 ms 缓冲定时器（lazy 创建 + 复用）</td></tr>
+</tbody>
+</table>
+
+<h3>RTC_DATA_ATTR 字段</h3>
+<table>
+<thead><tr><th>字段</th><th>语义</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td><code>s_last_sleep_us</code></td><td>上次进 deep sleep 的 RTC 时戳（µs）· 跨睡眠保留 · 死按防护</td><td>文件顶部 static</td></tr>
+</tbody>
+</table>
+<p class="sub"><code>kDeadHoldWindowUs = 500 ms</code> · 唤醒后 <code>NowRtcUs() - s_last_sleep_us &lt; 500 ms</code> 且 BOOT 仍按住 = 死按延续，立即短路再 sleep。</p>
+</section>
+
+<!-- ================== 2. GPIO 物理映射 ================== -->
+<section id="gpio">
+<h2><span class="num">2</span> GPIO 物理映射</h2>
+<p class="sub">来源：<code>main/boards/mydazy-p30-4g/config.h</code> · 按功能聚合。</p>
+
+<h3>2.1 电源 / 电池</h3>
+<table>
+<thead><tr><th>信号</th><th>GPIO</th><th>方向</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><b>AUDIO_PWR_EN</b></td><td>GPIO9</td><td>OUT</td><td><b>三合一 LDO 总开关</b> · 控 codec + ML307R + LCD · 跨 sleep 用 rtc_gpio_hold_en 锁定 LOW</td></tr>
+<tr><td>AUDIO_CODEC_PA</td><td>GPIO10</td><td>OUT</td><td>功放使能 · ShutdownHandler 先静音 20 ms 防 POP</td></tr>
+<tr><td>POWER_MANAGER</td><td>GPIO21</td><td>IN</td><td>充电状态 · 开漏 + 内部上拉 · LOW=充电中</td></tr>
+<tr><td>BATTERY_ADC</td><td>GPIO8</td><td>ADC1_CH7</td><td>电池电压一次采样</td></tr>
+</tbody>
+</table>
+
+<h3>2.2 音频 I2S / I2C</h3>
+<table>
+<thead><tr><th>信号</th><th>GPIO</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td>MCLK / BCLK / WS / DOUT / DIN</td><td>17 / 16 / 14 / 13 / 18</td><td>I2S0 双向 · DOUT→ES8311 · DIN←ES7210</td></tr>
+<tr><td>I2C SDA / SCL</td><td>GPIO11 / GPIO12</td><td>I2C_NUM_1 · 外部 10 kΩ 上拉 · 与触摸 + sc7a20h 共享</td></tr>
+<tr><td>I2C 毛刺过滤</td><td>—</td><td><b>glitch_ignore_cnt = 15（~187 ns）</b>· 应对 4G RF 干扰（默认 7 不够）</td></tr>
+</tbody>
+</table>
+
+<h3>2.3 显示 SPI</h3>
+<table>
+<thead><tr><th>信号</th><th>GPIO</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>SPI2 MOSI / SCLK / DC / CS</td><td>38 / 47 / 48 / 39</td><td>JD9853 单向 SPI · MISO=NC</td></tr>
+<tr><td>BACKLIGHT</td><td>GPIO41</td><td>PWM · 用户值 → 省电 15/100 → 深睡 0</td></tr>
+<tr><td>LCD_RESET</td><td><b>NC</b></td><td><b>无独立复位</b> · 硬复位走 GPIO9 LDO 断电</td></tr>
+<tr><td>LCD_TE</td><td>GPIO40</td><td>预留 · 未启用 VSYNC · 仅配为 input 防浮动</td></tr>
+</tbody>
+</table>
+
+<h3>2.4 触摸 / 加速度 / 按键 / 4G</h3>
+<table>
+<thead><tr><th>信号</th><th>GPIO</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>TOUCH_RST / TOUCH_INT</td><td>GPIO4 / GPIO5</td><td>AXS5106L · I2C 400 kHz</td></tr>
+<tr><td><b>SC7A20H_INT1</b></td><td><b>GPIO3</b></td><td>RTC GPIO · EXT1 拿起唤醒源 · 320 mg / 100 ms 阈值</td></tr>
+<tr><td>BOOT</td><td>GPIO0</td><td>EXT0 唤醒源 · 多功能键</td></tr>
+<tr><td>VOL+ / VOL−</td><td>GPIO42 / GPIO45</td><td>单击 ±10</td></tr>
+<tr><td>ML307_TX / RX</td><td>GPIO1 / GPIO2</td><td>UART · 注意：<code>ML307_TX_PIN=GPIO1</code> 实际是 ESP32→ML307 方向</td></tr>
+<tr><td>ML307_PWR / RST / DTR</td><td><b>全 NC</b></td><td>无独立控制 · 全靠 GPIO9 LDO 断电复位 + AT+CFUN=4 软关机</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 3. 共享 LDO 拓扑 ================== -->
+<section id="ldo">
+<h2><span class="num">3</span> 共享 LDO 关键拓扑（GPIO9）</h2>
+<p class="sub">P30-4G 硬件设计选择：<b>codec + ML307R + LCD 共用一个 AUD_VDD-3.3V LDO</b> · GPIO9 拉低 = 三者同时掉电 · 拉高 = 三者同时通电 · 这是整块板"硬复位"的唯一路径。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 260" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="lArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">AUDIO_PWR_EN (GPIO9) → 三合一 LDO 输出</text>
+
+  <rect x="340" y="40" width="200" height="50" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+  <text class="node-text" x="440" y="58" style="font-weight:600">ESP32-S3 · GPIO9</text>
+  <text class="node-text sm" x="440" y="78">RTC GPIO · 可 hold 穿越 sleep</text>
+
+  <rect x="320" y="115" width="240" height="38" rx="6" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="440" y="138" style="font-weight:600">AUD_VDD-3.3V · LDO 总开关</text>
+
+  <rect x="60" y="195" width="200" height="50" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="160" y="213" style="font-weight:600">ES8311 + ES7210</text>
+  <text class="node-text sm" x="160" y="232">音频编解码</text>
+
+  <rect x="340" y="195" width="200" height="50" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="440" y="213" style="font-weight:600">ML307R 4G</text>
+  <text class="node-text sm" x="440" y="232">PWR / RST 引脚 NC</text>
+
+  <rect x="620" y="195" width="200" height="50" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="720" y="213" style="font-weight:600">JD9853 LCD</text>
+  <text class="node-text sm" x="720" y="232">LCD_RESET 引脚 NC</text>
+
+  <path d="M440,90 L440,115" stroke="#666" marker-end="url(#lArr)"/>
+  <path d="M380,153 L160,195" stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#lArr)"/>
+  <path d="M440,153 L440,195" stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#lArr)"/>
+  <path d="M500,153 L720,195" stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#lArr)"/>
+</svg>
+</div>
+
+<h3>触发"硬复位"的路径</h3>
+<table>
+<thead><tr><th>场景</th><th>触发点</th><th>动作</th></tr></thead>
+<tbody>
+<tr><td>OTA 升级</td><td><code>esp_register_shutdown_handler(ShutdownHandler)</code></td><td>esp_restart 前 PA 静音 20 ms → GPIO9=0 → 500 ms 等 22µF 电容放电 → 重启后三者一并冷启</td></tr>
+<tr><td>恢复出厂 / 9 连击确认</td><td>同上（统一钩子）</td><td>同上</td></tr>
+<tr><td>网络切换 SwitchNetworkType</td><td>同上 + esp_restart()</td><td>同上 · 让 ML307R 也彻底重启避免 modem 状态残留</td></tr>
+<tr><td>深度睡眠 EnterDeepSleep</td><td><code>ShutdownTouchAndAudioForSleep</code></td><td>GPIO9=0 + <code>rtc_gpio_hold_en</code> · 穿越 sleep 维持 LOW</td></tr>
+<tr><td>开机</td><td><code>InitializeGpio</code></td><td>先 hold_dis 再 set_level(0) 锁 10 ms → set_level(1) → 200 ms 等 ES8311/ES7210 稳定</td></tr>
+</tbody>
+</table>
+
+<div class="callout bad">
+  <b>风险点</b>：GPIO9 拉低瞬间会"踢"4G PPP 链路 · 所以 <code>EnterDeepSleep</code> 必须先 <b>ResetProtocol（500 ms）</b> + <b>AT+CFUN=4（800 ms）</b> 才能断电 · 顺序错误会导致服务端 session 残留 + modem 假死。
+</div>
+</section>
+
+<!-- ================== 4. 构造函数 11 步 ================== -->
+<section id="ctor">
+<h2><span class="num">4</span> 构造函数 11 步时序</h2>
+<p class="sub">这是整块板的"冷启动主入口"· 顺序敏感 · 改动前先去 <code>p30-architecture.md § 一.5</code> 重审。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 540" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="cArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">MyDazyP30_4GBoard 构造函数</text>
+
+  <g font-size="12">
+    <rect x="160" y="40" width="560" height="32" rx="4" fill="#FFEBEE" stroke="#C62828"/>
+    <text x="180" y="60">0. 父类 DualNetworkBoard(ML307_TX=1, ML307_RX=2, DTR=NC, default=ML307)</text>
+
+    <rect x="160" y="78" width="560" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="180" y="98">1. esp_register_shutdown_handler(ShutdownHandler)  ← 任何 esp_restart 都走</text>
+
+    <rect x="160" y="116" width="560" height="32" rx="4" fill="#E3F2FD" stroke="#1976D2"/>
+    <text x="180" y="136">2. InitializeGpio：背光关 + PA 高 + GPIO9 hold_dis→0→delay 10ms→1→delay 200ms</text>
+
+    <rect x="160" y="154" width="560" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+    <text x="180" y="174">3. HandleWakeupCause：分支 EXT0 / EXT1 / TIMER / default · 决定 first_boot_</text>
+
+    <rect x="160" y="192" width="560" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="180" y="212">4. InitializeI2c：I2C_NUM_1 + glitch=15 + 创 i2c_worker_</text>
+
+    <rect x="160" y="230" width="560" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="180" y="250">5. PrepareTouchHardware：AXS5106L new（注册 wake_cb / gesture_cb）</text>
+
+    <rect x="160" y="268" width="560" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="180" y="288">6. InitializeSpi：SPI2 单向 · DMA disabled · max_xfer=144 KB</text>
+
+    <rect x="160" y="306" width="560" height="32" rx="4" fill="#E3F2FD" stroke="#1976D2"/>
+    <text x="180" y="326">7. InitializeDisplay：JD9853 panel + EmoteDisplay or UiDisplay（编译期）</text>
+
+    <rect x="160" y="344" width="560" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="180" y="364">8. InitializeTouch：attach_lvgl（失败置 null 但不阻断启动）</text>
+
+    <rect x="160" y="382" width="560" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="180" y="402">9. InitializeSc7a20h + StartShakeDetect（320 mg / 100 ms · 主线程 Schedule）</text>
+
+    <rect x="160" y="420" width="560" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+    <text x="180" y="440">10. InitializePowerManager + InitializePowerSaveTimer（120/60/300） + InitializeButtons</text>
+
+    <rect x="160" y="458" width="560" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="180" y="478">11. GetAudioCodec()（懒构造触发） → ApplyDefaultSettings → StartWelcomeTask</text>
+
+    <line x1="440" y1="72"  x2="440" y2="78"  stroke="#666" marker-end="url(#cArr)"/>
+    <line x1="440" y1="110" x2="440" y2="116" stroke="#666" marker-end="url(#cArr)"/>
+    <line x1="440" y1="148" x2="440" y2="154" stroke="#666" marker-end="url(#cArr)"/>
+    <line x1="440" y1="186" x2="440" y2="192" stroke="#666" marker-end="url(#cArr)"/>
+    <line x1="440" y1="224" x2="440" y2="230" stroke="#666" marker-end="url(#cArr)"/>
+    <line x1="440" y1="262" x2="440" y2="268" stroke="#666" marker-end="url(#cArr)"/>
+    <line x1="440" y1="300" x2="440" y2="306" stroke="#666" marker-end="url(#cArr)"/>
+    <line x1="440" y1="338" x2="440" y2="344" stroke="#666" marker-end="url(#cArr)"/>
+    <line x1="440" y1="376" x2="440" y2="382" stroke="#666" marker-end="url(#cArr)"/>
+    <line x1="440" y1="414" x2="440" y2="420" stroke="#666" marker-end="url(#cArr)"/>
+    <line x1="440" y1="452" x2="440" y2="458" stroke="#666" marker-end="url(#cArr)"/>
+  </g>
+</svg>
+</div>
+
+<h3>关键顺序约束</h3>
+<ul class="compact">
+  <li><b>InitializeGpio 必须在 HandleWakeupCause 前</b>：HandleWakeupCause 内部要读 BOOT 电平（死按防护），背光 / LDO 也要在此完成软启动。</li>
+  <li><b>PrepareTouchHardware 必须在 InitializeSpi 后吗？不是</b>：触摸走 I2C，但 <b>attach_lvgl 必须在 Display 已创建后</b> · 所以触摸驱动 new 在第 5 步，attach 在第 8 步，分两步是刻意的。</li>
+  <li><b>PowerSaveTimer 在 InitializeButtons 前</b>：按键 lambda 内会调 <code>WakeUp() → power_save_timer_-&gt;WakeUp()</code>，反过来会 null deref。</li>
+  <li><b>GetAudioCodec() 显式触发懒构造</b>：紧接着 ApplyDefaultSettings 要写 audio/output_volume，codec 必须已存在；不在构造函数末尾静默放弃会留隐式依赖。</li>
+  <li><b>StartWelcomeTask 必须最后</b>：依赖 audio_codec_ + display_ + LVGL 首帧都就绪。</li>
+</ul>
+</section>
+
+<!-- ================== 5. HandleWakeupCause ================== -->
+<section id="wakeup">
+<h2><span class="num">5</span> HandleWakeupCause · 4 分支</h2>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 360" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="wArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">HandleWakeupCause 决策树</text>
+
+  <ellipse cx="440" cy="55" rx="120" ry="20" fill="#FAFAFA" stroke="#666"/>
+  <text class="node-text" x="440" y="60" style="font-weight:600">esp_sleep_get_wakeup_cause</text>
+
+  <rect x="20" y="110" width="180" height="80" rx="6" fill="#fff" stroke="#1976D2"/>
+  <text class="node-text" x="110" y="128" style="font-weight:600;font-size:11px">EXT0 · BOOT 键</text>
+  <text class="node-text sm" x="110" y="146">① 检查 RTC 时戳</text>
+  <text class="node-text sm" x="110" y="162">②&lt;500ms+GPIO0=0 → 短路再 sleep</text>
+  <text class="node-text sm" x="110" y="178">③ CheckBootHoldOnWakeup(1.5s)</text>
+
+  <rect x="220" y="110" width="180" height="80" rx="6" fill="#fff" stroke="#5E35B1"/>
+  <text class="node-text" x="310" y="128" style="font-weight:600;font-size:11px">EXT1 · SC7A20H</text>
+  <text class="node-text sm" x="310" y="146">拿起 / 摇动唤醒</text>
+  <text class="node-text sm" x="310" y="162">first_boot_ = true</text>
+  <text class="node-text sm" x="310" y="178">直接走 Init（无校验）</text>
+
+  <rect x="420" y="110" width="180" height="80" rx="6" fill="#fff" stroke="#FB8C00"/>
+  <text class="node-text" x="510" y="128" style="font-weight:600;font-size:11px">TIMER · 闹钟</text>
+  <text class="node-text sm" x="510" y="146">AlarmManager::MarkTimerWakeup</text>
+  <text class="node-text sm" x="510" y="162">允许未校时 RTC fallback</text>
+  <text class="node-text sm" x="510" y="178">first_boot_ = true</text>
+
+  <rect x="620" y="110" width="200" height="80" rx="6" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="720" y="128" style="font-weight:600;font-size:11px">default · 复位</text>
+  <text class="node-text sm" x="720" y="146">first_boot_ = (POWERON</text>
+  <text class="node-text sm" x="720" y="162">|| USB || SW)</text>
+  <text class="node-text sm" x="720" y="178" style="fill:#D32F2F">panic / wdt / brownout 不放欢迎音</text>
+
+  <rect x="240" y="240" width="400" height="44" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+  <text class="node-text" x="440" y="258" style="font-weight:600">死按防护（仅 EXT0）</text>
+  <text class="node-text sm" x="440" y="276">RTC 字段 s_last_sleep_us + kDeadHoldWindowUs(500ms)</text>
+
+  <rect x="240" y="298" width="400" height="44" rx="6" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+  <text class="node-text" x="440" y="316" style="font-weight:600">回到构造函数继续 Init</text>
+  <text class="node-text sm" x="440" y="334">（CheckBootHoldOnWakeup 不通过则 EnterDeepSleep 不返回）</text>
+
+  <path d="M440,75 L110,110"  stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#wArr)"/>
+  <path d="M440,75 L310,110"  stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#wArr)"/>
+  <path d="M440,75 L510,110"  stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#wArr)"/>
+  <path d="M440,75 L720,110"  stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#wArr)"/>
+  <path d="M110,190 L420,240" stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#wArr)"/>
+  <path d="M310,190 L460,298" stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#wArr)"/>
+  <path d="M510,190 L460,298" stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#wArr)"/>
+  <path d="M720,190 L460,298" stroke="#666" stroke-dasharray="3 2" fill="none" marker-end="url(#wArr)"/>
+  <path d="M440,284 L440,298" stroke="#666" marker-end="url(#wArr)"/>
+</svg>
+</div>
+
+<h3>各分支详解</h3>
+<table>
+<thead><tr><th>分支</th><th>first_boot_</th><th>核心逻辑</th><th>体感</th></tr></thead>
+<tbody>
+<tr><td><b>EXT0</b> (BOOT)</td><td>true（通过 1.5 s）</td><td>① RTC 时戳 + GPIO0 LOW &lt; 500 ms → 短路 sleep · ② <code>CheckBootHoldOnWakeup(1500 ms)</code> 50 ms 步进轮询 · ③ 中途松开 → <code>EnterDeepSleep(true)</code>，不返回</td><td>主动按 1.5 s 才开机 · 死按多久都安全</td></tr>
+<tr><td><b>EXT1</b> (SC7A20H)</td><td>true</td><td><code>esp_sleep_get_ext1_wakeup_status()</code> 仅打日志，不做校验 → 直接走 Init</td><td>拿起设备 → 立即用 · NVS <code>pickupWake</code> 控开关</td></tr>
+<tr><td><b>TIMER</b></td><td>true</td><td><code>AlarmManager::MarkTimerWakeup()</code> → 让闹钟模块知道当前是定时唤醒，可以用未校时 RTC fallback 触发</td><td>闹钟到点 · 与 EXT0/EXT1 并存（深睡时三源 arm）</td></tr>
+<tr><td>default</td><td>仅 POWERON / USB / SW 为 true</td><td>panic / wdt / brownout / TASK_WDT 等异常重启不放欢迎音，避免"崩溃后假装一切正常"</td><td>插 USB 自动开机 · OTA 重启静默回 Idle · 异常重启无声</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+  <b>死按防护设计意图</b>：用户深睡时握着设备不放 → BOOT 始终 LOW → EXT0 立即触发开机 → CheckBootHoldOnWakeup 等不到松手 1.5 s 又回深睡 → 唤醒/睡眠死循环。
+  500 ms 短路 sleep 让这个循环以 sleep 状态稳定下来（&lt; 1 mA），用户松手再按才真开机。
+</div>
+</section>
+
+<!-- ================== 6. 按键事件 7 类 ================== -->
+<section id="buttons">
+<h2><span class="num">6</span> 按键事件 7 类（InitializeButtons）</h2>
+<p class="sub"><code>boot_button_(BOOT_BUTTON_GPIO, false, 800, 400)</code> · 长按阈值 800 ms · 连击窗口 400 ms · 但 OnLongPress 单独传 3000 ms 覆盖。</p>
+
+<h3>6.1 BOOT 按键完整矩阵</h3>
+<table>
+<thead><tr><th>事件</th><th>触发</th><th>动作</th><th>状态条件</th></tr></thead>
+<tbody>
+<tr><td>OnClick</td><td>单击</td><td>① <code>waiting_factory_reset_confirm_</code> 清零 · ② MP3 中 → <code>StopMp3AndExitPlayerUi</code> · ③ Idle→OGG_WAKEUP+delay 1500 ms+ToggleChat · ④ Listening→OGG_EXITCHAT+ToggleChat · ⑤ Speaking→ToggleChat</td><td>仅 Idle/Listening/Speaking 才 ToggleChat</td></tr>
+<tr><td>OnDoubleClick</td><td>双击</td><td>① 出厂确认窗口 + 10 s 内 → 真执行恢复 · ② <code>kDeviceStateWifiConfiguring</code> → <code>SwitchConfigMode</code>（BLUFI↔AP，<b>独立任务 4 KB Core 1</b>）· ③ AEC toggle（<code>kAecOff ↔ kAecOnDeviceSide</code>，需 <code>CONFIG_USE_DEVICE_AEC</code>）</td><td>三场景互斥</td></tr>
+<tr><td>OnMultipleClick(3)</td><td>3 连击</td><td><code>PauseAudioAndChatBeforeSwitch</code> → 三态轮转：配网→4G→WiFi→配网；提示音 OGG_NETWORK_4G / WIFI / WIFI_CONFIG · 1500 ms 后真切</td><td>任何态</td></tr>
+<tr><td>OnMultipleClick(4)</td><td>4 连击</td><td><code>ShutdownOrSleep("再见", "", OGG_SHUTDOWN, 2500 ms, false)</code> · gyro 唤醒禁用</td><td>任何态</td></tr>
+<tr><td>OnMultipleClick(9)</td><td>9 连击</td><td>AbortIfSpeaking + 置 <code>waiting_factory_reset_confirm_=true</code> + 记 <code>factory_reset_request_time_</code> + Alert "10 秒内双击确认" + OGG_FACTORY_RESET</td><td>任何态</td></tr>
+<tr><td>OnLongPress(3000)</td><td>长按 3 s</td><td>grace 期忽略 → 否则 <code>shutdown_armed_=true</code> + Alert "关机中" + OGG_REBOOT + <b>启 800 ms esp_timer</b> · timer 到 → Schedule 派发 <code>ShutdownOrSleep("再见", "", "", 1500ms, false)</code></td><td>任何态</td></tr>
+<tr><td>OnPressUp</td><td>松开</td><td>① grace 清 · ② <code>shutdown_armed_</code> 在 → 取消 timer + 取消关机（"松开撤销")</td><td>—</td></tr>
+</tbody>
+</table>
+
+<h3>6.2 grace 开机长按补丁</h3>
+<p class="sub"><code>boot_hold_grace_active_</code> 状态机：</p>
+<ul class="compact">
+  <li><b>入口</b>（InitializeButtons 顶部）：<code>first_boot_ && BOOT==LOW</code> → 主动 busy wait 最多 5 s 等用户松手 · 至少 store(true) 标志已置 · 用户在此期间不会触发 3 s 关机。</li>
+  <li><b>出口</b>：首次 <code>OnPressUp</code> 触发时 <code>exchange(false)</code> · 再按再松不影响。</li>
+  <li><b>原因</b>：开机长按 1.5 s 后 InitializeButtons 才注册回调 · 用户可能仍未松手 · 不补丁会立即被 OnLongPress(3000) 当作关机意向（差 1.5 s 而已）。</li>
+</ul>
+
+<h3>6.3 长按 3 s + 800 ms 缓冲设计</h3>
+<table>
+<thead><tr><th>时间点</th><th>动作</th><th>取消机制</th></tr></thead>
+<tbody>
+<tr><td>0 ~ 3000 ms</td><td>无响应</td><td>松开 = 无事发生</td></tr>
+<tr><td><b>3000 ms</b></td><td>Alert + OGG_REBOOT + <code>esp_timer_start_once(800 ms)</code></td><td>松开 → OnPressUp 清 shutdown_armed_ + stop timer</td></tr>
+<tr><td>3000 ~ 3800 ms</td><td>等 timer 触发</td><td>同上</td></tr>
+<tr><td><b>3800 ms</b></td><td>timer 回调 → <code>Application::Schedule</code> 派发 ShutdownOrSleep · 1500 ms 后真关</td><td>无法取消</td></tr>
+</tbody>
+</table>
+
+<div class="callout info">
+  <b>为何 timer 不直接关机</b>：<code>ESP_TIMER_TASK</code> 高优先级共享任务 · ShutdownOrSleep 内部含 1.5 s vTaskDelay + AbortSpeaking · 阻塞 timer 任务会卡住整个 esp_timer 调度。所以 timer 回调只做 <code>Schedule</code> 派发 → main_app 任务执行真关机。
+</div>
+
+<h3>6.4 音量按键</h3>
+<table>
+<thead><tr><th>事件</th><th>动作</th></tr></thead>
+<tbody>
+<tr><td>VOL+ OnClick</td><td><code>ApplyVolume(+10)</code> → clamp [0,100] → SetOutputVolume → 状态栏 1500 ms 通知 → WakeUp（重置省电定时器）</td></tr>
+<tr><td>VOL− OnClick</td><td><code>ApplyVolume(-10)</code> · 同上</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 7. 触摸 / 摇一摇 ================== -->
+<section id="touch">
+<h2><span class="num">7</span> 触摸 / 摇一摇</h2>
+
+<h3>7.1 触摸交互（OnTouchGesture）</h3>
+<p class="sub">所有触摸事件先调 <code>WakeUp()</code> 重置省电定时器 · 仅处理 SingleClick / DoubleClick · 状态栏区（y &lt; 36）交还 LVGL · LongPress / Swipe 显式忽略。</p>
+<table>
+<thead><tr><th>事件</th><th>状态</th><th>动作</th></tr></thead>
+<tbody>
+<tr><td>SingleClick</td><td>MusicPlayer 播放中</td><td>忽略（LVGL 按钮独占 Pause/Resume，防双触发抵消）</td></tr>
+<tr><td>SingleClick</td><td>Idle</td><td>OGG_WAKEUP + delay 800 ms + ToggleChat</td></tr>
+<tr><td>SingleClick</td><td>Speaking</td><td>AbortSpeaking</td></tr>
+<tr><td>DoubleClick</td><td>MusicPlayer 播放中</td><td>忽略</td></tr>
+<tr><td>DoubleClick</td><td>Listening / Speaking</td><td>AbortAnyConversation → 切 Idle → OGG_EXITCHAT（"孩子最熟悉的退出心智"）</td></tr>
+<tr><td>DoubleClick</td><td>其他</td><td>忽略（避免误触）</td></tr>
+</tbody>
+</table>
+
+<h3>7.2 摇一摇（SC7A20H OnShake）</h3>
+<table>
+<tbody>
+<tr><td>触发</td><td><code>sc7a20h_start_shake_detect</code> 内部算法 · 阈值 320 mg · 防抖 100 ms</td></tr>
+<tr><td>调度</td><td>驱动 ISR → <code>Application::Schedule</code> 派发到主线程</td></tr>
+<tr><td>状态条件</td><td>仅 <code>kDeviceStateIdle</code> 或 <code>kDeviceStateListening</code> 才响应</td></tr>
+<tr><td>动作</td><td>OGG_POPUP + <code>SendTextToAI("摇一摇随机互动")</code> · <b>Listening 不调 StopListening</b> 避免 UI 抖回时钟</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 8. 电源 / 省电 / 深睡 ================== -->
+<section id="power">
+<h2><span class="num">8</span> 电源 / 省电 / 深睡</h2>
+
+<h3>8.1 PowerManager 三回调链</h3>
+<table>
+<thead><tr><th>角色</th><th>动作</th></tr></thead>
+<tbody>
+<tr><td>构造</td><td><code>new PowerManager(POWER_MANAGER_GPIO=21)</code> · delay 200 ms 等 ADC 稳定 → 打印电量 + 充电状态</td></tr>
+<tr><td>OnLowBatteryStatusChanged</td><td>Alert "电量不足/请充电" + OGG_CHARGE（提示但不强制关机）</td></tr>
+<tr><td>构造期检测</td><td>若 <code>IsOffBatteryLevel() && level>0 && !charging</code> → 立即 <code>ShutdownOrSleep("电量过低", "强制关机", OGG_LOW_BATTERY, 3000 ms, false)</code></td></tr>
+</tbody>
+</table>
+
+<h3>8.2 PowerSaveTimer(120, 60, 300) 三回调</h3>
+<table>
+<thead><tr><th>回调</th><th>触发</th><th>动作</th></tr></thead>
+<tbody>
+<tr><td>OnEnterSleepMode</td><td>Idle 120 s</td><td>背光 → 15/100 · <b>ReportStatus()</b>（替代周期轮询）</td></tr>
+<tr><td>OnExitSleepMode</td><td>任意 WakeUp 事件</td><td>背光 → RestoreBrightness</td></tr>
+<tr><td>OnShutdownRequest</td><td>Idle 300 s（仅 NVS deepSleep=1）</td><td>ShutdownOrSleep("休眠中", "拿起唤醒", "", 1500 ms, <b>true</b>)</td></tr>
+</tbody>
+</table>
+
+<h3>8.3 EnterDeepSleep 10 步</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 480" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="sArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">EnterDeepSleep · 10 步（4G 板）</text>
+
+  <g font-size="12">
+    <rect x="180" y="40"  width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="60">1. AudioService::Stop() + delay 100ms（释放 codec / 退 audio_* 任务）</text>
+    <rect x="180" y="78"  width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="98">2. PowerSaveTimer::SetEnabled(false) + DISPLAY_BACKLIGHT=0</text>
+    <rect x="180" y="116" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="136">3. ResetProtocol + delay 500ms（异步 close + 析构 MQTT/WS）</text>
+    <rect x="180" y="154" width="520" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+    <text x="200" y="174" fill="#F57F17">4. GracefulShutdownModem · AT+CFUN=4 + 800ms（仅 ML307 网络在用时）</text>
+    <rect x="180" y="192" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="212">5. if (gyro_wakeup && NVS pickupWake) → sc7a20h_arm_wakeup(INT1)</text>
+    <rect x="180" y="230" width="520" height="32" rx="4" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+    <text x="200" y="250" fill="#C62828">6. ShutdownTouchAndAudioForSleep · GPIO9 LOW + rtc_gpio_hold_en</text>
+    <rect x="180" y="268" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="288">7. ConfigureDeepSleepWakeupSources（EXT0 + delay 200ms + 可选 EXT1）</text>
+    <rect x="180" y="306" width="520" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+    <text x="200" y="326" fill="#F57F17">8. if (WiFi 网络) → WifiStation::Stop（4G 模式跳过）</text>
+    <rect x="180" y="344" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="364">9. ResetAllGpiosForSleep（15 个 GPIO 重置为 input 无上下拉）</text>
+    <rect x="180" y="382" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+    <text x="200" y="402">10. AlarmManager::FlushNvs + ConfigureTimerWakeup（闹钟 RTC TIMER 唤醒源）</text>
+    <rect x="180" y="420" width="520" height="32" rx="4" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+    <text x="200" y="440" fill="#C62828" font-weight="600">11. s_last_sleep_us = NowRtcUs() + esp_deep_sleep_start ⚫</text>
+
+    <line x1="440" y1="72"  x2="440" y2="78"  stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="110" x2="440" y2="116" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="148" x2="440" y2="154" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="186" x2="440" y2="192" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="224" x2="440" y2="230" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="262" x2="440" y2="268" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="300" x2="440" y2="306" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="338" x2="440" y2="344" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="376" x2="440" y2="382" stroke="#666" marker-end="url(#sArr)"/>
+    <line x1="440" y1="414" x2="440" y2="420" stroke="#666" marker-end="url(#sArr)"/>
+  </g>
+</svg>
+</div>
+
+<h3>8.4 ResetAllGpiosForSleep 重置清单（15 个）</h3>
+<p class="sub">所有 I2S / 部分 SPI / I2C / 触摸 / 背光 / PA · 重置为 INPUT + 无上下拉，避免 GPIO 漂浮拉高功耗。</p>
+<table class="mono">
+<tr><td>I2S</td><td>MCLK(17) BCLK(16) WS(14) DIN(18) DOUT(13)</td></tr>
+<tr><td>I2C</td><td>SDA(11) SCL(12)</td></tr>
+<tr><td>音频/显示</td><td>PA(10) MOSI(38) SCLK(47) DC(48) CS(39) BACKLIGHT(41)</td></tr>
+<tr><td>触摸</td><td>RST(4) INT(5)</td></tr>
+</table>
+<div class="callout">
+  <b>注意未在重置清单</b>：GPIO9 (AUDIO_PWR_EN, 已被 hold_en 锁低) · GPIO0 (BOOT, 已配 EXT0) · GPIO3 (SC7A20H_INT1, 已配 EXT1) · GPIO21/8 (电池/充电检测) · GPIO40 (LCD_TE 预留) · UART 1/2（ML307 在 CFUN=4 之后断电仍未清，依赖 LDO 断电）。
+</div>
+</section>
+
+<!-- ================== 9. ShutdownHandler ================== -->
+<section id="restart">
+<h2><span class="num">9</span> ShutdownHandler · esp_restart 钩子</h2>
+<p class="sub">通过 <code>esp_register_shutdown_handler</code> 在构造函数开头注册 · ESP-IDF 框架在所有 <code>esp_restart()</code> 调用前自动执行 · 不再为每个重启路径手动写"关 LDO"代码。</p>
+
+<h3>三步流程</h3>
+<table>
+<thead><tr><th>步</th><th>动作</th><th>耗时</th><th>目的</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>gpio_set_level(AUDIO_CODEC_PA_PIN, 0)</code></td><td>—</td><td>静音功放 · 避免下一步断 LDO 时音圈瞬态电压释放产生 POP 异响</td></tr>
+<tr><td>2</td><td><code>esp_rom_delay_us(20*1000)</code></td><td>20 ms</td><td>等功放进入静音状态（shutdown 上下文用 ROM delay 比 vTaskDelay 更稳）</td></tr>
+<tr><td>3</td><td><code>gpio_set_level(AUDIO_PWR_EN_GPIO, 0)</code> + <code>rtc_gpio_hold_en</code></td><td>—</td><td>断 LDO 总开关 · hold 让 LOW 穿越 <code>esp_restart()</code> 维持</td></tr>
+<tr><td>4</td><td><code>esp_rom_delay_us(500*1000)</code></td><td>500 ms</td><td>等 22 µF 电容彻底放电 · 让 codec / 4G / LCD 真正断电复位</td></tr>
+</tbody>
+</table>
+
+<h3>覆盖的重启路径</h3>
+<ul class="compact">
+  <li>OTA 升级（<code>Ota::Reboot</code>）</li>
+  <li>恢复出厂（<code>SystemReset::CheckButtons(true)</code> + 3 s 倒计时 → esp_restart）</li>
+  <li>网络切换（<code>SwitchNetworkType</code> 末尾）</li>
+  <li>panic / wdt / brownout（IDF 框架自动重启路径）</li>
+</ul>
+
+<div class="callout ok">
+  <b>统一设计的价值</b>：任何 esp_restart 都会让 ML307R 跟着冷启 · 不会出现"软重启 ESP 但 modem 卡在旧 PPP 状态"的诡异故障。
+</div>
+</section>
+
+<!-- ================== 10. SwitchNetworkType ================== -->
+<section id="switch">
+<h2><span class="num">10</span> SwitchNetworkType（3 连击触发）</h2>
+<p class="sub">基类 <code>SaveNetworkTypeToSettings</code> 是 private，所以这里复刻一份写 NVS 的逻辑 · 路径不复用基类是有意的，量产纪律避免改父类。</p>
+
+<table>
+<thead><tr><th>步骤</th><th>动作</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>NVS <code>network.type</code> 翻转（0=WiFi / 1=ML307）</td><td>下次开机由 DualNetworkBoard 读取选默认</td></tr>
+<tr><td>2</td><td>ShowNotification "切换到 4G / WiFi"</td><td>用户态提示</td></tr>
+<tr><td>3</td><td>delay 1000 ms</td><td>等 UI 刷出来</td></tr>
+<tr><td>4</td><td><code>Application::ResetProtocol</code> + delay 500 ms</td><td>与 EnterDeepSleep 对称，优雅断 MQTT/WS</td></tr>
+<tr><td>5</td><td><code>AudioService::Stop</code></td><td>停录音/播放任务，避免 esp_restart 时 codec 还在跑</td></tr>
+<tr><td>6</td><td><code>esp_restart()</code></td><td>触发 ShutdownHandler 自动断 LDO 复位 LCD/codec/ML307</td></tr>
+</tbody>
+</table>
+
+<h3>3 连击调用前的统一暂停</h3>
+<p class="sub"><code>PauseAudioAndChatBeforeSwitch</code>：停 MP3 + 退 PlayerUI + AbortSpeaking/Listening · 避免切网瞬间音频任务仍在跑导致资源残留 / 异响。</p>
+</section>
+
+<!-- ================== 11. ReportStatus ================== -->
+<section id="report">
+<h2><span class="num">11</span> ReportStatus · 状态上报</h2>
+<p class="sub">触发点：<b>仅</b>在 PowerSaveTimer::OnEnterSleepMode 调一次（Idle 120 s）· 替代周期轮询。</p>
+
+<h3>护栏</h3>
+<table>
+<thead><tr><th>条件</th><th>跳过原因</th></tr></thead>
+<tbody>
+<tr><td>DeviceState ≠ Idle</td><td>对话期让位给音频上传 + TTS · 避 HTTPS/TLS 抢资源</td></tr>
+<tr><td>MusicPlayer 播放中</td><td>OSS Range 续传 + /status POST 同时进 4G PPP 会导致 SSL -76 重试用尽</td></tr>
+</tbody>
+</table>
+
+<h3>上报字段</h3>
+<table>
+<thead><tr><th>字段</th><th>来源</th></tr></thead>
+<tbody>
+<tr><td>battery_level / charging</td><td>PowerManager</td></tr>
+<tr><td>volume</td><td>AudioCodec::output_volume()</td></tr>
+<tr><td>brightness</td><td>Backlight::brightness()</td></tr>
+<tr><td>theme</td><td>Display::GetTheme()->name()</td></tr>
+<tr><td>network.type = "cellular"</td><td>固定（4G 板 ReportStatus 不区分实际跑 WiFi/ML307）</td></tr>
+<tr><td>network.csq / carrier</td><td>仅当 GetNetworkType() == ML307 才填，否则缺省</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+  <b>注意潜在差异</b>：用户当前跑 WiFi 时 <code>network.type</code> 仍上报 "cellular"（4G 板写死），服务端如果靠这个字段做联通/移动统计可能跑偏。WiFi 板对应字段填 "rssi"，与此处不一致。
+</div>
+</section>
+
+<!-- ================== 12. NVS / RTC 字段 ================== -->
+<section id="nvs">
+<h2><span class="num">12</span> NVS / RTC 字段汇总</h2>
+
+<h3>NVS 字段</h3>
+<table>
+<thead><tr><th>命名空间</th><th>字段</th><th>默认</th><th>读取点</th><th>语义</th></tr></thead>
+<tbody>
+<tr><td><code>status</code></td><td>deepSleep</td><td>1</td><td>InitializePowerSaveTimer / EnableAutoSleep / IsAutoSleepEnabled</td><td>是否启用自动深睡 · Control Center 开关</td></tr>
+<tr><td><code>status</code></td><td>pickupWake</td><td>1</td><td>EnterDeepSleep / ConfigureDeepSleepWakeupSources</td><td>是否启用 SC7A20H EXT1 拿起唤醒</td></tr>
+<tr><td><code>wifi</code></td><td>blufi</td><td>1（在 ApplyDefaultSettings 强写）</td><td>WifiBoard 内部</td><td>配网默认 BluFi（vs AP）</td></tr>
+<tr><td><code>network</code></td><td>type</td><td>1（构造函数透传给 DualNetworkBoard）</td><td>父类 + SwitchNetworkType</td><td>0=WiFi / 1=ML307</td></tr>
+<tr><td><code>audio</code></td><td>output_volume</td><td>80（&lt;50 自动校正）</td><td>ApplyDefaultSettings</td><td>音量过低保护</td></tr>
+</tbody>
+</table>
+
+<h3>RTC_DATA_ATTR 字段</h3>
+<table>
+<thead><tr><th>字段</th><th>类型</th><th>语义</th></tr></thead>
+<tbody>
+<tr><td><code>s_last_sleep_us</code></td><td>uint64_t</td><td>上次 esp_deep_sleep_start 调用前的 RTC 时戳；EXT0 唤醒后比对 &lt; 500 ms + GPIO 仍 LOW = 死按延续，立即短路再 sleep</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 13. virtual 重写 ================== -->
+<section id="vmethods">
+<h2><span class="num">13</span> virtual 重写覆盖面</h2>
+<table>
+<thead><tr><th>方法</th><th>实现要点</th></tr></thead>
+<tbody>
+<tr><td><code>GetAudioCodec()</code></td><td>懒构造 BoxAudioCodec（i2c_worker + I2S + ES8311/ES7210 双地址 + 参考通道）</td></tr>
+<tr><td><code>SetPowerSaveLevel(PERFORMANCE)</code></td><td>额外 WakeUp 一次 PowerSaveTimer 后转父类</td></tr>
+<tr><td><code>GetBatteryLevel(level, charging, discharging)</code></td><td>null 时返回 false + 全置 0；否则三个字段都填</td></tr>
+<tr><td><code>GetDisplay()</code></td><td>返回成员 display_（编译期 Emote / UiDisplay）</td></tr>
+<tr><td><code>GetBacklight()</code></td><td>函数内 static <code>PwmBacklight</code>（DISPLAY_BACKLIGHT + 不反转）· 首次调用懒构造</td></tr>
+<tr><td><code>EnableAutoSleep(bool)</code></td><td>写 NVS status.deepSleep + 同步 PowerSaveTimer::SetEnabled（Control Center 调用）</td></tr>
+<tr><td><code>IsAutoSleepEnabled()</code></td><td>读 NVS status.deepSleep 默认 1</td></tr>
+</tbody>
+</table>
+
+<h3>非 virtual 但对外</h3>
+<table>
+<thead><tr><th>方法</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>WakeUp()</code></td><td>触摸 / 按键 / 音量调整调用 → 重置 PowerSaveTimer</td></tr>
+<tr><td><code>SwitchNetworkType()</code></td><td>3 连击切网</td></tr>
+<tr><td>static <code>ShutdownHandler()</code></td><td>esp_restart 钩子</td></tr>
+<tr><td>static <code>RequestServerUnbind()</code></td><td>9 连击恢复出厂 → 解绑服务端（仅 mydazy CONFIG_OTA_URL 才发 GET <code>/reset</code> · 5 s 超时 · 失败不阻塞本地擦除）</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 14. 与 WiFi/P31 板差异 ================== -->
+<section id="diff">
+<h2><span class="num">14</span> 与 WiFi / P31 板差异</h2>
+<p class="sub">三板（4G / WiFi / P31）共享大部分逻辑，差异集中在网络栈、外设、ReportStatus 字段。</p>
+
+<table>
+<thead><tr><th>维度</th><th>P30-4G（本文件）</th><th>P30-WiFi</th><th>P31</th></tr></thead>
+<tbody>
+<tr><td>基类</td><td>DualNetworkBoard</td><td>WifiBoard</td><td>DualNetworkBoard</td></tr>
+<tr><td>3 连击逻辑</td><td>三态轮转：配网→4G→WiFi</td><td>二态：配网↔在线</td><td>三态（同 4G）</td></tr>
+<tr><td>EnterDeepSleep 第 4 步</td><td>GracefulShutdownModem · AT+CFUN=4 + 800 ms</td><td>跳过</td><td>同 4G</td></tr>
+<tr><td>EnterDeepSleep 第 8 步</td><td>仅 WiFi 模式时 WifiStation::Stop</td><td>WifiStation::Stop</td><td>同 4G</td></tr>
+<tr><td>ReportStatus.network</td><td>固定 "cellular" + csq + carrier</td><td>"wifi" + rssi</td><td>"cellular" + 含定位字段</td></tr>
+<tr><td>I2C glitch_ignore_cnt</td><td>15（4G RF 干扰防护）</td><td>默认 7</td><td>15</td></tr>
+<tr><td>共享 LDO（GPIO9）</td><td>codec + ML307 + LCD 三合一</td><td>codec + LCD 两合一</td><td>codec + ML307 + LCD 三合一</td></tr>
+<tr><td>额外外设</td><td>—</td><td>—</td><td>NFC + iBeacon + GNSS + 耳机检测</td></tr>
+<tr><td>InitializeButtons grace</td><td>✅</td><td>✅（与 4G 对齐）</td><td>同 4G</td></tr>
+<tr><td>RequestServerUnbind</td><td>✅</td><td>需确认是否同步</td><td>需确认</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 15. 量产前观察点 ================== -->
+<section id="smell">
+<h2><span class="num">15</span> 量产前观察点（review 候选）</h2>
+<p class="sub">这一节是"读完文件后顺手记下的疑问"· 不是 bug · 给后续 PR review 看的。</p>
+
+<table>
+<thead><tr><th>位置</th><th>观察</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td>OnClick · Idle 分支</td><td>OGG_WAKEUP 后阻塞 <b>1500 ms</b> 才 ToggleChatState（HandleTouchSingleClick 是 800 ms）</td><td>统一为 800 ms 或文档化为何 BOOT 慢 700 ms（与 OTA 1.5 s 阻塞类似的 P1 修复清单候选）</td></tr>
+<tr><td>OnLongPress 长按 3 s</td><td>构造时 <code>long_press_time=800</code>，OnLongPress 单独传 3000 ms · Button 类用 <code>long_press_callbacks_[ms]</code> map 注册，可同时挂多个时长 → 当前只挂 3000 一个，800 默认值未使用</td><td>无 bug · 但易误读 · 可把构造参第 3 参改 0（默认）显式表达意图</td></tr>
+<tr><td>HandleTouchSingleClick</td><td>Listening 状态无分支（BOOT 单击有 OGG_EXITCHAT + ToggleChat 退出对话）</td><td>触摸语义与 BOOT 不对称 · 是否需要补齐</td></tr>
+<tr><td>ReportStatus</td><td>network.type 写死 "cellular"，即使当前跑 WiFi</td><td>跟随 GetNetworkType() 动态填字段</td></tr>
+<tr><td>OnDoubleClick · 配网态切换</td><td>裸 <code>xTaskCreatePinnedToCore(.., "config_switch", 4096, .., Core 1)</code> · 同样的还有 <code>WelcomeTaskEntry</code> 走 <code>xTaskCreatePinnedToCore</code>（"welcome_init", 3072, Core 1, P3）</td><td>不违 grep <code>xTaskCreate\b</code> 纪律（<code>PinnedToCore</code> 不命中），但未在 § 四.1 落位表登记 · 短任务 (welcome 1.5 s / config_switch &lt; 1 s) 量产风险低 · 量产后改 <code>xTaskCreatePinnedToCoreWithCaps</code> + 登记一行</td></tr>
+<tr><td>InitializeButtons grace busy wait</td><td>构造函数中 <b>最多阻塞 5 s</b> 等用户松手</td><td>启动时长视感：grace 5 s + CheckBootHoldOnWakeup 1.5 s + Init 顺序 = 用户握紧最坏 6.5 s 才听到欢迎音</td></tr>
+<tr><td>EnterDeepSleep 第 4/8 步</td><td>4G 与 WiFi 分支彻底解耦，没有 unified path</td><td>正确做法，不要抽公共 EnterDeepSleepBase（违 CLAUDE.md "不抽基类"原则）</td></tr>
+<tr><td>RequestServerUnbind</td><td><b>同步</b> HTTP（不是 Schedule）· 阻塞 button task 最多 5 s · 紧接着 <code>SystemReset::CheckButtons(true)</code> 又是同步的（nvs_flash_erase + partition_erase + 3 s vTaskDelay）· 总阻塞 8-9 s</td><td>见 § 16 P0 风险 #B4</td></tr>
+</tbody>
+</table>
+
+</section>
+
+<!-- ================== 16. 三遍评审 · 风险推演 ================== -->
+<section id="review">
+<h2><span class="num">16</span> 三遍评审 · 风险推演</h2>
+<p class="sub">第一遍：文档准确性自检 · 第二遍：源码 bug 推演 · 第三遍：跨模块 / 并发 / 边界。结论按 P0/P1/P2 分级。</p>
+
+<h3>16.1 评审一 · 第一版文档已修正的错误</h3>
+<table>
+<thead><tr><th>条目</th><th>原文（第一版）</th><th>实际</th><th>已修</th></tr></thead>
+<tbody>
+<tr><td>D1</td><td>§ 15 "RequestServerUnbind 是异步路径（Schedule）· OK"</td><td><b>同步</b>调用 · 阻塞 button task 最多 5 s · 紧接 <code>SystemReset::CheckButtons(true)</code> 又同步阻塞 3-4 s · 累计 8-9 s</td><td>✅ § 15 改写 · § 16.3 列 P0</td></tr>
+<tr><td>D2</td><td>§ 15 "OnDoubleClick config_switch 违反 grep <code>xTaskCreate\b</code> 纪律"</td><td>实际是 <code>xTaskCreatePinnedToCore</code>，<b>不</b>命中 <code>\b</code>；但未在 § 四.1 落位表登记 · WelcomeTask 同样情况</td><td>✅ § 15 改写</td></tr>
+<tr><td>D3</td><td>§ 15 "OnLongPress 两套长按阈值需测试"</td><td>Button 类用 <code>long_press_callbacks_[ms]</code> map，可同时挂任意时长 · 项目仅注册 3000 ms · 不会误触</td><td>✅ § 15 改写</td></tr>
+</tbody>
+</table>
+
+<h3>16.2 评审二+三 · P0 风险（量产前必修）</h3>
+
+<div class="callout bad">
+<b>P0 标准</b>：硬件不可控行为 · 用户感知到死机/重启 · 跨次开机的不可恢复影响。
+</div>
+
+<table>
+<thead><tr><th>ID</th><th>风险</th><th>触发场景</th><th>影响</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td><b>B1</b></td><td>死按短路 sleep 未 hold AUDIO_PWR_EN（GPIO9）</td><td>EXT0 唤醒 + <code>since_us &lt; 500ms</code> + GPIO0=LOW → 直接 <code>esp_deep_sleep_start</code>，路径中只 arm EXT0 + rtc_pullup BOOT，<b>没有 <code>gpio_set_level(9, 0)</code> + <code>rtc_gpio_hold_en(9)</code></b></td><td>InitializeGpio 已把 GPIO9 拉高 200 ms（codec/4G/LCD 通电）· 进 sleep 后 GPIO9 失去驱动 → 输出取决于硬件外部电阻：上拉=三块芯片全程通电（数十 mA · 电池快速耗尽 · 烫手）· 下拉=安全 · 浮动=不可预测</td><td>立即在 esp_deep_sleep_start 之前补 <code>gpio_set_level(AUDIO_PWR_EN_GPIO, 0); rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);</code>。<b>同时请硬件确认 LDO_EN 外部默认电平</b>，无外部下拉的话本 bug 必现</td></tr>
+<tr><td><b>B2</b></td><td>9 连击双击确认 → button task 阻塞 8-9 s</td><td>OnDoubleClick → <code>RequestServerUnbind</code>（5 s 同步 HTTP）→ <code>SystemReset::CheckButtons(true)</code>（nvs_flash_erase + partition_erase + RestartInSeconds(3) 含 3 s vTaskDelay）</td><td>① button 内部 task 卡 8-9 s · 期间无法响应任何按键 · ② esp_timer 调度被推迟（背光不变暗 / UI 动效卡 / 闹钟未到点不响）· ③ 4G CSQ 差时 HTTP 实测 timeout 满 5 s · ④ Core 1 LVGL 在 nvs_flash_erase 期间被冻结 · 用户看到画面卡死</td><td>① <code>RequestServerUnbind</code> 改 <code>Schedule</code> 或带 cancel 的异步任务 + 1 s 超时 · ② Alert "正在恢复" 改循环 dot 进度 · ③ 整段动作放独立任务避免冻 button task · ④ 失败也不阻塞本地擦</td></tr>
+</tbody>
+</table>
+
+<h3>16.3 评审二+三 · P1 风险（量产后第一批 PR 修）</h3>
+<table>
+<thead><tr><th>ID</th><th>风险</th><th>说明</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td><b>B3</b></td><td>9 连击后 waiting_factory_reset_confirm_ 清除不彻底</td><td>OnClick 会清，OnMultipleClick(3/4)、OnLongPress、触摸事件、OnPressUp <b>都不清</b> · 9 连击后用户做任何"非单击"操作（包括 3 连击进配网）→ 10 s 内意外双击 → 触发恢复出厂</td><td>抽 <code>ClearFactoryResetWait()</code> 方法 · 所有用户输入入口统一调（注意：OnDoubleClick 自己消费这个状态，不调）</td></tr>
+<tr><td><b>B4</b></td><td>ShutdownOrSleep 用 AbortIfSpeaking 不处理 Listening</td><td>4 连击 / 低电 / 自动深睡 在 Listening 中触发关机 → mic 仍在录音 · Alert "再见" 与 mic upload 竞资源 · 服务端不收 stop 信号 → session 残留几十秒</td><td>把 <code>AbortIfSpeaking()</code> 改 <code>AbortAnyConversation()</code> · 同步改 OnDoubleClick 出厂确认分支（同问题）</td></tr>
+<tr><td><b>B5</b></td><td>TIMER 唤醒（闹钟）也走 first_boot_=true → 播 OGG_WELCOME</td><td>闹钟到点唤醒 → 1.5 s 后 WelcomeTask 播 OGG_WELCOME + RequestAutoChatOnIdle · 同时 AlarmManager 也准备播闹钟铃 · 两个音频源时序不确定，可能撞</td><td>TIMER 分支独立处理：<code>first_boot_=false</code> 或加 <code>is_timer_wakeup_</code> flag，让 WelcomeTask 跳过 PlaySound · 把发声让给 AlarmManager</td></tr>
+<tr><td><b>B6</b></td><td>ApplyDefaultSettings 每次开机强写 <code>wifi.blufi=1</code></td><td>用户在配网态双击切换到 AP 模式（SwitchConfigMode 内部写 blufi=0）→ 重启 → 又被强制改回 1 → 用户预期失败 · 同时增加 NVS 磨损</td><td>改"仅首次烧录后写"：先读，若 key 不存在才写默认值；或挂到 <code>SwitchConfigMode</code> 后不持久化的临时 flag</td></tr>
+<tr><td><b>B7</b></td><td>ApplyDefaultSettings 每次开机校正音量 &lt; 50 → 80</td><td>用户主动调音量到 30 后关机 → 重启又变 80 · "为什么我设的音量没保存"</td><td>仅在 <code>output_volume == 0</code>（NVS 默认未写）时写 80 · 不动 1-49 的用户设定</td></tr>
+<tr><td><b>B8</b></td><td>OnClick · Idle 分支 <code>vTaskDelay(1500)</code> 阻塞 button task</td><td>与 CLAUDE.md P1 清单"单击响应 1.5 s 阻塞（OTA 改异步）"同类 · 期间 button 内部 task 卡 · 双击 / 连击窗口被吃 · 用户感"按了没反应"</td><td>① 改 <code>Application::Schedule</code> 派发 PlaySound + Toggle · ② 或缩短为 800 ms 与 HandleTouchSingleClick 一致</td></tr>
+<tr><td><b>B9</b></td><td>HandleTouchSingleClick Idle 分支 <code>vTaskDelay(800)</code> 阻塞 touch task</td><td>同 B8 但触摸事件密度低 · 影响轻</td><td>同 B8 · 改 Schedule</td></tr>
+</tbody>
+</table>
+
+<h3>16.4 评审二+三 · P2 观察项（不急但记录）</h3>
+<table>
+<thead><tr><th>ID</th><th>观察</th><th>实际影响</th></tr></thead>
+<tbody>
+<tr><td><b>B10</b></td><td>多个关机源并发缺重入锁</td><td>4 连击 + 长按 timer + 低电检测 + PowerSaveTimer 都能调 ShutdownOrSleep · ShutdownOrSleep 无重入保护 · 但 <code>esp_deep_sleep_start</code> 不返回，第一个赢 · 实际仅有"两次 Alert 文案撞"小问题</td></tr>
+<tr><td><b>B11</b></td><td>ReportStatus 中 <code>dynamic_cast&lt;Ml307Board&amp;&gt;</code> 引用形式</td><td>禁异常环境下转换失败 → abort · 但前置 <code>GetNetworkType() == ML307</code> 保护住 · 改 <code>dynamic_cast&lt;Ml307Board*&gt;</code> 指针形式更稳</td></tr>
+<tr><td><b>B12</b></td><td>SwitchConfigMode 任务创建失败 → atomic_flag 永久卡 set</td><td><code>xTaskCreatePinnedToCore</code> 失败时（OOM）<code>switching.clear()</code> 不会执行 · 后续双击永远无法触发切换 · 量产期发生概率极低</td></tr>
+<tr><td><b>B13</b></td><td>ML307 UART pin (GPIO1/2) 未在 ResetAllGpiosForSleep 清单</td><td>LDO 断电后 ML307R 掉电，UART 引脚理论上无源 · 但 ESP 侧 GPIO1/2 仍配置为 UART pin 输出 · sleep 期间漏电 µA 级 · 量产影响微小</td></tr>
+<tr><td><b>B14</b></td><td>长按取消窗口 3000-3800 ms 内有 ~50 ms 调度延迟灰区</td><td>用户在 3795 ms 松手 · button task 50 ms 后才调 OnPressUp · 此时 timer 已 fire · 关机仍发生 · 设计 trade-off 内</td></tr>
+<tr><td><b>B15</b></td><td>NowRtcUs() 在第一次启动 s_last_sleep_us=0</td><td>下溢风险？<code>if (s_last_sleep_us &gt; 0)</code> 守住 · 首次开机不走死按短路逻辑 · 安全</td></tr>
+<tr><td><b>B16</b></td><td>InitializeButtons grace busy wait 最多阻塞 5 s</td><td>构造函数阻塞 → app_main 任务推迟 · 但 TASK_WDT 默认只盯 IDLE0/1，不监 app_main · 不会触发重启 · 仅是体感慢</td></tr>
+<tr><td><b>B17</b></td><td>EnterDeepSleep 总耗时 ~2.4 s 内阻塞 main_app</td><td>AudioService Stop 100 ms + ResetProtocol 500 ms + GracefulShutdownModem 800 ms + EXT0 arm 200 ms + 各种 delay ≈ 2 s · 期间 main_app 不响应 Schedule · 但已在关机途中，OK</td></tr>
+</tbody>
+</table>
+
+<h3>16.5 推演：是否会出现 bug？分场景结论</h3>
+<table>
+<thead><tr><th>场景</th><th>会复现的 bug</th></tr></thead>
+<tbody>
+<tr><td>用户握着设备死按 BOOT 不松（5 s 起）</td><td><b>B1</b> 可能复现（待硬件确认 LDO_EN 默认电平）· B16 体感慢 9 s 才听到欢迎音</td></tr>
+<tr><td>用户在 Listening 中按 4 连击关机 / 自动深睡触发</td><td><b>B4</b> 必现 · 服务端 session 残留</td></tr>
+<tr><td>用户在 9 连击后想 3 连击切网 / 单点屏幕</td><td><b>B3</b> 必现 · 10 s 内任意双击都会误触出厂</td></tr>
+<tr><td>用户主动把音量调到 30 后重启</td><td><b>B7</b> 必现 · 音量被回写 80</td></tr>
+<tr><td>用户在配网态切到 AP 模式后重启</td><td><b>B6</b> 必现 · blufi 被回写 1（除非 SwitchConfigMode 启动了 AP 模式后没存 NVS · 需查代码）</td></tr>
+<tr><td>用户在闹钟唤醒后听到的</td><td><b>B5</b> 不确定 · OGG_WELCOME 与闹钟铃的时序赌运气</td></tr>
+<tr><td>用户 9 连击 + 双击确认恢复出厂</td><td><b>B2</b> 必现 · 8-9 s 卡屏 · 但用户预期是"等待"，可能可接受</td></tr>
+<tr><td>用户在 OnClick 1.5 s 阻塞期间快速再按一次</td><td><b>B8</b> 必现 · 第二次按键被吞或滞后</td></tr>
+<tr><td>用户长按 3795 ms 松手</td><td><b>B14</b> 有几十毫秒灰区可能仍关机 · 不算 bug</td></tr>
+<tr><td>4G CSQ 差且服务端故障</td><td><b>B2</b> 加重，HTTP 5 s 完整跑满</td></tr>
+</tbody>
+</table>
+
+<h3>16.6 推演：还没暴露但值得加测试的边界</h3>
+<ul class="compact">
+  <li><b>EXT0 + EXT1 同时触发</b>：用户按 BOOT 的同时设备被晃动 → <code>esp_sleep_get_wakeup_cause</code> 只返回一个 · 哪个优先？需要测试用例固化。</li>
+  <li><b>OnLongPress(3000) 期间发生 deep sleep 触发</b>：自动深睡正好在用户长按 2 s 时触发 → button 中途 lost · 唤醒后状态机如何？理论上 OnPressUp 不会被调（中间断电）· shutdown_armed_ 是 stack 上的 atomic，RAM 重启后归零 · OK。</li>
+  <li><b>3 连击在 Listening 期间触发</b>：<code>PauseAudioAndChatBeforeSwitch</code> → AbortSpeaking · 但 Listening 用 AbortSpeaking 是什么效果？需确认 Application 内部对 state mismatch 的容忍。</li>
+  <li><b>SC7A20H 在 InitializePowerManager 之前初始化</b>：低电构造期关机 → ShutdownOrSleep(gyro=false) · OK，不依赖 sc7a20h。</li>
+  <li><b>UiDisplay 编译期未选时（EmoteDisplay）</b>：状态栏、ShowNotification、ShowAlert 行为可能不同 · 本梳理未覆盖 EmoteDisplay 路径。</li>
+</ul>
+
+<div class="callout info">
+  <b>下一步行动</b>：① <b>B1 立即做</b>（一行代码补 hold，硬件原理图核实）· ② <b>B2/B3/B4/B5</b> 入 § 5.2 P1 清单 · ③ <b>B6/B7</b> 一并入 ApplyDefaultSettings 重构 PR（小改）· ④ <b>B8/B9</b> 与 OTA 1.5 s 阻塞合并修 · ⑤ § 14 同步 WiFi/P31 板差异 · ⑥ 本文件挂到 <code>docs/p30-architecture.html § 一.5</code> 子页导航。
+</div>
+</section>
+
+</main>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · 闹钟功能</title>
+<style>
+:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+        --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
+        --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       margin: 0; background: #F5F5F5; color: var(--text); line-height: 1.55; font-size: 14px; }
+header { background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+         color: white; padding: 24px 40px; }
+header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 600; }
+header .meta { opacity: .9; font-size: 12px; }
+
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav { width: 180px; flex-shrink: 0; background: white; padding: 18px 0;
+      border-right: 1px solid var(--border); position: sticky; top: 0;
+      align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+nav h3 { margin: 0 14px 8px; font-size: 11px; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: .5px; }
+nav a { display: block; padding: 5px 14px; color: var(--text); text-decoration: none;
+        font-size: 13px; border-left: 3px solid transparent; }
+nav a:hover { background: var(--brand-light); border-left-color: var(--brand); color: var(--brand-deep); }
+
+main { flex: 1; padding: 24px 36px; max-width: 980px; }
+section { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
+             border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
+section h2 .num { display: inline-block; background: var(--brand); color: white;
+                  padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
+section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
+
+code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
+       font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px; color: #C2185B; }
+
+table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 13px; }
+th { background: #F5F5F5; padding: 6px 9px; text-align: left; border: 1px solid var(--border);
+     font-weight: 600; font-size: 12.5px; }
+td { padding: 5px 9px; border: 1px solid var(--border); vertical-align: top; font-size: 12.5px; }
+tr:nth-child(even) td { background: #FAFAFA; }
+
+.callout { padding: 10px 14px; border-radius: 6px; margin: 10px 0;
+           border-left: 4px solid var(--text-2); background: #FAFAFA; font-size: 13px; }
+.callout.ok    { border-left-color: var(--ok); background: #E8F5E9; }
+.callout.warn  { border-left-color: var(--warn); background: #FFF3E0; }
+.callout.bad   { border-left-color: var(--bad); background: #FFEBEE; }
+
+.svgwrap { background: var(--bg); padding: 10px; border-radius: 6px; margin: 10px 0; overflow-x: auto; }
+.svgwrap svg { display: block; max-width: 100%; height: auto; }
+text { font-family: -apple-system, "PingFang SC", sans-serif; }
+.svg-title { font-size: 13px; font-weight: 600; fill: var(--brand-deep); }
+.svg-axis { font-size: 11px; fill: var(--text-2); }
+.node-text { font-size: 12px; fill: var(--text); text-anchor: middle; dominant-baseline: middle; }
+.node-text.sm { font-size: 10.5px; fill: var(--text-2); }
+
+ul.compact { padding-left: 18px; margin: 6px 0; }
+ul.compact li { margin: 2px 0; }
+
+.pill { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+.pill.p0 { background:#FFEBEE; color:var(--bad); }
+.pill.p1 { background:#FFF3E0; color:var(--warn); }
+.pill.p2 { background:#E3F2FD; color:var(--core0-line); }
+.pill.lean { background:#F3E5F5; color:#6A1B9A; }
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>MyDazy P30 · 闹钟功能</h1>
+  <div class="meta">v1.0 · 2026-05-11 · main/alarm_manager.{h,cc} 699 行 · 三板已接入</div>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>目录</h3>
+  <a href="#overview">1. 概览</a>
+  <a href="#datamodel">2. 数据模型</a>
+  <a href="#boot">3. 启动加载</a>
+  <a href="#crud">4. CRUD 流程</a>
+  <a href="#trigger">5. 触发链路</a>
+  <a href="#timerwake">6. 定时唤醒</a>
+  <a href="#nvsworker">7. NVS Worker</a>
+  <a href="#external">8. 外部接口</a>
+  <a href="#review">9. 评审 + 优化</a>
+  <a href="#redesign">10. AI 极简重设计</a>
+</nav>
+
+<main>
+
+<!-- ================== 1. 概览 ================== -->
+<section id="overview">
+<h2><span class="num">1</span> 概览</h2>
+
+<h3>核心特点</h3>
+<table>
+  <thead><tr><th>特点</th><th>实现</th><th>位置</th></tr></thead>
+  <tbody>
+    <tr><td>本地存储 + 单例</td><td>Meyers Singleton · NVS 持久 · 8 槽固定</td><td><code>AlarmManager::GetInstance()</code></td></tr>
+    <tr><td>跨深睡触发</td><td>RTC 定时唤醒 + 分段睡眠 30min/2h</td><td><code>ConfigureTimerWakeup</code></td></tr>
+    <tr><td>未校时也能响</td><td><code>MarkTimerWakeup()</code> RTC fallback（year≥2024）</td><td>板级 TIMER 分支</td></tr>
+    <tr><td>异步 NVS 持久</td><td>独立 Core 0 worker 任务 · 200ms 合并窗口</td><td><code>NvsWorkerTask</code></td></tr>
+    <tr><td>AI 集成</td><td>触发后 SendTextToAI("闹钟响了…")</td><td><code>application.cc:273</code></td></tr>
+    <tr><td>对外</td><td>5 个 MCP 工具 · 无 RemoteCmd</td><td><code>RegisterMcpTools</code></td></tr>
+  </tbody>
+</table>
+
+<h3>关键常量</h3>
+<table>
+  <thead><tr><th>常量</th><th>值</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>MAX_ALARMS</td><td><b>8</b></td><td>固定槽位 id ∈ [0,7]</td></tr>
+    <tr><td>NVS 命名空间</td><td><code>"alarms"</code></td><td>跟 status / wifi / audio 同级独立</td></tr>
+    <tr><td>去重窗口</td><td><b>60 s</b></td><td>同一闹钟 60s 内只触发一次</td></tr>
+    <tr><td>RTC 提前余量</td><td><b>1800 s</b>（30 min）</td><td>RC 晶振 5% 漂移 + NTP 重同步缓冲</td></tr>
+    <tr><td>分段睡眠段长</td><td><b>7200 s</b>（2 h）</td><td>距闹钟 > 4h 时单次睡 2h · 醒来重 arm</td></tr>
+    <tr><td>RTC fallback 年份</td><td><b>≥ 2024</b></td><td>RTC 读到的 tm_year 必须 ≥ 2024 才信</td></tr>
+    <tr><td>NVS 队列深度</td><td><b>16</b></td><td>突发批量写不阻塞业务</td></tr>
+    <tr><td>NVS 合并窗口</td><td><b>200 ms</b></td><td>200ms 内入队的同 id 操作合并为一次提交</td></tr>
+    <tr><td>Worker 任务</td><td>P2 · 4608B · <b>Core 0</b></td><td>NVS flash op 走 Core 0 避免双核 cache 冲突</td></tr>
+  </tbody>
+</table>
+
+<h3>NVS 字段（命名空间 <code>alarms</code>）</h3>
+<p class="sub">8 槽位 · 每槽 2 键：<code>alarm_&lt;i&gt;</code>(int32 位段) + <code>msg_&lt;i&gt;</code>(string) · 编码详情见 § 2。</p>
+</section>
+
+<!-- ================== 2. 数据模型 ================== -->
+<section id="datamodel">
+<h2><span class="num">2</span> 数据模型</h2>
+
+<h3>AlarmConfig 结构（alarm_manager.h）</h3>
+<table>
+  <thead><tr><th>字段</th><th>类型</th><th>范围 / 校验</th><th>含义</th></tr></thead>
+  <tbody>
+    <tr><td>id</td><td>int</td><td>0 ~ 7</td><td>槽位号 = 数组下标</td></tr>
+    <tr><td>enabled</td><td>bool</td><td>—</td><td>停用不删 · CRUD 不动其他字段</td></tr>
+    <tr><td>hour</td><td>int</td><td>0 ~ 23</td><td>AddAlarm 入口校验</td></tr>
+    <tr><td>minute</td><td>int</td><td>0 ~ 59</td><td>同上</td></tr>
+    <tr><td>repeat_days</td><td>uint8</td><td>位掩码 bit0=周日…bit6=周六</td><td>0 = 一次性 · 触发后自动删</td></tr>
+    <tr><td>message</td><td>string</td><td>—</td><td>触发后送给 AI 当 prompt</td></tr>
+  </tbody>
+</table>
+
+<h3>repeat_days 位掩码常用值</h3>
+<table>
+  <thead><tr><th>需求</th><th>掩码</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>一次性</td><td><code>0x00</code></td><td>触发后自动删除</td></tr>
+    <tr><td>每天</td><td><code>0x7F</code></td><td>= 0b1111111</td></tr>
+    <tr><td>工作日</td><td><code>0x3E</code></td><td>= 周一 ~ 周五</td></tr>
+    <tr><td>周末</td><td><code>0x41</code></td><td>= 周日 + 周六</td></tr>
+  </tbody>
+</table>
+
+<h3>int32 位段打包（落 NVS）</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 130" xmlns="http://www.w3.org/2000/svg">
+  <text x="440" y="18" class="svg-title" text-anchor="middle">alarm_&lt;i&gt; int32 编码 · 1 字段塞下 4 个语义</text>
+
+  <g font-size="11">
+    <!-- 32 bit lanes -->
+    <g transform="translate(40, 40)">
+      <!-- enabled bit24 -->
+      <rect x="0"   y="0" width="80"  height="40" fill="#FFEBEE" stroke="#C62828"/>
+      <text x="40"  y="22" text-anchor="middle" font-weight="600" fill="#C62828">enabled</text>
+      <text x="40"  y="36" text-anchor="middle" fill="#666" font-size="10">bit 24 (1b)</text>
+
+      <!-- hour bit16-20 -->
+      <rect x="80"  y="0" width="170" height="40" fill="#E3F2FD" stroke="#1976D2"/>
+      <text x="165" y="22" text-anchor="middle" font-weight="600" fill="#1976D2">hour 0–23</text>
+      <text x="165" y="36" text-anchor="middle" fill="#666" font-size="10">bit 16–20 (5b)</text>
+
+      <!-- minute bit8-13 -->
+      <rect x="250" y="0" width="200" height="40" fill="#FFF3E0" stroke="#F57F17"/>
+      <text x="350" y="22" text-anchor="middle" font-weight="600" fill="#F57F17">minute 0–59</text>
+      <text x="350" y="36" text-anchor="middle" fill="#666" font-size="10">bit 8–13 (6b)</text>
+
+      <!-- repeat_days bit0-6 -->
+      <rect x="450" y="0" width="240" height="40" fill="#E8F5E9" stroke="#2E7D32"/>
+      <text x="570" y="22" text-anchor="middle" font-weight="600" fill="#2E7D32">repeat_days 7bit</text>
+      <text x="570" y="36" text-anchor="middle" fill="#666" font-size="10">bit 0–6 (Sun..Sat)</text>
+
+      <!-- 剩余位 -->
+      <rect x="690" y="0" width="100" height="40" fill="#F5F5F5" stroke="#999"/>
+      <text x="740" y="22" text-anchor="middle" fill="#999">unused</text>
+      <text x="740" y="36" text-anchor="middle" fill="#666" font-size="10">reserved</text>
+    </g>
+    <text x="40"  y="100" font-size="10.5" fill="#666">编码：<tspan font-family="monospace" fill="#C2185B">(enabled&lt;&lt;24) | (hour&lt;&lt;16) | (minute&lt;&lt;8) | repeat_days</tspan></text>
+    <text x="40"  y="116" font-size="10.5" fill="#666">解码反过来即可 · msg 单独存 string 键 · empty 不写不删</text>
+  </g>
+</svg>
+</div>
+
+</section>
+
+<!-- ================== 3. 启动加载 ================== -->
+<section id="boot">
+<h2><span class="num">3</span> 启动加载</h2>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 280" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="aArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="440" y="18" class="svg-title" text-anchor="middle">首次 GetInstance() → 自动加载 + 启 NVS Worker</text>
+
+  <ellipse cx="440" cy="55" rx="160" ry="20" fill="#FAFAFA" stroke="#666"/>
+  <text class="node-text" x="440" y="60" style="font-weight:600">⚡ Application::Start 首次 GetInstance()</text>
+
+  <rect x="120" y="100" width="280" height="40" rx="6" fill="#fff" stroke="#1976D2"/>
+  <text class="node-text" x="260" y="118" style="font-weight:600;fill:#1976D2">① LoadAlarms（同步）</text>
+  <text class="node-text sm" x="260" y="132">Settings("alarms", ro) 读 8 槽 · 解 int32</text>
+
+  <rect x="480" y="100" width="280" height="40" rx="6" fill="#fff" stroke="#F57F17"/>
+  <text class="node-text" x="620" y="118" style="font-weight:600;fill:#F57F17">② StartNvsWorker</text>
+  <text class="node-text sm" x="620" y="132">queue(16) + Pin Core 0 P2 · 常驻</text>
+
+  <rect x="240" y="170" width="400" height="40" rx="6" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="440" y="188" style="font-weight:600">③ Application::Start 后续</text>
+  <text class="node-text sm" x="440" y="202">SetAlarmCallback · RegisterMcpTools</text>
+
+  <ellipse cx="440" cy="245" rx="100" ry="20" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+  <text class="node-text" x="440" y="250" style="font-weight:600;fill:#2E7D32">🟢 就绪</text>
+
+  <path d="M380,75 L260,100" stroke="#666" marker-end="url(#aArr)" fill="none"/>
+  <path d="M500,75 L620,100" stroke="#666" marker-end="url(#aArr)" fill="none"/>
+  <path d="M260,140 L380,170" stroke="#666" marker-end="url(#aArr)" fill="none"/>
+  <path d="M620,140 L500,170" stroke="#666" marker-end="url(#aArr)" fill="none"/>
+  <path d="M440,210 L440,225" stroke="#666" marker-end="url(#aArr)" fill="none"/>
+</svg>
+</div>
+
+<div class="callout">
+  <b>懒构造</b>：Meyers Singleton · 首次 <code>GetInstance()</code> 时构造执行 LoadAlarms + StartNvsWorker。<code>Application::Start</code> 在 <code>SetAlarmCallback</code> 之前就完成。
+</div>
+</section>
+
+<!-- ================== 4. CRUD ================== -->
+<section id="crud">
+<h2><span class="num">4</span> CRUD 流程</h2>
+
+<h3>4.1 API 矩阵</h3>
+<table>
+  <thead><tr><th>API</th><th>线程</th><th>锁</th><th>NVS</th><th>返回</th></tr></thead>
+  <tbody>
+    <tr><td><code>AddAlarm(cfg)</code></td><td>任意</td><td>取 mutex</td><td>异步入队</td><td>bool</td></tr>
+    <tr><td><code>AddAlarmAuto(h, m, days, msg)</code></td><td>任意</td><td>取 mutex</td><td>异步入队</td><td>int id 或 -1</td></tr>
+    <tr><td><code>DeleteAlarm(id)</code></td><td>任意</td><td>同上</td><td>异步入队</td><td>bool</td></tr>
+    <tr><td><code>SetAlarmEnabled(id, on)</code></td><td>任意</td><td>同上</td><td>同上</td><td>bool</td></tr>
+    <tr><td><code>ClearAllAlarms()</code></td><td>任意</td><td>同上</td><td>批量异步</td><td>void</td></tr>
+    <tr><td><code>GetAlarm(id, out&)</code></td><td>任意</td><td>取 mutex</td><td>—</td><td>bool</td></tr>
+    <tr><td><code>CheckAndTrigger()</code></td><td>main_app</td><td>取锁扫描 + 释锁回调</td><td>一次性闹钟异步入队删</td><td>void</td></tr>
+  </tbody>
+</table>
+
+<h3>4.2 AddAlarmAuto 流程（MCP <code>self.alarm.add</code> 主入口）</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 220" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="cArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+
+  <rect x="20"  y="40" width="160" height="34" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="100" y="61">校验 hour/minute</text>
+
+  <rect x="200" y="40" width="160" height="34" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="280" y="61">lock(mutex_)</text>
+
+  <rect x="380" y="40" width="160" height="34" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="460" y="61">FindFreeSlot</text>
+
+  <rect x="560" y="40" width="160" height="34" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="640" y="61">填 alarms_[id]</text>
+
+  <rect x="740" y="40" width="140" height="34" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="810" y="61">SaveAlarmLocked</text>
+
+  <rect x="200" y="100" width="160" height="34" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="280" y="121">unlock</text>
+
+  <rect x="380" y="100" width="200" height="34" rx="4" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="480" y="121">↩ return id（成功）/ -1（满）</text>
+
+  <rect x="20" y="160" width="860" height="40" rx="6" fill="#FAFAFA" stroke="#999" stroke-dasharray="3 3"/>
+  <text class="node-text" x="450" y="183" style="fill:#666">SaveAlarmLocked → xQueueSend(AlarmNvsOp{Save, id, packed, msg}) · 业务线程不等 commit</text>
+
+  <path d="M180,57 L200,57" stroke="#666" marker-end="url(#cArr)"/>
+  <path d="M360,57 L380,57" stroke="#666" marker-end="url(#cArr)"/>
+  <path d="M540,57 L560,57" stroke="#666" marker-end="url(#cArr)"/>
+  <path d="M720,57 L740,57" stroke="#666" marker-end="url(#cArr)"/>
+  <path d="M810,74 L810,90 L280,90 L280,100" stroke="#666" fill="none" marker-end="url(#cArr)"/>
+  <path d="M360,117 L380,117" stroke="#666" marker-end="url(#cArr)"/>
+  <path d="M810,74 L810,140 L450,140 L450,160" stroke="#999" fill="none" stroke-dasharray="3 3" marker-end="url(#cArr)"/>
+</svg>
+</div>
+
+<div class="callout ok">
+  <b>原子性</b>：FindFreeSlot + Save 在同一把锁内完成 · 多线程并发 add 不会撞同槽。
+  <b>NVS 异步</b>：业务线程不等 commit · 用户感知"即时成功" · 真正落盘在 worker 任务 200ms 后。
+</div>
+
+<h3>4.3 一次性闹钟（repeat_days=0）自删</h3>
+<p class="sub">CheckAndTrigger 命中 → 锁内 RemoveAlarmLocked + 异步入队 · 触发后掉电场景最多一次重复触发后删除。</p>
+</section>
+
+<!-- ================== 5. 触发链路 ================== -->
+<section id="trigger">
+<h2><span class="num">5</span> 触发链路</h2>
+
+<h3>5.1 时序图</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 400" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="tArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+
+  <!-- lanes -->
+  <line x1="80"  y1="40" x2="80"  y2="380" stroke="#999" stroke-dasharray="3 3"/>
+  <line x1="270" y1="40" x2="270" y2="380" stroke="#999" stroke-dasharray="3 3"/>
+  <line x1="500" y1="40" x2="500" y2="380" stroke="#999" stroke-dasharray="3 3"/>
+  <line x1="710" y1="40" x2="710" y2="380" stroke="#999" stroke-dasharray="3 3"/>
+
+  <text class="node-text" x="80"  y="30" style="font-weight:600">main_app</text>
+  <text class="node-text" x="270" y="30" style="font-weight:600">AlarmManager</text>
+  <text class="node-text" x="500" y="30" style="font-weight:600">用户回调</text>
+  <text class="node-text" x="710" y="30" style="font-weight:600">AI / Audio</text>
+
+  <!-- 每秒 tick -->
+  <rect x="20" y="60" width="120" height="30" rx="4" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="80" y="79">CLOCK_TICK 1s</text>
+  <path d="M140,75 L270,75" stroke="#666" marker-end="url(#tArr)"/>
+
+  <rect x="200" y="100" width="140" height="32" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="270" y="120">CheckAndTrigger</text>
+
+  <!-- 双门 -->
+  <rect x="180" y="148" width="180" height="42" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="270" y="165" style="font-weight:600">门 1：time_synced</text>
+  <text class="node-text sm" x="270" y="180">|| (timer_wakeup && yr≥2024)</text>
+
+  <rect x="180" y="200" width="180" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="270" y="220">门 2：60s 去重窗口</text>
+
+  <rect x="180" y="240" width="180" height="46" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="270" y="257">lock + 扫 8 槽</text>
+  <text class="node-text sm" x="270" y="274">match enabled+h+m+wday</text>
+
+  <rect x="180" y="296" width="180" height="32" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="270" y="316">unlock</text>
+
+  <!-- 回调 -->
+  <path d="M360,312 L500,312" stroke="#666" marker-end="url(#tArr)"/>
+  <rect x="430" y="296" width="140" height="32" rx="4" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text class="node-text" x="500" y="316">alarm_callback_(cfg)</text>
+
+  <!-- AI -->
+  <path d="M570,312 L710,312" stroke="#666" marker-end="url(#tArr)"/>
+  <rect x="640" y="280" width="160" height="32" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="720" y="300">PlaySound(OGG_WAKEUP)</text>
+  <rect x="640" y="318" width="160" height="32" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="720" y="338">SendTextToAI("闹钟响了...")</text>
+
+  <path d="M270,132 L270,148" stroke="#666" marker-end="url(#tArr)"/>
+  <path d="M270,190 L270,200" stroke="#666" marker-end="url(#tArr)"/>
+  <path d="M270,232 L270,240" stroke="#666" marker-end="url(#tArr)"/>
+  <path d="M270,286 L270,296" stroke="#666" marker-end="url(#tArr)"/>
+</svg>
+</div>
+
+<h3>5.2 时间同步的两个开关</h3>
+<table>
+  <thead><tr><th>开关</th><th>谁打开</th><th>谁关闭</th><th>用途</th></tr></thead>
+  <tbody>
+    <tr><td><code>s_time_synced</code></td><td><code>MarkTimeSynced()</code> · OTA 拿到服务端时间</td><td>—（开了不会关）</td><td>正常运行期默认门</td></tr>
+    <tr><td><code>s_timer_wakeup</code></td><td>板级 TIMER 唤醒分支 <code>MarkTimerWakeup()</code></td><td>—（一次启动一次有效）</td><td>未 NTP 时用 RTC fallback 补漏</td></tr>
+  </tbody>
+</table>
+
+<div class="callout ok">
+  <b>RTC fallback 鸡生蛋问题</b>：定时唤醒时 NTP 还没到，但 RTC 已经走过一次完整 sleep · 这次唤醒发生 = 说明我们 sleep 时是 synced 的 · 否则 timer 根本不会被 arm。
+  所以 RTC 时间这次可信 · 加 <code>year ≥ 2024</code> 兜底防 RTC clear 异常。
+</div>
+
+<h3>5.3 触发后默认回调</h3>
+<p class="sub">application.cc:273 注册 lambda：<code>PlaySound(OGG_WAKEUP) + Schedule(SendTextToAI("闹钟响了..."))</code> · 重设计后改为 AlarmRinger.Start（§ 10）。</p>
+</section>
+
+<!-- ================== 6. 定时唤醒 ================== -->
+<section id="timerwake">
+<h2><span class="num">6</span> 定时唤醒 · 分段睡眠</h2>
+
+<h3>6.1 ConfigureTimerWakeup 决策树</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 360" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="dArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+
+  <ellipse cx="440" cy="40" rx="200" ry="20" fill="#FAFAFA" stroke="#666"/>
+  <text class="node-text" x="440" y="45" style="font-weight:600">EnterDeepSleep 末尾 · FlushNvs + ConfigureTimerWakeup</text>
+
+  <rect x="280" y="85" width="320" height="40" rx="6" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="440" y="103" style="font-weight:600">min_sec = GetSecondsToNextAlarm()</text>
+  <text class="node-text sm" x="440" y="118">扫 8 槽找最近 enabled 闹钟 (含 repeat_days 周计算)</text>
+
+  <polygon points="440,140 540,180 440,220 340,180" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="440" y="175" style="font-weight:600">无 enabled?</text>
+  <text class="node-text sm" x="440" y="190">min_sec = -1</text>
+
+  <rect x="20" y="160" width="240" height="40" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text class="node-text" x="140" y="178" style="font-weight:600;fill:#2E7D32">不 arm · ESP_OK</text>
+  <text class="node-text sm" x="140" y="192">由 EXT0/EXT1 唤醒即可</text>
+
+  <polygon points="440,235 540,275 440,315 340,275" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="440" y="270" style="font-weight:600">min_sec ≤ 1800?</text>
+
+  <rect x="620" y="255" width="240" height="40" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+  <text class="node-text" x="740" y="273" style="font-weight:600;fill:#C62828">不 arm · INVALID_STATE</text>
+  <text class="node-text sm" x="740" y="287">距闹钟太近 · 不该深睡 (caller 跳过)</text>
+
+  <rect x="20" y="320" width="350" height="40" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="195" y="340" style="font-weight:600;fill:#1976D2">≤ 14400 (4h)：sleep = min_sec - 1800</text>
+
+  <rect x="510" y="320" width="350" height="40" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="685" y="340" style="font-weight:600;fill:#1976D2">> 14400：sleep = 7200 (段长)</text>
+
+  <path d="M440,125 L440,140" stroke="#666" marker-end="url(#dArr)"/>
+  <path d="M340,180 L260,180" stroke="#666" marker-end="url(#dArr)"/>
+  <text class="svg-axis" x="300" y="170">是</text>
+  <path d="M440,220 L440,235" stroke="#666" marker-end="url(#dArr)"/>
+  <text class="svg-axis" x="450" y="232">否</text>
+  <path d="M540,275 L620,275" stroke="#666" marker-end="url(#dArr)"/>
+  <text class="svg-axis" x="580" y="265">是</text>
+  <path d="M390,315 L260,320" stroke="#666" marker-end="url(#dArr)" fill="none"/>
+  <text class="svg-axis" x="310" y="320">≤4h</text>
+  <path d="M490,315 L620,320" stroke="#666" marker-end="url(#dArr)" fill="none"/>
+  <text class="svg-axis" x="555" y="320">>4h</text>
+</svg>
+</div>
+
+<h3>6.2 分段策略为什么必要</h3>
+<table>
+  <thead><tr><th>问题</th><th>策略</th></tr></thead>
+  <tbody>
+    <tr><td>ESP32 内部 RC 振荡器深睡时漂移 <b>±5%</b></td><td>不能盲睡多小时 · 越长越偏</td></tr>
+    <tr><td>4h 内：sleep = min_sec - 1800</td><td>提前 30 min 醒来 · 留 NTP 重同步窗口 + 漂移缓冲</td></tr>
+    <tr><td>>4h：每 2h 醒一次重新 arm</td><td>每次醒来都会再走一次 ConfigureTimerWakeup · 漂移不累积</td></tr>
+    <tr><td>距闹钟 ≤ 30 min</td><td>返回 INVALID_STATE · caller 选择不深睡（保持在线等触发）</td></tr>
+  </tbody>
+</table>
+
+<h3>6.3 三种唤醒源并存</h3>
+<p class="sub">板级 EnterDeepSleep 配置 EXT0 (BOOT) + EXT1 (拿起) 之后才调 ConfigureTimerWakeup arm TIMER。ESP32-S3 三源并存 · 唤醒后 <code>esp_sleep_get_wakeup_cause()</code> 区分。</p>
+<table>
+  <thead><tr><th>唤醒源</th><th>板级处理</th><th>对闹钟的影响</th></tr></thead>
+  <tbody>
+    <tr><td>EXT0 (BOOT)</td><td>用户主动开机 · 首屏 + 欢迎音</td><td>开机后 CheckAndTrigger 仍会查 · 错过即错过</td></tr>
+    <tr><td>EXT1 (拿起)</td><td>静默 init · first_boot=true</td><td>同上</td></tr>
+    <tr><td>TIMER (RTC)</td><td><code>MarkTimerWakeup()</code> · first_boot=true</td><td>RTC fallback 门打开 · CheckAndTrigger 不需要等 NTP</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ================== 7. NVS Worker ================== -->
+<section id="nvsworker">
+<h2><span class="num">7</span> NVS Worker · 异步合并</h2>
+
+<h3>7.1 任务参数</h3>
+<table>
+  <thead><tr><th>参数</th><th>值</th><th>理由</th></tr></thead>
+  <tbody>
+    <tr><td>任务名</td><td><code>alarm_nvs</code></td><td>—</td></tr>
+    <tr><td>栈</td><td><b>4608 B</b> heap</td><td>NVS open + commit + 一个 Settings 作用域</td></tr>
+    <tr><td>优先级</td><td><b>P2</b></td><td>低于业务 · 不抢 UI/音频</td></tr>
+    <tr><td>Core</td><td><b>Core 0</b></td><td>NVS flash op 走 Core 0 防双核 cache 冲突</td></tr>
+    <tr><td>队列深度</td><td><b>16</b></td><td>突发批量写不阻塞业务</td></tr>
+    <tr><td>队列入队超时</td><td>0（非阻塞）</td><td>满队列宁可丢失也不卡业务</td></tr>
+    <tr><td>队列出队超时</td><td><b>500 ms</b></td><td>无活动也定期醒来不卡死</td></tr>
+    <tr><td>合并窗口</td><td><b>200 ms</b></td><td>窗口内同 id 合并为 last-writer-wins · 减少 flash 写</td></tr>
+  </tbody>
+</table>
+
+<h3>7.2 消息类型</h3>
+<table>
+  <thead><tr><th>op</th><th>负载</th><th>worker 动作</th></tr></thead>
+  <tbody>
+    <tr><td><code>Save</code></td><td>id + packed int32 + msg</td><td>set_int(alarm_&lt;i&gt;) + set_string(msg_&lt;i&gt;) 或 erase msg</td></tr>
+    <tr><td><code>Remove</code></td><td>id</td><td>erase alarm_&lt;i&gt; + msg_&lt;i&gt; + snd_&lt;i&gt; + ai_&lt;i&gt;</td></tr>
+  </tbody>
+</table>
+
+<h3>7.3 合并算法（NvsWorkerTask 主循环）</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 280" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="wArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+
+  <rect x="20"  y="40" width="240" height="34" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="140" y="61">xQueueReceive(timeout 5s)</text>
+
+  <rect x="300" y="40" width="280" height="34" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="440" y="61" style="font-weight:600">收到第 1 条 · 进合并窗口</text>
+
+  <rect x="620" y="40" width="240" height="34" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="740" y="61">map[id] = op</text>
+
+  <rect x="20"  y="100" width="240" height="34" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="140" y="120">vTaskDelay(200ms)</text>
+
+  <rect x="300" y="100" width="280" height="34" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="440" y="120">drain queue · 每条 map[id] 覆盖</text>
+
+  <rect x="620" y="100" width="240" height="34" rx="4" fill="#fff" stroke="#999"/>
+  <text class="node-text" x="740" y="120">同 id Save↔Remove 后写为准</text>
+
+  <rect x="180" y="160" width="520" height="34" rx="4" fill="#E3F2FD" stroke="#1976D2"/>
+  <text class="node-text" x="440" y="180" style="font-weight:600">一次 Settings 作用域执行所有 op · 析构时 nvs_commit</text>
+
+  <rect x="180" y="220" width="520" height="34" rx="4" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text class="node-text" x="440" y="240">nvs_pending_ 减回 0 · FlushNvs 解阻塞</text>
+
+  <path d="M260,57 L300,57" stroke="#666" marker-end="url(#wArr)"/>
+  <path d="M580,57 L620,57" stroke="#666" marker-end="url(#wArr)"/>
+  <path d="M740,74 L740,90 L140,90 L140,100" stroke="#666" fill="none" marker-end="url(#wArr)"/>
+  <path d="M260,117 L300,117" stroke="#666" marker-end="url(#wArr)"/>
+  <path d="M580,117 L620,117" stroke="#666" marker-end="url(#wArr)"/>
+  <path d="M740,134 L740,150 L440,150 L440,160" stroke="#666" fill="none" marker-end="url(#wArr)"/>
+  <path d="M440,194 L440,220" stroke="#666" marker-end="url(#wArr)"/>
+</svg>
+</div>
+
+<h3>7.4 FlushNvs（深睡前必调）</h3>
+<table>
+  <thead><tr><th>时机</th><th>动作</th></tr></thead>
+  <tbody>
+    <tr><td>EnterDeepSleep 末尾</td><td>板级 <code>AlarmManager::GetInstance().FlushNvs()</code> + <code>ConfigureTimerWakeup()</code></td></tr>
+    <tr><td>实现</td><td>20ms tick 轮询 <code>nvs_pending_</code> 直到 0 · 最长等 3000ms</td></tr>
+    <tr><td>目的</td><td>断电前确保所有 alarm 操作已 commit 进 flash · 否则掉电会丢</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ================== 8. 外部接口 ================== -->
+<section id="external">
+<h2><span class="num">8</span> 外部接口</h2>
+
+<h3>8.1 MCP 工具（5 个）</h3>
+<table>
+  <thead><tr><th>工具名</th><th>参数</th><th>返回</th><th>幂等</th></tr></thead>
+  <tbody>
+    <tr><td><code>self.alarm.add</code></td><td>message · hour · minute · repeat_days?</td><td>{ id, status }</td><td>不（每次新建）</td></tr>
+    <tr><td><code>self.alarm.remove</code></td><td>id</td><td>{ status }</td><td>是</td></tr>
+    <tr><td><code>self.alarm.list</code></td><td>—</td><td>{ alarms[], count, just_triggered?, next_alarm_in }</td><td>是（含 just_triggered 一次性消费）</td></tr>
+    <tr><td><code>self.alarm.set_enabled</code></td><td>id · enabled</td><td>{ status }</td><td>是</td></tr>
+    <tr><td><code>self.alarm.clear</code></td><td>—</td><td>{ status }</td><td>是</td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <b>just_triggered 一次性</b>：list 工具返回 <code>just_triggered</code> 字段 · 读后清空 · 给 AI 一个"我刚被闹钟唤醒"的信号 · 不会重复消费。
+</div>
+
+<h3>8.2 集成点（main/）</h3>
+<table>
+  <thead><tr><th>文件:行</th><th>调用</th><th>作用</th></tr></thead>
+  <tbody>
+    <tr><td>application.cc:273-283</td><td><code>SetAlarmCallback</code></td><td>注册默认回调 · OGG_WAKEUP + SendTextToAI</td></tr>
+    <tr><td>application.cc:285</td><td><code>RegisterMcpTools()</code></td><td>挂 5 个 MCP 工具</td></tr>
+    <tr><td>application.cc:383</td><td><code>CheckAndTrigger()</code></td><td>每秒 CLOCK_TICK 扫一次</td></tr>
+    <tr><td>application.cc:439</td><td><code>MarkTimeSynced()</code></td><td>OTA 报回服务端时间后开 time_synced 门</td></tr>
+    <tr><td>三板 <code>HandleWakeupCause</code> TIMER 分支</td><td><code>MarkTimerWakeup()</code></td><td>RTC fallback 门开</td></tr>
+    <tr><td>三板 <code>EnterDeepSleep</code> 末尾</td><td><code>FlushNvs()</code> + <code>ConfigureTimerWakeup()</code></td><td>commit 落盘 + arm RTC 定时</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ================== 9. 已落地修复 ================== -->
+<section id="review">
+<h2><span class="num">9</span> 已落地修复 log</h2>
+<p class="sub">三遍评审完成 · P0 量产 blocker 4 项 + P1 稳定性 6 项 + P2 精简 6 项 已全部修复 · 此处仅保留修复清单便于追溯。</p>
+
+<table>
+<thead><tr><th>分级</th><th>修复项</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td><span class="pill p0">P0</span></td><td>TZ 设置 <code>setenv("TZ","CST-8",1); tzset();</code> 修时区错位 8 小时</td><td>application.cc:441-446</td></tr>
+<tr><td><span class="pill p0">P0</span></td><td>CheckAndTrigger 时间门删 <code>s_timer_wakeup</code> 必要条件 · EXT0 唤醒不再漏</td><td>alarm_manager.cc:250-255</td></tr>
+<tr><td><span class="pill p0">P0</span></td><td>dedup 删 <code>&gt;= 0</code> 子句 · 防 NTP 回拨重复触发</td><td>alarm_manager.cc:268</td></tr>
+<tr><td><span class="pill p0">P0</span></td><td>dedup 判断移入 lock_guard · 防 last_trigger_time_ 撕裂</td><td>alarm_manager.cc:265-270</td></tr>
+<tr><td><span class="pill p1">P1</span></td><td>s_time_synced / s_timer_wakeup → <code>std::atomic&lt;bool&gt;</code></td><td>alarm_manager.cc:16-17</td></tr>
+<tr><td><span class="pill p1">P1</span></td><td>AddAlarm 加 <code>repeat_days &gt; 0x7F</code> 校验</td><td>alarm_manager.cc:167-172</td></tr>
+<tr><td><span class="pill p1">P1</span></td><td>CheckAndTrigger 加 <code>wday ∈ [0,6]</code> 防御 · 防 RTC 异常 1&lt;&lt;-1 UB</td><td>alarm_manager.cc:247-248</td></tr>
+<tr><td><span class="pill p1">P1</span></td><td>xQueueReceive 超时 5s → 500ms</td><td>alarm_manager.cc:638</td></tr>
+<tr><td><span class="pill p1">P1</span></td><td>降级路径不在锁内做同步 NVS · 防死锁</td><td>alarm_manager.cc:113, 144</td></tr>
+<tr><td><span class="pill p1">P1</span></td><td>NVS worker 栈 3584 → 4608B</td><td>alarm_manager.cc:33</td></tr>
+<tr><td><span class="pill p2">P2</span></td><td>删 UpdateAlarm 别名 + vTaskDelete 死代码 + snd_/ai_ 死键</td><td>alarm_manager.{h,cc}</td></tr>
+<tr><td><span class="pill p2">P2</span></td><td>抽 <code>kRtcSanityYear = 2024</code> 常量 · 修正 last op wins 注释</td><td>alarm_manager.cc:19, 628</td></tr>
+<tr><td><span class="pill p2">P2</span></td><td>RegisterMcpTools 加 static 幂等守卫</td><td>alarm_manager.cc:418</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>遗留</b>:RC 漂移补响 · kAlarmBell 启用 · last_triggered ring · 任务表登记 → 全部并入 § 10 重设计中处理。
+</div>
+</section>
+
+<!-- ================== 10. AI 极简重设计 ================== -->
+<section id="redesign">
+<h2><span class="num">10</span> AI 时代极简重设计 · 三遍评审</h2>
+
+<p class="sub">产品层重设计 · 13 项决策已定（§ 10.6）· 按 § 10.5.3 集成清单实施。</p>
+
+<h3>10.1 设计哲学</h3>
+<table>
+<thead><tr><th>维度</th><th>Pre-AI（传统闹钟 App）</th><th>AI 时代（MyDazy P30）</th></tr></thead>
+<tbody>
+<tr><td>设置</td><td>列表 + 表单 + 按钮</td><td><b>一句话</b></td></tr>
+<tr><td>展示</td><td>UI 列表 + 启用开关</td><td>AI 复述 · 必要时 list</td></tr>
+<tr><td>查询</td><td>用户看屏幕</td><td>用户问 AI</td></tr>
+<tr><td>取消</td><td>用户点删除</td><td>用户说 → AI 模糊匹配 → remove</td></tr>
+<tr><td>修改</td><td>编辑表单</td><td>remove + add（无 update API）</td></tr>
+<tr><td>响铃</td><td>循环铃声 + 震动 + UI 弹窗</td><td><b>循环铃声 + 渐入音量 + AI 语音 · 摇晃 / 按键 / 语音停</b></td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>核心原则</b>：AI 时代闹钟 = "一句话设 · 一声响 · 一动停" · 任何为 UI 手动操作设计的字段都是冗余。
+</div>
+
+<h3>10.2 评审 ① · 用户视角真实剧本</h3>
+<table>
+<thead><tr><th>#</th><th>用户场景</th><th>AI 翻译</th><th>API 调用</th><th>频率</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>「等会儿提醒看烤箱」「15 分钟」</td><td>now+15min</td><td>add(14, 30, "看烤箱", Once)</td><td>⭐⭐⭐⭐⭐</td></tr>
+<tr><td>2</td><td>「明早 7 点叫我」</td><td>明天 07:00 一次</td><td>add(7, 0, "起床", Once)</td><td>⭐⭐⭐⭐⭐</td></tr>
+<tr><td>3</td><td>「每天 7 点叫我起床」</td><td>每天</td><td>add(7, 0, "起床", Daily)</td><td>⭐⭐⭐⭐</td></tr>
+<tr><td>4</td><td>「工作日早 7 点叫我」</td><td>周一到五</td><td>add(7, 0, "起床", Weekdays)</td><td>⭐⭐⭐</td></tr>
+<tr><td>5</td><td>「我有什么闹钟」</td><td>查列表</td><td>list()</td><td>⭐⭐⭐</td></tr>
+<tr><td>6</td><td>「取消起床闹钟」</td><td>模糊匹配 + 删</td><td>list() + remove(id)</td><td>⭐⭐⭐</td></tr>
+<tr><td>7</td><td>「明天闹钟改到 8 点」</td><td>取消 + 新建</td><td>remove + add</td><td>⭐⭐</td></tr>
+<tr><td>8</td><td>[响] 用户说「知道了」</td><td>关停</td><td>dismiss()</td><td>⭐⭐⭐⭐⭐</td></tr>
+<tr><td>9</td><td>[响] 用户说「再睡 10 分钟」</td><td>关停 + 新建一次性</td><td>dismiss + add(now+10min, Once)</td><td>⭐⭐⭐⭐</td></tr>
+<tr><td>10</td><td>[响] 用户摇晃 / 按键</td><td>硬件直接关停</td><td>AlarmRinger.Stop()</td><td>⭐⭐⭐⭐⭐</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<b>关键洞察</b>：剧本 8 / 9 / 10（响铃 + 关停）= <b>闹钟灵魂</b>。当前"一声 PlaySound + 一句 AI" 完全不够 · 必须改为"持续响 + 渐入 + 多种关停"。
+</div>
+
+<h3>10.3 评审 ② · 设备端触发响应链路</h3>
+
+<h4>10.3.1 响铃状态机 SVG（新增 AlarmRinger）</h4>
+<div class="svgwrap">
+<svg viewBox="0 0 880 420" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="rArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+<text x="440" y="20" class="svg-title" text-anchor="middle">闹铃到点 → 渐入 → 关停（5 种触发）</text>
+
+<ellipse cx="160" cy="60" rx="100" ry="22" fill="#FAFAFA" stroke="#666"/>
+<text class="node-text" x="160" y="65" style="font-weight:600">[到点] CheckAndTrigger</text>
+
+<rect x="80" y="110" width="240" height="60" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+<text class="node-text" x="200" y="130" style="font-weight:600;fill:#C62828">AlarmRinger.Start(message)</text>
+<text class="node-text sm" x="200" y="148">禁 PowerSaveTimer · 保存音量</text>
+<text class="node-text sm" x="200" y="162">摇一摇阈值 320 → 800mg</text>
+
+<rect x="80" y="200" width="240" height="92" rx="6" fill="#FFF3E0" stroke="#F57F17"/>
+<text class="node-text" x="200" y="218" style="font-weight:600;fill:#F57F17">Ringing · 每 5s tick</text>
+<text class="node-text sm" x="200" y="234">0-10s · 30% + OGG_WAKEUP</text>
+<text class="node-text sm" x="200" y="250">10-30s · 50%</text>
+<text class="node-text sm" x="200" y="266">30-60s · 80%</text>
+<text class="node-text sm" x="200" y="282">60s+ · 100%</text>
+
+<text class="node-text" x="200" y="315" style="font-style:italic;fill:#666">+ SendTextToAI("闹钟响了 {message}")</text>
+
+<rect x="400" y="100" width="220" height="32" rx="4" fill="#fff" stroke="#999"/>
+<text class="node-text" x="510" y="120">① SC7A20H 大力摇晃 800mg</text>
+<rect x="400" y="140" width="220" height="32" rx="4" fill="#fff" stroke="#999"/>
+<text class="node-text" x="510" y="160">② BOOT 按键单击</text>
+<rect x="400" y="180" width="220" height="32" rx="4" fill="#fff" stroke="#999"/>
+<text class="node-text" x="510" y="200">③ 触摸屏单击</text>
+<rect x="400" y="220" width="220" height="32" rx="4" fill="#fff" stroke="#999"/>
+<text class="node-text" x="510" y="240">④ AI 调 alarm.dismiss</text>
+<rect x="400" y="260" width="220" height="32" rx="4" fill="#fff" stroke="#999"/>
+<text class="node-text" x="510" y="280">⑤ 5 分钟自动超时</text>
+
+<rect x="660" y="170" width="180" height="60" rx="6" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+<text class="node-text" x="750" y="190" style="font-weight:600;fill:#2E7D32">AlarmRinger.Stop(reason)</text>
+<text class="node-text sm" x="750" y="206">恢复音量 + 摇一摇阈值</text>
+<text class="node-text sm" x="750" y="220">恢复 PowerSaveTimer</text>
+
+<ellipse cx="750" cy="280" rx="100" ry="22" fill="#FAFAFA" stroke="#666"/>
+<text class="node-text" x="750" y="285" style="font-weight:600">回 Idle · 等下次</text>
+
+<path d="M160,82 L160,110" stroke="#666" marker-end="url(#rArr)"/>
+<path d="M200,170 L200,200" stroke="#666" marker-end="url(#rArr)"/>
+<path d="M320,140 L400,116" stroke="#666" fill="none" marker-end="url(#rArr)"/>
+<path d="M320,150 L400,156" stroke="#666" fill="none" marker-end="url(#rArr)"/>
+<path d="M320,165 L400,196" stroke="#666" fill="none" marker-end="url(#rArr)"/>
+<path d="M320,210 L400,236" stroke="#666" fill="none" marker-end="url(#rArr)"/>
+<path d="M320,240 L400,276" stroke="#666" fill="none" marker-end="url(#rArr)"/>
+<path d="M620,200 L660,200" stroke="#666" marker-end="url(#rArr)"/>
+<path d="M750,230 L750,258" stroke="#666" marker-end="url(#rArr)"/>
+</svg>
+</div>
+
+<h4>10.3.2 关停事件优先级矩阵</h4>
+<table>
+<thead><tr><th>关停方式</th><th>检测点</th><th>成本</th><th>体验</th></tr></thead>
+<tbody>
+<tr><td>摇晃</td><td>SC7A20H 闹钟模式阈值 800mg/200ms</td><td>低 · 复用现有 SDK</td><td>最自然 · 抗被子翻动误触</td></tr>
+<tr><td>BOOT 按键</td><td>三板 OnClick 加 IsRinging() 抢占</td><td>低 · 各板 3 行</td><td>主动按</td></tr>
+<tr><td>触摸单击</td><td>HandleTouchSingleClick 加抢占</td><td>低 · 各板 3 行</td><td>拿在手里</td></tr>
+<tr><td>AI 语音</td><td>新增 MCP <code>alarm.dismiss</code></td><td>低 · 10 行</td><td>"知道了 / 停止"</td></tr>
+<tr><td>5 分钟超时</td><td>esp_timer once</td><td>低 · 内置</td><td>防扰民兜底</td></tr>
+</tbody>
+</table>
+
+<h4>10.3.3 渐入音量曲线（4 段阶梯）</h4>
+<div class="svgwrap">
+<svg viewBox="0 0 880 220" xmlns="http://www.w3.org/2000/svg">
+<text x="440" y="18" class="svg-title" text-anchor="middle">音量渐入 · saved_volume 倍率</text>
+<line x1="60" y1="180" x2="820" y2="180" stroke="#666" stroke-width="2"/>
+<line x1="60" y1="180" x2="60" y2="40" stroke="#666" stroke-width="2"/>
+<text class="svg-axis" x="40" y="60" text-anchor="end">100%</text>
+<text class="svg-axis" x="40" y="100" text-anchor="end">80%</text>
+<text class="svg-axis" x="40" y="130" text-anchor="end">50%</text>
+<text class="svg-axis" x="40" y="160" text-anchor="end">30%</text>
+<line x1="60" y1="160" x2="200" y2="160" stroke="#1976D2" stroke-width="3"/>
+<line x1="200" y1="130" x2="380" y2="130" stroke="#1976D2" stroke-width="3"/>
+<line x1="380" y1="100" x2="560" y2="100" stroke="#1976D2" stroke-width="3"/>
+<line x1="560" y1="60"  x2="780" y2="60"  stroke="#C62828" stroke-width="3"/>
+<text class="svg-axis" x="60"  y="195" text-anchor="middle">0s</text>
+<text class="svg-axis" x="200" y="195" text-anchor="middle">10s</text>
+<text class="svg-axis" x="380" y="195" text-anchor="middle">30s</text>
+<text class="svg-axis" x="560" y="195" text-anchor="middle">60s</text>
+<text class="svg-axis" x="780" y="195" text-anchor="middle">5min 超时</text>
+<text class="node-text sm" x="130" y="150">温和唤醒</text>
+<text class="node-text sm" x="290" y="120">加强</text>
+<text class="node-text sm" x="470" y="90" >明显</text>
+<text class="node-text sm" x="670" y="50" style="fill:#C62828">最大 · 必醒</text>
+</svg>
+</div>
+
+<h4>10.3.4 深睡唤醒 30 分钟时间窗（隐藏 bug + 修复）</h4>
+<div class="callout bad">
+<b>当前隐藏 bug</b>：RTC TIMER 唤醒后（提前 30 min），PowerSaveTimer(120, 60, 300) 让设备 5 分钟后又进深睡 · <b>闹钟错过</b>！
+</div>
+<table>
+<thead><tr><th>时刻</th><th>事件</th><th>关键改动</th></tr></thead>
+<tbody>
+<tr><td>22:05</td><td>EnterDeepSleep · FlushNvs + ConfigureTimerWakeup(arm 06:30)</td><td>已实现</td></tr>
+<tr><td>06:30</td><td>RTC TIMER 唤醒 · MarkTimerWakeup + first_boot</td><td>已实现</td></tr>
+<tr><td>06:30</td><td>完整 init 5-10s · WelcomeTask 启动</td><td><b style="color:var(--bad)">需新增：检测 TIMER 唤醒跳过欢迎音</b></td></tr>
+<tr><td>06:30</td><td>NTP 校时 5-10s · MarkTimeSynced</td><td>已实现</td></tr>
+<tr><td>06:30-07:00</td><td>30 分钟在线 idle</td><td><b style="color:var(--bad)">需新增：临近闹钟禁用 PowerSaveTimer</b></td></tr>
+<tr><td>07:00</td><td>CheckAndTrigger 命中</td><td><b>改回调 → AlarmRinger.Start</b></td></tr>
+<tr><td>07:0X</td><td>渐入响铃 · 等关停</td><td><b>新增 AlarmRinger 模块</b></td></tr>
+<tr><td>07:0X</td><td>用户摇晃 → Stop · 恢复 PowerSaveTimer</td><td><b>新增</b></td></tr>
+</tbody>
+</table>
+
+<h3>10.4 评审 ③ · 功能边界梳理</h3>
+
+<table>
+<thead><tr><th>类别</th><th>项</th><th>动作</th></tr></thead>
+<tbody>
+<tr><td rowspan="9" style="background:#E8F5E9;font-weight:600;color:var(--ok)">必须保留<br>（刚需）</td>
+<td>hour / minute / message 字段</td><td>核心</td></tr>
+<tr><td>NVS 持久化 + 异步 worker + FlushNvs</td><td>设了不能丢 · 断电不丢</td></tr>
+<tr><td>ConfigureTimerWakeup 分段 30min/2h</td><td>RC 漂移硬限制</td></tr>
+<tr><td>dedup 60s</td><td>防 RC/NTP 抖动重触</td></tr>
+<tr><td>时间同步门 + TZ setenv</td><td>P0 量产铁律</td></tr>
+<tr><td>CheckAndTrigger 每秒 tick</td><td>触发核心</td></tr>
+<tr><td><b>AlarmRinger 模块（新增）</b></td><td>真正的闹钟体验</td></tr>
+<tr><td><b>禁用 PowerSaveTimer when alarm-imminent（新增）</b></td><td>30 分钟不再深睡</td></tr>
+<tr><td><b>TIMER 唤醒跳过欢迎音（新增）</b></td><td>避免音频冲突</td></tr>
+
+<tr><td rowspan="9" style="background:#FFEBEE;font-weight:600;color:var(--bad)">砍掉<br>（冗余）</td>
+<td>enabled 字段 + set_enabled MCP/API</td><td>暂停 = remove · 恢复 = add</td></tr>
+<tr><td>last_triggered_ / has_triggered_ / just_triggered JSON</td><td>AI 已从 SendTextToAI 拿 message</td></tr>
+<tr><td>GetAlarm 单条查询 API</td><td>list 一次给全</td></tr>
+<tr><td>GetTimeString / DateString / Weekday public</td><td>UI 时钟另有路径 · 闹钟内部用即可</td></tr>
+<tr><td>SetAlarmCallback 灵活注入</td><td>项目只 1 处用 · 硬编码 AlarmRinger.Start</td></tr>
+<tr><td>MarkTimerWakeup + s_timer_wakeup 字段</td><td>P0-2 改完后无业务依赖</td></tr>
+<tr><td>repeat_days 7-bit mask</td><td>改 enum 4 选 1</td></tr>
+<tr><td>clear MCP 工具</td><td>用户少用 · AI 可 list+remove 替代 · 表面收口</td></tr>
+<tr><td>8 槽 → 4 槽</td><td>家庭场景 ≤2 个长期 + 1-2 个临时即可</td></tr>
+
+<tr><td rowspan="3" style="background:#FFF3E0;font-weight:600;color:var(--warn)">推迟<br>（不重要）</td>
+<td>kAlarmBell AudioSource 启用</td><td>当前 OGG_WAKEUP 也能用 · 后续迭代</td></tr>
+<tr><td>last_triggered_ ring(4)</td><td>砍掉 just_triggered 后不需要</td></tr>
+<tr><td>RC 漂移补响窗口</td><td>30 min 提前 + 5 min 渐入 = 35 min 容错 · 概率极低</td></tr>
+</tbody>
+</table>
+
+<h3>10.5 极简后的最终设计</h3>
+
+<h4>10.5.1 数据模型对比</h4>
+<table>
+<thead><tr><th>字段</th><th>Before</th><th>After</th></tr></thead>
+<tbody>
+<tr><td>id</td><td>uint8 0-7</td><td>uint8 0-3（4 槽）</td></tr>
+<tr><td>enabled</td><td>bool</td><td><span style="color:var(--bad);text-decoration:line-through">删</span></td></tr>
+<tr><td>hour / minute</td><td>uint8</td><td>保留</td></tr>
+<tr><td>repeat_days</td><td>uint8 7-bit mask</td><td>enum <code>Once / Daily / Weekdays / Weekends</code></td></tr>
+<tr><td>message</td><td>string</td><td>string（clamp 64 字节）</td></tr>
+</tbody>
+</table>
+
+<h4>10.5.2 API 表面对比</h4>
+<table>
+<thead><tr><th>层</th><th>Before</th><th>After</th><th>变化</th></tr></thead>
+<tbody>
+<tr><td>MCP 工具</td><td>5（add / remove / list / set_enabled / clear）</td><td><b>4</b>（add / remove / list / dismiss）</td><td>−2 +1</td></tr>
+<tr><td>C++ 公开方法</td><td>16</td><td><b>7</b>（AddAlarm / DeleteAlarm / CheckAndTrigger / ConfigureTimerWakeup / FlushNvs / MarkTimeSynced / RegisterMcpTools）</td><td>−9</td></tr>
+<tr><td>新增模块</td><td>—</td><td>AlarmRinger（Start / Stop / IsRinging）</td><td>+1</td></tr>
+</tbody>
+</table>
+
+<h4>10.5.3 集成点改动清单</h4>
+<table>
+<thead><tr><th>#</th><th>位置</th><th>改动</th><th>代码量</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>main/audio/alarm_ringer.{h,cc}</code></td><td>新增模块 · 状态机 + 渐入 + 超时</td><td>~150 行</td></tr>
+<tr><td>2</td><td>application.cc:273 闹钟回调</td><td>改为 AlarmRinger.Start</td><td>5 行</td></tr>
+<tr><td>3</td><td>三板 OnClick / OnDoubleClick</td><td>开头加 IsRinging 抢占 Stop</td><td>9 行</td></tr>
+<tr><td>4</td><td>三板 HandleTouchSingleClick</td><td>同上</td><td>9 行</td></tr>
+<tr><td>5</td><td>三板 OnShake 静态回调</td><td>同上 + 阈值切换检测</td><td>9 行</td></tr>
+<tr><td>6</td><td>三板 WelcomeTaskEntry</td><td>TIMER 唤醒跳过欢迎音</td><td>9 行</td></tr>
+<tr><td>7</td><td>三板 InitializePowerSaveTimer</td><td>临近闹钟 (&lt;1800s) 禁用</td><td>12 行</td></tr>
+<tr><td>8</td><td>SC7A20H 驱动</td><td>新增 set_shake_threshold（如尚无）</td><td>评估</td></tr>
+<tr><td>9</td><td>alarm_manager.cc RegisterMcpTools</td><td>新增 self.alarm.dismiss + 删 set_enabled / clear</td><td>±10 行</td></tr>
+<tr><td>10</td><td>alarm_manager.{h,cc}</td><td>砍 enabled / Get / just_triggered / SetAlarmCallback / MarkTimerWakeup / mask</td><td>~−80 行</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<b>总代码量</b>：净增 ~140 行（+250 新增 − 110 砍）· 新增 1 个 audio/alarm_ringer.{h,cc}
+</div>
+
+<h3>10.6 已定方案（决策汇总）</h3>
+<table>
+<thead><tr><th>#</th><th>项</th><th>已定</th></tr></thead>
+<tbody>
+<tr><td>A</td><td>repeat 模式</td><td>enum <code>Once / Daily / Weekdays / Weekends</code></td></tr>
+<tr><td>B</td><td>响铃时设备其他状态</td><td>直接打断</td></tr>
+<tr><td>C</td><td>just_triggered 字段</td><td>删</td></tr>
+<tr><td>D</td><td>enabled 字段</td><td>删</td></tr>
+<tr><td>E</td><td>clear MCP 工具</td><td>删 · AI list+remove 替代</td></tr>
+<tr><td>F</td><td>出厂示例闹钟</td><td>✓ 已删 CreateDefaultAlarms</td></tr>
+<tr><td>G</td><td>渐入曲线</td><td>4 段阶梯 30/50/80/100%</td></tr>
+<tr><td>H</td><td>自动停超时</td><td>5 分钟</td></tr>
+<tr><td>I</td><td>响铃间隔</td><td>5 秒</td></tr>
+<tr><td>J</td><td>摇晃灵敏度切换</td><td>闹钟模式 800mg/200ms</td></tr>
+<tr><td>K</td><td>响铃 + AI 同步说话</td><td>同步念 message</td></tr>
+<tr><td>L</td><td>dismiss MCP 工具</td><td>独立 alarm.dismiss</td></tr>
+<tr><td>M</td><td>槽位数</td><td>4</td></tr>
+</tbody>
+</table>
+</section>
+
+</main>
+</div>
+
+</body>
+</html>

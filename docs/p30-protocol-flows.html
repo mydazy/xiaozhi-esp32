@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · Protocol 切换架构</title>
+<style>
+:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+        --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
+        --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       margin: 0; background: #F5F5F5; color: var(--text); line-height: 1.55; font-size: 14px; }
+header { background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+         color: white; padding: 24px 40px; }
+header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 600; }
+header .meta { opacity: .9; font-size: 12px; }
+
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav { width: 210px; flex-shrink: 0; background: white; padding: 18px 0;
+      border-right: 1px solid var(--border); position: sticky; top: 0;
+      align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+nav h3 { margin: 0 14px 8px; font-size: 11px; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: .5px; }
+nav a { display: block; padding: 5px 14px; color: var(--text); text-decoration: none;
+        font-size: 13px; border-left: 3px solid transparent; }
+nav a:hover { background: var(--brand-light); border-left-color: var(--brand); color: var(--brand-deep); }
+
+main { flex: 1; padding: 24px 36px; max-width: 980px; }
+section { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
+             border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
+section h2 .num { display: inline-block; background: var(--brand); color: white;
+                  padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
+section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
+
+code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
+       font-family: "SF Mono", Menlo, monospace; font-size: 12.5px; color: #C7254E; }
+
+table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; font-size: 13px; }
+th { background: #FAFAFA; color: var(--text); text-align: left; padding: 6px 8px;
+     border-bottom: 2px solid var(--border); font-weight: 600; }
+td { padding: 6px 8px; border-bottom: 1px solid #EEE; vertical-align: top; }
+td.center, th.center { text-align: center; }
+td.mono, th.mono { font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
+
+.callout { background: #FFF8E1; border-left: 4px solid #F57F17; padding: 10px 12px;
+           border-radius: 4px; margin: 10px 0; font-size: 13px; }
+.callout.ok   { background: #E8F5E9; border-color: #2E7D32; }
+.callout.bad  { background: #FFEBEE; border-color: #C62828; }
+.callout.info { background: #E3F2FD; border-color: #1976D2; }
+
+.pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px;
+        font-weight: 600; margin-right: 4px; }
+.pill.mqtt { background:#E0F7FA; color:#006064; }
+.pill.ws   { background:#F3E5F5; color:#6A1B9A; }
+.pill.dead { background:#FFEBEE; color:#C62828; }
+.pill.ok   { background:#E8F5E9; color:#2E7D32; }
+.pill.warn { background:#FFF3E0; color:#E65100; }
+.pill.bad  { background:#FFEBEE; color:#C62828; }
+
+.svgwrap { background: #FCFCFC; border: 1px dashed #DDD; border-radius: 6px;
+           padding: 10px; margin: 8px 0; overflow-x: auto; }
+.svgwrap svg { display: block; max-width: 100%; height: auto; }
+.svg-title { font-size: 13px; font-weight: 600; fill: var(--brand-deep); }
+.svg-axis  { font-size: 11px; fill: var(--text-2); }
+.node-text { font-size: 11.5px; fill: var(--text); text-anchor: middle; dominant-baseline: middle; }
+.node-text.sm { font-size: 10.5px; fill: var(--text-2); }
+
+ul.compact { padding-left: 18px; margin: 6px 0; }
+ul.compact li { margin: 2px 0; }
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>MyDazy P30 · Protocol 切换架构梳理</h1>
+  <div class="meta">v2.2.11 · 2026-05-11 · <code>main/protocols/*</code> + <code>main/application.cc</code> · baidu 已启用 + 四家协议三遍审查版</div>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>目录</h3>
+  <a href="#overview">1. 总览 · 四个 Protocol</a>
+  <a href="#abstract">2. Protocol 抽象层</a>
+  <a href="#mqtt">3. MqttProtocol</a>
+  <a href="#ws">4. WebsocketProtocol</a>
+  <a href="#joyai">5. WebsocketJoeaiProtocol</a>
+  <a href="#baidu">6. WebsocketBaiduProtocol（死代码）</a>
+  <a href="#init">7. InitializeProtocol 选择决策</a>
+  <a href="#triggers">8. 切换 · 触发点矩阵</a>
+  <a href="#channel">9. Open/Close 通道时序</a>
+  <a href="#callbacks">10. 7 个回调与 Application 协作</a>
+  <a href="#review1">11. 评审一 · 架构层</a>
+  <a href="#review2">12. 评审二 · 切换流程</a>
+  <a href="#review3">13. 评审三 · 风险与边界</a>
+  <a href="#cleanup">14. 精简建议</a>
+  <a href="#triple">15. 四家平台 · 三遍审查</a>
+</nav>
+
+<main>
+
+<!-- ================== 1. 总览 ================== -->
+<section id="overview">
+<h2><span class="num">1</span> 总览 · 四个 Protocol</h2>
+
+<table>
+<thead><tr><th>类</th><th>文件</th><th>行数</th><th>编译</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><b>Protocol</b>（抽象基类）</td><td><code>protocol.h/.cc</code></td><td>108 + 90</td><td><span class="pill ok">✓</span></td><td>11 个虚方法 + 7 个回调 + 共享字段（session_id/server_sample_rate/last_incoming_time）</td></tr>
+<tr><td><span class="pill mqtt">MqttProtocol</span></td><td><code>mqtt_protocol.cc/.h</code></td><td>402 + 68</td><td><span class="pill ok">✓</span></td><td>MQTT 控制 + UDP 音频（AES-CTR 加密）· 60 s 退避自动重连</td></tr>
+<tr><td><span class="pill ws">WebsocketProtocol</span></td><td><code>websocket_protocol.cc/.h</code></td><td>254 + 34</td><td><span class="pill ok">✓</span></td><td>单 WebSocket 通道 · v1/v2/v3 协议 · 不自动重连</td></tr>
+<tr><td><span class="pill ws">WebsocketJoeaiProtocol</span></td><td><code>websocket_joyai_protocol.cc/.h</code></td><td>410 + 74</td><td><span class="pill ok">✓</span></td><td>JD JoyAI 协议（<code>joyinside.jd.com</code>）· 事件映射 + base64 音频</td></tr>
+<tr><td><span class="pill ws">WebsocketBaiduProtocol</span></td><td><code>websocket_baidu_protocol.cc/.h</code></td><td>1477 + 178</td><td><span class="pill ok">✓ 已启用 v2.2.11</span></td><td>百度 BRTC 大模型互动 · WS 保活复用 + License 激活 + Token 缓存 · 1655 行内含 3 个 timer + 状态机最复杂</td></tr>
+</tbody>
+</table>
+
+<h3>类继承关系</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 280" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="oArr" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="white" stroke="#666"/></marker></defs>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">类继承图（实线 = 继承 · 虚线 = 选择）</text>
+
+  <rect x="320" y="40" width="240" height="58" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+  <text class="node-text" x="440" y="60" style="font-weight:600">Protocol（抽象基类）</text>
+  <text class="node-text sm" x="440" y="78">7 callbacks · 11 virtual methods</text>
+  <text class="node-text sm" x="440" y="92">protocol.h / protocol.cc</text>
+
+  <rect x="30" y="160" width="180" height="64" rx="6" fill="#E0F7FA" stroke="#006064"/>
+  <text class="node-text" x="120" y="178" style="font-weight:600">MqttProtocol</text>
+  <text class="node-text sm" x="120" y="194">MQTT control</text>
+  <text class="node-text sm" x="120" y="208">+ UDP/AES audio</text>
+  <text class="node-text sm" x="120" y="220">60s reconnect timer</text>
+
+  <rect x="240" y="160" width="180" height="64" rx="6" fill="#F3E5F5" stroke="#6A1B9A"/>
+  <text class="node-text" x="330" y="178" style="font-weight:600">WebsocketProtocol</text>
+  <text class="node-text sm" x="330" y="194">v1/v2/v3 binary</text>
+  <text class="node-text sm" x="330" y="208">single WS channel</text>
+  <text class="node-text sm" x="330" y="220">no auto-reconnect</text>
+
+  <rect x="450" y="160" width="180" height="64" rx="6" fill="#F3E5F5" stroke="#6A1B9A"/>
+  <text class="node-text" x="540" y="178" style="font-weight:600">WebsocketJoeaiProtocol</text>
+  <text class="node-text sm" x="540" y="194">joyinside.jd.com</text>
+  <text class="node-text sm" x="540" y="208">event mapping</text>
+  <text class="node-text sm" x="540" y="220">+ base64 audio</text>
+
+  <rect x="660" y="160" width="180" height="64" rx="6" fill="#F3E5F5" stroke="#6A1B9A"/>
+  <text class="node-text" x="750" y="178" style="font-weight:600">WebsocketBaiduProtocol</text>
+  <text class="node-text sm" x="750" y="194">BRTC 大模型互动</text>
+  <text class="node-text sm" x="750" y="208">WS 保活复用 + License</text>
+  <text class="node-text sm" x="750" y="220">3 timer · 1655 行</text>
+
+  <line x1="120" y1="160" x2="380" y2="98" stroke="#666" stroke-width="1.5" marker-end="url(#oArr)"/>
+  <line x1="330" y1="160" x2="420" y2="98" stroke="#666" stroke-width="1.5" marker-end="url(#oArr)"/>
+  <line x1="540" y1="160" x2="460" y2="98" stroke="#666" stroke-width="1.5" marker-end="url(#oArr)"/>
+  <line x1="750" y1="160" x2="500" y2="98" stroke="#666" stroke-width="1.5" marker-end="url(#oArr)"/>
+
+  <text class="node-text sm" x="120" y="245" style="fill:#1976D2">默认 · 量产主链路</text>
+  <text class="node-text sm" x="330" y="245" style="fill:#1976D2">兜底 WebSocket</text>
+  <text class="node-text sm" x="540" y="245" style="fill:#1976D2">JD JoyAI 专用</text>
+  <text class="node-text sm" x="750" y="245" style="fill:#1976D2">百度 BRTC 专用 · 最高优先级</text>
+</svg>
+</div>
+
+<h3>持有方</h3>
+<table>
+<tbody>
+<tr><td>持有者</td><td><code>Application::protocol_</code>（<code>std::unique_ptr&lt;Protocol&gt;</code>）· 单例</td></tr>
+<tr><td>声明位置</td><td><code>main/application.h:156</code></td></tr>
+<tr><td>构造点</td><td><code>InitializeProtocol</code>（<code>application.cc:590</code>）· 由 <code>ActivationTask</code> 调用</td></tr>
+<tr><td>析构点</td><td><code>ResetProtocol</code>（异步 Schedule） / <code>Reboot</code>（同步） / Application 析构</td></tr>
+<tr><td>访问点统计</td><td>application.cc 中 <code>protocol_</code> 出现 64 次 · 几乎所有"用户主动交互"路径都要 check + access</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 2. Protocol 抽象层 ================== -->
+<section id="abstract">
+<h2><span class="num">2</span> Protocol 抽象层（基类）</h2>
+
+<h3>2.1 7 个回调（Application 注册）</h3>
+<table>
+<thead><tr><th>回调</th><th>触发时机</th><th>Application 行为</th></tr></thead>
+<tbody>
+<tr><td><code>OnConnected</code></td><td>底层连接成功</td><td><code>DismissAlert()</code> 清"无法连接"提示</td></tr>
+<tr><td><code>OnNetworkError</code></td><td>SetError 触发</td><td>记 <code>last_error_message_</code> + <code>MAIN_EVENT_ERROR</code></td></tr>
+<tr><td><code>OnIncomingAudio</code></td><td>收到音频包</td><td>仅 Speaking 时 push 到 decode_queue（上限 40 帧 = 2.4 s）</td></tr>
+<tr><td><code>OnAudioChannelOpened</code></td><td>OpenAudioChannel 末尾</td><td><code>SetPowerSaveLevel(PERFORMANCE)</code> + 采样率校验</td></tr>
+<tr><td><code>OnAudioChannelClosed</code></td><td>CloseAudioChannel 末尾 / 底层断开</td><td><code>LOW_POWER</code> + 清 chat message + 切 Idle</td></tr>
+<tr><td><code>OnIncomingJson</code></td><td>收到 JSON 消息</td><td>分发 tts/llm/mcp/system/alert/custom 等 6 类</td></tr>
+<tr><td><code>OnDisconnected</code></td><td>底层断开（仅 MQTT 触发）</td><td>透传，注册了但应用层未做差异化处理</td></tr>
+</tbody>
+</table>
+
+<h3>2.2 11 个虚方法</h3>
+<table>
+<thead><tr><th>方法</th><th>纯虚</th><th>语义</th></tr></thead>
+<tbody>
+<tr><td><code>Start()</code></td><td>✓</td><td>底层启动 · MQTT 立即连 / WS 仅 return true 不连</td></tr>
+<tr><td><code>OpenAudioChannel()</code></td><td>✓</td><td>建/复用音频通道 · 含 hello 握手 + 10 s EventGroupWait</td></tr>
+<tr><td><code>CloseAudioChannel(bool send_goodbye=true)</code></td><td>✓</td><td>关音频通道 · MQTT 关 UDP / WS reset</td></tr>
+<tr><td><code>IsAudioChannelOpened() const</code></td><td>✓</td><td>检查 udp/websocket + !error_occurred + !IsTimeout</td></tr>
+<tr><td><code>SendAudio(packet)</code></td><td>✓</td><td>上行音频 · MQTT 加密 UDP / WS 二进制帧</td></tr>
+<tr><td><code>SendWakeWordDetected</code></td><td>—</td><td>默认 listen state=detect 消息</td></tr>
+<tr><td><code>SendStartListening(mode)</code></td><td>—</td><td>默认 listen state=start · Joyai 覆写为 CLIENT_VOICE_CHAT_START</td></tr>
+<tr><td><code>SendStopListening</code></td><td>—</td><td>默认 listen state=stop · Joyai 覆写</td></tr>
+<tr><td><code>SendAbortSpeaking(reason)</code></td><td>—</td><td>默认 abort 消息</td></tr>
+<tr><td><code>SendMcpMessage(payload)</code></td><td>—</td><td>默认 mcp 包装</td></tr>
+<tr><td><code>SendText(text)</code></td><td>protected ✓</td><td>底层发字符串 · 各派生类实现</td></tr>
+</tbody>
+</table>
+
+<h3>2.3 共享字段（基类）</h3>
+<table>
+<tbody>
+<tr><td><code>server_sample_rate_</code> / <code>server_frame_duration_</code></td><td>24000 / 60 默认 · server hello 时被覆盖</td></tr>
+<tr><td><code>error_occurred_</code></td><td>bool · SetError 置 true · OpenAudioChannel 时清 · 影响 IsAudioChannelOpened</td></tr>
+<tr><td><code>session_id_</code></td><td>std::string · 服务端 hello 返回 · 用于消息 session 关联</td></tr>
+<tr><td><code>last_incoming_time_</code></td><td>steady_clock · IsTimeout 用（120 s 默认）</td></tr>
+</tbody>
+</table>
+
+<h3>2.4 IsTimeout 机制</h3>
+<div class="callout">
+<b>关键</b>：基类 <code>IsTimeout()</code> 默认 <b>120 s</b> 没收到任何消息即超时。<code>IsAudioChannelOpened()</code> 实现统一为 <code>(transport 在 + !error + !IsTimeout)</code>。
+意味着：<b>3 分钟无服务端心跳 → 通道判超时 → 用户下次唤醒需要重 OpenAudioChannel</b>。这给云端"长时间无对话自动关闭 session"留了观察窗口。
+</div>
+</section>
+
+<!-- ================== 3. MqttProtocol ================== -->
+<section id="mqtt">
+<h2><span class="num">3</span> MqttProtocol · 控制面 + 加密音频面</h2>
+<p class="sub">默认协议（量产主链路）· MQTT TCP 控制 + UDP/AES-CTR 音频。</p>
+
+<h3>3.1 字段与生命周期</h3>
+<table>
+<thead><tr><th>字段</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>std::shared_ptr&lt;std::atomic&lt;bool&gt;&gt; alive_</code></td><td>跨任务保活标志 · 析构时置 false · Schedule lambda capture 后判空避免悬空 this</td></tr>
+<tr><td><code>EventGroupHandle_t event_group_handle_</code></td><td>等服务端 hello 的事件位</td></tr>
+<tr><td><code>std::mutex channel_mutex_</code></td><td>保护 udp_ 句柄 · SendAudio 和 CloseAudioChannel 互斥</td></tr>
+<tr><td><code>std::unique_ptr&lt;Mqtt&gt; mqtt_</code> / <code>std::unique_ptr&lt;Udp&gt; udp_</code></td><td>两路独立 transport</td></tr>
+<tr><td><code>mbedtls_aes_context aes_ctx_</code> · <code>aes_nonce_</code></td><td>AES-128-CTR · key/nonce 来自 server hello</td></tr>
+<tr><td><code>local_sequence_</code> / <code>remote_sequence_</code></td><td>UDP 包序列号 · 接收时校验</td></tr>
+<tr><td><code>esp_timer_handle_t reconnect_timer_</code></td><td>60 s 退避自动重连（仅 Idle 触发）</td></tr>
+</tbody>
+</table>
+
+<h3>3.2 启动与重连</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 320" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="mArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">MqttProtocol 启动/重连决策</text>
+
+  <ellipse cx="100" cy="60" rx="80" ry="20" fill="#FAFAFA" stroke="#666"/>
+  <text class="node-text" x="100" y="65" style="font-weight:600">Start()</text>
+
+  <rect x="200" y="40" width="200" height="40" rx="6" fill="#E0F7FA" stroke="#006064"/>
+  <text class="node-text" x="300" y="62">StartMqttClient(false)</text>
+
+  <rect x="200" y="120" width="200" height="56" rx="6" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="300" y="138" style="font-weight:600;font-size:11px">读 NVS mqtt.{endpoint,user,...}</text>
+  <text class="node-text sm" x="300" y="156">endpoint 空 → return false</text>
+
+  <rect x="430" y="40" width="200" height="40" rx="6" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="530" y="62">mqtt_-&gt;Connect(...)</text>
+
+  <rect x="430" y="120" width="200" height="56" rx="6" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="530" y="138" style="font-weight:600;font-size:11px">OnDisconnected 回调</text>
+  <text class="node-text sm" x="530" y="156">esp_timer_start_once(60s)</text>
+
+  <rect x="660" y="40" width="200" height="40" rx="6" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="760" y="62">Connect 失败 → SetError</text>
+
+  <rect x="430" y="216" width="200" height="56" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text class="node-text" x="530" y="234" style="font-weight:600;font-size:11px">reconnect_timer fires</text>
+  <text class="node-text sm" x="530" y="252">仅 Idle 时 Schedule(Start)</text>
+
+  <line x1="180" y1="60" x2="200" y2="60" stroke="#666" marker-end="url(#mArr)"/>
+  <line x1="300" y1="80" x2="300" y2="120" stroke="#666" marker-end="url(#mArr)"/>
+  <line x1="400" y1="60" x2="430" y2="60" stroke="#666" marker-end="url(#mArr)"/>
+  <line x1="630" y1="60" x2="660" y2="60" stroke="#666" stroke-dasharray="3 2" marker-end="url(#mArr)"/>
+  <line x1="530" y1="80" x2="530" y2="120" stroke="#666" stroke-dasharray="3 2" marker-end="url(#mArr)"/>
+  <line x1="530" y1="176" x2="530" y2="216" stroke="#666" stroke-dasharray="3 2" marker-end="url(#mArr)"/>
+  <line x1="530" y1="272" x2="530" y2="290" stroke="#666" marker-end="url(#mArr)"/>
+  <text class="node-text sm" x="530" y="306" style="fill:#2E7D32">→ Start 循环</text>
+</svg>
+</div>
+
+<h3>3.3 OpenAudioChannel（hello + UDP 拉起）</h3>
+<ol class="compact">
+  <li>检查 mqtt_ 已连 · 否则 StartMqttClient(true)</li>
+  <li><code>error_occurred_ = false</code> + 清 session_id_ + 清 SERVER_HELLO event bit</li>
+  <li>发 hello 消息（含 features.aec/mcp + audio_params 16k opus 60ms）</li>
+  <li><b>EventGroupWaitBits 10 s 等 SERVER_HELLO_EVENT</b>（阻塞调用方任务）</li>
+  <li>失败 → SetError "服务端超时" → return false</li>
+  <li>成功 → lock channel_mutex_ → 创建 UDP · Connect server:port</li>
+  <li>注册 UDP OnMessage（含 sequence 校验 + AES 解密）</li>
+  <li>调 <code>on_audio_channel_opened_</code> 回调</li>
+</ol>
+
+<h3>3.4 服务端 goodbye 兵乓机制</h3>
+<table>
+<tbody>
+<tr><td>服务端发 goodbye</td><td>session_id 匹配时 Schedule(<code>CloseAudioChannel(false)</code>)</td></tr>
+<tr><td>客户端主动 close</td><td><code>CloseAudioChannel(true)</code> 发 goodbye 给服务端</td></tr>
+<tr><td>避免兵乓</td><td><code>send_goodbye</code> 参数 · 服务端发来的 close 不回发</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 4. WebsocketProtocol ================== -->
+<section id="ws">
+<h2><span class="num">4</span> WebsocketProtocol · 单通道</h2>
+<p class="sub">控制 + 音频走同一个 WebSocket · binary 帧承载 OPUS · text 帧承载 JSON。</p>
+
+<h3>4.1 三版本二进制协议</h3>
+<table>
+<thead><tr><th>版本</th><th>头部结构</th><th>大小</th></tr></thead>
+<tbody>
+<tr><td>v1（默认）</td><td>无头部 · payload 即 OPUS</td><td>0 字节头</td></tr>
+<tr><td>v2</td><td><code>BinaryProtocol2</code>（version + type + reserved + timestamp + payload_size）</td><td>16 字节头</td></tr>
+<tr><td>v3</td><td><code>BinaryProtocol3</code>（type + reserved + payload_size）</td><td>4 字节头</td></tr>
+</tbody>
+</table>
+<p class="sub">版本来自 NVS <code>websocket.version</code> · 0/未设 → v1。</p>
+
+<h3>4.2 与 MqttProtocol 的差异</h3>
+<table>
+<thead><tr><th>项</th><th>MQTT</th><th>WebSocket</th></tr></thead>
+<tbody>
+<tr><td>Start() 行为</td><td>立即 Connect</td><td>仅 return true · 真连接延迟到 OpenAudioChannel</td></tr>
+<tr><td>自动重连</td><td>60 s esp_timer</td><td><b>无</b> · 断网后等用户唤醒重建</td></tr>
+<tr><td>音频传输</td><td>UDP + AES 加密</td><td>WebSocket 二进制帧 · 无加密（TLS 保密）</td></tr>
+<tr><td>控制/音频通道</td><td>分离（MQTT + UDP）</td><td>同一 WS</td></tr>
+<tr><td>CloseAudioChannel send_goodbye</td><td>真发 goodbye 消息</td><td><b>忽略参数</b>，直接 reset websocket_</td></tr>
+<tr><td>Auth Header</td><td>username/password</td><td>Bearer Token + Device-Id + Client-Id</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 5. WebsocketJoeaiProtocol ================== -->
+<section id="joyai">
+<h2><span class="num">5</span> WebsocketJoeaiProtocol · JD JoyAI</h2>
+<p class="sub">仅当 NVS <code>websocket.url</code> 含 <code>joyinside</code> 字串时启用。</p>
+
+<h3>5.1 URL 解析</h3>
+<p class="sub">OpenAudioChannel 内手写 query parser 提取 botId / sessionId / requestId · 同时把 query 中的 <code>:</code> 转义为 <code>%3A</code> 规避底层 URI parser stoi 异常。</p>
+
+<h3>5.2 事件 → 系统 JSON 映射</h3>
+<table>
+<thead><tr><th>Joyai 事件</th><th>映射为系统 type/state</th><th>触发动作</th></tr></thead>
+<tbody>
+<tr><td><code>SERVER_VOICE_CHAT_UPDATED / STARTED / READY</code></td><td>（内部）置 SERVER_READY 事件位</td><td>读 audio.output.sampleRate / frameSizeMs 写入 server_*_</td></tr>
+<tr><td><code>CALL_AGENT_START_EVENT</code></td><td>tts/start</td><td>切 Speaking</td></tr>
+<tr><td><code>TTS_SENTENCE_START</code></td><td>tts/sentence_start</td><td>显示新句</td></tr>
+<tr><td><code>TTS_COMPLETE</code> / <code>COMPLETE</code> / <code>CALL_AGENT_INTERRUPTED</code> / <code>INTERRUPT</code></td><td>tts/stop</td><td>切回 Idle</td></tr>
+<tr><td><code>EMPTY_CONTENT</code></td><td>tts/stop</td><td>避免卡边界</td></tr>
+<tr><td>contentType=AUDIO（base64）</td><td>注入 tts/start + audio packet</td><td>双路音频接收</td></tr>
+<tr><td>contentType=TEXT</td><td>stt</td><td>ASR 文本</td></tr>
+</tbody>
+</table>
+
+<h3>5.3 控制消息映射（覆写基类）</h3>
+<table>
+<tbody>
+<tr><td>SendStartListening(mode)</td><td>→ CLIENT_VOICE_CHAT_START（mode 被忽略）</td></tr>
+<tr><td>SendStopListening</td><td>→ CLIENT_VOICE_CHAT_STOP</td></tr>
+<tr><td>SendAbortSpeaking(reason)</td><td>→ CLIENT_TTS_ABORT（reason 被忽略）</td></tr>
+<tr><td>SendWakeWordDetected / SendMcpMessage</td><td><b>未覆写</b> · 沿用基类默认（可能与服务端不匹配）</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<b>双路音频接收</b>：服务端可发 binary OPUS 帧（走 HandleBinaryMessage）或 text JSON.content.AUDIO（base64 OPUS）· 两路 codec / sampleRate / frame_ms 都可独立 · 同一个 on_incoming_audio_ 回调汇入。这是 Joyai 独有路径。
+</div>
+</section>
+
+<!-- ================== 6. WebsocketBaiduProtocol ================== -->
+<section id="baidu">
+<h2><span class="num">6</span> WebsocketBaiduProtocol · 百度 BRTC 大模型互动</h2>
+<p class="sub">v2.2.11 启用 · NVS <code>websocket.url</code> 含 <code>brtc</code> 或 <code>baidu</code> 子串即激活 · 1655 行 · 四家协议中最复杂。</p>
+
+<div class="callout ok">
+<b>启用变更（5 处）</b>：
+<ul style="margin:6px 0 0 18px">
+<li><code>websocket_baidu_protocol.h:43</code> <code>CloseAudioChannel</code> 签名加 <code>bool send_goodbye = true</code>（修复编译错误）</li>
+<li><code>websocket_baidu_protocol.cc:3</code> <code>#include "display.h"</code> → <code>#include "display/display.h"</code></li>
+<li><code>websocket_baidu_protocol.cc:317</code> 定义签名同步 + <code>(void)send_goodbye</code></li>
+<li><code>main/CMakeLists.txt</code> 加 <code>"protocols/websocket_baidu_protocol.cc"</code></li>
+<li><code>application.cc</code> <code>InitializeProtocol</code> 加 <code>brtc/baidu</code> 子串分支（优先于 joyinside）</li>
+</ul>
+</div>
+
+<h3>6.1 启用条件 vs 三协议对比</h3>
+<table>
+<thead><tr><th>NVS websocket.url 子串</th><th>选中协议</th><th>判断顺序</th></tr></thead>
+<tbody>
+<tr><td><code>brtc</code> 或 <code>baidu</code></td><td><b>WebsocketBaiduProtocol</b></td><td>1（最高优先）</td></tr>
+<tr><td><code>joyinside</code></td><td>WebsocketJoeaiProtocol</td><td>2</td></tr>
+<tr><td>其他</td><td>WebsocketProtocol（兜底）</td><td>3</td></tr>
+</tbody>
+</table>
+
+<h3>6.2 复杂度速览 · 远超另外三家</h3>
+<table>
+<thead><tr><th>维度</th><th>数量</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>FreeRTOS Timer</td><td><b>3</b></td><td>idle_timer(30s 检查 / 5min 超时)· lic_retry(5s 一次性)· listening_to(30s 一次性)</td></tr>
+<tr><td>atomic 状态位</td><td><b>5</b></td><td>licensed_ / media_ready_ / is_speaking_ / is_playing_music_ / device_info_sent_</td></tr>
+<tr><td>非 atomic 状态位</td><td>4</td><td>greeting_sent_ / lic_active_pending_ / has_local_aec_ / auto_interrupt_</td></tr>
+<tr><td>失败追踪计数器</td><td>2 类 ×（counter + 时间戳）</td><td>audio_send_failures + control_send_failures · 各自独立断路器</td></tr>
+<tr><td>音频节流</td><td><b>20 ms pacing</b></td><td>过密帧静默 drop（&lt; 18 ms 间隔）· 与基类 60 ms 帧时长不一致</td></tr>
+<tr><td>快速重试</td><td>2 套阈值</td><td>音频 50 ms 内失败重试 1 次 · 控制 200 ms 内失败重试 1 次</td></tr>
+<tr><td>NVS 配置键</td><td>6 个</td><td>baidu.{server_sample_rate, server_frame_duration, break_delay_ms, idle_timeout, license_key, audiocodec}</td></tr>
+<tr><td>命令前缀</td><td>6 类</td><td>[E] 事件 · [Q] ASR · [A] LLM · [S] 状态 · [F] FunctionCall · [C] 自定义数据</td></tr>
+<tr><td>悬空指针保护</td><td><code>prevent_destroy_guard_</code></td><td>shared_ptr&lt;atomic&lt;bool&gt;&gt; · 析构置 false · timer/Schedule lambda 检查后跳过</td></tr>
+<tr><td>License key 默认</td><td>硬编码 fallback</td><td><code>"759877c9b68b4aa082cc05390be0cea9"</code>（NVS 未配置时使用）</td></tr>
+</tbody>
+</table>
+
+<h3>6.3 核心机制 1：WS 保活复用</h3>
+<p class="sub">与另外三家"断开 → 重连"模式不同，baidu 把 WS 当作长连接保活。</p>
+<table>
+<thead><tr><th>方法</th><th>行为</th></tr></thead>
+<tbody>
+<tr><td><code>CloseAudioChannel</code></td><td><b>不真正关 WS</b> · 仅置 media_ready_=false + 停 3 个 timer · 发 PREFIX_BREAK + CMD_MUSIC_STOP（如有）· WS 仍连</td></tr>
+<tr><td><code>OpenAudioChannel</code>（复用路径）</td><td>检测 <code>websocket_->IsConnected()</code> 为真 → 跳过 DNS/TCP/TLS/WS 握手 · 仅重发 device_info（如 AEC 切换）· media_ready_=true · 直接 return true</td></tr>
+<tr><td><code>OpenAudioChannel</code>（新建路径）</td><td>FetchSessionToken(HTTP) → ReplaceUrlParam → websocket_->Connect → 10 s 等 LICENSED 或 MEDIA_READY 事件</td></tr>
+<tr><td><code>DisconnectWebSocket</code>（独有 API）</td><td>真断 WS · 用于休眠/断网场景 · 不在 Protocol 基类接口</td></tr>
+</tbody>
+</table>
+
+<h3>6.4 核心机制 2：License 激活 + Token 缓存</h3>
+<table>
+<tbody>
+<tr><td>License key 来源</td><td>NVS baidu.license_key · 缺省 fallback 硬编码值</td></tr>
+<tr><td>激活时机</td><td>WS 连上后服务端推 [LIC] 事件 → 客户端发 EVENT_LIC_ACTIVE · 失败由 lic_retry_timer 5 s 后在 main_app 重试</td></tr>
+<tr><td>Token 缓存</td><td>连接方式 1（URL 含 <code>&id=&t=</code>）走 FetchSessionToken（HTTP）· 缓存 cached_instance_id_/cached_token_ · 断连后清除并 Prefetch</td></tr>
+<tr><td>预取异步任务</td><td><code>PrefetchSessionTokenAsync</code> → Schedule 派发 → 内含 <code>xTaskCreate(.., "bd_autoconn", 6144)</code> 自动建立 WS · <b>裸 xTaskCreate · 违反 § 四.1 落位表纪律</b></td></tr>
+</tbody>
+</table>
+
+<h3>6.5 核心机制 3：消息前缀路由</h3>
+<table>
+<thead><tr><th>前缀</th><th>语义</th><th>处理函数</th></tr></thead>
+<tbody>
+<tr><td><code>[E]:[LIC]:...</code></td><td>License 事件</td><td>HandleLicenseEvent</td></tr>
+<tr><td><code>[E]:[TTS_BEGIN_SPEAKING]</code> / <code>[TTS_END_SPEAKING]</code></td><td>TTS 开始/结束</td><td>HandleEvent · NotifyTtsState</td></tr>
+<tr><td><code>[E]:[REMOTE_PLAYER_BEGIN]</code> / <code>[REMOTE_PLAYER_END]</code></td><td>云端音乐播放控制</td><td>HandleEvent · is_playing_music_</td></tr>
+<tr><td><code>[E]:[CMD]:[REMOTE_PLAYER]:[STOP/PAUSE/RESUME]</code></td><td>云端推音乐控制</td><td>HandleRemoteMusicCommand → MusicPlayer 联动</td></tr>
+<tr><td><code>[Q]:</code> / <code>[Q]:[M]:[C]:</code></td><td>ASR 中间/最终结果</td><td>HandleAsrResult · 2 s 内同文本去重</td></tr>
+<tr><td><code>[A]:</code> / <code>[A]:[M]:</code></td><td>LLM 答复</td><td>HandleLLMResult · StripEmoji 过滤 4 字节 UTF-8</td></tr>
+<tr><td><code>[S]:</code></td><td>服务器状态/版本</td><td>仅日志</td></tr>
+<tr><td><code>[F]:</code></td><td>Function Call</td><td>HandleFunctionCall</td></tr>
+<tr><td><code>[C]:</code></td><td>自定义数据（云端推送）</td><td>HandleCustomData · 转 application.cc custom 消息</td></tr>
+<tr><td>裸 JSON <code>{type:"xxx"}</code></td><td>OTA/reboot 等命令</td><td>转 HandleCustomData</td></tr>
+</tbody>
+</table>
+
+<h3>6.6 启用后已知风险（详见 § 13 / § 15）</h3>
+<ul class="compact">
+<li><b>license_key 硬编码</b> · 用户未在 NVS 配 → 用 fallback · 该 key 来源/有效期未文档化</li>
+<li><b>裸 xTaskCreate "bd_autoconn"</b>（PrefetchSessionTokenAsync 内）· 6 KB 栈 · 未挂 Core 或登记</li>
+<li><b>OpenAudioChannel 10 s 阻塞 main_app</b>（与其他三家共有的 R2，但 baidu 含 FetchSessionToken HTTP 额外延迟）</li>
+<li><b>client_frame_duration=20 ms</b> 已生效（应用层 SendAudio 不读此方法）· 实际帧时长仍按 OPUS_FRAME_DURATION_MS 编码</li>
+<li><b>3 个 timer 析构顺序</b>：dtor 先 prevent_destroy_guard_ 置 false → stop+delete 三个 timer · 但 timer cb 内部可能正在 Schedule lambda 排队 · 依赖 main_app 在析构后不再处理 = 实际依赖 ResetProtocol 异步窗口</li>
+</ul>
+</section>
+
+<!-- ================== 7. InitializeProtocol ================== -->
+<section id="init">
+<h2><span class="num">7</span> InitializeProtocol · 选择决策（v2.2.11 含 baidu）</h2>
+<p class="sub">代码位置：<code>application.cc:618-636</code> · ActivationTask 调一次 · 之后只能 esp_restart 重切。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 920 420" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="iArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="460" y="20" class="svg-title" text-anchor="middle">InitializeProtocol · 决策树（v2.2.11）</text>
+
+  <ellipse cx="460" cy="55" rx="130" ry="20" fill="#FAFAFA" stroke="#666"/>
+  <text class="node-text" x="460" y="60" style="font-weight:600">ActivationTask 结尾</text>
+
+  <rect x="340" y="100" width="240" height="40" rx="6" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="460" y="124">ota_-&gt;HasMqttConfig() ?</text>
+
+  <rect x="40" y="180" width="180" height="48" rx="6" fill="#E0F7FA" stroke="#006064" stroke-width="2"/>
+  <text class="node-text" x="130" y="198" style="font-weight:600">MqttProtocol</text>
+  <text class="node-text sm" x="130" y="214">默认 · 量产主链路</text>
+
+  <rect x="340" y="180" width="240" height="40" rx="6" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="460" y="204">ota_-&gt;HasWebsocketConfig() ?</text>
+
+  <rect x="700" y="180" width="200" height="48" rx="6" fill="#E0F7FA" stroke="#006064"/>
+  <text class="node-text" x="800" y="198" style="font-weight:600">MqttProtocol</text>
+  <text class="node-text sm" x="800" y="214" style="fill:#F57F17">兜底 (LOGW warning)</text>
+
+  <rect x="340" y="260" width="240" height="40" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+  <text class="node-text" x="460" y="284" style="font-weight:600">url contains "brtc"|"baidu" ?</text>
+
+  <rect x="700" y="260" width="200" height="48" rx="6" fill="#F3E5F5" stroke="#6A1B9A" stroke-width="2"/>
+  <text class="node-text" x="800" y="278" style="font-weight:600">WebsocketBaiduProtocol</text>
+  <text class="node-text sm" x="800" y="294">百度 BRTC · 优先级 1</text>
+
+  <rect x="340" y="330" width="240" height="40" rx="6" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="460" y="354">url contains "joyinside" ?</text>
+
+  <rect x="700" y="330" width="200" height="48" rx="6" fill="#F3E5F5" stroke="#6A1B9A"/>
+  <text class="node-text" x="800" y="348" style="font-weight:600">WebsocketJoeaiProtocol</text>
+  <text class="node-text sm" x="800" y="364">JD JoyAI · 优先级 2</text>
+
+  <rect x="40" y="330" width="180" height="48" rx="6" fill="#F3E5F5" stroke="#6A1B9A"/>
+  <text class="node-text" x="130" y="348" style="font-weight:600">WebsocketProtocol</text>
+  <text class="node-text sm" x="130" y="364">兜底 · 优先级 3</text>
+
+  <line x1="460" y1="75" x2="460" y2="100" stroke="#666" marker-end="url(#iArr)"/>
+  <line x1="340" y1="120" x2="220" y2="180" stroke="#666" marker-end="url(#iArr)"/>
+  <text class="svg-axis" x="240" y="155" style="fill:#2E7D32">YES</text>
+  <line x1="460" y1="140" x2="460" y2="180" stroke="#666" marker-end="url(#iArr)"/>
+  <text class="svg-axis" x="475" y="160" style="fill:#666">NO</text>
+  <line x1="580" y1="200" x2="700" y2="200" stroke="#666" marker-end="url(#iArr)"/>
+  <text class="svg-axis" x="630" y="195" style="fill:#666">NO（兜底）</text>
+  <line x1="460" y1="220" x2="460" y2="260" stroke="#666" marker-end="url(#iArr)"/>
+  <text class="svg-axis" x="475" y="245" style="fill:#2E7D32">YES</text>
+  <line x1="580" y1="280" x2="700" y2="280" stroke="#666" marker-end="url(#iArr)"/>
+  <text class="svg-axis" x="630" y="275" style="fill:#2E7D32">YES → baidu</text>
+  <line x1="460" y1="300" x2="460" y2="330" stroke="#666" marker-end="url(#iArr)"/>
+  <text class="svg-axis" x="475" y="320" style="fill:#666">NO</text>
+  <line x1="580" y1="350" x2="700" y2="350" stroke="#666" marker-end="url(#iArr)"/>
+  <text class="svg-axis" x="630" y="345" style="fill:#2E7D32">YES → joyai</text>
+  <line x1="340" y1="354" x2="220" y2="354" stroke="#666" stroke-dasharray="3 2" marker-end="url(#iArr)"/>
+  <text class="svg-axis" x="285" y="349" style="fill:#666">NO（兜底）</text>
+</svg>
+</div>
+
+<h3>7.1 关键代码摘录</h3>
+<table>
+<thead><tr><th>判断</th><th>位置</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>ota_->HasMqttConfig()</code></td><td>application.cc:618</td><td>OTA /check_version 返回 mqtt config 字段</td></tr>
+<tr><td><code>ota_->HasWebsocketConfig()</code></td><td>application.cc:620</td><td>OTA 返回 websocket config</td></tr>
+<tr><td><code>ws_url.find("brtc") \|\| find("baidu")</code></td><td>application.cc:626</td><td>v2.2.11 新增 · 子串匹配 · 与 joyinside 同模式</td></tr>
+<tr><td><code>ws_url.find("joyinside")</code></td><td>application.cc:629</td><td>从 NVS <code>websocket.url</code> 读 · 子串匹配</td></tr>
+</tbody>
+</table>
+
+<h3>7.2 启用后用户切换路径</h3>
+<table>
+<tbody>
+<tr><td>OTA 配置只下发 MQTT</td><td>选 MqttProtocol（不可切 WS 系列）</td></tr>
+<tr><td>OTA 配置下发 WS · NVS url 改 baidu</td><td>3 连击 esp_restart → 重新 InitializeProtocol → 选 baidu</td></tr>
+<tr><td>同时支持 baidu + joyai 不同 SKU</td><td>OTA 后端按 MAC 下发不同 NVS url → 同一固件支持多平台</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 8. 触发点矩阵 ================== -->
+<section id="triggers">
+<h2><span class="num">8</span> 切换 · 触发点矩阵</h2>
+
+<table>
+<thead><tr><th>触发点</th><th>位置</th><th>动作</th><th>关键时序</th></tr></thead>
+<tbody>
+<tr><td><b>冷启动</b></td><td><code>ActivationTask</code></td><td>OTA 完成 → InitializeProtocol → protocol_-&gt;Start()</td><td>MQTT 立即连 · WS 延迟到 OpenAudioChannel</td></tr>
+<tr><td><b>NetworkType 切换</b>（3 连击）</td><td><code>SwitchNetworkType</code>（board.cc）</td><td>① 写 NVS network.type ② <b>Application::ResetProtocol</b> ③ AudioService::Stop ④ <b>esp_restart</b></td><td>异步 ResetProtocol + 1500 ms vTaskDelay 等 schedule 跑完 + LDO 钩子断电</td></tr>
+<tr><td><b>EnterDeepSleep</b></td><td><code>EnterDeepSleep</code>（board.cc）</td><td>① AudioService::Stop ② <b>Application::ResetProtocol</b> + delay 500 ms ③ GracefulShutdownModem ④ esp_deep_sleep_start</td><td>500 ms 让 Schedule lambda 跑 close + 析构</td></tr>
+<tr><td><b>Reboot</b>（system 命令 / OTA）</td><td><code>Application::Reboot</code></td><td>① CloseAudioChannel ② protocol_.reset() <b>同步</b> ③ AudioService::Stop ④ delay 1 s ⑤ esp_restart</td><td><b>同步</b> reset 不走 Schedule</td></tr>
+<tr><td><b>UpgradeFirmware</b></td><td><code>UpgradeFirmware</code></td><td>仅 CloseAudioChannel · 不 reset protocol_</td><td>失败回滚时 protocol_ 仍可用</td></tr>
+<tr><td><b>HandleNetworkDisconnectedEvent</b></td><td>application.cc:397</td><td>仅 CloseAudioChannel · 不 reset</td><td>等网络重连后用户唤醒重 OpenAudioChannel</td></tr>
+<tr><td>OnIncomingJson "reboot"</td><td>application.cc:719</td><td>Schedule(Reboot)</td><td>云端推送重启</td></tr>
+</tbody>
+</table>
+
+<h3>ResetProtocol 实现</h3>
+<table>
+<tbody>
+<tr><td>代码（application.cc:1422-1431）</td><td>Schedule lambda · <b>异步</b>派发到 main_app · 内部 CloseAudioChannel + protocol_.reset()</td></tr>
+<tr><td>调用方依赖</td><td><b>必须配合 vTaskDelay 等 schedule 跑完</b> · board.cc 的 ResetProtocol 后都有 500/1000/1500 ms delay</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 9. Open/Close 通道时序 ================== -->
+<section id="channel">
+<h2><span class="num">9</span> Open / Close 通道时序</h2>
+
+<h3>9.1 OpenAudioChannel 触发路径</h3>
+<table>
+<thead><tr><th>路径</th><th>调用点</th></tr></thead>
+<tbody>
+<tr><td>用户单击（BOOT / 触摸）</td><td>HandleToggleChatEvent → state=Connecting → Schedule(ContinueOpenAudioChannel) → OpenAudioChannel</td></tr>
+<tr><td>StartListening API</td><td>HandleStartListeningEvent → 同上路径</td></tr>
+<tr><td>唤醒词检测</td><td>HandleWakeWordDetectedEvent → state=Connecting → Schedule(ContinueWakeWordInvoke) → OpenAudioChannel</td></tr>
+<tr><td>SendTextToTts/AI（远程命令）</td><td>application.cc:1154 / 1167 · 自动开通道</td></tr>
+<tr><td>UpdateSystemPrompt</td><td>application.cc:1190 · 自动开通道</td></tr>
+</tbody>
+</table>
+
+<h3>9.2 CloseAudioChannel 触发路径</h3>
+<table>
+<thead><tr><th>路径</th><th>调用点</th><th>send_goodbye</th></tr></thead>
+<tbody>
+<tr><td>用户双击退出</td><td>触摸 DoubleClick / BOOT 单击 Listening 态 → HandleToggleChatEvent → CloseAudioChannel</td><td>true</td></tr>
+<tr><td>服务端 goodbye</td><td>MqttProtocol OnMessage → Schedule(CloseAudioChannel(false))</td><td><b>false</b>（防兵乓）</td></tr>
+<tr><td>网络断开</td><td>HandleNetworkDisconnectedEvent</td><td>true</td></tr>
+<tr><td>Reboot / UpgradeFirmware</td><td>同上</td><td>true</td></tr>
+<tr><td>ResetProtocol</td><td>异步 Schedule</td><td>true（基类默认）</td></tr>
+</tbody>
+</table>
+
+<h3>9.3 OpenAudioChannel 在 main_app 阻塞 10 s 风险</h3>
+<div class="callout bad">
+<b>关键</b>：ContinueOpenAudioChannel / ContinueWakeWordInvoke 通过 Schedule 派发到 <b>main_app 任务</b>。它们内部调 OpenAudioChannel · 而 OpenAudioChannel 内部含 <code>xEventGroupWaitBits(... 10000)</code> 等服务端 hello。
+意味着：<b>4G CSQ 差或服务端慢，main_app 任务卡 10 s</b>。期间所有 Schedule lambda 都不能执行（UI 刷新、其它按键、闹钟检查等都被推迟）。
+</div>
+</section>
+
+<!-- ================== 10. 回调与 Application 协作 ================== -->
+<section id="callbacks">
+<h2><span class="num">10</span> 7 个回调 · Application 协作面</h2>
+<p class="sub">在 <code>InitializeProtocol</code> 内一次性注册（application.cc:618-748）· 注意所有回调都需要 capture this，protocol_ 析构前必须保证 lambda 不再触发。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 380" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="cbArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">Protocol 回调 → Application 状态机</text>
+
+  <rect x="40" y="60" width="240" height="280" rx="8" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+  <text class="node-text" x="160" y="80" style="font-weight:600">Protocol 内部任务</text>
+  <text class="node-text sm" x="160" y="96">（MQTT/WS 内部 task · Core 0）</text>
+
+  <rect x="60" y="115" width="200" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="160" y="133">OnConnected</text>
+  <rect x="60" y="148" width="200" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="160" y="166">OnNetworkError</text>
+  <rect x="60" y="181" width="200" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="160" y="199">OnIncomingAudio</text>
+  <rect x="60" y="214" width="200" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="160" y="232">OnIncomingJson</text>
+  <rect x="60" y="247" width="200" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="160" y="265">OnAudioChannelOpened</text>
+  <rect x="60" y="280" width="200" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="160" y="298">OnAudioChannelClosed</text>
+  <rect x="60" y="313" width="200" height="22" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="160" y="327" style="font-size:10.5px">OnDisconnected (仅 MQTT)</text>
+
+  <rect x="600" y="60" width="240" height="280" rx="8" fill="#E3F2FD" stroke="#1976D2" stroke-width="2"/>
+  <text class="node-text" x="720" y="80" style="font-weight:600">main_app 任务 (Core 0)</text>
+  <text class="node-text sm" x="720" y="96">MAIN_EVENT_SCHEDULE 串行处理</text>
+
+  <rect x="620" y="115" width="200" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="720" y="133">DismissAlert</text>
+  <rect x="620" y="148" width="200" height="28" rx="4" fill="#FFEBEE" stroke="#C62828"/>
+  <text class="node-text" x="720" y="166" style="fill:#C62828">MAIN_EVENT_ERROR</text>
+  <rect x="620" y="181" width="200" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="720" y="199" style="font-size:10.5px">PushPacketToDecodeQueue</text>
+  <rect x="620" y="214" width="200" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="720" y="232" style="font-size:10.5px">tts/llm/mcp/system/alert/custom</text>
+  <rect x="620" y="247" width="200" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="720" y="265" style="font-size:10.5px">SetPowerSaveLevel(PERF)</text>
+  <rect x="620" y="280" width="200" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="720" y="298" style="font-size:10.5px">LOW_POWER + 切 Idle</text>
+  <rect x="620" y="313" width="200" height="22" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="720" y="327" style="font-size:10.5px">（注册了但应用层未差异化）</text>
+
+  <line x1="260" y1="129" x2="620" y2="129" stroke="#666" stroke-dasharray="2 2" marker-end="url(#cbArr)"/>
+  <line x1="260" y1="162" x2="620" y2="162" stroke="#C62828" stroke-dasharray="2 2" marker-end="url(#cbArr)"/>
+  <line x1="260" y1="195" x2="620" y2="195" stroke="#666" stroke-dasharray="2 2" marker-end="url(#cbArr)"/>
+  <line x1="260" y1="228" x2="620" y2="228" stroke="#666" stroke-dasharray="2 2" marker-end="url(#cbArr)"/>
+  <line x1="260" y1="261" x2="620" y2="261" stroke="#666" stroke-dasharray="2 2" marker-end="url(#cbArr)"/>
+  <line x1="260" y1="294" x2="620" y2="294" stroke="#666" stroke-dasharray="2 2" marker-end="url(#cbArr)"/>
+  <line x1="260" y1="324" x2="620" y2="324" stroke="#666" stroke-dasharray="2 2" marker-end="url(#cbArr)"/>
+
+  <text class="svg-axis" x="440" y="360" text-anchor="middle" style="fill:#666">→ Schedule lambda · 跨任务通过 main_tasks_ + mutex</text>
+</svg>
+</div>
+
+<h3>10.1 跨任务安全机制</h3>
+<table>
+<tbody>
+<tr><td>MqttProtocol::alive_</td><td>shared_ptr&lt;atomic&lt;bool&gt;&gt; · 析构置 false · Schedule lambda 内 if (*alive) 检查</td></tr>
+<tr><td>WebsocketProtocol</td><td><b>无 alive 保护</b> · 假设析构前 websocket_.reset() 已停所有回调</td></tr>
+<tr><td>WebsocketJoeaiProtocol</td><td><b>无 alive 保护</b> · 同上</td></tr>
+<tr><td>Application::Schedule</td><td>lambda 进入 main_tasks_ queue（mutex 保护）· main_app 任务处理 MAIN_EVENT_SCHEDULE 时取出执行</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 11. 评审一 · 架构层 ================== -->
+<section id="review1">
+<h2><span class="num">11</span> 评审一 · 架构层</h2>
+
+<h3>11.1 抽象设计评分</h3>
+<table>
+<thead><tr><th>维度</th><th>评估</th><th>原因</th></tr></thead>
+<tbody>
+<tr><td>接口职责分离</td><td><span class="pill ok">良好</span></td><td>11 个方法清晰分 transport 控制 / 控制消息发送 / 音频发送 三类</td></tr>
+<tr><td>回调机制</td><td><span class="pill ok">良好</span></td><td>7 个 OnXxx 让 Application 与 Protocol 解耦</td></tr>
+<tr><td>派生类 LSP（里氏替换）</td><td><span class="pill warn">部分破坏</span></td><td>WebsocketProtocol::CloseAudioChannel 忽略 send_goodbye 参数 · WebsocketJoeaiProtocol 隐藏 session_id_ 字段</td></tr>
+<tr><td>错误传播</td><td><span class="pill ok">良好</span></td><td>SetError → error_occurred_ + OnNetworkError 二合一</td></tr>
+<tr><td>资源生命周期</td><td><span class="pill warn">不一致</span></td><td>MQTT 有 alive_ guard · WS 系列无</td></tr>
+<tr><td>切换支持</td><td><span class="pill bad">薄弱</span></td><td>仅靠 ResetProtocol + esp_restart · 不支持运行时无重启切换</td></tr>
+</tbody>
+</table>
+
+<h3>11.2 架构问题</h3>
+<table>
+<thead><tr><th>ID</th><th>问题</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><b>A1</b></td><td>派生类签名不一致</td><td>WebsocketBaiduProtocol::CloseAudioChannel() 缺 send_goodbye 参数（编译失败陷阱）· WebsocketJoeaiProtocol::CloseAudioChannel 不使用 send_goodbye</td></tr>
+<tr><td><b>A2</b></td><td>session_id_ 隐藏基类字段</td><td>WebsocketJoeaiProtocol .h:42 重复声明 <code>std::string session_id_</code> 隐藏基类 protected 字段 · 基类的 <code>session_id()</code> getter 返回基类字段（空串）· 派生类自己写的 session_id_ 不被基类读取</td></tr>
+<tr><td><b>A3</b></td><td>OnDisconnected 与 OnAudioChannelClosed 语义重叠</td><td>WebsocketProtocol::OnDisconnected lambda 实际调用的是 <code>on_audio_channel_closed_</code>（line 168-173）· 而 MqttProtocol::OnDisconnected 调用 <code>on_disconnected_</code>（line 85-91）· 两个回调语义不一致</td></tr>
+<tr><td><b>A4</b></td><td>error_occurred_ 复位时机不一致</td><td>仅 OpenAudioChannel 清 error_occurred_ · 但 ResetProtocol 不重新 Open · 如果 protocol_ 在某次 SetError 后没立即 Open，IsAudioChannelOpened 永远返回 false</td></tr>
+<tr><td><b>A5</b></td><td>SendTextToTts/AI 仅 MQTT 实现</td><td>WebsocketProtocol/Joeai 返回 false（基类默认）· 远程命令路径在 WS 分支下失效</td></tr>
+<tr><td><b>A6</b></td><td>WebsocketBaiduProtocol 死代码</td><td>1654 行未编译 · 头文件签名错误 · 维护负债（见 § 14）</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 12. 评审二 · 切换流程 ================== -->
+<section id="review2">
+<h2><span class="num">12</span> 评审二 · 切换流程</h2>
+
+<h3>12.1 ResetProtocol 异步陷阱</h3>
+<div class="callout bad">
+<b>核心问题</b>：<code>Application::ResetProtocol</code> 是 <b>异步 Schedule</b>（application.cc:1423）· 调用方调它后立即返回 · 但实际 CloseAudioChannel + protocol_.reset() 要等 main_app 任务处理下一个 MAIN_EVENT_SCHEDULE 才执行。
+<br><br>
+<b>潜在后果</b>：
+<ul style="margin:6px 0 0 18px">
+<li>EnterDeepSleep 流程：ResetProtocol() → vTaskDelay(500) → GracefulShutdownModem → 断 LDO。若 main_app 在这 500 ms 内被其他 Schedule lambda 卡住（如 SetPowerSaveLevel 的同步路径），CloseAudioChannel 不会及时跑 → 服务端 session 未优雅 close · 同时 4G modem 仍在 PPP → GracefulShutdownModem AT+CFUN=4 多等几个包</li>
+<li>SwitchNetworkType 流程：1500 ms 余量较多，相对安全</li>
+</ul>
+</div>
+
+<h3>12.2 触发点对比</h3>
+<table>
+<thead><tr><th>触发</th><th>同步 reset</th><th>异步 reset</th><th>主流程是否等 close 完成</th></tr></thead>
+<tbody>
+<tr><td>SwitchNetworkType</td><td>—</td><td>✓</td><td>delay 1500 ms（充足）· esp_restart 兜底 ShutdownHandler</td></tr>
+<tr><td>EnterDeepSleep</td><td>—</td><td>✓</td><td>delay 500 ms · 较紧 · 依赖 main_app 不阻塞</td></tr>
+<tr><td>Reboot</td><td>✓</td><td>—</td><td><b>同步</b> 不走 Schedule · 真正等到 reset 完成</td></tr>
+<tr><td>UpgradeFirmware</td><td>仅 Close</td><td>—</td><td>不 reset · 升级失败回滚保留 protocol_</td></tr>
+<tr><td>HandleNetworkDisconnectedEvent</td><td>仅 Close</td><td>—</td><td>不 reset · 等重连</td></tr>
+</tbody>
+</table>
+
+<h3>12.3 切换流程时序图</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 320" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="tArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">SwitchNetworkType vs EnterDeepSleep · ResetProtocol 时序对照</text>
+
+  <text class="svg-axis" x="40" y="60" style="font-weight:600">SwitchNetworkType</text>
+
+  <rect x="40" y="75" width="100" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="90" y="93" style="font-size:10.5px">写 NVS type</text>
+  <rect x="150" y="75" width="100" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="200" y="93" style="font-size:10.5px">Notification</text>
+  <rect x="260" y="75" width="100" height="28" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="310" y="93" style="font-size:10.5px">delay 1000ms</text>
+  <rect x="370" y="75" width="120" height="28" rx="4" fill="#E0F7FA" stroke="#006064"/>
+  <text class="node-text" x="430" y="93" style="font-size:10.5px;font-weight:600">ResetProtocol↗</text>
+  <rect x="500" y="75" width="100" height="28" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="550" y="93" style="font-size:10.5px">delay 500ms</text>
+  <rect x="610" y="75" width="120" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="670" y="93" style="font-size:10.5px">AudioService.Stop</text>
+  <rect x="740" y="75" width="100" height="28" rx="4" fill="#FFEBEE" stroke="#C62828"/>
+  <text class="node-text" x="790" y="93" style="font-size:10.5px;font-weight:600">esp_restart</text>
+
+  <text class="svg-axis" x="40" y="160" style="font-weight:600">EnterDeepSleep</text>
+
+  <rect x="40" y="175" width="100" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="90" y="193" style="font-size:10.5px">AudioSvc.Stop</text>
+  <rect x="150" y="175" width="100" height="28" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="200" y="193" style="font-size:10.5px">delay 100ms</text>
+  <rect x="260" y="175" width="100" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="310" y="193" style="font-size:10.5px">PSTimer disable</text>
+  <rect x="370" y="175" width="120" height="28" rx="4" fill="#E0F7FA" stroke="#006064"/>
+  <text class="node-text" x="430" y="193" style="font-size:10.5px;font-weight:600">ResetProtocol↗</text>
+  <rect x="500" y="175" width="100" height="28" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+  <text class="node-text" x="550" y="193" style="font-size:10.5px">delay 500ms</text>
+  <rect x="610" y="175" width="120" height="28" rx="4" fill="#fff" stroke="#666"/>
+  <text class="node-text" x="670" y="193" style="font-size:10.5px">CFUN=4 + 800ms</text>
+  <rect x="740" y="175" width="100" height="28" rx="4" fill="#FFEBEE" stroke="#C62828"/>
+  <text class="node-text" x="790" y="193" style="font-size:10.5px;font-weight:600">deep_sleep</text>
+
+  <line x1="430" y1="103" x2="430" y2="240" stroke="#006064" stroke-width="1" stroke-dasharray="2 2"/>
+  <line x1="500" y1="103" x2="500" y2="240" stroke="#F57F17" stroke-width="1" stroke-dasharray="2 2"/>
+
+  <rect x="380" y="246" width="240" height="64" rx="6" fill="#FFF8E1" stroke="#F57F17"/>
+  <text class="node-text" x="500" y="266" style="font-weight:600">Schedule 异步窗口</text>
+  <text class="node-text sm" x="500" y="284">main_app 必须在 500ms 内</text>
+  <text class="node-text sm" x="500" y="298">处理 MAIN_EVENT_SCHEDULE · 否则</text>
+  <text class="node-text sm" x="500" y="310" style="fill:#D32F2F">下一步动作（断 LDO）会先到</text>
+</svg>
+</div>
+
+<h3>12.4 ResetProtocol 是否应该改同步？</h3>
+<table>
+<tbody>
+<tr><td><b>异步派生原因</b></td><td>避免在按键 task / Modem callback 等任意上下文里直接 reset · 防止持有 mutex 的任务和 destructor 路径互锁</td></tr>
+<tr><td><b>异步代价</b></td><td>调用方必须配 delay · 不能信"调完就关好"</td></tr>
+<tr><td><b>建议</b></td><td>保持异步但<b>返回 future / event bit</b>，让调用方可等待完成（信号量 + xEventGroupWaitBits 模式），比 delay 准确</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 13. 评审三 · 风险与边界 ================== -->
+<section id="review3">
+<h2><span class="num">13</span> 评审三 · 风险与边界</h2>
+
+<h3>13.1 P0 风险</h3>
+<table>
+<thead><tr><th>ID</th><th>风险</th><th>影响</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td><b>R1</b></td><td><b>websocket_baidu 编译陷阱</b></td><td>1654 行死代码 · 头文件 <code>CloseAudioChannel() override</code> 签名不匹配 · 一旦加回 CMakeLists 立即编译失败</td><td>立即删除整对 .cc/.h 或迁到 archive/ 目录 · 不能让它"半死不活"在主目录</td></tr>
+<tr><td><b>R2</b></td><td><b>OpenAudioChannel 阻塞 main_app 10 s</b></td><td>4G CSQ 差或服务端慢 → ContinueOpenAudioChannel 在 main_app 中卡 10 s · 期间所有 Schedule lambda 不执行（UI 不刷 / 闹钟不响 / 按键事件挤压）</td><td>把 OpenAudioChannel 挪到独立任务（如 ProtocolOpenTask）· 或把 EventGroupWaitBits 改 1 s 重试 + 异步状态机</td></tr>
+</tbody>
+</table>
+
+<h3>13.2 P1 风险</h3>
+<table>
+<thead><tr><th>ID</th><th>风险</th><th>影响</th></tr></thead>
+<tbody>
+<tr><td><b>R3</b></td><td>WS 系列无 alive_ guard</td><td>WebsocketProtocol / Joeai 析构时若有 OnData/OnDisconnected 回调正在 in-flight → 调用 on_xxx_ lambda 时 this 可能悬空 · 实际 websocket_.reset() 应该等回调 join，但取决于底层 web_socket 组件实现</td></tr>
+<tr><td><b>R4</b></td><td>session_id_ 隐藏（A2）</td><td>WebsocketJoeaiProtocol 自己写 session_id_ 但基类 SendAbortSpeaking / SendStartListening 拼接的是基类 session_id_（空串）· Joeai 自己又覆写了这些方法，所以实际影响可能为零 · <b>但代码气味强</b></td></tr>
+<tr><td><b>R5</b></td><td>OnDisconnected vs OnAudioChannelClosed（A3）</td><td>WS 协议把 OnDisconnected 当成 OnAudioChannelClosed 用 · MQTT 把两者分开 · 应用层注册 OnDisconnected 在 MQTT 路径下空触发，在 WS 路径下 永不触发</td></tr>
+<tr><td><b>R6</b></td><td>HandleNetworkDisconnectedEvent 缺空检查</td><td>application.cc:402 <code>protocol_->CloseAudioChannel()</code> 没检查 <code>protocol_</code> 是否为空 · 如果在 ResetProtocol Schedule 跑完后 + 网络断开同时发生 → nullptr deref</td></tr>
+<tr><td><b>R7</b></td><td>ResetProtocol 异步缺等待信号</td><td>EnterDeepSleep 的 500 ms 延迟是经验值 · 4G CSQ 差时 CloseAudioChannel 发 goodbye 网络往返可能超 500 ms</td></tr>
+<tr><td><b>R8</b></td><td>SendTextToTts/AI 仅 MQTT 实现</td><td>WS 协议下"远程命令推 TTS"功能失效 · application.cc:1163 调用会 return false 但调用方未处理</td></tr>
+<tr><td><b>R9</b></td><td>MqttProtocol::SendAudio 持锁加密 + UDP send</td><td>channel_mutex_ 锁住的代码段包含 mbedtls_aes_crypt_ctr + udp_->Send · 实测 50-100 µs 但理论上若 SendAudio 频繁（每 60 ms 一帧）与 CloseAudioChannel 并发 · 偶发延迟</td></tr>
+<tr><td><b>R10</b></td><td>WebsocketJoeaiProtocol HandleErrorMessage 死代码</td><td>line 370-376 定义但未在任何路径调用 · 协议错误处理路径缺失</td></tr>
+</tbody>
+</table>
+
+<h3>13.3 P2 观察项</h3>
+<table>
+<thead><tr><th>ID</th><th>观察</th></tr></thead>
+<tbody>
+<tr><td>R11</td><td>WebsocketProtocol::SendAudio v2 字段 host-order 写入但读取时也 ntohl · 一致性 OK（自洽）但跨平台时可能踩坑</td></tr>
+<tr><td>R12</td><td>WS v3 binary 解析 <code>bp3->type = bp3->type;</code>（自赋值）· 无意义但无害 · 是占位逻辑</td></tr>
+<tr><td>R13</td><td>MqttProtocol UDP sequence 不验证乱序丢包 · 仅日志告警 · OPUS 编解码有一定容错</td></tr>
+<tr><td>R14</td><td>WebsocketJoeaiProtocol bot_id_ / session_id_ / request_id_ 通过 URL 解析 · 没有校验长度/格式 · 恶意 URL 可能溢出 buffer（实际用 std::string append，无内存安全问题）</td></tr>
+<tr><td>R15</td><td>各 protocol 析构顺序：所有都先 vEventGroupDelete · MQTT 还多 esp_timer_delete · 但都<b>不显式 disconnect</b> · 依赖 unique_ptr 析构序</td></tr>
+<tr><td>R16</td><td>OpenAudioChannel 失败时仅 SetError · 不通知调用方"是否需要重试" · application.cc 中调用方收到 false 后路径很短，不重试</td></tr>
+<tr><td>R17</td><td>InitializeProtocol 在 ActivationTask 调一次 · 后续 SwitchNetworkType 是 esp_restart 整个进程重新走 · 没有"不重启切换协议"的路径</td></tr>
+<tr><td>R18</td><td>protocol_->Start() 在 InitializeProtocol 末尾调 · MQTT 立即连接 · 但回调注册在 Start() 之前 · 如果 MQTT 在 Start() 内部立即收到消息（极快网络），回调线程安全 · 实测 OK</td></tr>
+</tbody>
+</table>
+
+<h3>13.4 推演：可能在哪些场景出 bug？</h3>
+<table>
+<thead><tr><th>场景</th><th>会复现的风险</th></tr></thead>
+<tbody>
+<tr><td>用户在 4G CSQ 差时单击唤醒</td><td>R2 复现 · main_app 卡 10 s · 期间用户疯狂点屏没反应</td></tr>
+<tr><td>有人加回 websocket_baidu_protocol.cc 到 CMakeLists</td><td>R1 复现 · 编译失败</td></tr>
+<tr><td>切换到 WebsocketProtocol 后远程命令推 TTS</td><td>R8 复现 · SendTextToTts 返回 false · 提示音不响</td></tr>
+<tr><td>WS 模式下网络断开</td><td>R5 复现 · OnDisconnected 注册了但永不触发（WS 路径里它实际触发的是 OnAudioChannelClosed）</td></tr>
+<tr><td>EnterDeepSleep 同时网络掉</td><td>R6 + R7 复合 · 罕见</td></tr>
+<tr><td>JoyAI 协议 + 服务端发未知 eventType</td><td>仅日志 · 不崩 · 但 ASR/TTS 流程可能"卡边界"</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ================== 14. 精简建议 ================== -->
+<section id="cleanup">
+<h2><span class="num">14</span> 精简建议</h2>
+
+<h3>14.1 立即可做（量产前）</h3>
+<table>
+<thead><tr><th>动作</th><th>影响</th><th>风险</th></tr></thead>
+<tbody>
+<tr><td><b>baidu license_key NVS 化（去硬编码 fallback）</b></td><td>出厂强制配置 · 杜绝"用 demo key 误上线"</td><td>需要 OTA 配置流程一并下发 · 短期可保留 fallback + 加日志告警</td></tr>
+<tr><td><b>baidu 内 <code>xTaskCreate("bd_autoconn", ...)</code> 登记或改 Static Pin</b>（PrefetchSessionTokenAsync 内）</td><td>违 § 四.1 落位表纪律 · 6 KB 栈未挂 Core</td><td>低（任务一次性，OpenAudioChannel 后即 vTaskDelete）</td></tr>
+<tr><td>HandleNetworkDisconnectedEvent 加空检查（R6）</td><td>一行：<code>if (!protocol_) return;</code></td><td>零</td></tr>
+<tr><td>InitializeProtocol 兜底分支 LOGW 文案改清晰</td><td>用户排查 OTA 配置问题更友好</td><td>零</td></tr>
+<tr><td>移除 application.cc:1182 死注释（提及 baidu tts 通道）</td><td>注释已不准确（baidu 实际通过 [E] 事件而非"专用 tts 通道"）</td><td>零</td></tr>
+</tbody>
+</table>
+
+<h3>14.2 量产后第一个 PR</h3>
+<table>
+<thead><tr><th>动作</th><th>设计</th></tr></thead>
+<tbody>
+<tr><td>OpenAudioChannel 异步化（R2）</td><td>新建独立任务 <code>protocol_open</code> · Core 0 · 4 KB · OpenAudioChannel 在此跑 · 完成后回 Schedule 通知 Application 切到 Listening · main_app 不阻塞</td></tr>
+<tr><td>ResetProtocol 加 done event（R7）</td><td>Schedule lambda 末尾 xEventGroupSetBits · 调用方可选 xEventGroupWaitBits + timeout · 替代裸 vTaskDelay</td></tr>
+<tr><td>WS 系列加 alive_ guard（R3）</td><td>抽到基类 protected · WS/Joeai/Baidu 复用同一模板</td></tr>
+<tr><td>修 WebsocketJoeaiProtocol::session_id_ 隐藏（A2）</td><td>删派生类字段 · 让 ParseServerHello 写基类 session_id_</td></tr>
+<tr><td>统一 OnDisconnected 语义（A3 / R5）</td><td>WS 系列把 line 168 的回调改为 <code>on_disconnected_</code> · 应用层加 OnDisconnected 处理（如显示"网络断开"图标）</td></tr>
+</tbody>
+</table>
+
+<h3>14.3 长期重构（不要在量产期做）</h3>
+<table>
+<thead><tr><th>动作</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>SendTextToTts/AI 移到基类默认实现（A5）</td><td>所有 protocol 用统一的 listen state=detect 文本消息（MQTT 已经这样）</td></tr>
+<tr><td>OpenAudioChannel 状态机化</td><td>替代 EventGroupWait 10 s · 用状态机 connecting → hello_sent → hello_received → opened · 每步可重试</td></tr>
+<tr><td>InitializeProtocol 抽 ProtocolFactory</td><td>方便测试 · 但当前只有 3 种 protocol，工厂模式 ROI 低</td></tr>
+<tr><td>error_occurred_ 改 enum NetworkErrorReason（A4）</td><td>区分超时 / 服务端拒绝 / 网络断开 · 应用层做差异化提示</td></tr>
+</tbody>
+</table>
+
+<h3>14.4 一句话决策树（v2.2.11 更新版）</h3>
+<div class="callout ok">
+<b>本周</b>：① baidu 联调跑通后把 license_key 硬编码 fallback 删掉强制 NVS 配置；② 补 HandleNetworkDisconnectedEvent 空检查；③ baidu 内 <code>"bd_autoconn"</code> 裸 xTaskCreate 改 PinnedToCore + 落位表登记。<br>
+<b>下个 PR</b>：OpenAudioChannel 异步化（消除 main_app 10 s 阻塞）· 四家协议统一受益。<br>
+<b>已完成 v2.2.11</b>：✅ baidu 启用（5 处改动） · ✅ baidu 帧长 20→60 ms 与全链路统一 · ✅ 移除 20ms pacing 死代码 · ✅ 删 last_audio_send_time_ write-only 死字段。<br>
+<b>不要做</b>：抽 ProtocolFactory / 状态机化 · 量产期保守 &gt; 激进。
+</div>
+</section>
+
+<!-- ================== 15. 四家平台 · 三遍审查 ================== -->
+<section id="triple">
+<h2><span class="num">15</span> 四家平台 · 三遍审查（v2.2.11）</h2>
+<p class="sub">同一审查角度（接口对齐 / 状态机 / 资源生命周期）应用到全部 4 个 protocol · 帮助横向对照定位"哪家协议在哪个维度最薄弱"。</p>
+
+<h3>15.0 四家平台横向矩阵</h3>
+<table>
+<thead><tr><th>维度</th><th>MQTT</th><th>Websocket</th><th>Joyai</th><th>Baidu</th></tr></thead>
+<tbody>
+<tr><td>启用条件</td><td>HasMqttConfig</td><td>WS 兜底</td><td>url 含 joyinside</td><td>url 含 brtc/baidu（优先）</td></tr>
+<tr><td>底层传输</td><td>MQTT 控制 + UDP 加密音频</td><td>单 WS</td><td>单 WS</td><td>单 WS · 保活复用</td></tr>
+<tr><td>音频加密</td><td>AES-128-CTR（应用层）</td><td>仅 TLS</td><td>仅 TLS</td><td>仅 TLS</td></tr>
+<tr><td>音频帧长</td><td>60 ms</td><td>60 ms</td><td>60 ms（服务端 hello 可改）</td><td>60 ms（v2.2.11 统一）</td></tr>
+<tr><td>自动重连</td><td>60 s esp_timer</td><td>无</td><td>无</td><td>断连后 PrefetchSessionTokenAsync 自动建 WS</td></tr>
+<tr><td>OpenAudioChannel 等待</td><td>EventGroupWait 10 s（hello）</td><td>EventGroupWait 10 s（hello）</td><td>EventGroupWait 10 s（READY）</td><td>EventGroupWait 10 s（LICENSED \| MEDIA_READY）</td></tr>
+<tr><td>CloseAudioChannel 行为</td><td>真关 UDP + 可选 goodbye</td><td>websocket_.reset · 忽略 send_goodbye</td><td>websocket_.reset · 忽略 send_goodbye</td><td>仅置 media_ready=false · <b>WS 保活复用</b></td></tr>
+<tr><td>跨任务保护</td><td>alive_ shared_ptr atomic</td><td>无</td><td>无</td><td>prevent_destroy_guard shared_ptr atomic</td></tr>
+<tr><td>消息路由层级</td><td>type 字段（tts/llm/mcp/...）</td><td>type 字段</td><td>contentType + eventType 两层</td><td>6 类前缀 [E]/[Q]/[A]/[S]/[F]/[C]</td></tr>
+<tr><td>SendTextToTts / AI</td><td>覆写（listen state=detect）</td><td>基类默认 = false</td><td>基类默认 = false</td><td>覆写（INPUT_TEXT_TO_TTS / AI）</td></tr>
+<tr><td>UpdateSystemPrompt</td><td>基类默认 = false</td><td>基类默认 = false</td><td>基类默认 = false</td><td>覆写（CMD_UPDATE_PROMPT）</td></tr>
+<tr><td>SendRemoteMusicControl</td><td>基类默认 = false</td><td>基类默认 = false</td><td>基类默认 = false</td><td>覆写（PAUSE/RESUME/STOP）</td></tr>
+<tr><td>额外 timer</td><td>1（reconnect 60 s）</td><td>0</td><td>0</td><td><b>3</b>（idle 30 s / lic_retry 5 s / listening 30 s）</td></tr>
+<tr><td>NVS 命名空间</td><td>mqtt</td><td>websocket</td><td>websocket</td><td>baidu + websocket</td></tr>
+<tr><td>License / 鉴权</td><td>username/password（mqtt）</td><td>Bearer Token (header)</td><td>Bearer Token</td><td>License Key + 会话 Token（HTTP 预取）</td></tr>
+<tr><td>失败断路器</td><td>无（依赖 MQTT 重连）</td><td>无</td><td>无</td><td><b>2 套</b>（音频 3/10/5 s · 控制独立计数）</td></tr>
+<tr><td>代码行数</td><td>402 + 68</td><td>254 + 34</td><td>410 + 74</td><td>1477 + 178</td></tr>
+<tr><td>复杂度评分</td><td>⭐⭐⭐</td><td>⭐</td><td>⭐⭐</td><td>⭐⭐⭐⭐⭐</td></tr>
+</tbody>
+</table>
+
+<h3>15.1 第一遍审查 · 接口对齐（是否守住 Protocol 抽象契约）</h3>
+<table>
+<thead><tr><th>检查项</th><th>MQTT</th><th>Websocket</th><th>Joyai</th><th>Baidu</th></tr></thead>
+<tbody>
+<tr><td>11 个 virtual 全覆盖</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>CloseAudioChannel 签名一致（v2.2.11 后）</td><td>✅</td><td>✅</td><td>✅</td><td>✅（修复）</td></tr>
+<tr><td>send_goodbye 语义</td><td>✅ 真用 · 防服务端兵乓</td><td>⚠ 忽略</td><td>⚠ 忽略</td><td>⚠ 忽略（保活路径不发 goodbye）</td></tr>
+<tr><td>IsAudioChannelOpened 三因子统一<br>（transport + !error + !IsTimeout）</td><td>✅</td><td>✅</td><td>✅</td><td>⚠ 用 media_ready_ 替代 IsTimeout · 跳过 120 s 超时检查</td></tr>
+<tr><td>OnDisconnected 触发点</td><td>✅ MQTT 断开真触发</td><td>❌ 实际触发的是 on_audio_channel_closed_</td><td>❌ 同上</td><td>❌ 自定义路径调 audio_channel_closed</td></tr>
+<tr><td>session_id_ 写到基类字段</td><td>✅ ParseServerHello 写基类</td><td>✅ 同左</td><td>❌ 隐藏 · 派生类自有字段</td><td>⚠ 基类字段写 · 自有 device_id_/user_id_ 平行</td></tr>
+<tr><td>error_occurred_ 复位时机</td><td>OpenAudioChannel</td><td>OpenAudioChannel</td><td>OpenAudioChannel</td><td>OpenAudioChannel（含复用路径）</td></tr>
+<tr><td>UpdateLastIncomingTime 调用</td><td>OnMessage 末尾</td><td>OnData 末尾</td><td>OnData 末尾</td><td>OnData 末尾</td></tr>
+<tr><td>SendTextToTts / SendTextToAI 实现</td><td>✅ listen state=detect</td><td>❌ false</td><td>❌ false</td><td>✅ INPUT_TEXT_TO_TTS/AI</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<b>第一遍结论</b>：四家在 <b>OnDisconnected 语义</b>上不一致（MQTT 真触发 vs WS 系列实际触发 audio_channel_closed），且 <b>SendTextToTts/AI 仅 2/4 实现</b>（普通 WS + Joyai 没覆写）。如果未来要在 WS 路径加"远程命令 TTS"功能，需要为这两家补 SendText。
+</div>
+
+<h3>15.2 第二遍审查 · 状态机与时序（事件流是否自洽）</h3>
+<table>
+<thead><tr><th>状态/动作</th><th>MQTT</th><th>Websocket</th><th>Joyai</th><th>Baidu</th></tr></thead>
+<tbody>
+<tr><td>OpenAudioChannel 关键步骤数</td><td>5 步</td><td>4 步</td><td>5 步（含 ConfigureChatParameters）</td><td><b>10 步</b>（含 Token 预取 + License 等待）</td></tr>
+<tr><td>是否 main_app 内阻塞 10 s</td><td>✅ 是</td><td>✅ 是</td><td>✅ 是</td><td>✅ 是 + HTTP 延迟可叠加</td></tr>
+<tr><td>断网后重连策略</td><td>esp_timer 60 s 退避 · 仅 Idle 触发</td><td>等用户唤醒</td><td>等用户唤醒</td><td>PrefetchSessionTokenAsync 内 xTaskCreate auto-connect</td></tr>
+<tr><td>服务端 goodbye 处理</td><td>session_id 校验 · Schedule CloseAudioChannel(false)</td><td>无 goodbye 概念</td><td>无 goodbye 概念</td><td>无显式 goodbye 路径 · 走 [E] 事件控制</td></tr>
+<tr><td>TTS state 通知（start/stop）</td><td>服务端推 type=tts</td><td>同左</td><td>事件映射（CALL_AGENT_START → start 等）</td><td>[TTS_BEGIN_SPEAKING] / [TTS_END_SPEAKING] 路由</td></tr>
+<tr><td>Listening 超时保护</td><td>无</td><td>无</td><td>无</td><td>✅ listening_timer 30 s（弱网/LIC_FAILED 防呆）</td></tr>
+<tr><td>Idle 超时主动断</td><td>无（依赖基类 120 s）</td><td>无</td><td>无</td><td>✅ idle_timer 5 min · idle_goodbye_sent_ 防呆</td></tr>
+<tr><td>音频上行流控</td><td>无 · UDP 不丢</td><td>无</td><td>无</td><td>断路器（连续失败 3/10 → 跳/关）+ 快速重试</td></tr>
+<tr><td>TTS 期间是否继续发音频</td><td>是（云端 AEC 决定）</td><td>是</td><td>是</td><td>有 AEC 才发 · 无 AEC 不发（避免回声反馈）</td></tr>
+<tr><td>音乐播放联动</td><td>无</td><td>无</td><td>无</td><td>✅ is_playing_music_ 状态 + 自动 PAUSE/RESUME 联动</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<b>第二遍结论</b>：baidu 在<b>状态机完备性</b>上最重 — 有 listening 超时 / idle 超时 / 断路器 / 音乐联动 / TTS 期音频策略；其它三家在边界场景（Listening 卡住、Idle 长开通道）依赖基类 120 s 超时。<br>
+<b>OpenAudioChannel 10 s 阻塞主任务是四家共有的 P0</b>（§ 13 R2），但 baidu 因附加 HTTP token 预取，<b>最坏延迟可叠加到 ~12-15 s</b>。
+</div>
+
+<h3>15.3 第三遍审查 · 资源生命周期（析构 / 跨任务安全）</h3>
+<table>
+<thead><tr><th>资源</th><th>MQTT</th><th>Websocket</th><th>Joyai</th><th>Baidu</th></tr></thead>
+<tbody>
+<tr><td>跨任务 alive 保护</td><td>✅ alive_ shared_ptr</td><td>❌</td><td>❌</td><td>✅ prevent_destroy_guard_</td></tr>
+<tr><td>EventGroup 析构</td><td>✅ vEventGroupDelete</td><td>✅ 同左</td><td>✅ 同左</td><td>✅ 同左</td></tr>
+<tr><td>WS / UDP 析构</td><td>✅ unique_ptr.reset</td><td>✅ unique_ptr.reset</td><td>✅ unique_ptr.reset</td><td>✅ Close + 200 ms 等待 + reset</td></tr>
+<tr><td>Timer 析构</td><td>✅ stop + delete (esp_timer)</td><td>—</td><td>—</td><td>✅ stop + delete ×3（xTimer · 1 s 超时）</td></tr>
+<tr><td>mutex 保护写</td><td>✅ channel_mutex_（udp_）</td><td>❌</td><td>❌</td><td>❌（依赖 atomic）</td></tr>
+<tr><td>裸 xTaskCreate</td><td>无</td><td>无</td><td>无</td><td>⚠ "bd_autoconn" Core 未挂 · 6 KB 栈 · 一次性 · 未登记 § 四.1</td></tr>
+<tr><td>HTTP 同步阻塞</td><td>无</td><td>无</td><td>无</td><td>⚠ FetchSessionToken 同步 · 在 OpenAudioChannel/Schedule lambda 跑</td></tr>
+<tr><td>UART 阻塞风险（4G 板）</td><td>低</td><td>低</td><td>低</td><td>⚠ lic_retry 设计就是为了避开 TTS_END 在网络线程直接发 LIC_ACTIVE 卡 UART 5 s</td></tr>
+<tr><td>未释放成员（写无读）</td><td>—</td><td>—</td><td>—</td><td>✅ last_audio_send_time_ 已删（v2.2.11）</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<b>第三遍结论</b>：MQTT 和 Baidu 都有跨任务保护机制（alive / guard），但实现风格不同；<b>WS / Joyai 完全裸跑</b>，依赖 web_socket 底层 reset 时同步 join 内部回调任务——一旦底层组件改 ABI 可能出悬空 this。<br>
+Baidu 的"裸 xTaskCreate bd_autoconn"和"FetchSessionToken 同步 HTTP"是<b>两个独立但相关的设计妥协</b>，量产后第一批 PR 建议合并改造为"独立任务 + 内部状态机"。
+</div>
+
+<h3>15.4 推演 · 四家在用户场景下的"会不会出 bug"</h3>
+<table>
+<thead><tr><th>场景</th><th>MQTT</th><th>Websocket</th><th>Joyai</th><th>Baidu</th></tr></thead>
+<tbody>
+<tr><td>4G CSQ 差 + 用户单击唤醒</td><td>OpenAudio 卡 10 s（R2）</td><td>同 R2</td><td>同 R2</td><td>R2 + HTTP token 5 s 叠加 → 最坏 15 s</td></tr>
+<tr><td>用户 Listening 中 4 连击关机</td><td>R4 复现（AbortIfSpeaking 不处理 Listening · session 残留）</td><td>R4</td><td>R4</td><td>R4 + listening_timer 兜底（30 s 后自动关）</td></tr>
+<tr><td>断网后等 5 分钟拿起设备唤醒</td><td>60 s 退避内已重连过 · 体验最好</td><td>等用户唤醒触发 OpenAudio · 期间网络已恢复 OK</td><td>同 WS</td><td>PrefetchSessionTokenAsync 触发 auto-connect · WS 已就绪 · 体验最好</td></tr>
+<tr><td>服务端推 system reboot</td><td>OnMessage type=system → Reboot</td><td>同左</td><td>未在 contentType=EVENT 路径处理 reboot</td><td>裸 JSON {type:reboot} 走 HandleCustomData · 处理</td></tr>
+<tr><td>License key 错误</td><td>—</td><td>—</td><td>—</td><td>OpenAudio 10 s 等不到 LICENSED → SetError + 失败 · UI 出"无法连接"</td></tr>
+<tr><td>OTA 升级期</td><td>升级前 CloseAudio · 升级失败回滚 protocol_ 仍可用</td><td>同左</td><td>同左</td><td>同左 + 升级失败后 PrefetchSessionTokenAsync 重新拿 token</td></tr>
+<tr><td>EnterDeepSleep 期间 baidu WS 保活</td><td>—</td><td>—</td><td>—</td><td>ResetProtocol 走 protocol_.reset → dtor 内 Close + 200 ms delay · 但 Schedule 异步 + 500 ms delay 可能不够（R7）</td></tr>
+</tbody>
+</table>
+
+<h3>15.5 推演 · 哪个协议最不该量产先放</h3>
+<table>
+<tbody>
+<tr><td><b>最稳</b></td><td>MqttProtocol · 405 行 · 跨任务保护 + 自动重连 + AES 加密音频 · 历经量产</td></tr>
+<tr><td>次稳</td><td>WebsocketProtocol · 254 行最简 · 但 OnDisconnected 语义错位 + 无 alive 保护</td></tr>
+<tr><td>需观察</td><td>WebsocketJoeaiProtocol · 事件映射多 + 双路音频接收 · 联调充分后稳</td></tr>
+<tr><td><b>最复杂 · 灰度优先</b></td><td>WebsocketBaiduProtocol · 1655 行 · 3 timer + License + Token + 裸 xTaskCreate · 量产前建议<b>仅在测试 SKU 启用</b>，主力 SKU 继续走 MQTT</td></tr>
+</tbody>
+</table>
+
+<h3>15.6 量产前 baidu 灰度方案建议</h3>
+<table>
+<tbody>
+<tr><td>1. 优先级</td><td>当前已"优先于 joyai/普通 ws" · 但只有 NVS url 含 brtc/baidu 才命中 → 默认仍走 MQTT</td></tr>
+<tr><td>2. 灰度</td><td>OTA 后端按 MAC 段下发 NVS url（含 brtc 子串）· 控制启用比例</td></tr>
+<tr><td>3. 监控点</td><td>新增 ESP_LOGI 上报"baidu OpenAudio 耗时" + "license 激活成功率" + "WS 保活复用次数" · 走 OTA /report 上报</td></tr>
+<tr><td>4. 回滚</td><td>NVS url 改回非 brtc/baidu → esp_restart → 重新走 MqttProtocol 或 WS 兜底</td></tr>
+</tbody>
+</table>
+</section>
+
+</main>
+</div>
+
+</body>
+</html>

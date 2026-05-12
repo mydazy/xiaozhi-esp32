@@ -14,6 +14,7 @@
 #include <freertos/event_groups.h>
 #include <driver/gpio.h>
 #include <driver/uart.h>
+#include <atomic>
 #include "at_uart.h"
 #include "network_interface.h"
 
@@ -73,6 +74,10 @@ public:
     std::string GetCarrierName();
     int GetCsq();
 
+    int RefreshCsq();
+
+    static constexpr uint64_t kCsqStaleUs = 60ULL * 1000 * 1000;
+
     // 状态查询
     bool pin_ready() const { return pin_ready_; }
     bool network_ready() const { return network_ready_; }
@@ -84,7 +89,8 @@ protected:
     std::string imei_;
     std::string carrier_name_;
     std::string module_revision_;
-    int csq_ = -1;
+    std::atomic<int>      csq_{-1};
+    std::atomic<uint64_t> csq_updated_us_{0};   // 最近一次 csq_ 被刷新的 esp_timer_get_time()
     bool pin_ready_ = true;
     bool network_ready_ = false;
 

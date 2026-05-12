@@ -45,17 +45,8 @@ void Blufi::ReleaseStaticMem() {
     return;
   }
 
-  // 安全前提：调用方保证 BT controller 已 deinit 或从未 init
-  // 本项目调用时机：WifiBoard::StartNetwork SmartConnect 成功路径
-  //   —— 此时 BT 从未被 InitializeController，即 .bss 区原封不动
-  //   esp_bt_controller_mem_release 内部允许 STATUS_IDLE 状态调用
-
   size_t free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-
-  // ESP_BT_MODE_BTDM: 释放 BT 双模（Classic + BLE）所有 .bss/.data
-  // 本项目只用 BLE 但 sdkconfig 未裁剪 Classic，用 BTDM 一次性释放最大
   esp_err_t ret = esp_bt_mem_release(ESP_BT_MODE_BTDM);
-
   size_t free_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
 
   if (ret == ESP_OK) {
@@ -224,11 +215,10 @@ void Blufi::Stop() {
     ESP_LOGI(TAG, "✅ BLE 控制器已清理");
   }
 
-  // 4. 清理定时器和回调
-  if (retry_timer_) {
-    esp_timer_stop(retry_timer_);
-    esp_timer_delete(retry_timer_);
-    retry_timer_ = nullptr;
+  // 4. 清理定时器和回调（atomic exchange · 防 callback / OnScanDone 并发双 delete）
+  if (auto h = retry_timer_.exchange(nullptr, std::memory_order_acq_rel)) {
+    esp_timer_stop(h);
+    esp_timer_delete(h);
   }
   WifiStation::GetInstance().OnScanComplete(nullptr);
   on_success_ = nullptr;
@@ -322,19 +312,18 @@ void Blufi::OnScanDone() {
       ESP_LOGW(TAG, "[3/8] 未扫描到热点，第%d次重试", self.scan_retry_count_);
       self.scanning_ = true;
 
-      // 清理上次定时器
-      if (self.retry_timer_) {
-        esp_timer_delete(self.retry_timer_);
-        self.retry_timer_ = nullptr;
+      // 清理上次定时器（atomic exchange · 谁抢到谁释放）
+      if (auto h = self.retry_timer_.exchange(nullptr, std::memory_order_acq_rel)) {
+        esp_timer_stop(h);
+        esp_timer_delete(h);
       }
 
       esp_timer_create_args_t timer_args = {
           .callback = [](void *) {
             auto &s = Blufi::GetInstance();
-            // 回调后立即删除定时器
-            if (s.retry_timer_) {
-              esp_timer_delete(s.retry_timer_);
-              s.retry_timer_ = nullptr;
+            // 回调后释放定时器（atomic exchange · 防 Stop/OnScanDone 并发双 delete）
+            if (auto h = s.retry_timer_.exchange(nullptr, std::memory_order_acq_rel)) {
+              esp_timer_delete(h);
             }
             if (s.ble_connected_ && s.scanning_) {
               WifiStation::GetInstance().TriggerScan();
@@ -347,8 +336,10 @@ void Blufi::OnScanDone() {
           .name = "blufi_retry",
           .skip_unhandled_events = true,
       };
-      if (esp_timer_create(&timer_args, &self.retry_timer_) == ESP_OK) {
-        esp_timer_start_once(self.retry_timer_, 500 * 1000);  // 500ms
+      esp_timer_handle_t new_timer = nullptr;
+      if (esp_timer_create(&timer_args, &new_timer) == ESP_OK) {
+        self.retry_timer_.store(new_timer, std::memory_order_release);
+        esp_timer_start_once(new_timer, 500 * 1000);  // 500ms
       } else {
         wifi.TriggerScan();
       }
@@ -521,10 +512,10 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
     self.ble_connected_ = false;
     self.scanning_ = false;
     self.scan_retry_count_ = 0;
-    if (self.retry_timer_) {
-      esp_timer_stop(self.retry_timer_);
-      esp_timer_delete(self.retry_timer_);
-      self.retry_timer_ = nullptr;
+    // atomic exchange · 防 BLE_DISCONNECT 与 Stop/callback 并发 double-delete
+    if (auto h = self.retry_timer_.exchange(nullptr, std::memory_order_acq_rel)) {
+      esp_timer_stop(h);
+      esp_timer_delete(h);
     }
     blufi_security_deinit();
 
@@ -551,7 +542,8 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
     // ⭐ 异步执行WiFi连接，避免阻塞NimBLE host task
     // TryConnectAndSave 最多阻塞10s，超过BLE supervision timeout(6s)会导致
     // BLE断连，小程序收不到配网结果→显示"配网超时"而实际WiFi已连接成功
-    xTaskCreate([](void *arg) {
+    // Pin Core 0：与 BT controller / WiFi stack 同核 · 避免漂到 Core 1 抢实时音频
+    xTaskCreatePinnedToCore([](void *arg) {
       auto &self = Blufi::GetInstance();
       std::string error;
       if (self.credential_validator_(self.ssid_, self.password_, error)) {
@@ -582,7 +574,7 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
                                         nullptr);
       }
       vTaskDelete(NULL);
-    }, "blufi_wifi", 4096, NULL, 5, NULL);
+    }, "blufi_wifi", 4096, NULL, 5, NULL, 0 /* Core 0 */);
     break;
   }
 

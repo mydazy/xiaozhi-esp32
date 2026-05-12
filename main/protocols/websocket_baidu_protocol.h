@@ -6,6 +6,9 @@
 #include <web_socket.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
+#include <freertos/timers.h>
+#include <atomic>            // std::atomic<bool/int> 字段需要完整定义（不能依赖 web_socket.h 的前置声明）
+#include <chrono>            // steady_clock 时间戳字段
 #include <string>
 #include <memory>
 
@@ -37,10 +40,13 @@ public:
     bool Start() override;
     bool SendAudio(std::unique_ptr<AudioStreamPacket> packet) override;
 
-    // 百度协议使用 20ms 帧时长 (规范建议最佳20ms，可提高 ASR 响应速度)
-    int client_frame_duration() const override { return 20; }
+    // 帧时长与其他协议统一：60 ms（项目硬编码 OPUS_FRAME_DURATION_MS=60，整链路按 60 ms 编/解码 + queue 上限）
+    // 历史曾标 20 ms（百度规范建议）但 client_frame_duration() 无消费者 + audio_service 不支持动态切换 → 死代码
+    // 实测项目以 60 ms 帧发给百度 BRTC，服务端可接收。如未来支持动态帧长再考虑改回 20 ms。
+    int client_frame_duration() const override { return 60; }
     bool OpenAudioChannel() override;
-    void CloseAudioChannel() override;
+    // 签名对齐基类（编译错误修复）· send_goodbye 在百度协议下不发送（WS 保活复用），仅 (void) 消费
+    void CloseAudioChannel(bool send_goodbye = true) override;
     bool IsAudioChannelOpened() const override;
 
     // 百度协议适配方法
@@ -104,9 +110,6 @@ private:
     // ASR 去重
     std::string last_final_asr_text_;
     std::chrono::steady_clock::time_point last_final_asr_time_;
-
-    // 音频发送节流（20ms pacing）
-    std::chrono::steady_clock::time_point last_audio_send_time_;
 
     // NVS 可配置参数（构造时读取）
     int break_delay_ms_ = 500;

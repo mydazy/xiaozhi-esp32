@@ -24,9 +24,9 @@
 
 static const char *TAG = "WifiBoard";
 
-// 智能联网参数
-static constexpr int MAX_SCAN_RETRY = 2;        // 最大扫描重试次数
-static constexpr int SCAN_WAIT_MS = 3000;       // 单次扫描等待时间
+// 智能联网参数（P0：重试 2→4 + 首次 3s→5s · 防弱信号家庭场景频繁误进配网）
+static constexpr int MAX_SCAN_RETRY = 4;        // 最大扫描重试次数（双频开启扫描 1.3s · 2 次太少）
+static constexpr int SCAN_WAIT_MS = 5000;       // 单次扫描等待时间（含扫描 + 连接 buffer）
 static constexpr int CONNECT_TIMEOUT_MS = 10000; // 连接超时
 
 WifiBoard::WifiBoard() {
@@ -447,7 +447,8 @@ void WifiBoard::OnConfigSuccess() {
 
     app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "", "", Lang::Sounds::OGG_SUCCESS);
 
-    xTaskCreate([](void* arg) {
+    // Pin Core 0：与 BT controller / WiFi stack 同核 · 防漂到 Core 1 撞实时音频
+    xTaskCreatePinnedToCore([](void* arg) {
         auto* self = static_cast<WifiBoard*>(arg);
 
         // 1. 等待提示音 + BLE数据发送完成
@@ -472,7 +473,7 @@ void WifiBoard::OnConfigSuccess() {
         Application::GetInstance().Reboot();  // 内部 esp_restart() 不返回
 
         vTaskDelete(NULL);
-    }, "config_done", 8192, this, 5, NULL);
+    }, "config_done", 8192, this, 5, NULL, 0 /* Core 0 */);
 }
 
 // ============ 其他方法 ============

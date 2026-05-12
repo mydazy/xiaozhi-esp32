@@ -1,6 +1,6 @@
 #include "websocket_baidu_protocol.h"
 #include "board.h"
-#include "display.h"
+#include "display/display.h"
 #include "audio/music_player.h"
 #include "system_info.h"
 #include "application.h"
@@ -219,15 +219,8 @@ bool WebsocketBaiduProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet
         return false;
     }
 
-    // ========== 20ms pacing：丢弃过密帧，保持平滑上行流 ==========
-    // 语音交互中"最新帧"比"补发旧帧"更重要，突刺会劣化服务器 ASR
-    auto now_pacing = std::chrono::steady_clock::now();
-    auto since_last = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now_pacing - last_audio_send_time_).count();
-    if (since_last < 18) {  // 20ms 帧 - 2ms 容差
-        return true;  // 静默丢弃过密帧，不算失败
-    }
-
+    // 帧节流：项目固定 60 ms 帧（OPUS_FRAME_DURATION_MS），audio_service 上行已按 60 ms 节奏出帧，无需协议层 pacing
+    // 历史 18 ms 阈值（"20 ms - 2 ms 容差"）在 60 ms 帧下永不触发 → 移除避免误读
     UpdateActivityTime();
 
     // 电路断路器：连续失败 >= 3 次跳过发送，避免 Ml307Tcp 5s/次超时堆积
@@ -259,7 +252,6 @@ bool WebsocketBaiduProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet
     }
 
     if (ok) {
-        last_audio_send_time_ = std::chrono::steady_clock::now();
         audio_tx_frames_++;
         audio_tx_bytes_ += packet->payload.size();
         if (audio_send_failures_ > 0) {
@@ -314,7 +306,9 @@ bool WebsocketBaiduProtocol::IsAudioChannelOpened() const {
            !error_occurred_ && media_ready_;
 }
 
-void WebsocketBaiduProtocol::CloseAudioChannel() {
+void WebsocketBaiduProtocol::CloseAudioChannel(bool send_goodbye) {
+    // 百度协议 WS 保活复用 · 不发 goodbye · 仅消费参数避免 unused warning
+    (void)send_goodbye;
     bool was_ready = media_ready_.exchange(false, std::memory_order_acq_rel);
     ESP_LOGI(TAG, "[CLOSE] was_ready=%d ws=%d", was_ready,
              websocket_ ? websocket_->IsConnected() : -1);

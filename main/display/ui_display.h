@@ -5,6 +5,7 @@
 #include "../scene_type.h"
 #include <lvgl.h>
 #include <functional>
+#include <atomic>
 
 // [量产稳定期] ControlCenter 已下线，恢复时取消注释 forward decl 与 unique_ptr 字段
 // class ControlCenter;
@@ -67,11 +68,23 @@ public:
 
     // 显示笔画 GIF 动画（写字识字）——把 PSRAM buffer 装入 emoji_collection "font" 槽位
     // gif_buffer 由 heap_caps_malloc(MALLOC_CAP_SPIRAM) 分配，所有权转移给 EmojiCollection
-    void FontGif(uint8_t* gif_buffer, size_t size);
+    // request_id 用于并发去重：调用 BeginFontPending 拿到的 token，stale token 会丢弃 buffer
+    // 传 0 表示无 token（兼容旧路径 / 旁路触发）
+    void FontGif(uint8_t* gif_buffer, size_t size, uint32_t request_id = 0);
 
     // 退出笔画 GIF 模式（与 FontGif 对称）——切回 neutral 表情、恢复 bottom_bar
     // 调用方：application.cc 下轮 Speaking 清场 + 触摸 emoji_box 退出
     void HideFontGif();
+
+    // 申请一次"笔画 GIF 装载"许可：
+    //   - 立即翻转 font_pending_ 守护位（block ShowEduCard 闪屏）
+    //   - 返回 request_id（递增 token）；FontGif 调用时回传，stale 请求自动丢弃
+    //   - 调用方下载失败时必须配对 CancelFontPending(id) 释放守护位
+    uint32_t BeginFontPending();
+    void CancelFontPending(uint32_t request_id);
+
+    // 笔画 GIF 是否有"待装载"的下载窗口（in_font_mode_ 之前的中间态）
+    bool IsFontPending() const { return font_pending_.load(); }
 
     void SetEmotion(const char* emotion) override;
     void SetChatMessage(const char* role, const char* content) override;
@@ -79,13 +92,11 @@ public:
     void HideControlCenter() {}
     bool IsControlCenterVisible() const { return false; }
 
-    // 显示教育卡（overlay 模式，与 QR 同槽，盖在 chat/clock 之上）
-    // category 取值（MCP 协议字段）：
-    //   被动 56px 主秀：word / hanzi / pinyin / poem / topic / color
-    //   主动 88px 超大：letter / phonics / math
-    // top/bottom 可空字符串（该行不显示）。触屏点击退出。
-    void ShowEduCard(const char* category, const char* main_text,
-                     const char* top, const char* bottom);
+    // 显示教育卡（overlay 模式，单一两行布局 · 不分类）
+    //   main: 主秀大字（56 默认 / 48 EN 兜底 · 自动判定 CJK/英文）
+    //   top:  顶部辅助文字（30 px 薄荷绿 · 拼音 / 中文释义 / 类别）· 可空
+    // 触屏点击退出。in_font_mode_ 时屏蔽。
+    void ShowEduCard(const char* main, const char* top);
     void HideEduCard();
     bool IsEduCardActive() const {
         return edu_card_overlay_ != nullptr &&
@@ -102,16 +113,15 @@ private:
     lv_obj_t* clock_time_label_ = nullptr;
     lv_obj_t* clock_date_label_ = nullptr;
     lv_obj_t* clock_week_label_ = nullptr;
-    const lv_font_t* clock_big_font_  = nullptr;   // 88px cbin · 时钟数字 0-9 + : · v8 同时承载主动学习超大主秀 (英文+大小写+加减乘除·~89 KB)
-    const lv_font_t* clock_text_font_ = nullptr;   // 30px cbin · 主屏日期/星期 + 教育卡顶部拼音/Phonics + IPA (~79 KB)
-    const lv_font_t* edu_main_font_   = nullptr;   // 48px cbin · v8 EN 兜底 11-12 字符英文（仅 ASCII+拼音+Phonics·77 KB·v3 已砍中文）
-    const lv_font_t* edu_main_56_font_ = nullptr;  // 56px cbin · v8 主秀 Bold · GB 2312 一级 3755 字 + ASCII + 拼音 + Phonics · 1bpp 压缩 (~1.3 MB)
+    const lv_font_t* clock_big_font_  = nullptr;   // 88px cbin · 时钟主屏时间专用（数字 0-9 + :）· 不参与教育卡
+    const lv_font_t* clock_text_font_ = nullptr;   // 30px cbin · 主屏日期/星期 + 教育卡顶部拼音/中文释义
+    const lv_font_t* edu_main_font_   = nullptr;   // 48px cbin · 教育卡 EN 兜底 11-12 字符英文
+    const lv_font_t* edu_main_56_font_ = nullptr;  // 56px cbin · 教育卡主秀 Bold · GB 2312 + ASCII
 
     lv_obj_t* qr_overlay_ = nullptr;
     lv_obj_t* edu_card_overlay_ = nullptr;
     lv_obj_t* edu_top_label_    = nullptr;
     lv_obj_t* edu_main_label_   = nullptr;
-    lv_obj_t* edu_bottom_label_ = nullptr;
     static void OnEduCardClicked(lv_event_t* e);
 
     static void OnFontExitClicked(lv_event_t* e);
@@ -127,10 +137,10 @@ private:
         int letter_space;
         int height;                  // 字体高度 px，用于布局计算
     };
-    void RenderEduCardLayout(const EduRow& top, const EduRow& main_row, const EduRow& bottom);
+    void RenderEduCardLayout(const EduRow& top, const EduRow& main_row);
     void EnsureEduCardOverlay();                                        // 懒创建 overlay + 3 label 槽
     void UpdateEduRow(lv_obj_t* lbl, const EduRow& row, int y);         // 更新单个 label 槽（LV_ALIGN_TOP_MID）
-    void UpdateEduRowAtBottom(lv_obj_t* lbl, const EduRow& row, int dist_from_bottom);  // 副位定位（LV_ALIGN_BOTTOM_MID）
+    
 
     std::function<void()> qr_double_click_cb_;
     uint64_t              qr_last_click_us_ = 0;
@@ -153,6 +163,13 @@ private:
     SceneType active_scene_ = SceneType::kChat;
 
     bool in_font_mode_ = false;
+    // 笔画 GIF 异步下载守护：
+    //   - BeginFontPending() 设 true + 递增 request_id_next_，ShowEduCard 检测到不弹卡（防闪屏）
+    //   - FontGif/CancelFontPending 清零（成功装载 → in_font_mode_ 接管 / 失败 → 守护位释放）
+    //   - 多核共享：MCP 下载任务（Core 0）↔ Application Schedule（main thread）
+    std::atomic<bool>     font_pending_{false};
+    std::atomic<uint32_t> font_request_next_{0};
+    std::atomic<uint32_t> font_request_active_{0};
 
     // ===== 内部方法 =====
     void CreateClockPage();

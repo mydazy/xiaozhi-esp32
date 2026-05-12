@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · 蓝牙 / BLUFI</title>
+<style>
+:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+        --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
+        --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       margin: 0; background: #F5F5F5; color: var(--text); line-height: 1.55; font-size: 14px; }
+header { background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+         color: white; padding: 24px 40px; }
+header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 600; }
+header .meta { opacity: .9; font-size: 12px; }
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav { width: 180px; flex-shrink: 0; background: white; padding: 18px 0;
+      border-right: 1px solid var(--border); position: sticky; top: 0;
+      align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+nav h3 { margin: 0 14px 8px; font-size: 11px; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: .5px; }
+nav a { display: block; padding: 5px 14px; color: var(--text); text-decoration: none;
+        font-size: 13px; border-left: 3px solid transparent; }
+nav a:hover { background: var(--brand-light); border-left-color: var(--brand); color: var(--brand-deep); }
+main { flex: 1; padding: 24px 36px; max-width: 980px; }
+section { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
+             border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
+section h2 .num { display: inline-block; background: var(--brand); color: white;
+                  padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
+section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
+code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
+       font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px; color: #C2185B; }
+table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 13px; }
+th { background: #F5F5F5; padding: 6px 9px; text-align: left; border: 1px solid var(--border);
+     font-weight: 600; font-size: 12.5px; }
+td { padding: 5px 9px; border: 1px solid var(--border); vertical-align: top; font-size: 12.5px; }
+tr:nth-child(even) td { background: #FAFAFA; }
+.callout { padding: 10px 14px; border-radius: 6px; margin: 10px 0;
+           border-left: 4px solid var(--text-2); background: #FAFAFA; font-size: 13px; }
+.callout.ok    { border-left-color: var(--ok); background: #E8F5E9; }
+.callout.warn  { border-left-color: var(--warn); background: #FFF3E0; }
+.callout.bad   { border-left-color: var(--bad); background: #FFEBEE; }
+.svgwrap { background: var(--bg); padding: 10px; border-radius: 6px; margin: 10px 0; overflow-x: auto; }
+.svgwrap svg { display: block; max-width: 100%; height: auto; }
+text { font-family: -apple-system, "PingFang SC", sans-serif; }
+.svg-title { font-size: 13px; font-weight: 600; fill: var(--brand-deep); }
+.node-text { font-size: 12px; fill: var(--text); text-anchor: middle; dominant-baseline: middle; }
+.node-text.sm { font-size: 10.5px; fill: var(--text-2); }
+ul.compact { padding-left: 18px; margin: 6px 0; }
+ul.compact li { margin: 2px 0; }
+.pill { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+.pill.done  { background:#E8F5E9; color:var(--ok); }
+.pill.todo  { background:#FFF3E0; color:var(--warn); }
+.pill.risk  { background:#FFEBEE; color:var(--bad); }
+.pill.lean  { background:#F3E5F5; color:#6A1B9A; }
+.commit { font-family: "SFMono-Regular", monospace; font-size: 11.5px; color: var(--text-2); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MyDazy P30 · 蓝牙 / BLUFI</h1>
+  <div class="meta">v2.0 · 2026-05-12 · NimBLE-only · 配网 + iBeacon stub（OBSERVER 已禁用以省 25-35KB INT）</div>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>目录</h3>
+  <a href="#status">1. 现状一览</a>
+  <a href="#overview">2. 模块与参数</a>
+  <a href="#entry">3. 入口 + 状态机</a>
+  <a href="#handshake">4. 数据握手</a>
+  <a href="#exit">5. 退出 + RAM 释放</a>
+  <a href="#fault">6. 异常 + 任务</a>
+  <a href="#risks">7. 已修 + 在修 + 待办</a>
+  <a href="#next">8. 下一步行动</a>
+</nav>
+
+<main>
+
+<!-- =============== 1 现状一览（最重要） =============== -->
+<section id="status">
+<h2><span class="num">1</span> 现状一览（2026-05-12）</h2>
+
+<p class="sub">本节回答"BLUFI 现在什么状态、哪些问题已经排查过、还剩什么风险"——量产前最关心的三件事。</p>
+
+<div class="callout ok">
+<b>✅ 已落地的 P0 修复</b>（量产 blocker 全部消除）
+<ul class="compact" style="margin-top:6px">
+<li><b>sdkconfig 漂移修复</b>：CENTRAL/OBSERVER/GATT_CLIENT 真禁用，NimBLE mem 改 PSRAM <span class="commit">· b0056d97</span></li>
+<li><b>裸 xTaskCreate 清零</b>：<code>blufi_wifi</code> + <code>config_done</code> 改 <code>xTaskCreatePinnedToCore(..., Core 0)</code> <span class="commit">· main/ grep 0 命中</span></li>
+<li><b>retry_timer 释放竞态修复</b>：<code>std::atomic&lt;esp_timer_handle_t&gt;</code> + exchange 模式（Stop / OnScanDone / BLE_DISCONNECT 三路径"谁抢到谁释放"）</li>
+<li><b>iBeacon 死代码消除</b>：<code>ibeacon.cc</code> 加 <code>#if CONFIG_BT_NIMBLE_ROLE_OBSERVER</code> 守卫，量产构建时变 stub（StartDeferred 已删 · 不再编译错）</li>
+</ul>
+</div>
+
+<div class="callout warn">
+<b>🟡 在修但未提交（diff 中）</b>
+<ul class="compact" style="margin-top:6px">
+<li><b>wifi_station 并发改造</b>：<code>is_scanning_</code> 改 <code>std::atomic&lt;bool&gt;</code> + exchange 抢占（三处并发：TriggerScan / STA_START / 重连 timer）</li>
+<li><b>connect_queue 加锁</b>：<code>HandleScanResult / StartConnect / IpEventHandler</code> 三处加 <code>std::lock_guard</code>，防 Stop 并发清空导致迭代器失效</li>
+</ul>
+<small>位置：<code>main/wifi/wifi_station.cc</code> · 已编译验证 · 待 commit</small>
+</div>
+
+<div class="callout bad">
+<b>🔴 仍存在的风险（按量产影响排序）</b>
+<table>
+<thead><tr><th>#</th><th>风险</th><th>位置</th><th>量产影响</th></tr></thead>
+<tbody>
+<tr><td>R1</td><td>Stop 主线程 nimble_port_stop 最多阻塞 2s</td><td><code>blufi_init.c:287-293</code></td><td>OnConfigSuccess 期间 LVGL 帧率掉 0 · 用户看到屏幕卡顿</td></tr>
+<tr><td>R2</td><td>INIT_FINISH 超时仅 WARN 继续</td><td><code>blufi.cc:178-181</code></td><td>NimBLE 异常时下游空走 GATT · 配网失败但无错误提示</td></tr>
+<tr><td>R3</td><td>BLE_CONNECT 后 adv_stop 早于 security_init</td><td><code>blufi.cc:453-455</code></td><td>security 失败时广播已停 · 用户必须等 6s 监管超时</td></tr>
+<tr><td>R4</td><td><code>wifi_config_mode_</code> 跨任务裸 <code>bool</code></td><td><code>wifi_board.h:14</code></td><td>违反 atomic 规则 · 但实际是单写多读 · 概率低</td></tr>
+<tr><td>R5</td><td>DH dh_param_len 来自手机字节流未 clamp</td><td><code>blufi_security.c:81-86</code></td><td>恶意手机可申 64KB 堆 · 量产关闭信任 · 非紧急</td></tr>
+<tr><td>R6</td><td><code>init_done_sem_</code> 释放顺序：先 delete 再 nullptr</td><td><code>blufi.cc:230-233</code></td><td>Host task 残余 Give 触发 panic · 极小概率</td></tr>
+<tr><td>R7</td><td>MTU 247 与 msys block 256 错位</td><td><code>sdkconfig:937</code></td><td>单包跨 block 碎片化 · 性能损耗 ~5% · 不影响功能</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="callout">
+<b>⚪ 已确认无问题（排查闭环）</b>
+<ul class="compact" style="margin-top:6px">
+<li><b>BT 静态 RAM 释放</b>：SmartConnect 成功路径走 <code>esp_bt_mem_release(BTDM)</code>，PSRAM 配置后实际回收 25-35KB INT</li>
+<li><b>BLE_CONNECT 事件丢失自愈</b>：<code>blufi.cc:404-431</code> 用 GET_WIFI_LIST 等数据事件兜底修正状态</li>
+<li><b>MTU 协商</b>：247 字节解决 Android WiFi 列表丢包，iOS 自动协商 ~185</li>
+<li><b>设备名 "nimble" 覆盖问题</b>：<code>blufi.cc:283</code> 直接传 <code>device_name_</code>，绕开 ble_svc_gap_init 默认值覆盖</li>
+<li><b>RF 时分冲突</b>：Stop 期间 WiFi 推迟到 BLE_CONNECT 后启动，coex 由 IDF 自动处理</li>
+<li><b>BLUFI/AP 双路径</b>：<code>WifiBoard::SwitchConfigMode</code> 落 NVS <code>blufi=0/1</code>，运行时切换 OK</li>
+</ul>
+</div>
+</section>
+
+<!-- =============== 2 模块与参数 =============== -->
+<section id="overview">
+<h2><span class="num">2</span> 模块与参数</h2>
+
+<h3>4 大宏观状态</h3>
+<table>
+<thead><tr><th>状态</th><th>说明</th><th>RAM 占用</th><th>触发进入</th></tr></thead>
+<tbody>
+<tr><td><b>BT_RELEASED</b></td><td>BT 静态 RAM 永久释放 · 不可再 init</td><td>0</td><td>SmartConnect 成功 + 从未 init</td></tr>
+<tr><td><b>BT_OFF</b></td><td>BT 模块未启动 · 在线运行</td><td>~25KB 静态保留</td><td>正常使用期</td></tr>
+<tr><td><b>BLUFI_ADV</b></td><td>BLE 广播中 · 等待手机连接</td><td>+ ~10KB（msys/ACL）</td><td>EnterWifiConfigMode · blufi=1</td></tr>
+<tr><td><b>BLUFI_PROV</b></td><td>已连接 · 配置传输 + AES 加密</td><td>+ DH ~3KB + AES 0.6KB</td><td>BLE_CONNECT 事件</td></tr>
+</tbody>
+</table>
+
+<h3>源文件清单（main/blufi/）</h3>
+<table>
+<thead><tr><th>文件</th><th>行数</th><th>职责</th></tr></thead>
+<tbody>
+<tr><td><code>blufi.{h,cc}</code></td><td>93 + 657</td><td>Blufi 单例 · GATT 回调 · 数据流 · retry_timer atomic</td></tr>
+<tr><td><code>blufi_init.{h,c}</code></td><td>42 + 335</td><td>NimBLE controller/host 生命周期 · MTU 247 协商</td></tr>
+<tr><td><code>blufi_security.c</code></td><td>232</td><td>DH 握手 + AES-CFB128（mbedtls）</td></tr>
+<tr><td><code>ibeacon.{h,cc}</code></td><td>55 + 164</td><td><b>条件编译 stub</b>（OBSERVER 关闭时只剩签名） · P31 启用时打开</td></tr>
+</tbody>
+</table>
+
+<h3>关键参数（与 sdkconfig 实际值对齐）</h3>
+<table>
+<thead><tr><th>参数</th><th>当前实际值</th><th>来源</th></tr></thead>
+<tbody>
+<tr><td>BT controller</td><td>Pin Core 0 · TX power +9dBm</td><td><code>sdkconfig:1104</code></td></tr>
+<tr><td>NimBLE host 栈</td><td>4096 字节 · Core 0</td><td><code>sdkconfig:865-868</code></td></tr>
+<tr><td>NimBLE 内存分配</td><td><span style="color:var(--ok)"><b>PSRAM（EXTERNAL）</b></span></td><td><code>sdkconfig:862-863</code></td></tr>
+<tr><td>NimBLE 角色</td><td><span style="color:var(--ok)"><b>仅 PERIPHERAL + BROADCASTER + GATT_SERVER</b></span></td><td><code>sdkconfig:874-879</code></td></tr>
+<tr><td>BLE 设备名</td><td>"MyDazy-XXXX"（MAC 末 4 位）</td><td><code>blufi.cc:283</code></td></tr>
+<tr><td>MTU</td><td>247 字节首选（对端协商）</td><td><code>blufi_init.c:249</code></td></tr>
+<tr><td>BLE 连接 interval</td><td>30-50 ms · 监管超时 6 s</td><td><code>blufi.cc:463-470</code></td></tr>
+<tr><td>WiFi 扫描上限</td><td>20 AP</td><td><code>blufi.cc:28</code></td></tr>
+<tr><td>配网超时</td><td>10 分钟 · 超时进深睡</td><td><code>wifi_board.cc</code></td></tr>
+<tr><td>INIT_FINISH 超时</td><td>3 s（仅 WARN · 见 R2）</td><td><code>blufi.cc:179</code></td></tr>
+<tr><td>msys 池</td><td>12×256 + 24×320 ≈ 10.7 KB</td><td><code>sdkconfig:937-940</code></td></tr>
+<tr><td>ACL buf</td><td>24×255 ≈ 6 KB</td><td><code>sdkconfig:3292-3293</code></td></tr>
+</tbody>
+</table>
+
+<h3>NVS 字段</h3>
+<table>
+<thead><tr><th>命名空间</th><th>字段</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td>wifi</td><td>blufi</td><td>1=BLUFI 优先（默认）· 0=AP 模式</td></tr>
+<tr><td>wifi</td><td>force_ap</td><td>1=配网失败标记 · 强制下次进配网</td></tr>
+<tr><td>wifi</td><td>skip_welcome</td><td>1=配网后重启跳过欢迎音</td></tr>
+<tr><td>wifi</td><td>ssid_list</td><td>已保存 AP 列表（SmartConnect 用）</td></tr>
+<tr><td>blufi</td><td>binding_code</td><td>BLUFI 写入 · 供 OTA 等模块读取（当前已挂 Settings 解耦）</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 3 入口 + 状态机 =============== -->
+<section id="entry">
+<h2><span class="num">3</span> 入口 + 状态机</h2>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 380" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="bArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+<text x="440" y="20" class="svg-title" text-anchor="middle">三种入口 → BLUFI 状态机</text>
+
+<rect x="40" y="60" width="200" height="50" rx="6" fill="#fff" stroke="#1976D2"/>
+<text class="node-text" x="140" y="80" style="font-weight:600;fill:#1976D2">① 首次开机</text>
+<text class="node-text sm" x="140" y="96">ssid_list 空 · 自动进</text>
+
+<rect x="280" y="60" width="200" height="50" rx="6" fill="#fff" stroke="#F57F17"/>
+<text class="node-text" x="380" y="80" style="font-weight:600;fill:#F57F17">② SmartConnect 失败</text>
+<text class="node-text sm" x="380" y="96">已存凭证连不上</text>
+
+<rect x="520" y="60" width="200" height="50" rx="6" fill="#fff" stroke="#5E35B1"/>
+<text class="node-text" x="620" y="80" style="font-weight:600;fill:#5E35B1">③ 用户手动重置</text>
+<text class="node-text sm" x="620" y="96">长按 / 9 连击 / MCP</text>
+
+<rect x="200" y="160" width="480" height="44" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+<text class="node-text" x="440" y="180" style="font-weight:600;fill:#C62828">force_ap=1 · skip_welcome=1 → Reboot</text>
+<text class="node-text sm" x="440" y="196">凭证保留 · 配网入口标志写 NVS</text>
+
+<rect x="200" y="230" width="480" height="44" rx="6" fill="#fff" stroke="#999"/>
+<text class="node-text" x="440" y="250" style="font-weight:600">EnterWifiConfigMode · blufi=1 分支</text>
+<text class="node-text sm" x="440" y="266">Blufi::InitializeController → Start → adv_start</text>
+
+<ellipse cx="440" cy="320" rx="220" ry="24" fill="#FFF3E0" stroke="#F57F17" stroke-width="2"/>
+<text class="node-text" x="440" y="320" style="font-weight:600;fill:#F57F17">🟡 BLUFI_ADV · 等待手机连接</text>
+<text class="node-text sm" x="440" y="338">超时 10 min → EnterDeepSleep(true)</text>
+
+<path d="M140,110 L380,160" stroke="#666" fill="none" marker-end="url(#bArr)"/>
+<path d="M380,110 L440,160" stroke="#666" fill="none" marker-end="url(#bArr)"/>
+<path d="M620,110 L500,160" stroke="#666" fill="none" marker-end="url(#bArr)"/>
+<path d="M440,204 L440,230" stroke="#666" marker-end="url(#bArr)"/>
+<path d="M440,274 L440,296" stroke="#666" marker-end="url(#bArr)"/>
+</svg>
+</div>
+
+<h3>InitializeController + Start 关键步</h3>
+<ol class="compact">
+<li>调用方持 LVGL 锁（防 BT init 期间 LCD DMA 抢 SPI）</li>
+<li><code>esp_blufi_controller_init / enable(BLE)</code></li>
+<li>注册 BLUFI callback + 创建 INIT_FINISH 信号量</li>
+<li><code>esp_blufi_host_and_cb_init</code>（NimBLE host 启动 · MTU 247 · GATT profile 注册）</li>
+<li><code>xSemaphoreTake(init_done_sem_, 3s)</code> 等 INIT_FINISH 事件（释放 LVGL 锁前）</li>
+<li>INIT_FINISH 回调 → <code>esp_blufi_adv_start_with_name("MyDazy-XXXX")</code></li>
+</ol>
+</section>
+
+<!-- =============== 4 数据握手 =============== -->
+<section id="handshake">
+<h2><span class="num">4</span> BLUFI 数据握手时序</h2>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 460" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="hArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+
+<line x1="100"  y1="40" x2="100"  y2="440" stroke="#999" stroke-dasharray="3 3"/>
+<line x1="380" y1="40" x2="380" y2="440" stroke="#999" stroke-dasharray="3 3"/>
+<line x1="660" y1="40" x2="660" y2="440" stroke="#999" stroke-dasharray="3 3"/>
+
+<text class="node-text" x="100" y="30" style="font-weight:600">手机</text>
+<text class="node-text" x="380" y="30" style="font-weight:600">设备（NimBLE host）</text>
+<text class="node-text" x="660" y="30" style="font-weight:600">WiFi STA</text>
+
+<rect x="40" y="60" width="120" height="28" rx="4" fill="#fff" stroke="#999"/>
+<text class="node-text" x="100" y="78">BLE 连接</text>
+<path d="M160,74 L380,74" stroke="#666" marker-end="url(#hArr)"/>
+
+<rect x="280" y="100" width="200" height="50" rx="4" fill="#FFEBEE" stroke="#C62828"/>
+<text class="node-text" x="380" y="118">① BLE_CONNECT 事件</text>
+<text class="node-text sm" x="380" y="134">adv_stop · security_init</text>
+<text class="node-text sm" x="380" y="146">conn params 30-50ms / 6s</text>
+
+<path d="M380,150 L660,150" stroke="#666" stroke-dasharray="3 3" marker-end="url(#hArr)"/>
+<rect x="600" y="160" width="120" height="28" rx="4" fill="#fff" stroke="#1976D2"/>
+<text class="node-text" x="660" y="178">WiFi.Start 扫描</text>
+
+<rect x="40" y="200" width="120" height="28" rx="4" fill="#fff" stroke="#999"/>
+<text class="node-text" x="100" y="218">GET_WIFI_LIST</text>
+<path d="M160,214 L380,214" stroke="#666" marker-end="url(#hArr)"/>
+
+<rect x="280" y="245" width="200" height="32" rx="4" fill="#fff" stroke="#999"/>
+<text class="node-text" x="380" y="265">送回 ≤20 AP</text>
+<path d="M380,277 L100,300" stroke="#666" fill="none" marker-end="url(#hArr)"/>
+
+<rect x="40" y="310" width="120" height="28" rx="4" fill="#fff" stroke="#999"/>
+<text class="node-text" x="100" y="328">RECV SSID/PWD/code</text>
+<path d="M160,324 L380,324" stroke="#666" marker-end="url(#hArr)"/>
+
+<rect x="280" y="350" width="200" height="50" rx="4" fill="#E8F5E9" stroke="#2E7D32"/>
+<text class="node-text" x="380" y="368">② blufi_wifi task</text>
+<text class="node-text sm" x="380" y="384">P5 · 4096 栈 · Core 0 Pin</text>
+<text class="node-text sm" x="380" y="396">先 JSON 设备信息 + conn_report</text>
+
+<path d="M380,400 L660,400" stroke="#666" marker-end="url(#hArr)"/>
+<rect x="600" y="410" width="120" height="28" rx="4" fill="#E8F5E9" stroke="#2E7D32"/>
+<text class="node-text" x="660" y="428">连 AP 成功 → 保存</text>
+</svg>
+</div>
+
+<h3>安全机制 + BLE_CONNECT 后 4 步</h3>
+<ol class="compact">
+<li><b>停广播</b>（防多手机抢连 · <span style="color:var(--bad)">R3：早于 security_init</span>）</li>
+<li><b>security_init</b>（DH/AES 上下文 · 多次调用幂等）</li>
+<li><b>更新连接参数</b>：itvl 24-40（30-50ms）+ supervision 600（6s）· 抗用户浏览 WiFi 列表期间断连</li>
+<li><b>WiFi 扫描预热</b>：未 init 走 <code>wifi.Start()</code>（STA_START 自动扫描）· 已 init 走 <code>TriggerScan</code></li>
+</ol>
+</section>
+
+<!-- =============== 5 退出 + RAM 释放 =============== -->
+<section id="exit">
+<h2><span class="num">5</span> 退出 + RAM 释放</h2>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 280" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="eArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+<text x="440" y="20" class="svg-title" text-anchor="middle">OnConfigSuccess → Reboot → BT 永久释放</text>
+
+<rect x="180" y="50" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+<text x="200" y="70">① WiFi 连接成功 · 保存凭证 · 发 STA_CONN_SUCCESS 到手机</text>
+
+<rect x="180" y="92" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+<text x="200" y="112">② 起 config_done task · P5 · 8192 栈 · Core 0</text>
+
+<rect x="180" y="134" width="520" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="200" y="154" fill="#F57F17">③ sleep 2s · 让手机收到 success → StopConfigMode（R1：阻塞 2s）</text>
+
+<rect x="180" y="176" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+<text x="200" y="196">④ sleep 500ms · Application::Reboot（含音频/LDO 安全序列）</text>
+
+<rect x="180" y="218" width="520" height="44" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+<text x="200" y="238" fill="#2E7D32" font-weight="600">⑤ 重启后 SmartConnect 成功 · BT 从未 init</text>
+<text x="200" y="254" fill="#666" font-size="11">→ Blufi::ReleaseStaticMem · esp_bt_mem_release(BTDM) · 实际回收 25-35 KB INT（PSRAM 配置后兑现）</text>
+
+<line x1="440" y1="82" x2="440" y2="92" stroke="#666" marker-end="url(#eArr)"/>
+<line x1="440" y1="124" x2="440" y2="134" stroke="#666" marker-end="url(#eArr)"/>
+<line x1="440" y1="166" x2="440" y2="176" stroke="#666" marker-end="url(#eArr)"/>
+<line x1="440" y1="208" x2="440" y2="218" stroke="#666" marker-end="url(#eArr)"/>
+</svg>
+</div>
+
+<h3>RAM 释放的根因（量产关键）</h3>
+<div class="callout warn">
+<b>为什么 OnConfigSuccess 必须 Reboot 而不是原地切状态</b>：配网期 BLE+WiFi+提示音 占用大量 RAM，原地继续走 SetDeviceState(idle)→OTA→MQTT 时内部 RAM 会跌到 ~57KB 触达 60KB 红线；NVS flash op 禁用 cache 时 PSRAM 栈任务（opus_codec / cdc_console / audio_detection）会 <b>Double exception (SP=0x60100000)</b>。重启后凭证已保存，走 SmartConnect 干净路径。<br>
+<small style="color:var(--text-2)">代码注释：<code>wifi_board.cc:465-470</code></small>
+</div>
+
+<table>
+<thead><tr><th>场景</th><th>BT 是否 init</th><th>释放结果</th></tr></thead>
+<tbody>
+<tr><td>首次开机 + 配网成功 + 重启</td><td>已 init（配网期）</td><td>❌ 不释放（BT 已占用）</td></tr>
+<tr><td>第二次启动 SmartConnect 成功</td><td>从未 init</td><td>✅ 释放 25-35 KB INT</td></tr>
+<tr><td>每次启动都失败回 BLUFI</td><td>每次 init</td><td>❌ 永远不释放（设计如此）</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 6 异常 + 任务 =============== -->
+<section id="fault">
+<h2><span class="num">6</span> 异常路径 + 任务拓扑</h2>
+
+<h3>6.1 异常路径</h3>
+<table>
+<thead><tr><th>异常</th><th>检测</th><th>响应</th></tr></thead>
+<tbody>
+<tr><td>配网 10 分钟超时</td><td>主线程 while + vTaskDelay 1s 轮询</td><td>Alert "配网超时" · EnterDeepSleep(true)</td></tr>
+<tr><td>手机送错密码</td><td>TryConnectAndSave 返回 false</td><td>发 JSON <code>{"error":"..."}</code> + STA_CONN_FAIL · BLE 保持等重输</td></tr>
+<tr><td>BLE 中途断开</td><td>BLE_DISCONNECT 事件</td><td>清 timer（atomic exchange）/ security · 除非 stopping_ 否则重新 adv</td></tr>
+<tr><td><b>BLE_CONNECT 事件丢失</b></td><td>收到 GET_WIFI_LIST 等数据事件时 <code>ble_connected_</code> 仍为 false</td><td><b>自愈</b>：补 adv_stop + security_init + 预扫描（<code>blufi.cc:404-431</code>）</td></tr>
+<tr><td>WiFi 扫描空结果</td><td>OnScanDone records.empty</td><td>最多 2 次 retry（500ms 间隔 · esp_timer）· 仍空发空列表</td></tr>
+<tr><td>INIT_FINISH 超时（3s）</td><td>xSemaphoreTake 返回 false</td><td><span style="color:var(--bad)"><b>R2：仅 WARN 继续</b></span> · 下游空走</td></tr>
+<tr><td>手机抢连</td><td>BLE_CONNECT 立即停广播</td><td>第二台手机搜不到（GATT_MAX_CONNECTIONS=3 形同虚设）</td></tr>
+</tbody>
+</table>
+
+<h3>6.2 配网期任务（main/ 0 裸 xTaskCreate ✅）</h3>
+<table>
+<thead><tr><th>任务名</th><th>栈</th><th>优先级</th><th>Core</th><th>生命周期</th></tr></thead>
+<tbody>
+<tr><td>BT controller（IDF）</td><td>—</td><td>—</td><td>Core 0</td><td>BT 启用至 release</td></tr>
+<tr><td>bleprph_host_task</td><td>4096</td><td>—</td><td>Core 0</td><td>NimBLE 启用至 stop</td></tr>
+<tr><td>blufi_wifi</td><td>4096</td><td>P5</td><td><span style="color:var(--ok)">Core 0 ✅</span></td><td>异步 WiFi 连接（~10s）</td></tr>
+<tr><td>config_done</td><td>8192</td><td>P5</td><td><span style="color:var(--ok)">Core 0 ✅</span></td><td>2.5s 后 Reboot</td></tr>
+<tr><td>blufi_retry timer</td><td>—</td><td>—</td><td>esp_timer</td><td>WiFi 扫描重试（500ms · atomic exchange）</td></tr>
+</tbody>
+</table>
+
+<h3>6.3 内存预算</h3>
+<table>
+<thead><tr><th>项</th><th>RAM</th><th>区域</th></tr></thead>
+<tbody>
+<tr><td>BT controller 静态</td><td>~15 KB</td><td>INT</td></tr>
+<tr><td>NimBLE host 静态</td><td>~10 KB</td><td><b>PSRAM ✅</b></td></tr>
+<tr><td>msys 池 + ACL buf</td><td>~17 KB</td><td>INT</td></tr>
+<tr><td>DH + AES 上下文（仅 PROV 期）</td><td>~3.5 KB</td><td>heap INT</td></tr>
+<tr><td><b>配网期总计</b></td><td><b>~35 KB INT + ~10 KB PSRAM</b></td><td>—</td></tr>
+<tr><td><b>SmartConnect 后释放</b></td><td><b>−25~35 KB</b></td><td>INT（永久回收）</td></tr>
+</tbody>
+</table>
+
+<h3>6.4 三板差异</h3>
+<table>
+<thead><tr><th>差异点</th><th>4G 板</th><th>WiFi 板</th><th>P31 板</th></tr></thead>
+<tbody>
+<tr><td>BLUFI 路径</td><td colspan="3">三板均走 <code>boards/common/wifi_board.cc</code> 同一实现</td></tr>
+<tr><td>iBeacon 扫描</td><td>无</td><td>无</td><td>源码 stub · 启用需重开 OBSERVER 并恢复 25-35KB INT 占用</td></tr>
+<tr><td>NimBLE 角色</td><td colspan="3"><b>仅 PERIPHERAL + BROADCASTER + GATT_SERVER（已生效）</b></td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 7 已修 + 待办 =============== -->
+<section id="risks">
+<h2><span class="num">7</span> 已修 + 在修 + 待办（按风险分级）</h2>
+
+<h3>7.1 已修复（commit 证据）</h3>
+<table>
+<thead><tr><th>编号</th><th>问题</th><th>commit / 位置</th></tr></thead>
+<tbody>
+<tr><td><span class="pill done">FIXED</span></td><td>sdkconfig 漂移 · NimBLE 角色裁剪 + PSRAM 真生效</td><td><span class="commit">b0056d97</span></td></tr>
+<tr><td><span class="pill done">FIXED</span></td><td>main/ 裸 xTaskCreate 清零（blufi_wifi + config_done Pin Core 0）</td><td><span class="commit">739a2a78 + 当前</span></td></tr>
+<tr><td><span class="pill done">FIXED</span></td><td>retry_timer 三路径释放竞态 · atomic exchange 模式</td><td><code>blufi.h:76 · blufi.cc:218/315/325/516</code></td></tr>
+<tr><td><span class="pill done">FIXED</span></td><td>iBeacon 死代码 · 条件编译 stub</td><td><code>ibeacon.cc:9-16</code></td></tr>
+<tr><td><span class="pill done">FIXED</span></td><td>NimBLE 初始化 · LVGL 锁 + INIT_FINISH 信号量</td><td><span class="commit">3272859c</span></td></tr>
+<tr><td><span class="pill done">FIXED</span></td><td>BLE 设备名 "nimble" 覆盖 · 直传 device_name_</td><td><span class="commit">e412d9c5</span></td></tr>
+<tr><td><span class="pill done">FIXED</span></td><td>BLE_CONNECT 事件丢失 · 数据事件兜底自愈</td><td><code>blufi.cc:404-431</code></td></tr>
+<tr><td><span class="pill done">FIXED</span></td><td>MTU 247 字节 · 解决 Android WiFi 列表丢包</td><td><code>blufi_init.c:249</code></td></tr>
+<tr><td><span class="pill done">FIXED</span></td><td>IDF 5.5 WiFi 兼容 · WPA3 SAE + 延迟 disconnect</td><td><span class="commit">92d27813 · b7ee8d61</span></td></tr>
+<tr><td><span class="pill done">FIXED</span></td><td>binding_code 解耦 · 走 Settings("blufi")（OTA 可读）</td><td><code>blufi.cc:647-650</code></td></tr>
+</tbody>
+</table>
+
+<h3>7.2 在修（diff 待提交）</h3>
+<table>
+<tbody>
+<tr><td><span class="pill todo">DIFF</span> <b>wifi_station 三处并发竞态</b>：is_scanning_ 改 atomic exchange · connect_queue 加锁 · IpEventHandler clear 加锁 — 已编译验证，待 commit（<code>main/wifi/wifi_station.cc</code>）</td></tr>
+</tbody>
+</table>
+
+<h3>7.3 待办（按量产风险排序）</h3>
+<table>
+<thead><tr><th>#</th><th>修复</th><th>风险等级</th></tr></thead>
+<tbody>
+<tr><td><span class="pill risk">R1</span></td><td><b>nimble_port_stop 2s 阻塞挪出主线程</b>：当前 OnConfigSuccess 已在独立 task · 已部分缓解 · 仍可在 blufi_init.c 用回调通知代替轮询等待</td><td>中（用户感知）</td></tr>
+<tr><td><span class="pill risk">R2</span></td><td><b>INIT_FINISH 超时返回 false + Stop</b>：当前仅 WARN · 改后避免下游空走 GATT</td><td>中（异常路径覆盖）</td></tr>
+<tr><td><span class="pill risk">R3</span></td><td><b>BLE_CONNECT 调换 security_init / adv_stop 顺序</b>：security_init 先 · 失败再 stop_adv（让用户立刻重连）</td><td>低（极端场景）</td></tr>
+<tr><td><span class="pill risk">R4</span></td><td><b>wifi_config_mode_ 改 std::atomic&lt;bool&gt;</b>：跨任务读写一致</td><td>低（单写多读）</td></tr>
+<tr><td><span class="pill risk">R5</span></td><td><b>DH dh_param_len clamp ≤2048</b>：来自手机字节流的长度防恶意攻击</td><td>低（量产闭环信任）</td></tr>
+<tr><td><span class="pill risk">R6</span></td><td><b>init_done_sem_ 释放顺序</b>：先 atomic_exchange 置 nullptr 再 vSemaphoreDelete</td><td>极低（残余 Give 几乎不可能）</td></tr>
+<tr><td><span class="pill risk">R7</span></td><td><b>msys block 调到 256 对齐 MTU 247</b>：消除单包跨 block 碎片</td><td>极低（性能损耗 ~5%）</td></tr>
+</tbody>
+</table>
+
+<h3>7.4 精简候选（lean）</h3>
+<table>
+<tbody>
+<tr><td><span class="pill lean">lean</span> <b>blufi_init.c Bluedroid 分支 ~80 行</b>：项目锁 NimBLE · Bluedroid 未编入 · 上游残留可删（<code>blufi_init.c:30-110</code>）</td></tr>
+<tr><td><span class="pill lean">lean</span> <b>device_name 长度 248 检查</b>：BLE GAP max=31 · 应改 31 或删（<code>blufi.cc:101</code>）</td></tr>
+<tr><td><span class="pill lean">lean</span> <b>WIFI_LIST_NUM=20 重复定义</b>：blufi.cc 和 wifi_station 各自定义一份 · 集中到 wifi_station.h</td></tr>
+<tr><td><span class="pill lean">lean</span> <b>ibeacon.{h,cc} 当前为 stub</b>：P31 真启用前可考虑物理删除（节约 219 行编译资源）· 或保留以备启用</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 8 下一步行动 =============== -->
+<section id="next">
+<h2><span class="num">8</span> 下一步行动</h2>
+
+<p class="sub">三个批次，按"量产风险"和"工作量"双维度组织。批次 A 不依赖外部资源，今天可推进；批次 B 是稳定性补强；批次 C 是精简，发版后处理。</p>
+
+<div class="callout bad">
+<b>批次 A · 今天可落（量产前最后一公里）</b>
+<ol class="compact" style="margin-top:6px">
+<li><b>提交 wifi_station 并发改造</b>：当前 diff 已编译验证，单独一个 commit · <code>git add main/wifi/wifi_station.cc &amp;&amp; git commit -m "fix(wifi): is_scanning atomic + connect_queue 持锁"</code></li>
+<li><b>修 R2 (INIT_FINISH 超时)</b>：3s 超时改返回 false + 调 Stop · 防 NimBLE 异常时下游空走（<code>blufi.cc:178-181</code>）· 改动 ≤ 5 行</li>
+<li><b>修 R3 (BLE_CONNECT 顺序)</b>：security_init 提到 adv_stop 之前 · 改动 2 行（<code>blufi.cc:453-455</code>）</li>
+<li><b>修 R6 (init_done_sem_ 释放顺序)</b>：本地拷贝 + 置 nullptr 再 delete · 改动 4 行（<code>blufi.cc:230-233</code>）</li>
+</ol>
+<small style="color:var(--text-2)">合并后烧录一台真机做 BLUFI 完整链路（开机→配网→重启→SmartConnect→BT 释放），确认内部 RAM > 60KB 且无 panic。</small>
+</div>
+
+<div class="callout warn">
+<b>批次 B · 本周内（稳定性补强）</b>
+<ol class="compact" style="margin-top:6px">
+<li><b>R1 nimble_port_stop 改回调</b>：blufi_init.c:285-293 的 40×50ms 轮询改 BLE host task 退出回调 · 让 config_done task 等回调而非主线程轮询</li>
+<li><b>R4 wifi_config_mode_ 改 atomic</b>：<code>wifi_board.h:14</code> · 一行改动</li>
+<li><b>R5 DH 长度 clamp</b>：<code>blufi_security.c:81-86</code> · 大于 2048 直接返回错误，防恶意手机申堆</li>
+<li><b>R7 msys block 调 256</b>：<code>sdkconfig:937</code> · 重新 reconfigure 后压测 Android 大列表场景</li>
+</ol>
+</div>
+
+<div class="callout ok">
+<b>批次 C · 量产稳定 1 周后（精简）</b>
+<ol class="compact" style="margin-top:6px">
+<li>删 blufi_init.c 的 Bluedroid 分支（~80 行）· 项目锁 NimBLE 永不回头</li>
+<li>修 device_name 长度检查（248 → 31，BLE GAP 真实上限）</li>
+<li>合并 WIFI_LIST_NUM 重复定义</li>
+<li>P31 决策点：iBeacon 真启用要不要做？若不做，物理删 ibeacon.{h,cc}</li>
+</ol>
+</div>
+
+<h3>验收清单（批次 A 落地后必跑）</h3>
+<ul class="compact">
+<li>[ ] 全板编译通过（4G / WiFi / P31）· <code>python scripts/release.py</code></li>
+<li>[ ] 真机：首次开机 BLUFI 配网成功 · log 看到 <code>esp_bt_mem_release</code> 释放 25-35KB</li>
+<li>[ ] 真机：BLUFI 期间内部 RAM 始终 > 60KB · <code>heap_caps_get_free_size(MALLOC_CAP_INTERNAL)</code> 抽样</li>
+<li>[ ] 真机：手机断连/重连/抢连 三场景无 panic（看 retry_timer 路径）</li>
+<li>[ ] 真机：连续 5 次重置→配网→重启 · 无内存泄漏（free heap 趋势平稳）</li>
+<li>[ ] Android 大列表场景（20 AP）三次下发不丢包</li>
+<li>[ ] grep <code>xTaskCreate\b</code> main/ 仍是 0 命中</li>
+</ul>
+</section>
+
+</main>
+</div>
+
+</body>
+</html>

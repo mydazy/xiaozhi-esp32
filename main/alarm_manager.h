@@ -21,10 +21,6 @@ struct AlarmConfig {
     std::string message;      // 提醒内容
 };
 
-// P0-2: NVS 写操作异步队列元素
-// UI 线程持业务锁只做内存操作 + enqueue, 实际 NVS 写由独立 worker task 执行,
-// 避免 UI(Core1) 持 mutex_ 做 flash op 时 main_event_loop(Core0) 阻塞导致的死锁,
-// 及 PSRAM 栈任务被 scheduler 切入 flash_op_lock 期间引发的 Double Exception。
 enum class AlarmNvsOpType : uint8_t {
     Save,
     Remove,
@@ -36,7 +32,7 @@ struct AlarmNvsOp {
 
 // 闹钟管理器（单例，线程安全，8 固定槽位，NVS 持久化）
 //
-// 三个入口：MCP 语音 / UI 触摸 / 深睡唤醒
+// 两个入口：MCP 语音 / 深睡唤醒
 // 触发方式：CLOCK_TICK 每秒调用 CheckAndTrigger()
 class AlarmManager {
 public:
@@ -45,9 +41,8 @@ public:
     AlarmManager(const AlarmManager&) = delete;
     AlarmManager& operator=(const AlarmManager&) = delete;
 
-    // ---- CRUD（线程安全）----
+    // ---- CRUD（线程安全）· AddAlarm 重复 id 即更新 ----
     bool AddAlarm(const AlarmConfig& alarm);
-    bool UpdateAlarm(const AlarmConfig& alarm);
     bool DeleteAlarm(uint8_t id);
     bool GetAlarm(uint8_t id, AlarmConfig& out) const;
     void ClearAllAlarms();
@@ -66,7 +61,7 @@ public:
     // ---- 深睡（进入深睡前调用）----
     esp_err_t ConfigureTimerWakeup();
 
-    // v1.9.68: 阻塞等 NVS 写队列 drain 完（OTA/关机/深睡前兜底）
+    // 阻塞等 NVS 写队列 drain 完（OTA/关机/深睡前兜底）
     // timeout_ms 到期仍未清空时返回 false，但不阻塞调用方太久
     bool FlushNvs(uint32_t timeout_ms = 3000);
 
@@ -83,16 +78,12 @@ public:
     static bool IsTimeSynced();
     // Timer 唤醒标记（允许未校时时用 RTC fallback 触发闹钟）
     static void MarkTimerWakeup();
-    static std::string GetTimeString();
-    static std::string GetDateString();
-    static int GetWeekday();
 
 private:
     AlarmManager();
     ~AlarmManager() = default;
 
     void LoadAlarms();
-    void CreateDefaultAlarms();
     bool SaveAlarmLocked(const AlarmConfig& alarm);
     void RemoveAlarmLocked(uint8_t id);
     bool IsSlotOccupied(uint8_t id) const { return (slot_occupied_ & (1 << id)) != 0; }
@@ -100,8 +91,6 @@ private:
     int CalcSecondsUntil(const AlarmConfig& alarm) const;
     std::string BuildJsonLocked() const;
 
-    // P0-2: 异步 NVS 写 (worker task 上下文, 不持 mutex_)
-    // v1.9.68: 改为接受 Settings& 复用一个 open/commit 生命周期（批量合并提交）
     void DoNvsSaveIn(class Settings& settings, const AlarmConfig& alarm);
     void DoNvsRemoveIn(class Settings& settings, uint8_t id);
     static void NvsWorkerTask(void* arg);
@@ -112,11 +101,11 @@ private:
     bool loaded_ = false;
     std::function<void(const AlarmConfig&)> alarm_callback_;
 
-    // P0-2: NVS 写异步队列
+    // NVS 写异步队列
     QueueHandle_t nvs_queue_ = nullptr;
     TaskHandle_t nvs_worker_task_ = nullptr;
     std::atomic<bool> nvs_worker_running_{false};
-    // v1.9.68: pending = 队列未入 + worker 正在处理中。FlushNvs 轮询至 0。
+    // pending = 队列未入 + worker 正在处理中。FlushNvs 轮询至 0。
     std::atomic<uint32_t> nvs_pending_{0};
 
     // 防重触发

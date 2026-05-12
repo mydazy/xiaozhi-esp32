@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>MyDazy P30 · 教育卡 UI Spec · 启蒙定版</title>
+<title>📦 [历史] MyDazy P30 · 教育卡 UI Spec · 启蒙定版（设计推演）</title>
 <style>
   /* 真机用 975MaruSC 圆角字体（商业字体，浏览器加载不到）
      mockup 用 Google Fonts 的 M PLUS Rounded 1c 做近似替代——
@@ -182,9 +182,25 @@
 <body>
 <div class="page">
 
-<!-- HERO -->
+<!-- ⚠ 历史归档提示 -->
+<div style="background:#FFF8E1;border-left:4px solid #FB8C00;padding:14px 20px;margin:0 0 28px;border-radius:6px;font-size:14px;line-height:1.7;color:#B95000">
+  <strong>📦 设计推演历史文档（v32 之前）</strong><br>
+  本文档为教育卡早期设计推演与产品决策记录（含"为什么不要 80-100 超大字号档"等论证过程），具有历史参考价值。
+  <br><br>
+  <strong>当前权威规范请看：</strong><a href="p30-edu-card.html" style="color:#1976D2;font-weight:600">p30-edu-card.html · 教育卡设计规范（v32 落地版）</a>
+  <br><br>
+  <strong>当前与本文档主要差异</strong>：
+  <ul style="margin:4px 0 0 18px;padding:0">
+    <li>MCP 工具：本文档 6+ 独立工具（show_word_card 等） → 当前单一 <code style="background:#fff;padding:1px 5px">self.education.show_card(category)</code></li>
+    <li>分隔符：本文档 <code>"left|right"</code> → 当前 <code>"[main_bottom]"</code> 用 <code>_</code> 下划线（避 l/I 混淆）</li>
+    <li>超大字号：本文档"不另立 80-100" → 当前 <b>已实现 88 px</b> 主秀（letter/phonics/math 主动学习）</li>
+    <li>激活校验：本文档 <code>is_pinyin(left)</code> + 3000 字校验 → 当前 <code>ContainsCjk + 280px 实测兜底</code></li>
+  </ul>
+</div>
+
+<!-- HERO（原始内容 · 历史推演）-->
 <header class="hero">
-  <div class="eyebrow">MyDazy P30 · 教育卡 · 启蒙定版</div>
+  <div class="eyebrow">MyDazy P30 · 教育卡 · 启蒙定版（历史）</div>
   <h1>3-9 岁启蒙：56 主秀 / 30 顶 / 20 副</h1>
   <p class="lede">
     LLM TTS 流抽出关键词时显示。两种模式（PY 学汉字、EN 学英文），三档字号（56 / 30 / 20），单一品牌色（金 / 绿 / 黑）。

@@ -23,7 +23,6 @@ static const char* IMAGE_FILES[] = {
     IMG_FILE_ICON_CHECKBOX_CHECKED,
     IMG_FILE_BUTTON_LEFT,
     IMG_FILE_BUTTON_RIGHT,
-    // 状态栏电池/信号图标已迁至 FontAwesome 字体（见 ui_display.cc · CreateGlobalStatusBar）
 };
 
 static constexpr int IMAGE_COUNT = sizeof(IMAGE_FILES) / sizeof(IMAGE_FILES[0]);

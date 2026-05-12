@@ -7,6 +7,7 @@
 #include "mqtt_protocol.h"
 #include "websocket_protocol.h"
 #include "websocket_joyai_protocol.h"
+#include "websocket_baidu_protocol.h"
 #include "assets/lang_config.h"
 #include "mcp_server.h"
 #include "assets.h"
@@ -17,9 +18,13 @@
 #include "device_state_event.h"
 #include "audio/music_player.h"
 #include "alarm_manager.h"
+#include "audio/alarm_ringer.h"
 
 #include <cstring>
+#include <cstdlib>   // setenv / tzset (P0：闹钟时区基准)
+#include <ctime>
 #include <vector>
+#include <optional>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
 #include <cJSON.h>
@@ -31,113 +36,65 @@
 
 
 namespace {
-constexpr size_t kEduCardMaxPerSentence = 1;     // 严格单卡：音画同步
-constexpr int    kEduCardIntervalMs     = 3500;
-
-struct EduWordHit {
-    std::string word;
-    std::string top;
-    std::string bottom;
+struct EduCard {
+    std::string main;   // 主秀：汉字（≤4 字）/ 英文单词（≤12 字符）
+    std::string top;    // 辅助：拼音 / 中文释义
 };
 
-bool ParseEduCardBody(const std::string& s, size_t lp, size_t rp, EduWordHit* out) {
-    out->top.clear();
+bool ParseEduCard(const std::string& s, size_t lp, size_t rp, EduCard* out) {
+    auto sep = s.find('_', lp + 1);
+    if (sep == std::string::npos || sep >= rp) return false;
+    if (s.find('_', sep + 1) < rp) return false;  // 多于 1 个 _ 拒绝
 
-    auto first = s.find('_', lp + 1);
-    if (first == std::string::npos || first >= rp) return false;  // 无 '_' 拒绝
-
-    auto second = s.find('_', first + 1);
-    if (second != std::string::npos && second < rp) {
-        // 三段 [main_bottom_top]
-        auto third = s.find('_', second + 1);
-        if (third != std::string::npos && third < rp) return false;  // 4 段拒绝
-        out->word   = s.substr(lp + 1, first - lp - 1);
-        out->bottom = s.substr(first + 1, second - first - 1);
-        out->top    = s.substr(second + 1, rp - second - 1);
-    } else {
-        // 二段 [main_bottom]
-        out->word   = s.substr(lp + 1, first - lp - 1);
-        out->bottom = s.substr(first + 1, rp - first - 1);
-    }
+    out->main = s.substr(lp + 1, sep - lp - 1);
+    out->top  = s.substr(sep + 1, rp - sep - 1);
 
     auto trim = [](std::string& x) {
         while (!x.empty() && x.front() == ' ') x.erase(0, 1);
         while (!x.empty() && x.back() == ' ') x.pop_back();
     };
-    trim(out->top); trim(out->word); trim(out->bottom);
-    if (out->word.empty() || out->bottom.empty()) return false;
-    if (out->word.size() > 32 || out->bottom.size() > 48 || out->top.size() > 24) return false;
+    trim(out->main); trim(out->top);
+
+    if (out->main.empty() || out->top.empty()) return false;
+    if (out->main.size() > 32 || out->top.size() > 24) return false;
     return true;
 }
 
-std::vector<EduWordHit> ExtractEduWordCards(const std::string& s) {
-    std::vector<EduWordHit> hits;
-    size_t pos = 0;
-    while (hits.size() < kEduCardMaxPerSentence) {
-        auto lp = s.find('[', pos);
-        if (lp == std::string::npos) break;
-        auto rp = s.find(']', lp + 1);
-        if (rp == std::string::npos) break;
-        EduWordHit hit;
-        if (ParseEduCardBody(s, lp, rp, &hit)) hits.push_back(std::move(hit));
-        pos = rp + 1;
-    }
-    return hits;
+// 从一句 LLM 文本提取教育卡（产品决策严格单卡）
+std::optional<EduCard> ExtractEduCard(const std::string& s) {
+    auto lp = s.find('[');
+    if (lp == std::string::npos) return std::nullopt;
+    auto rp = s.find(']', lp + 1);
+    if (rp == std::string::npos) return std::nullopt;
+    EduCard hit;
+    if (!ParseEduCard(s, lp, rp, &hit)) return std::nullopt;
+    return hit;
 }
 
-// 链式弹卡状态
-std::vector<EduWordHit> g_edu_queue;
-size_t                  g_edu_idx = 0;
-esp_timer_handle_t      g_edu_timer = nullptr;
-
-void FlushNextEduCardOnMain() {
-    if (g_edu_idx >= g_edu_queue.size()) return;
-    auto state = Application::GetInstance().GetDeviceState();
-    if (state != kDeviceStateSpeaking) {
-        g_edu_queue.clear();
-        g_edu_idx = 0;
-        return;
-    }
-    auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
-    // 同轮屏蔽：FontGIF 显示中放弃整队（产品决策 · 下轮 Speaking 由 application.cc 清场后重启）
-    if (ui && ui->IsFontGifActive()) {
-        ESP_LOGI(TAG, "EduCard queue dropped: font GIF active (%u cards skipped)",
-                 (unsigned)(g_edu_queue.size() - g_edu_idx));
-        g_edu_queue.clear();
-        g_edu_idx = 0;
-        return;
-    }
-    auto hit = g_edu_queue[g_edu_idx++];
-    if (ui) {
-        ui->ShowEduCard("word", hit.word.c_str(),
-                        hit.top.c_str(), hit.bottom.c_str());
-    }
-    if (g_edu_idx < g_edu_queue.size()) {
-        esp_timer_start_once(g_edu_timer, (uint64_t)kEduCardIntervalMs * 1000);
-    }
-}
-
-void FlushNextEduCard() {
-    Application::GetInstance().Schedule([]() { FlushNextEduCardOnMain(); });
-}
-
-void EnqueueEduCards(std::vector<EduWordHit> hits) {
-    if (hits.empty()) return;
-    Application::GetInstance().Schedule([hits = std::move(hits)]() mutable {
-        if (!g_edu_timer) {
-            esp_timer_create_args_t args = {
-                .callback = [](void*) { FlushNextEduCard(); },
-                .arg = nullptr,
-                .dispatch_method = ESP_TIMER_TASK,
-                .name = "edu_card_timer",
-                .skip_unhandled_events = true,
-            };
-            esp_timer_create(&args, &g_edu_timer);
+// 投递到 main loop 显示教育卡（state + FontGIF 守护）
+void TriggerEduCard(EduCard hit) {
+    Application::GetInstance().Schedule([hit = std::move(hit)]() {
+        auto state = Application::GetInstance().GetDeviceState();
+        if (state != kDeviceStateSpeaking) {
+            ESP_LOGI(TAG, "[edu] skip @Schedule: state=%d (need Speaking=%d) main=%s",
+                     (int)state, (int)kDeviceStateSpeaking, hit.main.c_str());
+            return;
         }
-        esp_timer_stop(g_edu_timer);
-        g_edu_queue = std::move(hits);
-        g_edu_idx = 0;
-        FlushNextEduCardOnMain();   // 已在 main loop 内，直接调（不再 Schedule 嵌套）
+        auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
+        if (!ui) {
+            ESP_LOGW(TAG, "[edu] skip @Schedule: display !UiDisplay (dynamic_cast nullptr)");
+            return;
+        }
+        bool gif_active = ui->IsFontGifActive();
+        bool gif_pending = ui->IsFontPending();
+        if (gif_active || gif_pending) {
+            ESP_LOGI(TAG, "[edu] skip @Schedule: font_gif active=%d pending=%d main=%s",
+                     (int)gif_active, (int)gif_pending, hit.main.c_str());
+            return;
+        }
+        ESP_LOGI(TAG, "[edu] -> ShowEduCard: main='%s' top='%s'",
+                 hit.main.c_str(), hit.top.c_str());
+        ui->ShowEduCard(hit.main.c_str(), hit.top.c_str());
     });
 }
 }  // namespace
@@ -192,6 +149,13 @@ bool Application::SetDeviceState(DeviceState state) {
 void Application::Initialize() {
     auto& board = Board::GetInstance();
     SetDeviceState(kDeviceStateStarting);
+
+    // P0：时区基准必须最早设（在任何 localtime_r / 时钟显示之前）
+    // CST-8 == UTC+8（中国标准时间）· POSIX TZ 符号反向所以是 -8
+    // 已校时设备重启时：RTC 已是 UTC，TZ 让 localtime_r 显示北京时间
+    // 未校时设备：tm_year < 2020 触发"--:--"占位，TZ 仍提前就绪
+    setenv("TZ", "CST-8", 1);
+    tzset();
 
     // Setup the display
     auto display = board.GetDisplay();
@@ -317,16 +281,9 @@ void Application::Initialize() {
         }
     });
 
-    // 闹钟回调：响铃时 OGG_WAKEUP + AI 自然语言提醒（参 189 经验 · 不抢屏）
-    AlarmManager::GetInstance().SetAlarmCallback([this](const AlarmConfig& evt) {
-        PlaySound(Lang::Sounds::OGG_WAKEUP);
-        char prompt[160];
-        snprintf(prompt, sizeof(prompt),
-                 "闹钟响了，现在 %02d:%02d，提醒：%s。请用简短温馨的语气提醒主人",
-                 evt.hour, evt.minute, evt.message.c_str());
-        Schedule([text = std::string(prompt)]() {
-            Application::GetInstance().SendTextToAI(text);
-        });
+    // 闹钟回调：交 AlarmRinger 接管（持续响 + 渐入音量 + 摇晃/按键/语音/超时关停）
+    AlarmManager::GetInstance().SetAlarmCallback([](const AlarmConfig& evt) {
+        AlarmRinger::GetInstance().Start(evt.message);
     });
     // MCP 工具注册（self.alarm.add / list / delete / set_enabled）
     AlarmManager::GetInstance().RegisterMcpTools();
@@ -483,6 +440,11 @@ void Application::HandleActivationDoneEvent() {
 
     has_server_time_ = ota_->HasServerTime();
     if (has_server_time_) {
+        // P0：闹钟时区基准 · 不 setenv("TZ") 会让 localtime_r 退化为 UTC（显示比真实少 8h）
+        // ⇒ 用户设"早 7:00"实际北京 15:00 才响 · CST-8 == UTC+8（中国标准时间）
+        // ⚠️ 必须与 ota.cc 协同：settimeofday 接 UTC 毫秒（已修），TZ 由此 setenv 决定本地偏移
+        setenv("TZ", "CST-8", 1);
+        tzset();
         AlarmManager::MarkTimeSynced();   // 校时成功 · 启用闹钟检查
     }
 
@@ -668,10 +630,14 @@ void Application::InitializeProtocol() {
     if (ota_->HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
     } else if (ota_->HasWebsocketConfig()) {
-        // JoyAI 协议分发：检查 websocket URL 是否指向 joyinside.jd.com
+        // WebSocket 分发优先级：Baidu (brtc/baidu) → JoyAI (joyinside) → 普通 WS 兜底
+        // 子串匹配 · 与 OTA 配置解耦 · 凭 NVS websocket.url 形态判别
         Settings ws_settings("websocket", false);
         std::string ws_url = ws_settings.GetString("url", "");
-        if (ws_url.find("joyinside") != std::string::npos) {
+        if (ws_url.find("baidu") != std::string::npos) {
+            ESP_LOGI(TAG, "Using Baidu BRTC WebSocket protocol (url=%s)", ws_url.c_str());
+            protocol_ = std::make_unique<WebsocketBaiduProtocol>();
+        } else if (ws_url.find("joyinside") != std::string::npos) {
             ESP_LOGI(TAG, "Using JoyAI WebSocket protocol");
             protocol_ = std::make_unique<WebsocketJoeaiProtocol>();
         } else {
@@ -741,11 +707,10 @@ void Application::InitializeProtocol() {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
                     std::string sentence = text->valuestring;
 
-                    // 被动学习：[main|bottom] 或 [top|main|bottom] → 自动弹 word 卡（多张链式）
-                    auto hits = ExtractEduWordCards(sentence);
-                    if (!hits.empty()) {
-                        ESP_LOGI(TAG, "EduCard auto-trigger: %zu card(s)", hits.size());
-                        EnqueueEduCards(std::move(hits));
+                    // AI 对话被动学习：[main_top] → 自动弹教育卡（严格单卡 · 两行布局）
+                    if (auto hit = ExtractEduCard(sentence); hit.has_value()) {
+                        ESP_LOGI(TAG, "EduCard auto-trigger: %s", hit->main.c_str());
+                        TriggerEduCard(std::move(*hit));
                     }
 
                     Schedule([display, message = sentence]() {
@@ -1153,7 +1118,8 @@ void Application::HandleStateChangedEvent() {
             break;
         case kDeviceStateSpeaking:
             display->SetStatus("");
-            // 下一轮对话开始：清掉上一轮的教育卡 + 笔画 GIF（让新一轮的画面可以正常显示）
+            // 下一轮对话开始：清掉上一轮的教育卡 + 笔画 GIF · 让新一轮 LLM 触发新显示
+            // 单卡架构（严格音画同步）· 无队列无 timer 需要清
             if (lcd) {
                 lcd->HideEduCard();
                 lcd->HideFontGif();

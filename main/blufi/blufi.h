@@ -3,6 +3,7 @@
 
 #include <string>
 #include <functional>
+#include <atomic>
 #include "esp_blufi_api.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -70,7 +71,9 @@ private:
     bool stopping_ = false;
     bool scanning_ = false;
     int scan_retry_count_ = 0;       // 扫描空结果重试计数
-    esp_timer_handle_t retry_timer_ = nullptr;  // 重试定时器
+    // 重试定时器 · 多路径竞态：Stop / timer callback / OnScanDone 创新 都会 delete
+    // atomic exchange 模式：先 exchange(nullptr) 夺走句柄 · 抢到的负责释放 · 抢不到的跳过
+    std::atomic<esp_timer_handle_t> retry_timer_{nullptr};
 
     // ⚠️ GATT profile init 同步信号（INIT_FINISH 事件触发时 give）
     // Start() 持锁等待，避免调用方释放 LVGL 锁时 NimBLE 还在 flash op

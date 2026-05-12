@@ -79,7 +79,7 @@ ul.compact li { margin: 2px 0; }
 
 <header>
   <h1>MyDazy P30 · UI 交互流程</h1>
-  <div class="meta">v32 · 2026-05-11 · main/display/ui_display.{h,cc} 完全对齐</div>
+  <div class="meta">v32 · 2026-05-11 · 单卡架构（无 queue/timer）· 与代码完全对齐</div>
 </header>
 
 <div class="layout">
@@ -92,7 +92,7 @@ ul.compact li { margin: 2px 0; }
   <a href="#states">4. 主状态机</a>
   <a href="#chain">5. 教育卡链路</a>
   <a href="#review">6. 流程评审</a>
-  <a href="#optimize">7. 代码优化候选</a>
+  <a href="#optimize">7. 后续候选</a>
   <a href="#verify">8. 量产收尾</a>
 </nav>
 
@@ -117,7 +117,7 @@ ul.compact li { margin: 2px 0; }
   </tbody>
 </table>
 
-<h3>公共 API（5 函数 · 2 查询 · 2 状态字段）</h3>
+<h3>公共 API（6 核心函数 · 4 查询 · 2 状态字段）</h3>
 <table>
   <thead><tr><th>分类</th><th>API</th><th>调用方</th></tr></thead>
   <tbody>
@@ -127,17 +127,19 @@ ul.compact li { margin: 2px 0; }
     <tr><td rowspan="2"><b>教育卡</b></td>
         <td><code>ShowEduCard(category, main, top, bottom)</code></td><td>application.cc 聊天正则 + MCP <code>show_card</code></td></tr>
     <tr><td><code>HideEduCard()</code></td><td>内部 4 处 + application.cc 退出</td></tr>
-    <tr><td><b>笔画 GIF</b></td>
+    <tr><td rowspan="2"><b>笔画 GIF</b></td>
         <td><code>FontGif(buffer, size)</code></td><td>MCP <code>show_stroke</code> 下载完成回调</td></tr>
+    <tr><td><code>HideFontGif()</code></td><td>触摸退出 / application.cc Speaking 状态清场</td></tr>
     <tr><td rowspan="3"><b>音乐播放</b></td>
         <td><code>SwitchToPlayerMode(title)</code> / <code>SwitchOutPlayerMode()</code></td><td>MCP <code>music_play</code> / 唤醒词</td></tr>
     <tr><td><code>UpdatePlayerProgress()</code> / <code>SetPlayerPaused()</code></td><td>PlayerTickCb / MCP 暂停</td></tr>
     <tr><td><code>OnPlayerPauseToggle(cb)</code></td><td>注册暂停按钮回调</td></tr>
     <tr><td><b>QR 激活</b></td>
         <td><code>ShowQrCode(content, ...)</code> / <code>HideQrCode()</code></td><td>配网 BLE / 激活流程</td></tr>
-    <tr><td rowspan="3"><b>查询</b></td>
+    <tr><td rowspan="4"><b>查询</b></td>
         <td><code>GetCurrentScene()</code></td><td>返回 SceneType</td></tr>
     <tr><td><code>IsEduCardActive()</code></td><td>教育卡 overlay 是否显示中</td></tr>
+    <tr><td><code>IsFontGifActive()</code></td><td>笔画 GIF 是否显示中（TriggerEduCard 内守护）</td></tr>
     <tr><td><code>IsClockMode()</code> / <code>IsPlayerMode()</code></td><td>SceneType 快捷判定</td></tr>
   </tbody>
 </table>
@@ -156,8 +158,7 @@ ul.compact li { margin: 2px 0; }
 <table>
   <thead><tr><th>常量</th><th>值</th><th>位置</th></tr></thead>
   <tbody>
-    <tr><td>教育卡链式间隔</td><td><b>3500 ms</b></td><td><code>application.cc</code> kEduCardIntervalMs</td></tr>
-    <tr><td>每句最多卡数</td><td><b>1</b>（音画同步）</td><td>kEduCardMaxPerSentence</td></tr>
+    <tr><td>每句教育卡数</td><td><b>严格 1 张</b>（音画同步 · 单卡架构 · 无链式弹卡）</td><td><code>application.cc</code> ExtractFirstEduWordCard</td></tr>
     <tr><td>聊天字幕滚动速度</td><td><b>30 px/s</b>（≈2 字/秒）</td><td>SetChatMessage kChatScrollSpeedPps</td></tr>
     <tr><td>主秀 88px 触发</td><td>category=letter/phonics/math · ≤5 字符</td><td>PickEduMainFont + IsSuperCategory</td></tr>
     <tr><td>主秀 56px 默认</td><td>PY-mode ≤4 字 · EN-mode ≤10 字符</td><td>PickEduMainFont</td></tr>
@@ -273,59 +274,52 @@ ul.compact li { margin: 2px 0; }
 <!-- ================== 3. 跨线程数据流 ================== -->
 <section id="threads">
 <h2><span class="num">3</span> 跨线程数据流</h2>
-<p class="sub">教育卡 / 笔画 GIF 数据来自 3 个 FreeRTOS 任务，全部通过 <code>Application::Schedule()</code> 投回 main loop。</p>
+<p class="sub">教育卡 / 笔画 GIF 数据来自 2 个 FreeRTOS 任务，全部通过 <code>Application::Schedule()</code> 投回 main loop。</p>
 
 <div class="svgwrap">
-<svg viewBox="0 0 880 380" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 880 320" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <marker id="thRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#D32F2F"/></marker>
-    <marker id="thOrn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#FB8C00"/></marker>
     <marker id="thGrn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2E7D32"/></marker>
   </defs>
-  <text x="440" y="20" class="svg-title" text-anchor="middle">Schedule 屏障：3 生产线程 → main loop 单线程串行化</text>
+  <text x="440" y="20" class="svg-title" text-anchor="middle">Schedule 屏障：2 生产线程 → main loop 单线程串行化</text>
 
   <rect x="30" y="50" width="220" height="80" rx="6" fill="#FFEBEE" stroke="#D32F2F"/>
   <text class="node-text" x="140" y="74" style="font-weight:600">📡 Network Task</text>
   <text class="node-text sm" x="140" y="92">OnIncomingJson · sentence_start</text>
-  <text class="node-text sm" x="140" y="108">ExtractEduWordCards</text>
-  <text class="node-text sm" x="140" y="122" style="font-family:monospace">→ Schedule</text>
+  <text class="node-text sm" x="140" y="108">ExtractFirstEduWordCard</text>
+  <text class="node-text sm" x="140" y="122" style="font-family:monospace">→ TriggerEduCard → Schedule</text>
 
-  <rect x="30" y="155" width="220" height="60" rx="6" fill="#FFF3E0" stroke="#FB8C00"/>
-  <text class="node-text" x="140" y="178" style="font-weight:600">⏱ esp_timer_task</text>
-  <text class="node-text sm" x="140" y="196">3.5s 链式弹卡定时器</text>
-  <text class="node-text sm" x="140" y="208" style="font-family:monospace">FlushNextEduCard → Schedule</text>
+  <rect x="30" y="180" width="220" height="80" rx="6" fill="#FFEBEE" stroke="#D32F2F"/>
+  <text class="node-text" x="140" y="204" style="font-weight:600">⬇ HTTP Download (PSRAM 栈)</text>
+  <text class="node-text sm" x="140" y="222">show_stroke GIF 下载</text>
+  <text class="node-text sm" x="140" y="238" style="font-family:monospace">→ Schedule(FontGif)</text>
 
-  <rect x="30" y="240" width="220" height="80" rx="6" fill="#FFEBEE" stroke="#D32F2F"/>
-  <text class="node-text" x="140" y="264" style="font-weight:600">⬇ HTTP Download (PSRAM 栈)</text>
-  <text class="node-text sm" x="140" y="282">show_stroke GIF 下载</text>
-  <text class="node-text sm" x="140" y="298" style="font-family:monospace">→ Schedule(FontGif)</text>
+  <rect x="340" y="130" width="120" height="60" rx="6" fill="#FAFAFA" stroke="#2E7D32" stroke-width="2" stroke-dasharray="4 3"/>
+  <text class="node-text" x="400" y="154" style="font-weight:600;fill:#2E7D32">🛡 Schedule</text>
+  <text class="node-text sm" x="400" y="172">投递屏障</text>
 
-  <rect x="340" y="160" width="120" height="60" rx="6" fill="#FAFAFA" stroke="#2E7D32" stroke-width="2" stroke-dasharray="4 3"/>
-  <text class="node-text" x="400" y="184" style="font-weight:600;fill:#2E7D32">🛡 Schedule</text>
-  <text class="node-text sm" x="400" y="202">投递屏障</text>
+  <rect x="540" y="90" width="290" height="140" rx="8" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+  <text class="node-text" x="685" y="116" style="font-weight:600">🎯 Main Event Loop</text>
+  <text class="node-text sm" x="685" y="136">main_event_loop_task（单线程）</text>
+  <text class="node-text sm" x="685" y="158" style="font-family:monospace">state + FontGIF 守护</text>
+  <text class="node-text sm" x="685" y="176" style="font-family:monospace">ShowEduCard / FontGif</text>
+  <text class="node-text sm" x="685" y="194" style="font-family:monospace">in_font_mode_ 唯一访问者</text>
+  <text class="node-text sm" x="685" y="216" style="fill:#2E7D32;font-weight:600">▶ 零跨线程 race · 零队列状态</text>
 
-  <rect x="540" y="120" width="290" height="140" rx="8" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
-  <text class="node-text" x="685" y="146" style="font-weight:600">🎯 Main Event Loop</text>
-  <text class="node-text sm" x="685" y="166">main_event_loop_task（单线程）</text>
-  <text class="node-text sm" x="685" y="186" style="font-family:monospace">EnqueueEduCards</text>
-  <text class="node-text sm" x="685" y="204" style="font-family:monospace">FlushNextEduCardOnMain</text>
-  <text class="node-text sm" x="685" y="222" style="font-family:monospace">g_edu_queue 唯一访问者</text>
-  <text class="node-text sm" x="685" y="244" style="fill:#2E7D32;font-weight:600">▶ 零跨线程 race</text>
-
-  <path d="M250,90 Q300,90 340,180" stroke="#D32F2F" fill="none" marker-end="url(#thRed)"/>
-  <path d="M250,185 L340,190" stroke="#FB8C00" fill="none" marker-end="url(#thOrn)"/>
-  <path d="M250,280 Q300,280 340,200" stroke="#D32F2F" fill="none" marker-end="url(#thRed)"/>
-  <path d="M460,190 L540,190" stroke="#2E7D32" stroke-width="2" fill="none" marker-end="url(#thGrn)"/>
+  <path d="M250,90 Q300,90 340,150" stroke="#D32F2F" fill="none" marker-end="url(#thRed)"/>
+  <path d="M250,220 Q300,220 340,170" stroke="#D32F2F" fill="none" marker-end="url(#thRed)"/>
+  <path d="M460,160 L540,160" stroke="#2E7D32" stroke-width="2" fill="none" marker-end="url(#thGrn)"/>
 </svg>
 </div>
 
 <h3>关键不变量</h3>
 <ul class="compact">
-  <li><code>g_edu_queue</code> 只在 main loop 读写，无 mutex 需求</li>
   <li><code>active_scene_</code> / <code>in_font_mode_</code> 只在持 DisplayLockGuard 的 main loop 内更新</li>
   <li>LVGL 渲染调用必须持 <code>DisplayLockGuard</code>（lv_timer / 异步事件除外）</li>
-  <li>FontGif 内 PSRAM buffer 所有权转移给 EmojiCollection，调用方不再 free</li>
+  <li>FontGif 内 PSRAM buffer 所有权转移给 LvglRawImage（owns_data=true · 析构 heap_caps_free）</li>
   <li>OnFontExitClicked / OnEduCardClicked 用 <code>Schedule()</code> 异步退出，避免 LVGL 事件回调内改 src 触发链问题</li>
+  <li><b>无 g_edu_queue / 无 esp_timer</b>：单卡架构 = 无队列状态 · 无 timer 生命周期 = 零跨轮泄漏</li>
 </ul>
 </section>
 
@@ -406,24 +400,21 @@ ul.compact li { margin: 2px 0; }
 
 <!-- ================== 5. 教育卡链路 ================== -->
 <section id="chain">
-<h2><span class="num">5</span> 教育卡链式弹卡链路</h2>
-<p class="sub">从 LLM 输出 <code>[apple_苹果]</code> 到屏幕渲染共 7 步，跨 3 个线程，全部经 Schedule 串行化。</p>
+<h2><span class="num">5</span> 教育卡单卡链路</h2>
+<p class="sub">从 LLM 输出 <code>[apple_苹果]</code> 到屏幕渲染共 <b>3 步</b>（单卡架构 · 无队列 · 无 timer）。</p>
 
 <table>
   <thead><tr><th>步骤</th><th>线程</th><th>函数</th><th>动作</th></tr></thead>
   <tbody>
-    <tr><td>1</td><td>Network</td><td>OnIncomingJson(sentence_start)</td><td>解析 JSON</td></tr>
-    <tr><td>2</td><td>Network</td><td>ExtractEduWordCards</td><td>正则匹配每个 [...]，转 EduWordHit vector</td></tr>
-    <tr><td>3</td><td>Network → Main</td><td>EnqueueEduCards</td><td>Schedule 投递，写 g_edu_queue（单线程访问）</td></tr>
-    <tr><td>4</td><td>Main</td><td>FlushNextEduCardOnMain</td><td>取队头，校验 state==Speaking，调 ShowEduCard</td></tr>
-    <tr><td>5</td><td>Main / LVGL</td><td>ShowEduCard</td><td>预盖 + 字号选档 + RenderEduCardLayout</td></tr>
-    <tr><td>6</td><td>esp_timer</td><td>esp_timer_start_once(3500ms)</td><td>启动下一张定时器</td></tr>
-    <tr><td>7</td><td>esp_timer → Main</td><td>FlushNextEduCard → Schedule</td><td>定时器回调投回 main loop，继续弹下一张</td></tr>
+    <tr><td>1</td><td>Network</td><td>OnIncomingJson(sentence_start)</td><td>解析 JSON · <code>ExtractFirstEduWordCard(sentence)</code> 返回 <code>std::optional&lt;EduWordHit&gt;</code></td></tr>
+    <tr><td>2</td><td>Network → Main</td><td>TriggerEduCard</td><td>Schedule 投递 lambda 到 main loop（lambda 内含 state + FontGIF 守护）</td></tr>
+    <tr><td>3</td><td>Main / LVGL</td><td>ShowEduCard</td><td><code>in_font_mode_</code> 入口守护 + 字号选档 + RenderEduCardLayout</td></tr>
   </tbody>
 </table>
 
-<div class="callout">
-  <b>音画同步</b>：每句最多 1 张卡 + 3.5s 间隔 = 跟 TTS 朗读节奏对齐。3-9 岁孩子被动跟读时不会被多卡轰炸。
+<div class="callout ok">
+  <b>音画同步</b>：每句严格 1 张卡 · 与 TTS 朗读节奏一一对齐 · 3-9 岁孩子被动跟读不被多卡轰炸。<br>
+  <b>历史死代码已删</b>（2026-05-11）：旧版有 g_edu_queue / g_edu_idx / g_edu_timer 链式 timer 基础设施（kEduCardIntervalMs=3500ms），但产品决策严格单卡后 timer 永不启动 → 整套死代码（~55 行 / 3 全局变量 / 3 函数）删除 · 顺带消除一个 P0 跨轮泄漏 bug（旧 queue 残留在新轮 Speaking 突然显示）。
 </div>
 </section>
 
@@ -438,7 +429,7 @@ ul.compact li { margin: 2px 0; }
   <tbody>
     <tr><td rowspan="3"><b>a · Chat→EduCard</b></td>
         <td>EnsureDisplayFonts 延迟加载</td><td class="judge-ok">✅</td><td>cbin 字体启动后才挂载，避免 boot 卡顿</td></tr>
-    <tr><td>预盖守卫 <code>if (in_font_mode_)</code></td><td class="judge-ok">✅</td><td>统一入口检查 · 路径 a 走 false 分支零开销 · 路径 f 复用同代码</td></tr>
+    <tr><td><code>if (in_font_mode_) return</code> 入口守卫</td><td class="judge-ok">✅</td><td>路径 a 跳过（false）· 路径 f 屏蔽（true 直接 return）· 单一守卫双路径复用</td></tr>
     <tr><td>bottom_bar 提到 overlay 之上</td><td class="judge-ok">✅</td><td>产品决策（教育卡时保留"长按说话"提示）· move_foreground 标准做法</td></tr>
 
     <tr><td rowspan="2"><b>b · EduCard→Chat</b></td>
@@ -450,9 +441,10 @@ ul.compact li { margin: 2px 0; }
     <tr><td>FontGif 直接调 <code>LcdDisplay::SetEmotion("font")</code> 绕守护</td><td class="judge-ok">✅</td><td>不依赖 in_font_mode_ 前置清，语义直接</td></tr>
     <tr><td>ReplaceEmoji 原子 swap</td><td class="judge-ok">✅</td><td>PSRAM buffer 所有权转移，零内存泄漏</td></tr>
 
-    <tr><td rowspan="2"><b>d · FontGIF→Chat</b></td>
-        <td>HideFontGif 显式调 SetBottomBarVisible(true) + <code>LcdDisplay::SetEmotion("neutral")</code></td><td class="judge-ok">✅</td><td>直接调父类绕守护 · 与 FontGif 对称</td></tr>
+    <tr><td rowspan="3"><b>d · FontGIF→Chat</b></td>
+        <td>HideFontGif 显式调 <code>ShowBottomBar()</code> + <code>LcdDisplay::SetEmotion("neutral")</code></td><td class="judge-ok">✅</td><td>直接调父类绕守护 · 与 FontGif 对称</td></tr>
     <tr><td>HideFontGif 自身就是守护清退点</td><td class="judge-ok">✅</td><td>清 in_font_mode_=false 后 SetEmotion 可重新生效</td></tr>
+    <tr><td>HideFontGif 推进 generation token（<code>font_request_active_.store(0)</code>）</td><td class="judge-ok">✅ 🔴</td><td><b>race 闭合（2026-05-12 修）</b>：在飞的 FontGif(req_id) 调用变 stale → drop buffer + heap_caps_free · 防"show_stroke 下载迟到→ HideFontGif 之后才装载 GIF → bottom_bar 二次 HIDDEN → 下一轮 LLM 字幕被 in_font_mode_ 守护吞掉"</td></tr>
 
     <tr><td rowspan="2"><b>e · EduCard→FontGIF</b></td>
         <td>FontGif 内显式 HideEduCard</td><td class="judge-ok">✅</td><td>清场显式可见 · 不再埋在 SetEmotion 内</td></tr>
@@ -462,7 +454,7 @@ ul.compact li { margin: 2px 0; }
         <td>ShowEduCard 入口检查 <code>in_font_mode_</code> 直接 return</td><td class="judge-ok">✅</td><td>产品决策：同轮 GIF 不被卡覆盖 · 路径 f 改为禁用 · 预盖 hack 消除</td></tr>
 
     <tr><td><b>g · Speaking 清场</b><br><span style="font-size:11px;color:#666">下轮对话</span></td>
-        <td>application.cc 进 Speaking 调 <code>HideEduCard() + HideFontGif()</code></td><td class="judge-ok">✅</td><td>语义清晰：Listening 不清（同轮稳定）· Speaking 清（下轮重置）</td></tr>
+        <td>application.cc 进 Speaking 调 <code>HideEduCard() + HideFontGif()</code></td><td class="judge-ok">✅</td><td>语义清晰：Listening 不清（同轮稳定）· Speaking 清（下轮重置）· 单卡架构无 queue/timer 需清</td></tr>
   </tbody>
 </table>
 
@@ -472,10 +464,25 @@ ul.compact li { margin: 2px 0; }
 本轮重构后职责分离：
 <ul style="margin:6px 0 6px 22px">
   <li><b>SetEmotion</b>（3 行）：仅切表情 src + in_font_mode_ 守护（屏蔽所有外部 emotion）</li>
-  <li><b>FontGif</b>：显式调 HideEduCard / HideQrCode / HideBottomBar() + 直接 LcdDisplay::SetEmotion("font")</li>
-  <li><b>HideFontGif</b>：显式调 SetBottomBarVisible(true) + 直接 LcdDisplay::SetEmotion("neutral")</li>
+  <li><b>FontGif</b>：显式调 HideEduCard / HideQrCode / HideBottomBar + 直接 LcdDisplay::SetEmotion("font")</li>
+  <li><b>HideFontGif</b>：显式调 ShowBottomBar + 直接 LcdDisplay::SetEmotion("neutral")</li>
 </ul>
 14 环节评审：<b>14/14 全部 ✅</b> · 旧 4 处 ⚠ Hack 全部消除（c-1 / c-2 / d-1 / e-1）。
+</div>
+
+<div class="callout warn">
+<b>🔴 跨轮 race 闭合（2026-05-12）</b><br>
+<b>缺陷</b>：<code>HideFontGif()</code> 只清 <code>in_font_mode_</code> + <code>font_pending_</code>，未推进 <code>font_request_active_</code>。
+<b>触发时序</b>：
+<ol style="margin:6px 0 6px 22px">
+  <li>T0：<code>BeginFontPending</code> → active=N · MCP show_stroke 异步下载启动</li>
+  <li>T1：用户唤醒 → <code>kDeviceStateSpeaking</code> → <code>HideFontGif()</code>（active 仍=N）</li>
+  <li>T2：下载迟到完成 → Schedule <code>FontGif(buf, size, N)</code></li>
+  <li>T3：FontGif 内 token 检查 active=N → 匹配 → 装载 + <code>HideBottomBar()</code> + <code>in_font_mode_=true</code></li>
+  <li>T4：后续 LLM 字幕 <code>SetChatMessage("assistant", ...)</code> 被守护吞 → <b>字幕永久看不见</b></li>
+</ol>
+<b>修复</b>：<code>HideFontGif()</code> 增加 <code>font_request_active_.store(0, release)</code>。后续 FontGif(N) 进入时 active=0, N≠0 → stale → <code>heap_caps_free(buffer) + return</code>。
+<b>幂等性</b>：<code>BeginFontPending</code> 用 <code>store(id)</code> 直接覆盖，不依赖旧值；新一轮 show_stroke 流程不受影响。
 </div>
 
 <div class="callout ok">
@@ -486,58 +493,10 @@ ul.compact li { margin: 2px 0; }
 
 <!-- ================== 7. 代码优化候选 ================== -->
 <section id="optimize">
-<h2><span class="num">7</span> 代码优化候选</h2>
-<p class="sub">三个量级的优化建议 · 量产期默认保守，量产烧板 3 个月稳定后可选做。</p>
+<h2><span class="num">7</span> 后续候选（量产稳定后）</h2>
+<p class="sub">当前架构 14/14 环节 ✅ · 零 hack · 零死代码 · 零跨轮泄漏。下列候选属于"打磨项"，量产烧板 3 个月稳定后第 2 迭代评估。</p>
 
-<h3>已落地优化</h3>
-<table>
-  <thead><tr><th>项</th><th>动作</th><th>结果</th></tr></thead>
-  <tbody>
-    <tr><td>S1</td><td>状态机改造：Listening 不清场 / Speaking 清场 / 路径 f 同轮屏蔽</td><td>同轮 GIF 不被卡覆盖 · 下轮 Speaking 重置 · 预盖 hack 消除</td></tr>
-    <tr><td>S2</td><td>ShowBottomBar / HideBottomBar 对称 helper 提取</td><td>SetEmotion 内 9 行 add/remove flag → 1 行调用 · 命名对齐 Show*/Hide* 族</td></tr>
-    <tr><td>S3</td><td>ResetFontMode → HideFontGif 改名 + 公开</td><td>与 FontGif 对称 · application.cc 可显式调用清场</td></tr>
-    <tr><td>S4</td><td>历史 ⭐ / P0-X 修复注释清除</td><td>源码不背包袱（git log 已记录）</td></tr>
-    <tr><td><b>M1</b></td><td><b>SetEmotion 4 职责解耦</b>（互斥清场 / bottom_bar 切换 / 表情 src 切换 / 守护逻辑）</td><td>SetEmotion 25 行 → 3 行 · FontGif / HideFontGif 副作用显式化 · 14 环节评审全 ✅</td></tr>
-    <tr><td><b>M2</b></td><td>IsFontGifActive() 公开查询 + FlushNextEduCardOnMain 整队作废守卫</td><td>FontGIF 期间避免 timer 3.5s 空转 · 队列即时清空</td></tr>
-    <tr><td><b>M3 🔴 P0</b></td><td><b>LvglRawImage PSRAM 内存泄漏修复</b>：加析构 + <code>owns_data</code> 参数区分所有权</td><td>FontGif 显式接管 PSRAM gif_buffer · ReplaceEmoji 析构旧 LvglRawImage 时 heap_caps_free · <b>每次 show_stroke 避免 300-512KB 泄漏</b></td></tr>
-    <tr><td><b>M4 P2</b></td><td><code>new (std::nothrow) LvglRawImage</code> 防呆判 nullptr</td><td>PSRAM OOM 时优雅退化（释放 gif_buffer + log warn）替代潜在 crash</td></tr>
-  </tbody>
-</table>
-<div class="callout ok">
-  <b>行为变更</b>：M1 引入"font 模式屏蔽所有外部 emotion"（旧版仅屏蔽 neutral）· 产品语义更严格 · 烧板验证 emotion 切换全场景无回归。
-</div>
-
-<h3>量级 M · SetEmotion 副作用解耦 <span style="color:#2E7D32">✅ 已落地（2026-05-11）</span></h3>
-<pre>
-<span class="com">// 落地后：SetEmotion 仅切表情，副作用搬到 FontGif/HideFontGif 显式调用</span>
-<span class="kw">void</span> SetEmotion(<span class="kw">const char</span>* e) <span class="kw">override</span> {
-    <span class="kw">if</span> (in_font_mode_) <span class="kw">return</span>;     <span class="com">// 唯一守护：font 模式不响应外部 emotion</span>
-    LcdDisplay::SetEmotion(e);          <span class="com">// 父类仅切 src</span>
-}
-<span class="kw">void</span> FontGif(uint8_t* buf, size_t size) {
-    DisplayLockGuard lock(<span class="kw">this</span>);
-    HideEduCard(); HideQrCode();        <span class="com">// 显式互斥清场</span>
-    SetBottomBarVisible(<span class="kw">false</span>);
-    emoji_collection-&gt;ReplaceEmoji(<span class="str">"font"</span>, ...);
-    LcdDisplay::SetEmotion(<span class="str">"font"</span>);     <span class="com">// 直接父类，绕守护</span>
-    lv_obj_move_foreground(emoji_box_);
-    in_font_mode_ = <span class="kw">true</span>;
-}
-<span class="kw">void</span> HideFontGif() {
-    <span class="kw">if</span> (!in_font_mode_) <span class="kw">return</span>;
-    DisplayLockGuard lock(<span class="kw">this</span>);
-    in_font_mode_ = <span class="kw">false</span>;
-    ShowBottomBar();
-    LcdDisplay::SetEmotion(<span class="str">"neutral"</span>);
-}
-</pre>
-<div class="callout ok">
-  <b>已实现</b>：SetEmotion 25 行 → 3 行 · § 6 评审 4 处 ⚠ 全部消除 · 14/14 环节 ✅<br>
-  <b>行为变更</b>：font 模式从"只屏蔽 neutral"→"屏蔽所有 emotion"（产品意图更对齐）<br>
-  <b>验收</b>：静态 grep 通过 · 烧板验证待测（重点测开机表情 / Connecting 期间 LLM emotion 推送 / 教育卡显示中表情切换）
-</div>
-
-<h3>量级 L · ContentOverlay enum 三态合并（中度重构 · 待量产稳定后）</h3>
+<h3>候选 · ContentOverlay enum 三态合并</h3>
 <pre>
 <span class="kw">enum class</span> ContentOverlay : uint8_t {
     kNone    = 0,   <span class="com">// 默认表情</span>
@@ -555,12 +514,6 @@ ContentOverlay overlay_mode_ = ContentOverlay::kNone;
   <b>工时</b>：1-2 小时 · <b>建议量产烧板 3 个月稳定后第 2 迭代</b>
 </div>
 
-<h3>状态总结</h3>
-<div class="callout ok">
-  <b>已落地</b>：S1 + S2 + S3 + S4 + M1 + M2（状态机改造 / helper 提取 / 命名对称 / 注释清理 / SetEmotion 解耦 / FontGIF 整队作废守卫）<br>
-  <b>剩余候选</b>：L · ContentOverlay enum 三态合并 — 留到 v33+ 大版本<br>
-  <b>评审表</b>：14/14 环节全 ✅ · 零 hack
-</div>
 </section>
 
 
@@ -568,7 +521,7 @@ ContentOverlay overlay_mode_ = ContentOverlay::kNone;
 <section id="verify">
 <h2><span class="num">8</span> 量产收尾</h2>
 
-<h3>烧板验收清单（11 项）</h3>
+<h3>烧板验收清单（15 项）</h3>
 <table>
   <thead><tr><th>#</th><th>测试场景</th><th>预期</th><th>覆盖</th></tr></thead>
   <tbody>
@@ -577,40 +530,42 @@ ContentOverlay overlay_mode_ = ContentOverlay::kNone;
     <tr><td>3</td><td>MCP show_stroke('好')</td><td>Chat → 笔画 GIF · 底部隐藏</td><td>路径 c</td></tr>
     <tr><td>4</td><td>触摸 emoji_box 退 GIF</td><td>GIF → neutral · 底部恢复</td><td>路径 d</td></tr>
     <tr><td>5</td><td>教育卡中说"猫怎么写"</td><td>教育卡 → GIF（卡先 HIDDEN）</td><td>路径 e</td></tr>
-    <tr><td>6</td><td>GIF 中触发 <code>[bird_鸟]</code></td><td>GIF → 教育卡 · <b>无 neutral 闪烁</b></td><td>路径 f 预盖</td></tr>
-    <tr><td>7</td><td>tts:stop 在教育卡显示中</td><td>队列清空 · 教育卡保留至触摸退出</td><td>状态机闭合</td></tr>
-    <tr><td>8</td><td>MCP music_play</td><td>Chat/Clock → Player · 进度 200ms 刷新</td><td>跨场景</td></tr>
-    <tr><td>9</td><td>Player 中唤醒词</td><td>Player → Chat / Clock</td><td>跨场景</td></tr>
-    <tr><td>10</td><td>开机 → 激活 → 联网 → 时钟</td><td>QR overlay 自动隐藏 · scene=kClock</td><td>前置态</td></tr>
-    <tr><td>11</td><td>连续触发 10 次 GIF→EduCard</td><td>无闪烁 · 无内存增长（PSRAM swap）</td><td>压力</td></tr>
-    <tr><td><b>12</b></td><td><b>FontGIF 显示中 LLM 推 <code>[bird_鸟]</code></b></td><td><b>GIF 不被覆盖</b> · log "EduCard skipped: font GIF active" · 队列被作废</td><td>路径 f 屏蔽</td></tr>
-    <tr><td><b>13</b></td><td>步骤 12 之后唤醒 → Listening</td><td>FontGIF + 字幕保留 · 同轮稳定</td><td>Listening 不清场</td></tr>
-    <tr><td><b>14</b></td><td>步骤 13 之后说"换一个" → Speaking</td><td>FontGIF 被清 · 新 <code>[dog_狗]</code> 正常显示</td><td>下轮重置</td></tr>
-    <tr><td><b>15</b></td><td><b>M1 验证：FontGIF 显示中 LLM 推 SetEmotion("happy")</b></td><td>被守护屏蔽 · 表情 src 不切 · GIF 继续播</td><td>M1 解耦</td></tr>
-    <tr><td><b>16</b></td><td>开机 → Connecting 期间 LLM 推 SetEmotion 序列</td><td>非 font 模式时表情正常切换 · 无 hidden 副作用</td><td>M1 回归</td></tr>
-    <tr><td><b>17 🔴</b></td><td><b>连续 16 次 MCP show_stroke 不同字</b></td><td>PSRAM 可用空间稳定（不递减）· <code>heap_caps_get_free_size(MALLOC_CAP_SPIRAM)</code> 验证</td><td><b>M3 泄漏回归</b></td></tr>
-    <tr><td><b>18</b></td><td>MCP show_stroke 时人为造 PSRAM 满</td><td>FontGif log "alloc failed" · gif_buffer 被 free · 无 crash</td><td>M4 防呆</td></tr>
+    <tr><td>6</td><td>tts:stop 在教育卡显示中</td><td>教育卡保留至触摸退出（单卡架构无队列残留）</td><td>状态机闭合</td></tr>
+    <tr><td>7</td><td>MCP music_play</td><td>Chat/Clock → Player · 进度 200ms 刷新</td><td>跨场景</td></tr>
+    <tr><td>8</td><td>Player 中唤醒词</td><td>Player → Chat / Clock</td><td>跨场景</td></tr>
+    <tr><td>9</td><td>开机 → 激活 → 联网 → 时钟</td><td>QR overlay 自动隐藏 · scene=kClock</td><td>前置态</td></tr>
+    <tr><td>10</td><td>连续触发 10 次 GIF↔EduCard 切换</td><td>无闪烁 · 无内存增长（PSRAM swap）</td><td>压力</td></tr>
+    <tr><td><b>11</b></td><td><b>FontGIF 显示中 LLM 推 <code>[bird_鸟]</code></b></td><td><b>GIF 不被覆盖</b> · log "EduCard skipped: font GIF active" · TriggerEduCard lambda 内 early return</td><td>路径 f 屏蔽</td></tr>
+    <tr><td><b>12</b></td><td>步骤 11 之后唤醒 → Listening</td><td>FontGIF + 字幕保留 · 同轮稳定</td><td>Listening 不清场</td></tr>
+    <tr><td><b>13 🔴</b></td><td><b>跨轮场景：Speaking 推 [apple] → PTT 打断 → Listening → 再 Speaking 不推卡</b></td><td>第 1 张 apple 显示后被 Speaking 清场 · <b>无残留卡跳出</b>（单卡架构无 queue/timer）</td><td>跨轮无泄漏</td></tr>
+    <tr><td><b>14</b></td><td>FontGIF 显示中 LLM 推 SetEmotion("happy")</td><td>被守护屏蔽 · 表情 src 不切 · GIF 继续播</td><td>M1 解耦</td></tr>
+    <tr><td><b>15 🔴</b></td><td><b>连续 16 次 MCP show_stroke 不同字</b></td><td>PSRAM 可用空间稳定（不递减）· <code>heap_caps_get_free_size(MALLOC_CAP_SPIRAM)</code> 验证</td><td><b>M3 泄漏回归</b></td></tr>
+    <tr><td><b>16 🔴</b></td><td><b>show_stroke 下载途中（耗时 1-3s）立刻按键唤醒 → 进入新一轮 Speaking</b></td><td>log 出现 <code>[font_gif] hide: was_in_font=...</code> 后 <code>FontGif: stale token N (active=0), drop X bytes</code> · 屏幕保持 chat 模式 · 新一轮 LLM 字幕正常显示 · bottom_bar 显示无残留 HIDDEN</td><td><b>跨轮 race 回归（2026-05-12 修）</b></td></tr>
   </tbody>
 </table>
 
 <h3>量产纪律</h3>
 <ul class="compact">
-  <li><b>DeviceState 12 态不新增枚举</b> —— 22 项功能盘点 0 项需要新增</li>
+  <li><b>DeviceState 11 态不新增枚举</b> —— 22 项功能盘点 0 项需要新增</li>
   <li><b>SceneType 8 值不轻易扩展</b> —— 真有第 6 个共享逻辑全屏 Scene 时才抽 SceneFactory</li>
   <li><b>不抽 ActivitySession / SceneNavigator 基类</b> —— LVGL screen 已是 Scene 抽象</li>
   <li><b>事件型扩展走 AudioSource enum</b> —— Alarm / PomodoroBell / Reminder 禁加 IsXxx flag</li>
+  <li><b>YAGNI 原则</b> —— 不为未来扩展提前留基础设施（已删 3500ms 链式 timer 即此教训）</li>
   <li><b>新模块在 docs/p30-architecture.html § 一.5.2 落位表登记</b>（A×B×C 三维坐标）</li>
 </ul>
 
-<h3>命名规范（二轮精简后落地）</h3>
+<h3>命名规范（落地汇总）</h3>
 <table>
   <thead><tr><th>类</th><th>命名</th><th>理由</th></tr></thead>
   <tbody>
     <tr><td>场景枚举</td><td><code>SceneType::kChat</code>（非 kEmoji）</td><td>产品语义对齐 SwitchToChatMode</td></tr>
     <tr><td>笔画入口</td><td><code>FontGif()</code>（非 EnterFontMode / UpdateFontGif）</td><td>名词命名，与 ShowEduCard / ShowQrCode 风格统一</td></tr>
     <tr><td>笔画退出</td><td><code>HideFontGif()</code> 公开（与 FontGif 对称）</td><td>application.cc Speaking 状态需显式调用 · 命名对称 Show/Hide 风格</td></tr>
+    <tr><td>底部条显隐</td><td><code>ShowBottomBar()</code> / <code>HideBottomBar()</code> 对称</td><td>替代 SetBottomBarVisible(bool) · 命名对齐 Show/Hide 族</td></tr>
     <tr><td>教育卡分类</td><td><code>const char* category</code>（无 EduCategory enum）</td><td>调用入口都是 LLM 字符串，9 enum 是死代码</td></tr>
     <tr><td>渲染主体</td><td><code>RenderEduCardLayout</code>（非 BuildEduCard）</td><td>强调"已知数据→画屏"，避免与 ShowEduCard 混淆</td></tr>
+    <tr><td>教育卡提取</td><td><code>ExtractFirstEduWordCard</code>(optional)（非 ExtractEduWordCards(vector)）</td><td>单卡架构 · optional 比空 vector 更准确</td></tr>
+    <tr><td>教育卡投递</td><td><code>TriggerEduCard</code>(EduWordHit)（非 EnqueueEduCards(vector)）</td><td>单卡架构 · 无 queue · 名词直接</td></tr>
     <tr><td>状态字段</td><td><code>active_scene_</code> / <code>in_font_mode_</code></td><td>消除 "current_xx" 命名重复</td></tr>
   </tbody>
 </table>

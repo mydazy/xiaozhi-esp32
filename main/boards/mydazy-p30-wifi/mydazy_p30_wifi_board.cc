@@ -1,5 +1,6 @@
 #include "wifi_board.h"
 #include "alarm_manager.h"
+#include "audio/alarm_ringer.h"
 #include "assets/lang_config.h"
 #include "codecs/box_audio_codec.h"
 #include "display/display.h"
@@ -55,12 +56,27 @@
 
 #define TAG "MyDazyP30_WifiBoard"
 
-// 上次 sleep 时戳（每次更新 · 跨 deep sleep 保持）· < 500ms = 死按延续 · 短路 sleep
-#include <esp_sleep.h>
+// 距上次 sleep < 500ms + GPIO 低 = 死按延续 · 短路再 sleep
+// 用 gettimeofday（POSIX 标准 · ESP-IDF 内部基于 RTC · 跨 deep sleep 持续 · 无组件依赖）
+#include <sys/time.h>
 RTC_DATA_ATTR static uint64_t s_last_sleep_us = 0;
 static constexpr uint64_t kDeadHoldWindowUs = 500 * 1000;
+static inline uint64_t NowRtcUs() {
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    return (uint64_t)tv.tv_sec * 1000000ULL + tv.tv_usec;
+}
 
 namespace {
+// 闹钟响铃中：任何用户输入（按键/触摸/摇晃）都优先关停闹钟，不进对话流程
+inline bool TryStopAlarmRinger(const char* reason) {
+    if (AlarmRinger::GetInstance().IsRinging()) {
+        AlarmRinger::GetInstance().Stop(reason);
+        return true;
+    }
+    return false;
+}
+
 // 小工具：处于 Speaking 时先 Abort，避免状态冲突
 inline void AbortIfSpeaking() {
     auto& app = Application::GetInstance();
@@ -132,7 +148,6 @@ private:
     BoxAudioCodec* audio_codec_ = nullptr;
 
     bool first_boot_ = false;
-    bool is_alarm_clock_ = false;
 
     // v2.2.10 删除 Volume± 长按调音 · 字段 vol_*_task_ / vol_*_running_ 一并清理
 
@@ -199,10 +214,10 @@ private:
                 ESP_LOGI(TAG, "从开机键唤醒");
                 // 距上次 sleep < 500ms + GPIO 低 = 死按延续 · 短路再 sleep · 用户死按多久都安全
                 if (s_last_sleep_us > 0) {
-                    uint64_t since_us = esp_rtc_get_time_us() - s_last_sleep_us;
+                    uint64_t since_us = NowRtcUs() - s_last_sleep_us;
                     if (since_us < kDeadHoldWindowUs && gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
                         ESP_LOGW(TAG, "距 sleep %llu ms · 用户未松手 · 短路 sleep", since_us / 1000);
-                        s_last_sleep_us = esp_rtc_get_time_us();
+                        s_last_sleep_us = NowRtcUs();
                         esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0);
                         rtc_gpio_pullup_en(BOOT_BUTTON_GPIO);
                         esp_deep_sleep_start();
@@ -220,13 +235,16 @@ private:
                 break;
             case ESP_SLEEP_WAKEUP_TIMER:
                 ESP_LOGI(TAG, "从定时器唤醒 · 闹钟模式");
-                is_alarm_clock_ = true;
                 AlarmManager::MarkTimerWakeup();
                 first_boot_ = true;
                 break;
             default:
                 ESP_LOGI(TAG, "首次启动或复位 (wakeup=%d, reset=%d)", (int)wakeup_reason, (int)reset_reason);
-                first_boot_ = true;
+                // 仅正常启动放欢迎音：上电 / USB 接入 / 主动 esp_restart（OTA/出厂复位/切网）
+                // panic / wdt / brownout 等异常重启不放，避免"崩溃后假装一切正常"误导用户
+                first_boot_ = (reset_reason == ESP_RST_POWERON ||
+                               reset_reason == ESP_RST_USB ||
+                               reset_reason == ESP_RST_SW);
                 break;
         }
     }
@@ -322,6 +340,7 @@ private:
     // 摇一摇识别（孩子拿起来甩 → 云端决定返回什么）
     static void OnShake(void* /*ctx*/) {
         Application::GetInstance().Schedule([]() {
+            if (TryStopAlarmRinger("shake")) return;
             auto& app = Application::GetInstance();
             auto state = app.GetDeviceState();
             if (state != kDeviceStateIdle && state != kDeviceStateListening) {
@@ -403,6 +422,7 @@ private:
     }
 
     void HandleTouchSingleClick() {
+        if (TryStopAlarmRinger("touch")) return;
         auto& app = Application::GetInstance();
         auto state = app.GetDeviceState();
 
@@ -426,6 +446,7 @@ private:
 
     // 触摸双击：退出对话回 Idle（孩子最熟悉的"退出"心智）
     void HandleTouchDoubleClick() {
+        if (TryStopAlarmRinger("touch")) return;
         auto& app = Application::GetInstance();
 
         if (MusicPlayer::GetInstance().IsPlaying()) {
@@ -597,8 +618,8 @@ private:
 
         ESP_LOGI(TAG, "准备进入深度睡眠");
         vTaskDelay(pdMS_TO_TICKS(200));
-        // 每次进 sleep 都记时戳 · 唤醒后比较 < 500ms 即死按延续 · 直接短路 sleep
-        s_last_sleep_us = esp_rtc_get_time_us();
+        // 每次进 sleep 都记 RTC 时戳 · 唤醒后比较 < 500ms 即死按延续 · 直接短路 sleep
+        s_last_sleep_us = NowRtcUs();
         esp_deep_sleep_start();
     }
 
@@ -663,6 +684,7 @@ private:
 
         // 单击：MP3 播放中先停 + 退 PlayerUI · 仅 Idle/Listening/Speaking 才 ToggleChat
         boot_button_.OnClick([this]() {
+            if (TryStopAlarmRinger("button")) return;
             auto& app = Application::GetInstance();
             auto status = app.GetDeviceState();
             ESP_LOGI(TAG, "单击 button 状态: %u", status);
@@ -683,6 +705,7 @@ private:
 
         // 双击：① 出厂确认（10s 窗口）② 配网态 BLUFI↔AP 切换 ③ AEC 模式切换
         boot_button_.OnDoubleClick([this]() {
+            if (TryStopAlarmRinger("button")) return;
             auto& app = Application::GetInstance();
             auto status = app.GetDeviceState();
             // ① 9 连击后 10s 内双击 = 确认出厂
@@ -767,10 +790,14 @@ private:
             if (!shutdown_delay_timer_) {
                 esp_timer_create_args_t args = {
                     .callback = [](void* arg) {
+                        // ESP_TIMER_TASK 高优先级共享任务，禁止阻塞（ShutdownOrSleep 含 2-3s vTaskDelay）
+                        // → 用 Schedule 派发到 main_app 任务执行，timer 回调立刻返回
                         auto* self = static_cast<MyDazyP30_WifiBoard*>(arg);
                         if (self->shutdown_armed_.exchange(false)) {
-                            ESP_LOGI(TAG, "800ms 缓冲到 · 执行关机");
-                            self->ShutdownOrSleep("再见", "", "", 1500, false);
+                            ESP_LOGI(TAG, "800ms 缓冲到 · 派发关机到 main_app");
+                            Application::GetInstance().Schedule([self]() {
+                                self->ShutdownOrSleep("再见", "", "", 1500, false);
+                            });
                         }
                     },
                     .arg = this,
@@ -901,8 +928,14 @@ private:
         auto& app = Application::GetInstance();
         vTaskDelay(pdMS_TO_TICKS(1500));
 
+        // 闹钟 TIMER 唤醒：跳过欢迎音 · AlarmRinger 接管响铃 · 不抢屏不抢音
+        if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+            ESP_LOGI(TAG, "TIMER 唤醒(闹钟模式)· 跳过欢迎音");
+            vTaskDelete(NULL);
+            return;
+        }
+
         if (app.GetDeviceState() != kDeviceStateWifiConfiguring && self->first_boot_) {
-            // A1 · 先 arm 自动对话 · 见 4G 板同位注释
             app.RequestAutoChatOnIdle();
             app.PlaySound(Lang::Sounds::OGG_WELCOME);
         }

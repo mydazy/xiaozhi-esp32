@@ -27,6 +27,33 @@
 
 #define TAG "Ota"
 
+namespace {
+// 从 server_time JSON 段取 timestamp（UTC 毫秒）写入系统墙钟
+// 单一入口避免 CheckVersion / OnIncomingJson 两处实现漂移（历史 +8h bug 根因）
+// 返回 true = 设置成功（has_server_time_ 应置 true）
+bool ApplyServerUtcTime(cJSON* server_time_obj) {
+    if (!cJSON_IsObject(server_time_obj)) return false;
+    cJSON* timestamp = cJSON_GetObjectItem(server_time_obj, "timestamp");
+    if (!cJSON_IsNumber(timestamp)) return false;
+
+    struct timeval tv;
+    double ts = timestamp->valuedouble;                              // server UTC 毫秒
+    tv.tv_sec  = (time_t)(ts / 1000);
+    tv.tv_usec = (suseconds_t)((long long)ts % 1000) * 1000;
+    settimeofday(&tv, NULL);                                         // 接纯 UTC · TZ=CST-8 在 application.cc 设
+
+    time_t sec = tv.tv_sec;
+    struct tm utc_tm, local_tm;
+    gmtime_r(&sec, &utc_tm);
+    localtime_r(&sec, &local_tm);
+    ESP_LOGI(TAG, "[time] sync: ts=%.0fms UTC=%04d-%02d-%02d %02d:%02d:%02d Local=%02d:%02d:%02d",
+             ts, utc_tm.tm_year+1900, utc_tm.tm_mon+1, utc_tm.tm_mday,
+             utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec,
+             local_tm.tm_hour, local_tm.tm_min, local_tm.tm_sec);
+    return true;
+}
+}  // namespace
+
 
 Ota::Ota() {
 #ifdef ESP_EFUSE_BLOCK_USR_DATA
@@ -192,28 +219,8 @@ esp_err_t Ota::CheckVersion() {
         ESP_LOGI(TAG, "No websocket section found!");
     }
 
-    has_server_time_ = false;
-    cJSON *server_time = cJSON_GetObjectItem(root, "server_time");
-    if (cJSON_IsObject(server_time)) {
-        cJSON *timestamp = cJSON_GetObjectItem(server_time, "timestamp");
-        cJSON *timezone_offset = cJSON_GetObjectItem(server_time, "timezone_offset");
-        
-        if (cJSON_IsNumber(timestamp)) {
-            // 设置系统时间
-            struct timeval tv;
-            double ts = timestamp->valuedouble;
-            
-            // 如果有时区偏移，计算本地时间
-            if (cJSON_IsNumber(timezone_offset)) {
-                ts += (timezone_offset->valueint * 60 * 1000); // 转换分钟为毫秒
-            }
-            
-            tv.tv_sec = (time_t)(ts / 1000);  // 转换毫秒为秒
-            tv.tv_usec = (suseconds_t)((long long)ts % 1000) * 1000;  // 剩余的毫秒转换为微秒
-            settimeofday(&tv, NULL);
-            has_server_time_ = true;
-        }
-    } else {
+    has_server_time_ = ApplyServerUtcTime(cJSON_GetObjectItem(root, "server_time"));
+    if (!has_server_time_) {
         ESP_LOGW(TAG, "No server_time section found!");
     }
 
@@ -765,20 +772,8 @@ bool Ota::ReportStatus() {
             cJSON* root = cJSON_Parse(holder->c_str());
             if (!root) { vTaskDelete(NULL); return; }
 
-            // 同步服务器时间
-            cJSON* server_time = cJSON_GetObjectItem(root, "server_time");
-            if (cJSON_IsObject(server_time)) {
-                cJSON* timestamp = cJSON_GetObjectItem(server_time, "timestamp");
-                cJSON* timezone_offset = cJSON_GetObjectItem(server_time, "timezone_offset");
-                if (cJSON_IsNumber(timestamp)) {
-                    struct timeval tv;
-                    double ts = timestamp->valuedouble;
-                    if (cJSON_IsNumber(timezone_offset)) ts += (timezone_offset->valueint * 60 * 1000);
-                    tv.tv_sec = static_cast<time_t>(ts / 1000);
-                    tv.tv_usec = static_cast<suseconds_t>(static_cast<long long>(ts) % 1000) * 1000;
-                    settimeofday(&tv, NULL);
-                }
-            }
+            // 同步服务器时间（统一走 ApplyServerUtcTime helper · 与 CheckVersion 共享逻辑）
+            ApplyServerUtcTime(cJSON_GetObjectItem(root, "server_time"));
 
             // 处理远程设置控制
             cJSON* settings_obj = cJSON_GetObjectItem(root, "settings");

@@ -17,28 +17,65 @@
 
 #define TAG "EducationMcp"
 
+// 设计决策：show_stroke GIF 不缓存。
+//   理由：① GIF buffer 与 LVGL GIF decoder 异步渲染绑定，缓存 buffer 跨 LvglRawImage 实例生命周期复杂
+//        ② PSRAM 占用收益不对等（缓存 1MB vs 重下 200-2000ms · 量产期优先稳定性）
+//        ③ 单字 GIF 服务器侧可能更新笔顺修正，每次下载保证最新
+//   每次调用都走完整 HTTP 下载 + 校验路径。
+
 void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_stroke) {
     if (!ui) return;  // 仅 UiDisplay 支持 GIF 动态注入（emoji_collection + LvglGif 路径）
 
     if (include_stroke) {
     mcp.AddTool("self.education.show_stroke",
-        "显示汉字笔画书写动画。"
-        "当用户提到任何字的写法时必须调用，包括：怎么写、笔画、笔顺、写法、"
-        "写个X字、教我写、写一下、拼写、练字、学写字。"
-        "character=单个汉字,多字取首个。"
-        "调用后先说'好的'，再简要说明笔顺，最后给出两个热门组词。"
-        "回复要简短，适合语音播报，不超过3句话。",
+        "[识字写字核心工具 · 高优先级] 在屏幕上播放单个汉字的笔画书写 GIF 动画,孩子边看边学笔顺。\n"
+        "\n"
+        "## 必须调用的场景(听到下列任一类表达就立即调用,不要先问、不要犹豫):\n"
+        "1) 直接问写法: 怎么写 / X怎么写 / X字怎么写 / 写法 / 笔顺 / 笔画 / 先写哪一笔 / 第一笔是什么\n"
+        "2) 教学请求: 教我写 / 教我X / 教写字 / 学写字 / 我想学写字 / 学个新字 / 学X字 / 陪我练字 / 练字\n"
+        "3) 表达困惑: 我不会写 / 我不会写X / 妈妈我不会 / X字我不会 / X怎么写呀 / 帮我写\n"
+        "4) 看示范: 示范 / 演示 / 给我看看怎么写 / 给我画 / 写给我看 / 一起写X\n"
+        "5) 间接表达: 我想看X字 / 我们写X吧 / 教孩子写X / X字长什么样 / 学习X字\n"
+        "\n"
+        "## 禁止调用的场景(用别的方式回复):\n"
+        "× '怎么读 / X怎么读 / 读音 / 拼音' -> 不调本工具,用 [X_pīnyīn] 教育卡内联\n"
+        "× '是什么字 / 这是什么 / 那个字是啥' -> 不调本工具,用 [X_pīnyīn] 识字卡\n"
+        "× '什么意思 / X 是什么意思' -> 不调本工具,口语解释 + [X_pīnyīn] 内联\n"
+        "× 算式 / 古诗 / 闲聊 / 故事 -> 完全不涉及\n"
+        "\n"
+        "## character 参数取字规则:\n"
+        "- 单字明确: '好字怎么写' -> '好'; '写个山字' -> '山'\n"
+        "- 多字句子取核心字(用户最关注/最难/最后提到的): '我不会写花字' -> '花'\n"
+        "- 不能识别具体字时: 先用 TTS 反问'你想学哪个字?',不要瞎调\n"
+        "- 严格单字,GB2312 常用字范围(U+4E00~U+9FFF)\n"
+        "\n"
+        "## 调用示例(对话 -> 工具调用 + 口播):\n"
+        "孩子'好字怎么写?'\n"
+        "  -> show_stroke('好'); 口播'好,看我画给你看。先写女字旁,再写子。组词:好吃、好看。'\n"
+        "孩子'妈妈我不会写花字'\n"
+        "  -> show_stroke('花'); 口播'别担心我教你。花字上面草字头,下面化。组词:花朵、鲜花。'\n"
+        "孩子'教我学写字吧'\n"
+        "  -> 不调,先反问'好呀,你想学哪个字?'\n"
+        "孩子'山字怎么读?'\n"
+        "  -> 不调 show_stroke,回复'是 [山_shān] 哦'\n"
+        "\n"
+        "## 同轮互斥(重要):\n"
+        "本轮调用了 show_stroke -> 本轮 TTS 文本不要再出现 [main_top] 教育卡标记,会画面冲突。\n"
+        "\n"
+        "## 即时反馈(GIF 下载 1-2s):\n"
+        "调用后立刻口播'好,看我画给你看' 让用户在加载期间有反馈,GIF 出现后再讲笔顺要点。\n"
+        "全部回复 <=3 句,语音友好,不超过 30 字一句。",
         PropertyList({Property("character", kPropertyTypeString)}),
         [ui](const PropertyList& properties) -> ReturnValue {
             std::string character = properties["character"].value<std::string>();
-            if (character.empty()) return std::string("请输入一个汉字");
+            if (character.empty()) return std::string("ERR: character is empty");
 
             // UTF-8 → Unicode 码点
             const unsigned char* p = (const unsigned char*)character.c_str();
             uint32_t unicode = 0;
             int char_len = 0;
             if ((p[0] & 0x80) == 0) {
-                return std::string("请输入中文汉字");
+                return std::string("ERR: character must be a Chinese hanzi");
             } else if ((p[0] & 0xE0) == 0xC0 && character.length() >= 2) {
                 unicode = ((p[0] & 0x1F) << 6) | (p[1] & 0x3F);
                 char_len = 2;
@@ -49,10 +86,17 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
                 unicode = ((p[0] & 0x07) << 18) | ((p[1] & 0x3F) << 12) | ((p[2] & 0x3F) << 6) | (p[3] & 0x3F);
                 char_len = 4;
             } else {
-                return std::string("无法识别的字符编码");
+                return std::string("ERR: invalid UTF-8 encoding");
             }
             if (unicode < 0x4E00 || unicode > 0x9FFF) {
-                return std::string("请输入常用汉字");
+                return std::string("ERR: not a common Chinese hanzi (CJK Unified Ideographs)");
+            }
+            // 严格单字：调用方传"好字"应只取首字，多字截断会让缓存命中乱
+            // 取首字后剩余字节数应为 0
+            if ((int)character.length() != char_len) {
+                ESP_LOGW(TAG, "show_stroke: 多字截断 '%s' → 首字 (len=%d, total=%u)",
+                         character.c_str(), char_len, (unsigned)character.length());
+                character = character.substr(0, char_len);
             }
 
             // URL 拼接：https://aiagent.bj.bcebos.com/dict/stroke/<percent_encoded_utf8>_<unicode_hex>.gif
@@ -68,14 +112,28 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
             snprintf(url_buf, sizeof(url_buf),
                      "https://aiagent.bj.bcebos.com/dict/stroke/%s_%s.gif",
                      encoded_char.c_str(), unicode_hex);
-            ESP_LOGI(TAG, "show_stroke: U+%s URL=%s", unicode_hex, url_buf);
+
+            // 入口立即翻 pending 守护位（block ShowEduCard 闪屏）+ 拿并发去重 token
+            // 同轮内若 LLM 连发两次 show_stroke → 旧 token 自动作废，新下载覆盖
+            uint32_t req_id = ui->BeginFontPending();
+            ESP_LOGI(TAG, "show_stroke: U+%s req=%u URL=%s",
+                     unicode_hex, (unsigned)req_id, url_buf);
 
             // 后台 PSRAM 任务异步下载（不阻塞 mcp 调用方）
-            auto* ctx = new std::pair<UiDisplay*, std::string>(ui, std::string(url_buf));
+            // ctx 带上 character 用于失败兜底（404 / 弱网 / GIF 损坏 → 弹大字卡让用户至少看到字）
+            struct StrokeCtx {
+                UiDisplay* ui;
+                std::string url;
+                std::string character;
+                uint32_t req_id;
+            };
+            auto* ctx = new StrokeCtx{ui, std::string(url_buf), character, req_id};
             xTaskCreatePinnedToCoreWithCaps([](void* arg) {
-                auto* ctx = static_cast<std::pair<UiDisplay*, std::string>*>(arg);
-                auto* d = ctx->first;
-                const auto& url = ctx->second;
+                auto* ctx = static_cast<StrokeCtx*>(arg);
+                auto* d = ctx->ui;
+                const auto& url = ctx->url;
+                std::string fallback_char = ctx->character;   // 失败兜底用
+                uint32_t req_id = ctx->req_id;
                 constexpr size_t kMaxGifSize = 512 * 1024;  // 控制单字 GIF ≤ 512KB
 
                 int64_t t_start = esp_timer_get_time();
@@ -87,106 +145,80 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
                     ? (int)((gsz * 1000ULL) / (size_t)elapsed_ms / 1024)
                     : 0;
 
-                // GIF 完整性校验（防止 LVGL 解码器崩溃 / 服务器返回 HTML 错误页等）
-                bool valid = ok && gsz >= 14 &&
+                // GIF 完整性校验（防 LVGL 解码崩溃 / 服务器返回 HTML 错误页 / 截断数据）：
+                //   ① 下载成功 ok
+                //   ② size 至少 1KB（笔画 GIF 实测 ≥30KB · 1KB 兜底拒绝空响应/4xx 错误页）
+                //   ③ 头 6 字节 GIF89a/GIF87a magic
+                //   ④ 末字节 0x3B = GIF Trailer（保证下载完整，未被中途截断）
+                constexpr size_t kMinValidGifSize = 1024;
+                bool valid = ok && gsz >= kMinValidGifSize &&
                     (memcmp(gif, "GIF89a", 6) == 0 || memcmp(gif, "GIF87a", 6) == 0) &&
                     gif[gsz - 1] == 0x3B;
                 if (!valid) {
-                    ESP_LOGW(TAG, "show_stroke: GIF 校验失败 bytes=%u elapsed=%dms speed=%dKB/s（该字可能无笔画动画）",
-                             (unsigned)gsz, elapsed_ms, speed_kbs);
+                    ESP_LOGW(TAG, "show_stroke: GIF 校验失败 bytes=%u elapsed=%dms speed=%dKB/s req=%u → 兜底弹大字卡",
+                             (unsigned)gsz, elapsed_ms, speed_kbs, (unsigned)req_id);
                     if (gif) heap_caps_free(gif);
+                    // 兜底：在主线程弹"大字 + 空 top"的 EduCard。
+                    // 防呆：① state 必须仍是 Speaking ② 释放 pending 让卡能弹出
+                    Application::GetInstance().Schedule([d, fallback_char, req_id]() {
+                        d->CancelFontPending(req_id);  // 必须先释放，否则 ShowEduCard 被 pending 屏蔽
+                        if (Application::GetInstance().GetDeviceState() != kDeviceStateSpeaking) return;
+                        ESP_LOGI(TAG, "show_stroke fallback: ShowEduCard(\"%s\", \"\")", fallback_char.c_str());
+                        d->ShowEduCard(fallback_char.c_str(), "");
+                    });
                     delete ctx;
                     vTaskDelete(NULL);
                     return;
                 }
-                ESP_LOGI(TAG, "show_stroke: download done bytes=%u elapsed=%dms speed=%dKB/s, replacing GIF",
-                         (unsigned)gsz, elapsed_ms, speed_kbs);
+                ESP_LOGI(TAG, "show_stroke: download done bytes=%u elapsed=%dms speed=%dKB/s req=%u",
+                         (unsigned)gsz, elapsed_ms, speed_kbs, (unsigned)req_id);
 
-                Application::GetInstance().Schedule([d, gif, gsz]() {
-                    d->FontGif(gif, gsz);   // PSRAM buffer 所有权转移给 EmojiCollection
+                Application::GetInstance().Schedule([d, gif, gsz, req_id, fallback_char]() {
+                    // 主线程二次守护：只在 Speaking 时装载 GIF（用户已退出 → buffer 丢弃）
+                    // 同时只允许最新 token 装载（FontGif 内部再 dedup）
+                    if (Application::GetInstance().GetDeviceState() != kDeviceStateSpeaking) {
+                        ESP_LOGI(TAG, "show_stroke: state changed, drop GIF req=%u", (unsigned)req_id);
+                        heap_caps_free(gif);
+                        d->CancelFontPending(req_id);
+                        return;
+                    }
+                    d->FontGif(gif, gsz, req_id);   // PSRAM buffer 所有权转移给 LvglRawImage
                 });
                 delete ctx;
                 vTaskDelete(NULL);
             }, "stroke_dl", 8192, ctx, 1, nullptr, 0, MALLOC_CAP_SPIRAM);
 
-            return std::string("OK,正在加载笔画动画");
+            return std::string("OK: stroke loading");
         });
     }  // include_stroke
 
-    // 教育卡 P0：动态切换 LLM system prompt（参考 BRTC SDK update_vision_prompt 协议）
-    // 三档专属 prompt 在云端按 mode 路由；本地仅触发协议层 [SET]:[UPDATE_SYSTEM_PROMPT]:
-    //   word    → 英文识字模式（自然拼读 + 中英对照 + 音标）
-    //   hanzi   → 汉字识字模式（拼音 + 笔画 + 组词，配合 show_stroke + show_card）
-    //   pinyin  → 拼音教学模式（韵母 / 声母 / 整体认读）
-    //   reset   → 恢复默认 chat 人设
-    // 之所以让 LLM 自己调用而不是 set_mode 简单参数：让云端 prompt 库统一管控、设备只发触发器
-    mcp.AddTool("self.education.set_mode",
-        "切换教学专属 system prompt(教育卡 P0)。"
-        "用户提到学英语/学汉字/学拼音/教学模式时调用。"
-        "mode=word: 英文识字; hanzi: 汉字识字; pinyin: 拼音; reset: 退出教学回普通聊天。"
-        "调用后简短回应'好,进入XX模式'即可。",
-        PropertyList({Property("mode", kPropertyTypeString)}),
-        [](const PropertyList& properties) -> ReturnValue {
-            std::string mode = properties["mode"].value<std::string>();
-            // 本地仅做"切档触发器" — 真正 prompt 文本走云端模板（统一可调可灰度）
-            // 协议层 model_type 约定: 2=视觉理解槽 / 0=聊天槽；教学走 2 槽避免污染默认人设
-            int model_type = (mode == "reset") ? 0 : 2;
-            std::string prompt;  // 留空 = 由云端按 mode 字段路由 prompt 库
-            if (mode != "word" && mode != "hanzi" && mode != "pinyin" && mode != "reset") {
-                return std::string("mode 仅支持 word/hanzi/pinyin/reset");
-            }
-            // 拼一个最小 trigger（云端 update_system_prompt handler 解析 mode 字段路由模板）
-            prompt = std::string("{\"edu_mode\":\"") + mode + "\"}";
-            bool ok = Application::GetInstance().UpdateSystemPrompt(model_type, prompt);
-            return std::string(ok ? "OK" : "切换失败");
-        });
-
-    // 教育卡渲染（9 类 category · 主动 letter/phonics/math 走 88px / 其他 56px）
+    // 教育卡渲染（极简 · 两行布局 · 不分类）
+    //   main 自动判定 CJK/英文 · 字号 56 默认 / 48 EN 兜底
+    //   top  顶部辅助：汉字配拼音 / 英文配中文释义
+    //   优先级 < TTS 内联 [main_top]：本工具作"主动调用兜底"，常规场景应直接在 TTS 嵌入标记
     mcp.AddTool("self.education.show_card",
-        "渲染教育卡片(九选一)，需要可视化展示字词/拼音/算式/古诗/科普时调用：\n"
-        "【被动 56 主秀】\n"
-        " word: top=自然拼读\"ap·ple\"(选填) / main=英文≤10 字母 / bottom=中文释义≤10 字；\n"
-        " hanzi: top=带声调拼音\"niǎo\"(必填) / main=汉字≤4 字 / bottom=组词≤10 字；\n"
-        " pinyin: top=类别\"韵母\"(必填) / main=带调字母≤8 字符 / bottom=例字≤10 字；\n"
-        " poem: top=拼音(选填) / main=诗题≤4 字 / bottom=作者朝代；\n"
-        " topic: top=拼音(选填) / main=主题词≤4 字 / bottom=类别(如\"昆虫\")；\n"
-        " color: top=英文如\"red\"(选填) / main=中文颜色≤2 字 / bottom=英文翻译；\n"
-        "【主动 88 超大主秀】\n"
-        " letter: main=字母\"Aa\"(大小写并排≤5 字符) / bottom=首例词中文；\n"
-        " phonics: top=类别\"声母\"(必填) / main=单声母\"b\"(≤5 字符) / bottom=例字\"爸 bà\"；\n"
-        " math: main=算式\"3+5=8\"(≤5 字符) / bottom=读法\"三加五等于八\"。\n"
-        "拼音必须用 ǎēīǒūǚ 等带声调字母，禁用\"hao\"无声调或\"三声\"文字描述。",
+        "[兜底用 · 优先用 TTS 内联 [main_top]] 显示教育卡片(两行布局)。\n"
+        "汉字组词: main=\"书包\" top=\"shū bāo\" (汉字 <=4 字, 拼音必带声调 ǎēīǒūǚ)\n"
+        "英文单词: main=\"apple\" top=\"苹果\" (英文 <=12 字符)\n"
+        "返回 ERR: ... 时表示参数超限,LLM 应改用更短的词重试。",
         PropertyList({
-            Property("category", kPropertyTypeString),
-            Property("main",     kPropertyTypeString),
-            Property("top",      kPropertyTypeString, std::string("")),
-            Property("bottom",   kPropertyTypeString, std::string("")),
+            Property("main", kPropertyTypeString),
+            Property("top",  kPropertyTypeString, std::string("")),
         }),
         [ui](const PropertyList& properties) -> ReturnValue {
-            std::string category = properties["category"].value<std::string>();
-            std::string main_t   = properties["main"].value<std::string>();
-            std::string top      = properties["top"].value<std::string>();
-            std::string bottom   = properties["bottom"].value<std::string>();
-            if (main_t.empty()) return std::string("请输入要展示的内容");
-            // 9 类白名单：被动 6（56px） + 主动 3（88px）
-            static const char* kAllowed[] = {
-                "word", "hanzi", "pinyin",
-                "poem", "topic", "color",
-                "letter", "phonics", "math"
-            };
-            bool ok = false;
-            for (const char* c : kAllowed) {
-                if (category == c) { ok = true; break; }
+            std::string main_t = properties["main"].value<std::string>();
+            std::string top    = properties["top"].value<std::string>();
+            if (main_t.empty()) return std::string("ERR: main is empty");
+            // 粗略字节数兜底：汉字 4 字 = 12 bytes / 英文 12 字 = 12 bytes，统一上限 16 bytes 留余量
+            // 真正的字符集 + 布局判定由 UiDisplay::ShowEduCard 内 PickFont 完成（超范围会静默跳过）
+            if (main_t.size() > 16) {
+                return std::string("ERR: main too long (max 4 CJK or 12 ASCII chars)");
             }
-            if (!ok) {
-                return std::string(
-                    "category 仅支持 word/hanzi/pinyin/poem/topic/color/letter/phonics/math");
+            if (top.size() > 32) {  // 拼音 4 字 = ~20 bytes，留余量
+                return std::string("ERR: top too long");
             }
-
-            // 切回 main 任务（与 LVGL 渲染线程互斥，DisplayLockGuard 在 ShowEduCard 内）
-            Application::GetInstance().Schedule([ui, category, main_t, top, bottom]() {
-                ui->ShowEduCard(category.c_str(), main_t.c_str(),
-                                top.c_str(), bottom.c_str());
+            Application::GetInstance().Schedule([ui, main_t, top]() {
+                ui->ShowEduCard(main_t.c_str(), top.c_str());
             });
             return std::string("OK");
         });

@@ -4,10 +4,15 @@
 #include <cmath>
 
 #include "esp_log.h"
+#include "sdkconfig.h"
 
-#ifdef CONFIG_BT_NIMBLE_ENABLED
+// iBeacon 需要 NimBLE Observer 角色（被动扫描）
+// 当前量产 P30-4G/WIFI 关闭 OBSERVER 释放 25-35KB INT RAM · 此模块编译成 stub
+// 将来 P31 启用 iBeacon 时需重开 CONFIG_BT_NIMBLE_ROLE_OBSERVER（详见 docs/p30-bluetooth-flows.html § 5.2）
+#if defined(CONFIG_BT_NIMBLE_ENABLED) && defined(CONFIG_BT_NIMBLE_ROLE_OBSERVER)
 #include "host/ble_hs.h"
 #include "host/ble_gap.h"
+#define IBEACON_OBSERVER_AVAILABLE 1
 #endif
 
 #define TAG "IBeacon"
@@ -30,11 +35,10 @@ IBeacon& IBeacon::GetInstance() {
 // ============ 公共接口 ============
 
 bool IBeacon::Start() {
-#ifndef CONFIG_BT_NIMBLE_ENABLED
-    ESP_LOGE(TAG, "NimBLE not enabled");
+#ifndef IBEACON_OBSERVER_AVAILABLE
+    ESP_LOGW(TAG, "iBeacon Start ignored · CONFIG_BT_NIMBLE_ROLE_OBSERVER 未启用（量产 stub）");
     return false;
-#endif
-
+#else
     if (scanning_) {
         ESP_LOGW(TAG, "Already scanning");
         return true;
@@ -65,6 +69,7 @@ bool IBeacon::Start() {
     initialized_ = true;
     ESP_LOGI(TAG, "Started (省电: 1280ms/11.25ms, ~3-5mA)");
     return true;
+#endif
 }
 
 void IBeacon::Stop() {
@@ -72,7 +77,9 @@ void IBeacon::Stop() {
         return;
     }
 
+#ifdef IBEACON_OBSERVER_AVAILABLE
     ble_gap_disc_cancel();
+#endif
     scanning_ = false;
     ESP_LOGI(TAG, "Stopped");
 }
@@ -84,6 +91,7 @@ void IBeacon::OnDetected(IBeaconCallback callback) {
 // ============ 内部方法 ============
 
 int IBeacon::ScanCallback(struct ble_gap_event* event, void* arg) {
+#ifdef IBEACON_OBSERVER_AVAILABLE
     auto* self = static_cast<IBeacon*>(arg);
 
     if (event->type != BLE_GAP_EVENT_DISC) {
@@ -102,7 +110,9 @@ int IBeacon::ScanCallback(struct ble_gap_event* event, void* arg) {
             self->on_detected_(beacon);
         }
     }
-
+#else
+    (void)event; (void)arg;
+#endif
     return 0;
 }
 

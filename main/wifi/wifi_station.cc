@@ -20,12 +20,14 @@
 #define WIFI_EVENT_CONNECTED BIT0
 #define WIFI_EVENT_DISCONNECTED BIT1
 #define WIFI_EVENT_GOT_IP BIT2
-// 重连退避延迟（微秒）: 1s, 2s, 4s, 8s, 15s, 30s, 60s（封顶）
-// 快速阶段 3 次（7s），慢速阶段无限重试（60s 间隔）
+// 重连退避延迟（微秒）: 1s, 2s, 4s, 8s, 15s, 30s, 60s（快速 7 档累计约 2 min）
+// P0 · 第 kReconnectStormCap 次后切稀疏 5 min 一次 · 防密码改 / SSID 改场景永远在线日志/电流
 static const uint64_t kReconnectBackoffUs[] = {
     1000000, 2000000, 4000000, 8000000, 15000000, 30000000, 60000000
 };
 static const int kReconnectBackoffCount = sizeof(kReconnectBackoffUs) / sizeof(kReconnectBackoffUs[0]);
+static constexpr int kReconnectStormCap = 20;                          // 前 20 次走指数退避
+static constexpr uint64_t kReconnectSparseUs = 300ULL * 1000000ULL;    // 第 20 次后稀疏 5 分钟一次
 
 WifiStation& WifiStation::GetInstance() {
     static WifiStation instance;
@@ -67,17 +69,15 @@ WifiStation::~WifiStation() {
 
 // ========== 扫描管理实现 ==========
 void WifiStation::TriggerScan() {
-    if (is_scanning_) {
-        ESP_LOGI(TAG, "Scan already in progress, skip");
-        return;
-    }
-
     if (!initialized_) {
         ESP_LOGE(TAG, "WiFi not initialized, cannot scan");
         return;
     }
 
-    is_scanning_ = true;
+    if (is_scanning_.exchange(true, std::memory_order_acq_rel)) {
+        ESP_LOGI(TAG, "Scan already in progress, skip");
+        return;
+    }
     ESP_LOGI(TAG, "Starting WiFi scan...");
 
     // 主动扫描：每信道80-120ms（默认120ms被动），总耗时约1.3s
@@ -301,8 +301,11 @@ void WifiStation::Stop() {
     on_scan_complete_ = nullptr;
     on_disconnected_ = nullptr;
 
-    // 重置连接队列和状态
-    connect_queue_.clear();
+    // 重置连接队列和状态（P0 · 持锁 · 防 WiFi event task 并发读写）
+    {
+        std::lock_guard<std::mutex> lk(connect_queue_mutex_);
+        connect_queue_.clear();
+    }
     reconnect_count_ = 0;
     ssid_.clear();
     password_.clear();
@@ -410,6 +413,8 @@ void WifiStation::HandleScanResult() {
     auto& ssid_manager = SsidManager::GetInstance();
     auto ssid_list = ssid_manager.GetSsidList();
 
+    std::unique_lock<std::mutex> queue_lock(connect_queue_mutex_);
+
     connect_queue_.clear();
 
     for (int i = 0; i < ap_num; i++) {
@@ -454,12 +459,21 @@ void WifiStation::HandleScanResult() {
                   return a.rssi > b.rssi;
               });
 
+    queue_lock.unlock();
     StartConnect();
 }
 
 void WifiStation::StartConnect() {
-    auto ap_record = connect_queue_.front();
-    connect_queue_.erase(connect_queue_.begin());
+    WifiApRecord ap_record;
+    {
+        std::lock_guard<std::mutex> lk(connect_queue_mutex_);
+        if (connect_queue_.empty()) {
+            ESP_LOGW(TAG, "StartConnect: queue empty · 中止");
+            return;
+        }
+        ap_record = connect_queue_.front();
+        connect_queue_.erase(connect_queue_.begin());
+    }
     ssid_ = ap_record.ssid;
     password_ = ap_record.password;
 
@@ -467,9 +481,6 @@ void WifiStation::StartConnect() {
         on_connect_(ssid_);
     }
 
-    // 🔴 IDF 5.5 兼容（IDFGH-16870）：esp_wifi_set_config 在 "sta is connecting"
-    // 状态会返回 ESP_OK 但配置不生效（5.4 容忍，5.5 静默失效）。
-    // 等 STA_DISCONNECTED 事件而非裸 vTaskDelay，避免 IDF 5.5 抖动期 200ms 不够。
     xEventGroupClearBits(event_group_, WIFI_EVENT_CONNECTED | WIFI_EVENT_DISCONNECTED | WIFI_EVENT_GOT_IP);
     esp_err_t dret = esp_wifi_disconnect();
     if (dret == ESP_OK) {
@@ -544,20 +555,23 @@ void WifiStation::WifiEventHandler(void* arg, esp_event_base_t event_base, int32
         ESP_LOGI(TAG, "WIFI_EVENT_STA_START: try_connect=%d, scan_only=%d",
             this_->try_connect_mode_, this_->scan_only_mode_);
 
-        // 启动后自动触发首次扫描（快速模式）
-        ESP_LOGI(TAG, "Auto triggering first scan...");
-        this_->is_scanning_ = true;
-        wifi_scan_config_t scan_cfg = {};
-        scan_cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
-        scan_cfg.scan_time.active.min = 80;
-        scan_cfg.scan_time.active.max = 120;
-        esp_err_t ret = esp_wifi_scan_start(&scan_cfg, false);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Auto scan failed: %s", esp_err_to_name(ret));
-            this_->is_scanning_ = false;
-        }
-        if (this_->on_scan_begin_) {
-            this_->on_scan_begin_();
+        // 启动后自动触发首次扫描（快速模式）· P0 原子抢占防与 TriggerScan / 重连扫并发
+        if (this_->is_scanning_.exchange(true, std::memory_order_acq_rel)) {
+            ESP_LOGI(TAG, "STA_START: scan already in progress, skip");
+        } else {
+            ESP_LOGI(TAG, "Auto triggering first scan...");
+            wifi_scan_config_t scan_cfg = {};
+            scan_cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+            scan_cfg.scan_time.active.min = 80;
+            scan_cfg.scan_time.active.max = 120;
+            esp_err_t ret = esp_wifi_scan_start(&scan_cfg, false);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Auto scan failed: %s", esp_err_to_name(ret));
+                this_->is_scanning_ = false;
+            }
+            if (this_->on_scan_begin_) {
+                this_->on_scan_begin_();
+            }
         }
     } else if (event_id == WIFI_EVENT_SCAN_DONE) {
         this_->HandleScanResult();
@@ -602,9 +616,19 @@ void WifiStation::WifiEventHandler(void* arg, esp_event_base_t event_base, int32
                 };
                 esp_timer_create(&args, &this_->reconnect_timer_);
             }
-            int idx = this_->reconnect_count_ < kReconnectBackoffCount
-                      ? this_->reconnect_count_ : kReconnectBackoffCount - 1;
-            uint64_t delay = kReconnectBackoffUs[idx];
+            // P0 · 第 20 次后切稀疏退避 · 防密码/SSID 改场景永远重试风暴
+            uint64_t delay;
+            if (this_->reconnect_count_ >= kReconnectStormCap) {
+                delay = kReconnectSparseUs;
+                if (this_->reconnect_count_ == kReconnectStormCap) {
+                    ESP_LOGW(TAG, "Reconnect storm 第 %d 次 · 切稀疏 5 分钟一次 · 可能密码改/SSID 改",
+                             kReconnectStormCap);
+                }
+            } else {
+                int idx = this_->reconnect_count_ < kReconnectBackoffCount
+                          ? this_->reconnect_count_ : kReconnectBackoffCount - 1;
+                delay = kReconnectBackoffUs[idx];
+            }
             this_->reconnect_count_++;
             ESP_LOGI(TAG, "Reconnecting %s in %" PRIu64 " ms (attempt %d)",
                      this_->ssid_.c_str(), delay / 1000, this_->reconnect_count_);
@@ -641,7 +665,11 @@ void WifiStation::IpEventHandler(void* arg, esp_event_base_t event_base, int32_t
         if (this_->on_connected_) {
             this_->on_connected_(this_->ssid_);
         }
-        this_->connect_queue_.clear();
+        // P0 · 持锁清队列 · 防与 HandleScanResult/StartConnect 并发
+        {
+            std::lock_guard<std::mutex> lk(this_->connect_queue_mutex_);
+            this_->connect_queue_.clear();
+        }
         this_->reconnect_count_ = 0;
         // 连接成功，清理退避定时器
         if (this_->reconnect_timer_) {
@@ -836,17 +864,18 @@ bool WifiStation::InitWifiDriver(WifiMode mode, const std::string& ap_ssid) {
         esp_timer_create_args_t timer_args = {
             .callback = [](void* arg) {
                 auto* self = static_cast<WifiStation*>(arg);
-                if (!self->try_connect_mode_ && !self->is_scanning_) {
-                    // 非配网连接模式，用于连接失败后重试
-                    self->is_scanning_ = true;
-                    wifi_scan_config_t cfg = {};
-                    cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
-                    cfg.scan_time.active.min = 80;
-                    cfg.scan_time.active.max = 120;
-                    esp_err_t ret = esp_wifi_scan_start(&cfg, false);
-                    if (ret != ESP_OK) {
-                        self->is_scanning_ = false;
-                    }
+                if (self->try_connect_mode_) return;
+                // P0 原子抢占：与 TriggerScan / STA_START 三处并发
+                if (self->is_scanning_.exchange(true, std::memory_order_acq_rel)) {
+                    return;  // 已有扫描在跑
+                }
+                wifi_scan_config_t cfg = {};
+                cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+                cfg.scan_time.active.min = 80;
+                cfg.scan_time.active.max = 120;
+                esp_err_t ret = esp_wifi_scan_start(&cfg, false);
+                if (ret != ESP_OK) {
+                    self->is_scanning_ = false;
                 }
             },
             .arg = this,

@@ -14,6 +14,7 @@
 #include "application.h"
 #include "audio/music_player.h"
 #include "alarm_manager.h"
+#include "audio/alarm_ringer.h"
 #include "button.h"
 #include "config.h"
 #include "settings.h"
@@ -57,14 +58,28 @@
 
 #define TAG "MyDazyP30_4GBoard"
 
-// 上次进 sleep 的 RTC 时戳（每次 sleep 入口都更新 · 跨 deep sleep 保持）
-// 用途：EXT0 唤醒时若距上次 sleep < 500ms = 死按延续（硬件极速被触发）· 直接再 sleep
+// EXT0 唤醒时若距上次 sleep < 500ms = 死按延续（硬件极速被触发）· 直接再 sleep
 // 真心开机必然 = 用户松手再按 · 间隔 ≥ 200ms · 实测远超 500ms
-#include <esp_sleep.h>
+// 用 gettimeofday（POSIX 标准 · ESP-IDF 内部基于 RTC · 跨 deep sleep 持续 · 无组件依赖）
+#include <sys/time.h>
 RTC_DATA_ATTR static uint64_t s_last_sleep_us = 0;
 static constexpr uint64_t kDeadHoldWindowUs = 500 * 1000;  // 500ms
+static inline uint64_t NowRtcUs() {
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    return (uint64_t)tv.tv_sec * 1000000ULL + tv.tv_usec;
+}
 
 namespace {
+// 闹钟响铃中：任何用户输入（按键/触摸/摇晃）都优先关停闹钟，不进对话流程
+inline bool TryStopAlarmRinger(const char* reason) {
+    if (AlarmRinger::GetInstance().IsRinging()) {
+        AlarmRinger::GetInstance().Stop(reason);
+        return true;
+    }
+    return false;
+}
+
 // 小工具：处于 Speaking 时先 Abort，避免状态冲突
 inline void AbortIfSpeaking() {
     auto& app = Application::GetInstance();
@@ -136,7 +151,6 @@ private:
     BoxAudioCodec* audio_codec_ = nullptr;
 
     bool first_boot_ = false;
-    bool is_alarm_clock_ = false;
 
     std::atomic<bool> shutdown_armed_{false};
     esp_timer_handle_t shutdown_delay_timer_ = nullptr;
@@ -197,10 +211,15 @@ private:
                 // 距上次 sleep < 500ms + GPIO 低 = 死按延续（硬件极速被 EXT0 触发）
                 // 直接重 arm + sleep · 永不"误判开机播欢迎音"· 用户死按多久都安全
                 if (s_last_sleep_us > 0) {
-                    uint64_t since_us = esp_rtc_get_time_us() - s_last_sleep_us;
+                    uint64_t since_us = NowRtcUs() - s_last_sleep_us;
                     if (since_us < kDeadHoldWindowUs && gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
                         ESP_LOGW(TAG, "距 sleep %llu ms · 用户未松手 · 短路 sleep", since_us / 1000);
-                        s_last_sleep_us = esp_rtc_get_time_us();
+                        // 防御性断 LDO + hold（B1 修复）· 与 EnterDeepSleep 路径对称
+                        // 硬件 R47=100K 已下拉 GPIO9 到 GND，sleep 失驱时自动断电；本两行作 belt-and-suspenders
+                        // 防 R47 虚焊 / 缺件，并让 sleep 期 GPIO9 立即 LOW 不依赖 RC 放电
+                        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
+                        rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
+                        s_last_sleep_us = NowRtcUs();
                         esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0);
                         rtc_gpio_pullup_en(BOOT_BUTTON_GPIO);
                         esp_deep_sleep_start();
@@ -218,13 +237,16 @@ private:
                 break;
             case ESP_SLEEP_WAKEUP_TIMER:
                 ESP_LOGI(TAG, "从定时器唤醒 · 闹钟模式");
-                is_alarm_clock_ = true;
                 AlarmManager::MarkTimerWakeup();  // 允许未校时时用 RTC fallback 触发闹钟
                 first_boot_ = true;
                 break;
             default:
                 ESP_LOGI(TAG, "首次启动或复位 (wakeup=%d, reset=%d)", (int)wakeup_reason, (int)reset_reason);
-                first_boot_ = true;
+                // 仅正常启动放欢迎音：上电 / USB 接入 / 主动 esp_restart（OTA/出厂复位/切网）
+                // panic / wdt / brownout 等异常重启不放，避免"崩溃后假装一切正常"误导用户
+                first_boot_ = (reset_reason == ESP_RST_POWERON ||
+                               reset_reason == ESP_RST_USB ||
+                               reset_reason == ESP_RST_SW);
                 break;
         }
     }
@@ -314,6 +336,7 @@ private:
     // Listening 中不调 StopListening 避免 UI 抖回时钟，直接 SendTextToAI 平滑过渡。
     static void OnShake(void* /*ctx*/) {
         Application::GetInstance().Schedule([]() {
+            if (TryStopAlarmRinger("shake")) return;
             auto& app = Application::GetInstance();
             auto state = app.GetDeviceState();
             if (state != kDeviceStateIdle && state != kDeviceStateListening) {
@@ -386,6 +409,7 @@ private:
     }
 
     void HandleTouchSingleClick() {
+        if (TryStopAlarmRinger("touch")) return;
         auto& app = Application::GetInstance();
         auto state = app.GetDeviceState();
 
@@ -411,6 +435,7 @@ private:
     // Listening / Speaking → AbortAnyConversation + 切 Idle + 提示音
     // Idle / MP3 / 其他 → 忽略（避免误触干扰）
     void HandleTouchDoubleClick() {
+        if (TryStopAlarmRinger("touch")) return;
         auto& app = Application::GetInstance();
 
         if (MusicPlayer::GetInstance().IsPlaying()) {
@@ -591,8 +616,8 @@ private:
 
         ESP_LOGI(TAG, "准备进入深度睡眠");
         vTaskDelay(pdMS_TO_TICKS(200));
-        // 每次进 sleep 都记时戳 · 唤醒后比较 < 500ms 即死按延续 · 直接短路 sleep
-        s_last_sleep_us = esp_rtc_get_time_us();
+        // 每次进 sleep 都记 RTC 时戳 · 唤醒后比较 < 500ms 即死按延续 · 直接短路 sleep
+        s_last_sleep_us = NowRtcUs();
         esp_deep_sleep_start();
     }
 
@@ -656,6 +681,7 @@ private:
 
         // 单击：MP3 播放中先停 + 退 PlayerUI · 仅 Idle/Listening/Speaking 才 ToggleChat
         boot_button_.OnClick([this]() {
+            if (TryStopAlarmRinger("button")) return;
             auto& app = Application::GetInstance();
             auto status = app.GetDeviceState();
             ESP_LOGI(TAG, "单击 button 状态: %u", status);
@@ -676,6 +702,7 @@ private:
 
         // 双击：① 出厂确认（10s 窗口）② 配网态 BLUFI↔AP 切换 ③ AEC 模式切换
         boot_button_.OnDoubleClick([this]() {
+            if (TryStopAlarmRinger("button")) return;
             auto& app = Application::GetInstance();
             auto status = app.GetDeviceState();
             // ① 9 连击后 10s 内双击 = 确认出厂
@@ -687,8 +714,12 @@ private:
                 waiting_factory_reset_confirm_.store(false);
                 AbortIfSpeaking();
                 app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
-                RequestServerUnbind();
-                SystemReset::CheckButtons(true);  // NVS 全擦 + 3s 倒计时 esp_restart
+                // B2 修复：HTTP 解绑 + NVS 全擦 + 3s 倒计时 改异步任务
+                // 原同步路径阻塞 button 内部 task 8-9 s（HTTP 5s + nvs_erase + RestartInSeconds 3s）
+                // 期间 esp_timer 调度被冻 / Core 1 LVGL 在 nvs_flash_erase 期间被挂起 → 画面卡死
+                // factory_reset 任务跑完 RequestServerUnbind 后调 SystemReset::CheckButtons(true) 内部 esp_restart 不返回
+                xTaskCreatePinnedToCore(&MyDazyP30_4GBoard::FactoryResetTaskEntry,
+                                        "factory_reset", 6144, nullptr, 3, nullptr, 0);
                 return;
             }
             // ② 配网态：BLUFI ↔ AP 切换（提示音由 SwitchConfigMode 内部 PlaySound）
@@ -763,10 +794,14 @@ private:
             if (!shutdown_delay_timer_) {
                 esp_timer_create_args_t args = {
                     .callback = [](void* arg) {
+                        // ESP_TIMER_TASK 高优先级共享任务，禁止阻塞（ShutdownOrSleep 含 2-3s vTaskDelay）
+                        // → 用 Schedule 派发到 main_app 任务执行，timer 回调立刻返回
                         auto* self = static_cast<MyDazyP30_4GBoard*>(arg);
                         if (self->shutdown_armed_.exchange(false)) {
-                            ESP_LOGI(TAG, "800ms 缓冲到 · 执行关机");
-                            self->ShutdownOrSleep("再见", "", "", 1500, false);
+                            ESP_LOGI(TAG, "800ms 缓冲到 · 派发关机到 main_app");
+                            Application::GetInstance().Schedule([self]() {
+                                self->ShutdownOrSleep("再见", "", "", 1500, false);
+                            });
                         }
                     },
                     .arg = this,
@@ -894,6 +929,13 @@ private:
         auto& app = Application::GetInstance();
         vTaskDelay(pdMS_TO_TICKS(1500));
 
+        // 闹钟 TIMER 唤醒：跳过欢迎音 · AlarmRinger 接管响铃 · 不抢屏不抢音
+        if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+            ESP_LOGI(TAG, "TIMER 唤醒(闹钟模式)· 跳过欢迎音");
+            vTaskDelete(NULL);
+            return;
+        }
+
         if (app.GetDeviceState() != kDeviceStateWifiConfiguring && self->first_boot_) {
             app.RequestAutoChatOnIdle();
             app.PlaySound(Lang::Sounds::OGG_WELCOME);
@@ -937,9 +979,23 @@ public:
 
         ApplyDefaultSettings();
 
+        // 注册板专属 MCP 工具（教育卡 show_stroke/show_card）— 必须在 Display 初始化之后
+        // 修复 BUG：v32 之前 P30-4G 完全没注册 show_stroke，导致 LLM 看不到工具 → 用户感知"识字 GIF 不工作"
+        InitializeTools();
+
         ESP_LOGI(TAG, "MyDazy P30 4G 初始化完成 (ES8311+ES7210, 支持4G、电源管理、触摸屏)");
 
         StartWelcomeTask();
+    }
+
+    // MCP 工具注册（板专属能力）— 通用工具由 McpServer::AddCommonTools 自动注册
+    void InitializeTools() {
+        auto& mcp = McpServer::GetInstance();
+        // 教育卡 MCP 工具集：show_stroke 笔画 GIF + show_card 教育卡
+        // 4G/WiFi 两种网络模式下都开启 show_stroke：
+        //   完整性校验四重防护（1KB min + GIF89a/87a magic + 末字节 0x3B Trailer + Schedule state 守护）
+        //   弱网失败时端侧自动弹大字 EduCard 兜底，不会显示脏帧或崩溃
+        RegisterEducationMcpTools(mcp, dynamic_cast<UiDisplay*>(GetDisplay()));
     }
 
 
@@ -1023,6 +1079,17 @@ public:
         esp_rom_delay_us(500 * 1000);           // 等 22uF 电容放电（shutdown 上下文用 ROM delay 更稳妥）
     }
 
+    // 出厂复位任务（B2 修复）· 9 连击双击确认时由 OnDoubleClick 派发
+    // 任务: Core 0 · stack 6 KB(HTTP+TLS+nvs_erase 用量) · P3 · 一次性 · SystemReset::CheckButtons 内 esp_restart 不返回
+    // 异步化目的: 避免 button 内部 task 同步阻塞 8-9 s 导致 esp_timer 调度冻结 / LVGL 卡死
+    static void FactoryResetTaskEntry(void* /*arg*/) {
+        ESP_LOGI("P30_4G", "factory_reset task: 开始");
+        RequestServerUnbind();             // 最多 1.5s（HTTP timeout）· 失败不阻塞
+        SystemReset::CheckButtons(true);   // 内部: nvs_flash_erase + partition_erase + RestartInSeconds(3) + esp_restart
+        // 兜底: 理论不会执行，因 esp_restart 不返回
+        vTaskDelete(nullptr);
+    }
+
     // 通知服务器解绑设备：mydazy 业务，仅在 9 连击双击确认时使用。失败不阻塞本地擦除。
     static bool RequestServerUnbind() {
         std::string url = CONFIG_OTA_URL;
@@ -1045,7 +1112,9 @@ public:
         http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
         http->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
         http->SetHeader("User-Agent", SystemInfo::GetUserAgent().c_str());
-        http->SetTimeout(5000);
+        // 1.5s 超时（B2 修复：原 5s）· 出厂复位路径已在独立 factory_reset 任务跑
+        // 4G CSQ 差时快速失败，避免阻塞后续 SystemReset::CheckButtons + esp_restart
+        http->SetTimeout(1500);
 
         if (!http->Open("GET", url)) {
             ESP_LOGW("P30_4G", "Failed to connect to server for unbind");
@@ -1058,7 +1127,7 @@ public:
         return status_code == 200 || status_code == 204;
     }
 
-    // 切换网络：写 NVS + esp_restart()，电源复位由 ShutdownHandler 自动接管
+    // 切换网络：优雅断 MQTT/WS → 停 audio → 写 NVS → esp_restart() · 电源复位由 ShutdownHandler 自动接管
     void SwitchNetworkType() {
         auto display = GetDisplay();
         Settings net_settings("network", true);  // 复刻基类 SaveNetworkTypeToSettings 逻辑（基类已设 private）
@@ -1070,6 +1139,8 @@ public:
             display->ShowNotification(Lang::Strings::SWITCH_TO_WIFI_NETWORK);
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
+        Application::GetInstance().ResetProtocol();  // 与 EnterDeepSleep 对称：优雅断 MQTT/WS 避免服务端残留 session
+        vTaskDelay(pdMS_TO_TICKS(500));              // 等异步 Schedule lambda 完成 close + 析构
         Application::GetInstance().GetAudioService().Stop();
         esp_restart();   // ShutdownHandler 自动断 LDO 复位 LCD
     }

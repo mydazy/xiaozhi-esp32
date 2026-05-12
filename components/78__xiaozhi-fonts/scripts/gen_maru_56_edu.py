@@ -23,8 +23,8 @@ gen_maru_56_edu.py — 生成 56px 教育卡主秀字库（v8 启蒙定版）
   ~3800 字符 · 2bpp + RLE 压缩 → ~2 MB（vs 旧版 1bpp 1.3 MB）
 
 输出：
-  cbin/font_maru_56_1.bin
-  cbin/mydazy/font_maru_56_1.bin     ← 项目运行时加载路径
+  cbin/font_maru_56_4.bin
+  cbin/mydazy/font_maru_56_4.bin     ← 项目运行时加载路径（v8.1 4bpp 抗锯齿，替代旧 1bpp 56_1）
 """
 
 import os
@@ -110,7 +110,8 @@ def main():
         "--size", "56",
         "--format", "cbin",
         "--force-fast-kern-format",
-        # 不加 --no-compress：让 lv_font_conv 自动 RLE 压缩，控制最终体积
+        # RLE 压缩 · 体积 5.0MB → 2.2MB（节省 ~3MB · 防 assets 分区 8MB 溢出）
+        # 依赖：sdkconfig 必须 CONFIG_LV_USE_FONT_COMPRESSED=y（否则 bitmap 全空白）
         "-o", str(CBIN_OUT),
         "--font", str(TTF_MARU_BOLD),
         "--symbols", chars_str,

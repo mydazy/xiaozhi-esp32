@@ -23,7 +23,6 @@ LvglDisplay::LvglDisplay() {
             DisplayLockGuard lock(display);
             lv_obj_add_flag(display->notification_label_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(display->status_label_, LV_OBJ_FLAG_HIDDEN);
-            // status_bar_ 永久不隐藏（产品决策）：不再按之前状态恢复 HIDDEN
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,

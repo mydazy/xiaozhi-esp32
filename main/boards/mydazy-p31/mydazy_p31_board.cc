@@ -1,5 +1,6 @@
 ﻿#include "dual_network_board.h"
 #include "alarm_manager.h"
+#include "audio/alarm_ringer.h"
 #include "ml307_board.h"
 #include "wifi_board.h"
 #include "assets/lang_config.h"
@@ -21,6 +22,7 @@
 #include "power_save_timer.h"
 #include "power_manager.h"
 #include "mcp_server.h"
+#include "education_mcp_tools.h"
 #include "ota.h"
 #include "assets.h"
 #include "esp_nfc_ws1850s.h"
@@ -57,13 +59,28 @@
 
 #define TAG "MyDazyP31Board"
 
-// 上次 sleep 时戳（每次更新 · 跨 deep sleep 保持）· < 500ms = 死按延续 · 短路 sleep
-#include <esp_sleep.h>
+// 距上次 sleep < 500ms + GPIO 低 = 死按延续 · 短路再 sleep
+// 用 gettimeofday（POSIX 标准 · ESP-IDF 内部基于 RTC · 跨 deep sleep 持续 · 无组件依赖）
+#include <sys/time.h>
 RTC_DATA_ATTR static uint64_t s_last_sleep_us = 0;
 static constexpr uint64_t kDeadHoldWindowUs = 500 * 1000;
+static inline uint64_t NowRtcUs() {
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    return (uint64_t)tv.tv_sec * 1000000ULL + tv.tv_usec;
+}
 
 // 耳机检测全局状态（audio_service.cc 访问）
 bool headset_present = false;
+
+// 闹钟响铃中：任何用户输入（按键/触摸/摇晃）都优先关停闹钟，不进对话流程
+static inline bool TryStopAlarmRinger(const char* reason) {
+    if (AlarmRinger::GetInstance().IsRinging()) {
+        AlarmRinger::GetInstance().Stop(reason);
+        return true;
+    }
+    return false;
+}
 
 // ADC 校准辅助
 static bool AdcCalibrationInit(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t* out_handle) {
@@ -113,8 +130,6 @@ private:
     Axs5106lTouch* touch_driver_ = nullptr;
 
     bool first_boot_ = false;
-    // 闹钟功能
-    bool is_alarm_clock_ = false;
     time_t start_time_;
 
     // 音量调节任务
@@ -216,10 +231,10 @@ private:
                 ESP_LOGI(TAG, "从开机键唤醒");
                 // 距上次 sleep < 500ms + GPIO 低 = 死按延续 · 短路再 sleep · 用户死按多久都安全
                 if (s_last_sleep_us > 0) {
-                    uint64_t since_us = esp_rtc_get_time_us() - s_last_sleep_us;
+                    uint64_t since_us = NowRtcUs() - s_last_sleep_us;
                     if (since_us < kDeadHoldWindowUs && gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
                         ESP_LOGW(TAG, "距 sleep %llu ms · 用户未松手 · 短路 sleep", since_us / 1000);
-                        s_last_sleep_us = esp_rtc_get_time_us();
+                        s_last_sleep_us = NowRtcUs();
                         esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0);
                         rtc_gpio_pullup_en(BOOT_BUTTON_GPIO);
                         esp_deep_sleep_start();
@@ -233,13 +248,17 @@ private:
                 break;
             case ESP_SLEEP_WAKEUP_TIMER:
                 ESP_LOGI(TAG, "从定时器唤醒 · 闹钟模式");
-                is_alarm_clock_ = true;
                 AlarmManager::MarkTimerWakeup();
                 first_boot_ = true;
                 break;
             default:
-                ESP_LOGI(TAG, "首次启动或复位 (原因=%u)", wakeup_reason);
-                first_boot_ = true;
+                ESP_LOGI(TAG, "首次启动或复位 (原因=%u, reset=%d)", wakeup_reason, (int)esp_reset_reason());
+                // 仅正常启动放欢迎音：上电 / USB 接入 / 主动 esp_restart（OTA/出厂复位/切网）
+                // panic / wdt / brownout 等异常重启不放，避免"崩溃后假装一切正常"误导用户
+                {
+                    esp_reset_reason_t rr = esp_reset_reason();
+                    first_boot_ = (rr == ESP_RST_POWERON || rr == ESP_RST_USB || rr == ESP_RST_SW);
+                }
                 break;
         }
     }
@@ -308,6 +327,7 @@ private:
 
         // 设置手势回调：单击唤醒/打断/退出对话，滑动调节音量
         touch_driver_->SetGestureCallback([this](TouchGesture gesture, int16_t x, int16_t y) {
+            if (TryStopAlarmRinger("touch")) return;
             WakeUp();
 
             switch (gesture) {
@@ -589,8 +609,8 @@ private:
 
         ESP_LOGI(TAG, "准备进入深度睡眠");
         vTaskDelay(pdMS_TO_TICKS(200));
-        // 每次进 sleep 都记时戳 · 唤醒后比较 < 500ms 即死按延续 · 直接短路 sleep
-        s_last_sleep_us = esp_rtc_get_time_us();
+        // 每次进 sleep 都记 RTC 时戳 · 唤醒后比较 < 500ms 即死按延续 · 直接短路 sleep
+        s_last_sleep_us = NowRtcUs();
         esp_deep_sleep_start();
     }
 
@@ -633,6 +653,7 @@ private:
 
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
+            if (TryStopAlarmRinger("button")) return;
             auto& app = Application::GetInstance();
             auto status = app.GetDeviceState();
             ESP_LOGI(TAG, "单击 button 状态： %u", status);
@@ -660,6 +681,7 @@ private:
 
         // 双击：确认恢复出厂设置或切换聊天模式
         boot_button_.OnDoubleClick([this]() {
+            if (TryStopAlarmRinger("button")) return;
             auto& app = Application::GetInstance();
             auto status = app.GetDeviceState();
             ESP_LOGI(TAG, "双击 button 状态： %u", status);
@@ -1430,6 +1452,14 @@ public:
         //     首次进入 kDeviceStateIdle 表示激活已完成，4G 必然已联网，此时自动开 GPS。
         //     用户通过 self.gps.stop 关闭后，gnss_user_disabled_ 置位，不再自动重启。
         InitializeGnssMcp();
+
+        // 13.b 教育卡 MCP 工具集：show_stroke 笔画 GIF + show_card 教育卡（必须在 Display 初始化之后）
+        // 修复 BUG：v32 之前 P31 完全没注册 show_stroke，导致 LLM 看不到工具 → 识字 GIF 永远不触发
+        // 4G/WiFi 两种网络模式下都开启 show_stroke：
+        //   完整性校验四重防护（1KB min + GIF89a/87a magic + 末字节 0x3B Trailer + Schedule state 守护）
+        //   弱网失败时端侧自动弹大字 EduCard 兜底，不会显示脏帧或崩溃
+        RegisterEducationMcpTools(McpServer::GetInstance(),
+                                  dynamic_cast<UiDisplay*>(GetDisplay()));
         DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
             [this](DeviceState /*prev*/, DeviceState curr) {
                 if (curr != kDeviceStateIdle) return;
@@ -1471,6 +1501,14 @@ public:
                 auto self = static_cast<MyDazyP31Board*>(arg);
                 auto& app = Application::GetInstance();
                 vTaskDelay(pdMS_TO_TICKS(1500));
+
+                // 闹钟 TIMER 唤醒：跳过欢迎音 · AlarmRinger 接管响铃 · 不抢屏不抢音
+                if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+                    ESP_LOGI(TAG, "TIMER 唤醒(闹钟模式)· 跳过欢迎音");
+                    self->welcome_task_handle_ = nullptr;
+                    vTaskDelete(NULL);
+                    return;
+                }
 
                 // 检查是否处于配网模式,如果是则跳过logo和欢迎音
                 if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {

@@ -151,7 +151,7 @@
 | 9.3 | 深睡中拿起摇晃 | SC7A20H ext1 唤醒 + 进对话 | `pickupWake=1` |
 | 9.4 | 深睡中按 BOOT（长按 2s）| 唤醒进对话 | ⭐ D9 长按 2s 开机 |
 | 9.5 | 深睡中按 BOOT（短按）| 立即回深睡 | |
-| 9.6 | 深睡中定时器到（如闹钟）| 唤醒 + `is_alarm_clock_=true` | 后续业务接入 |
+| 9.6 | 深睡中定时器到（如闹钟）| TIMER 唤醒 → `AlarmManager::MarkTimerWakeup()` → CheckAndTrigger 触发回调 | 闹钟已接入 |
 | 9.7 | EnterDeepSleep 流程日志 | 见 7 步：停 AudioService → ResetProtocol → GracefulShutdownModem → arm_wakeup → 关触摸/音频 → 配置唤醒源 → 复位 GPIO | |
 | 9.8 | 关机时按住 BOOT | 等 BOOT 释放后再进深睡（最多 5s） | 防立即被唤醒 |
 | 9.9 | EnableAutoSleep(false) | 禁用自动休眠，5 分钟仍亮屏 | NVS deepSleep=0 |

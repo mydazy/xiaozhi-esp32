@@ -164,6 +164,8 @@ private:
     uint8_t remember_bssid_;
     int reconnect_count_ = 0;
     esp_timer_handle_t reconnect_timer_ = nullptr;  // 重连退避定时器
+    // P0：connect_queue_ 跨核访问保护 · WiFi event task(Core 0) 写读 + main task Stop() 写
+    mutable std::mutex connect_queue_mutex_;
     std::vector<WifiApRecord> connect_queue_;
 
     // 连接回调
