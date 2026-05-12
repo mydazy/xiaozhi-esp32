@@ -471,6 +471,20 @@ ul.compact li { margin: 2px 0; }
 </div>
 
 <div class="callout warn">
+<b>🔴 视觉遮挡 bug 闭合（2026-05-12 · 实测优先）</b><br>
+<b>用户实测现象</b>：调用一次 FontGif 后，<b>之后所有对话底部都不显示字幕</b>。
+<b>根因（不是 token race）</b>：
+<ol style="margin:6px 0 6px 22px">
+  <li><code>FontGif()</code> 内 <code>lv_obj_move_foreground(emoji_box_)</code> 把 emoji_box 提到屏幕最前 z-order</li>
+  <li><code>HideFontGif() → ShowBottomBar()</code> 旧版仅 <code>lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN)</code></li>
+  <li>bottom_bar flag=visible · 但物理 z-order < emoji_box → <b>视觉被永久遮挡</b></li>
+  <li>后续 <code>SetChatMessage</code> 父类 <code>remove HIDDEN</code> 也未 <code>move_foreground</code> → 字幕永远看不见</li>
+</ol>
+<b>修复</b>：<code>ShowBottomBar()</code> 内追加 <code>lv_obj_move_foreground(bottom_bar_)</code>。
+<b>对照</b>：<code>SwitchToChatMode</code>（line 391）和 <code>HideEduCard</code>（line 1015）早已用同款 <code>move_foreground</code> 思路，<code>ShowBottomBar</code> 是漏的一环。
+</div>
+
+<div class="callout warn">
 <b>🔴 跨轮 race 闭合（2026-05-12）</b><br>
 <b>缺陷</b>：<code>HideFontGif()</code> 只清 <code>in_font_mode_</code> + <code>font_pending_</code>，未推进 <code>font_request_active_</code>。
 <b>触发时序</b>：

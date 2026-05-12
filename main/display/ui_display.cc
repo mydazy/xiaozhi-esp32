@@ -602,11 +602,12 @@ void UiDisplay::HideFontGif() {
     ESP_LOGI(TAG, "[font_gif] hide: was_in_font=%d → bottom_bar shown + emotion=neutral", was_in_font);
 }
 
-// bottom_bar 显示（其他场景下让"长按说话"等字幕条可见）
+// bottom_bar 显示（其他场景下让字幕条可见）
 void UiDisplay::ShowBottomBar() {
     if (!bottom_bar_) return;
     DisplayLockGuard lock(this);
     lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(bottom_bar_);
 }
 
 // bottom_bar 隐藏（font 模式让用户聚焦写字 GIF）
