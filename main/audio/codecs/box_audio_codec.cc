@@ -238,9 +238,6 @@ void BoxAudioCodec::EnableOutput(bool enable) {
         return;
     }
     if (enable) {
-        // 先静音，避免开启时的 POP 噪声
-        ESP_ERROR_CHECK(esp_codec_dev_set_out_mute(output_dev_, true));
-
         // Play 16bit 1 channel
         esp_codec_dev_sample_info_t fs = {
             .bits_per_sample = 16,
@@ -251,21 +248,14 @@ void BoxAudioCodec::EnableOutput(bool enable) {
         };
         ESP_ERROR_CHECK(esp_codec_dev_open(output_dev_, &fs));
         ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, output_volume_));
-
-        // 延迟后取消静音，让功放稳定
-        vTaskDelay(pdMS_TO_TICKS(30));
-        ESP_ERROR_CHECK(esp_codec_dev_set_out_mute(output_dev_, false));
     } else {
-        // 先静音，避免关闭时的 POP 噪声
-        ESP_ERROR_CHECK(esp_codec_dev_set_out_mute(output_dev_, true));
-        vTaskDelay(pdMS_TO_TICKS(20));
-
         ESP_ERROR_CHECK(esp_codec_dev_close(output_dev_));
     }
     AudioCodec::EnableOutput(enable);
 }
 
 int BoxAudioCodec::Read(int16_t* dest, int samples) {
+    std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (input_enabled_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(input_dev_, (void*)dest, samples * sizeof(int16_t)));
     }
@@ -273,6 +263,7 @@ int BoxAudioCodec::Read(int16_t* dest, int samples) {
 }
 
 int BoxAudioCodec::Write(const int16_t* data, int samples) {
+    std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (output_enabled_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(output_dev_, (void*)data, samples * sizeof(int16_t)));
     }
@@ -297,21 +288,37 @@ void BoxAudioCodec::CalibrateMicOnce() {
     std::vector<int16_t> tone(8000);
     for (size_t i = 0; i < 8000; i++)
         tone[i] = (int16_t)(24000 * std::sin(2.0 * M_PI * 1000 * i / 16000));
-    struct Ctx { BoxAudioCodec* self; std::vector<int16_t>* tone; } ctx{this, &tone};
+    struct Ctx {esp_codec_dev_handle_t output_dev; std::vector<int16_t>* tone; } ctx{output_dev_, &tone};
 
     auto measure = [&]() -> int32_t {
-        xTaskCreate([](void* a) {
+        // calib 子任务 · Pin Core 1 + P10 · TaskHandle + eTaskGetState 轮询等退出
+        // 防 &ctx 栈指针 UAF（CLAUDE.md 量产红线: main/ 下 0 裸 xTaskCreate）
+        TaskHandle_t calib_task = nullptr;
+        BaseType_t ok = xTaskCreatePinnedToCore([](void* a) {
             auto* c = (Ctx*)a;
-            c->self->Write(c->tone->data(), c->tone->size());
+            esp_codec_dev_write(c->output_dev, (void*)c->tone->data(), c->tone->size() * sizeof(int16_t));
             vTaskDelete(NULL);
-        }, "calib", 4096, &ctx, 5, NULL);
+        }, "calib", 4096, &ctx, 10, &calib_task, 1);
+        if (ok != pdPASS) {
+            ESP_LOGE(TAG, "calib task create failed");
+            return 1;  // 避免上层 log10(5000/0) 除零
+        }
         vTaskDelay(pdMS_TO_TICKS(150));
         std::vector<int16_t> rec(3200 * input_channels_);
-        Read(rec.data(), rec.size());
+        esp_codec_dev_read(input_dev_, rec.data(), rec.size() * sizeof(int16_t));
         int64_t sum = 0;
         for (size_t i = 0; i < rec.size(); i += input_channels_)
             sum += (int64_t)rec[i] * rec[i];
-        vTaskDelay(pdMS_TO_TICKS(400));
+        // 显式等子任务退出（Write 500ms · 给 1000ms 超时余量）· 替代原固定 vTaskDelay(400)
+        TickType_t start = xTaskGetTickCount();
+        while (eTaskGetState(calib_task) != eDeleted) {
+            if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(1000)) {
+                ESP_LOGE(TAG, "calib task exit timeout · force kill");
+                vTaskDelete(calib_task);
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
         return (int32_t)std::sqrt((double)sum / (rec.size() / input_channels_));
     };
 
