@@ -178,6 +178,9 @@ private:
     // 连接状态（网络线程 OnDisconnected 回调也会修改，需 atomic）
     std::atomic<bool> device_info_sent_{false};
 
+    std::atomic<bool> opening_{false};               // OpenAudioChannel 重入锁
+    std::atomic<bool> autoconn_task_alive_{false};   // bd_autoconn 任务存活标记 (防同名任务堆积)
+
     // 析构保护：防止 timer/Schedule lambda 访问悬空 this
     std::shared_ptr<std::atomic<bool>> prevent_destroy_guard_ = std::make_shared<std::atomic<bool>>(true);
 

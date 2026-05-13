@@ -472,16 +472,17 @@ void WebsocketBaiduProtocol::PrefetchSessionTokenAsync() {
             session_token_fetched_ = true;
             ESP_LOGI(TAG, "Token prefetched: id=%s", cached_instance_id_.c_str());
 
-            // Token 就绪后自动建立 WS 连接，用于接收服务器推送命令
-            // OpenAudioChannel 涉及 TLS 握手（阻塞），必须在独立任务中用内部 RAM 栈执行
-            if (!this->IsAudioChannelOpened()) {
-                xTaskCreate([](void* arg) {
+            if (!this->IsAudioChannelOpened() &&
+                !autoconn_task_alive_.exchange(true, std::memory_order_acq_rel)) {
+                xTaskCreatePinnedToCore([](void* arg) {
                     auto* p = static_cast<WebsocketBaiduProtocol*>(arg);
-                    if (!p->prevent_destroy_guard_->load()) { vTaskDelete(nullptr); return; }
-                    ESP_LOGI(TAG, "Auto-connect WS for server push");
-                    p->OpenAudioChannel();
+                    if (p->prevent_destroy_guard_->load()) {
+                        ESP_LOGI(TAG, "Auto-connect WS for server push");
+                        p->OpenAudioChannel();
+                    }
+                    p->autoconn_task_alive_.store(false, std::memory_order_release);
                     vTaskDelete(nullptr);
-                }, "bd_autoconn", 6144, this, 1, nullptr);
+                }, "bd_autoconn", 8192, this, 1, nullptr, 0 /* Core 0 · 网络协议栈 */);
             }
         }
     });
@@ -508,6 +509,16 @@ static std::string ReplaceUrlParam(const std::string& url, const char* param, co
 }
 
 bool WebsocketBaiduProtocol::OpenAudioChannel() {
+    bool expected = false;
+    if (!opening_.compare_exchange_strong(expected, true)) {
+        ESP_LOGW(TAG, "OpenAudioChannel re-entry blocked (another task is opening)");
+        return false;
+    }
+    struct OpeningGuard {
+        std::atomic<bool>& f;
+        ~OpeningGuard() { f.store(false, std::memory_order_release); }
+    } opening_guard{opening_};
+
     // 全量重置会话状态
     cmd_seq_ = 0;
     audio_tx_frames_ = audio_tx_bytes_ = audio_rx_frames_ = audio_rx_bytes_ = 0;
@@ -590,8 +601,12 @@ bool WebsocketBaiduProtocol::OpenAudioChannel() {
         BAIDU_PROTOCOL_LICENSED_EVENT |
         BAIDU_PROTOCOL_MEDIA_READY_EVENT);
 
-    // 创建WebSocket
     auto network = Board::GetInstance().GetNetwork();
+    if (websocket_) {
+        websocket_->Close();
+        vTaskDelay(pdMS_TO_TICKS(100));   // 等 esp-tls receive task 真正退出
+        websocket_.reset();
+    }
     websocket_ = network->CreateWebSocket(1);
     if (!websocket_) {
         ESP_LOGE(TAG, "WS create failed");
@@ -621,7 +636,7 @@ bool WebsocketBaiduProtocol::OpenAudioChannel() {
         }
         is_playing_music_ = false;
 
-        // 清除 Token 缓存并预取（方式二 AK/SK 直连不需要）
+        // 清除 Token 缓存（方式二 AK/SK 直连不需要 Prefetch）
         if (session_token_fetched_) {
             session_token_fetched_ = false;
             cached_instance_id_.clear();
@@ -635,10 +650,9 @@ bool WebsocketBaiduProtocol::OpenAudioChannel() {
         if (was_ready && on_audio_channel_closed_) on_audio_channel_closed_();
     });
 
-    // 2026-05-13 WiFi PSM 预热: 避开"刚进 MIN_MODEM 立刻 TLS 握手"竞态
-    ESP_LOGI(TAG, "PSM warmup: PERFORMANCE → wait 300ms before TLS");
+    ESP_LOGI(TAG, "PSM warmup: PERFORMANCE → wait 500ms before TLS");
     Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
-    vTaskDelay(pdMS_TO_TICKS(300));
+    vTaskDelay(pdMS_TO_TICKS(500));
 
     // 重试策略: 最多 3 次, 每次失败间隔递增 (500ms / 1500ms)
     constexpr int kMaxConnectAttempts = 3;
