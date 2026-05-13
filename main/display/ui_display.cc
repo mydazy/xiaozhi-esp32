@@ -1095,8 +1095,8 @@ void UiDisplay::UpdateEduRow(lv_obj_t* lbl, const EduRow& row, int y) {
 }
 
 // 渲染教育卡 overlay（240px 屏高 · 单一两行布局）
-//   顶部辅助 30px 薄荷绿 · y=60
-//   主秀大字 56/48px 金黄 · y=110
+//   main 主秀（56/48）中心居中偏上 20px → main_y = 100 - main_h/2
+//   top 辅助（30/20）在 main 上方间距 20px → top_y = main_y - 20 - top_h
 void UiDisplay::RenderEduCardLayout(const EduRow& top, const EduRow& main_row) {
     DisplayLockGuard lock(this);
     HideQrCode();      // 与 QR overlay 互斥
@@ -1108,8 +1108,10 @@ void UiDisplay::RenderEduCardLayout(const EduRow& top, const EduRow& main_row) {
         return;
     }
 
-    UpdateEduRow(edu_top_label_,  top,      60);
-    UpdateEduRow(edu_main_label_, main_row, 110);
+    int main_y = 100 - main_row.height / 2;
+    int top_y  = main_y - 20 - top.height;
+    UpdateEduRow(edu_top_label_,  top,      top_y);
+    UpdateEduRow(edu_main_label_, main_row, main_y);
 
     lv_obj_remove_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(edu_card_overlay_);
