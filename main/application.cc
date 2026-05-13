@@ -306,7 +306,7 @@ void Application::Initialize() {
     PomodoroManager::GetInstance().SetFinishCallback([]() {
         Application::GetInstance().Schedule([]() {
             Application::GetInstance().WakeWordInvoke(
-                "番茄钟时间到了，提醒休息一下");
+                "番茄钟时间到鼓励一下");
             if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
                 ui->SwitchOutPomodoroMode();
             }
@@ -1098,7 +1098,15 @@ void Application::HandleStateChangedEvent() {
 //            display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
-            if (lcd) lcd->SwitchToClockMode();   // idle 立即回时钟主屏
+            if (lcd) {
+                auto& pm = PomodoroManager::GetInstance();
+                if (pm.IsActive()) {
+                    bool running = (pm.GetState() == PomodoroManager::State::kRunning);
+                    lcd->SwitchToPomodoroMode(pm.GetRemainSec(), running);
+                } else {
+                    lcd->SwitchToClockMode();
+                }
+            }
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);

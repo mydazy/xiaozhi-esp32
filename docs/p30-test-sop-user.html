@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · 用户验机清单（普通用户版）</title>
+<style>
+:root {
+  --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+  --ok:#2E7D32; --ok-bg:#E8F5E9;
+  --bad:#D32F2F; --bad-bg:#FFEBEE;
+  --pending:#9E9E9E; --pending-bg:#FAFAFA;
+  --bg:#FAFAFA; --border:#E0E0E0;
+  --text:#212121; --text-2:#666; --text-3:#999;
+  --tip:#FFF8E1; --tip-line:#F9A825;
+}
+* { box-sizing:border-box; }
+body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+       margin:0; background:var(--bg); color:var(--text); line-height:1.65;
+       font-size:15px; }
+
+/* ===== 顶部 ===== */
+header.top { background:linear-gradient(135deg,var(--brand) 0%,var(--brand-deep) 100%);
+             color:white; padding:28px 24px; text-align:center; }
+header.top h1 { margin:0 0 6px 0; font-size:24px; font-weight:600; }
+header.top .sub { opacity:.92; font-size:14px; }
+header.top .badges { margin-top:12px; }
+header.top .badges span { display:inline-block; background:rgba(255,255,255,.18);
+                           padding:3px 11px; border-radius:12px; font-size:12.5px;
+                           margin:0 3px; }
+
+/* ===== 介绍卡 ===== */
+.intro { max-width:780px; margin:18px auto; background:white; border-radius:10px;
+         padding:18px 24px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+.intro h2 { margin:0 0 8px 0; font-size:17px; color:var(--brand-deep); }
+.intro p { margin:6px 0; font-size:14px; color:var(--text); }
+.intro .steps { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:12px; }
+.intro .step { background:#FAFAFA; padding:10px 12px; border-radius:6px;
+               border-left:3px solid var(--brand); }
+.intro .step b { color:var(--brand-deep); display:block; font-size:13px; }
+.intro .step span { font-size:12.5px; color:var(--text-2); }
+
+/* ===== 元信息 ===== */
+.meta-bar { max-width:780px; margin:0 auto 16px; background:white;
+            border-radius:10px; padding:14px 24px; display:grid;
+            grid-template-columns:1fr 1fr 1fr; gap:12px;
+            box-shadow:0 1px 3px rgba(0,0,0,.05); }
+.meta-bar .field { display:flex; flex-direction:column; }
+.meta-bar label { font-size:12px; color:var(--text-2); margin-bottom:3px; }
+.meta-bar input { padding:7px 10px; border:1px solid var(--border);
+                   border-radius:5px; font-size:14px; font-family:inherit; }
+.meta-bar input:focus { outline:none; border-color:var(--brand); }
+
+/* ===== 汇总条 ===== */
+.summary { max-width:780px; margin:0 auto 16px; background:white;
+           border-radius:10px; padding:14px 20px; display:flex; gap:14px;
+           align-items:center; flex-wrap:wrap; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+.summary .stat { display:flex; align-items:center; gap:5px;
+                 padding:5px 12px; border-radius:14px; font-size:13.5px;
+                 background:#FAFAFA; border:1px solid var(--border); }
+.summary .stat b { font-weight:600; font-size:16px; }
+.summary .stat.pass { background:var(--ok-bg); border-color:var(--ok); color:var(--ok); }
+.summary .stat.fail { background:var(--bad-bg); border-color:var(--bad); color:var(--bad); }
+.summary .stat.pending { background:var(--pending-bg); border-color:var(--pending); color:var(--pending); }
+.progress { flex:1; min-width:160px; height:8px; background:#EEE;
+            border-radius:4px; overflow:hidden; }
+.progress > div { height:100%; background:linear-gradient(90deg,var(--ok) 0%,#66BB6A 100%);
+                  transition:width .3s ease; }
+.summary .actions { display:flex; gap:7px; flex-wrap:wrap; }
+.btn { padding:6px 14px; border:1px solid var(--border); background:white;
+       border-radius:6px; cursor:pointer; font-size:13px; font-family:inherit; }
+.btn:hover { background:#F5F5F5; }
+.btn.primary { background:var(--brand); color:white; border-color:var(--brand); }
+.btn.primary:hover { background:var(--brand-deep); }
+.btn.danger { color:var(--bad); border-color:var(--bad); }
+.btn.danger:hover { background:var(--bad-bg); }
+
+/* ===== 主体 ===== */
+main { max-width:780px; margin:0 auto; padding:0 12px 40px; }
+section { background:white; border-radius:10px; padding:18px 22px;
+          margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+section > h2 { margin:0 0 4px 0; font-size:18px; color:var(--brand-deep);
+               display:flex; align-items:center; gap:8px; }
+section > h2 .emoji { font-size:22px; }
+section > h2 .count { margin-left:auto; font-size:12.5px; color:var(--text-2);
+                      font-weight:normal; background:#FAFAFA; padding:2px 8px;
+                      border-radius:10px; border:1px solid var(--border); }
+section > p.intro-sec { color:var(--text-2); font-size:13.5px; margin:6px 0 14px; }
+
+/* ===== 测试项卡片 ===== */
+.case { border:1px solid var(--border); border-radius:8px; padding:12px 14px;
+        margin-bottom:10px; transition:all .2s; }
+.case.pass { background:linear-gradient(135deg,var(--ok-bg) 0%,white 30%);
+             border-color:var(--ok); }
+.case.fail { background:linear-gradient(135deg,var(--bad-bg) 0%,white 30%);
+             border-color:var(--bad); }
+.case.hidden { display:none; }
+.case .num { color:var(--brand); font-weight:600; font-size:12.5px;
+             background:var(--brand-light); padding:2px 8px;
+             border-radius:10px; margin-right:6px; }
+.case .title { font-size:15px; font-weight:600; margin:0 0 4px 0; }
+.case .expect { color:var(--text); font-size:14px; margin:6px 0;
+                padding:8px 12px; background:#FAFCFF;
+                border-left:3px solid #BBDEFB; border-radius:0 5px 5px 0; }
+.case .expect .lead { display:block; color:var(--text-2); font-size:11.5px;
+                      text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px; }
+.case .tip { font-size:12.5px; color:var(--text-2); margin:4px 0;
+             padding:6px 10px; background:var(--tip); border-radius:4px;
+             border-left:3px solid var(--tip-line); }
+.case .controls { display:flex; gap:8px; align-items:center; margin-top:8px; }
+.case .btn-group { display:flex; gap:0; flex-shrink:0; }
+.case .btn-group button { padding:7px 14px; border:1px solid var(--border);
+                          background:white; cursor:pointer; font-size:13px;
+                          font-family:inherit; color:var(--text-2); }
+.case .btn-group button:first-child { border-radius:6px 0 0 6px; }
+.case .btn-group button:last-child  { border-radius:0 6px 6px 0; border-left:none; }
+.case .btn-group button.active.pass { background:var(--ok); color:white;
+                                       border-color:var(--ok); }
+.case .btn-group button.active.fail { background:var(--bad); color:white;
+                                       border-color:var(--bad); }
+.case input.note { flex:1; padding:7px 10px; border:1px solid var(--border);
+                   border-radius:6px; font-size:13.5px; font-family:inherit; }
+.case input.note:focus { outline:none; border-color:var(--brand); }
+.case input.note.has-content { border-color:#42A5F5; background:#F5FAFE; }
+
+/* ===== 筛选 ===== */
+.filter { max-width:780px; margin:0 auto 14px; padding:0 12px;
+          display:flex; gap:7px; flex-wrap:wrap; align-items:center; }
+.filter span.label { color:var(--text-2); font-size:13px; margin-right:2px; }
+.chip { padding:5px 14px; border-radius:14px; border:1px solid var(--border);
+        background:white; cursor:pointer; font-size:13px; user-select:none;
+        transition:all .15s; }
+.chip:hover { background:#F0F0F0; }
+.chip.active { background:var(--brand); color:white; border-color:var(--brand); }
+.chip.pass.active { background:var(--ok); border-color:var(--ok); }
+.chip.fail.active { background:var(--bad); border-color:var(--bad); }
+.chip.pending.active { background:var(--pending); border-color:var(--pending); }
+
+/* ===== 反馈区 ===== */
+.feedback { background:var(--tip); border:1px dashed var(--tip-line);
+            border-radius:10px; padding:18px 22px; margin-bottom:14px; }
+.feedback h2 { margin:0 0 8px 0; font-size:17px; color:#E65100; }
+.feedback p { margin:6px 0; font-size:14px; }
+.feedback textarea { width:100%; min-height:80px; padding:10px;
+                     border:1px solid var(--border); border-radius:6px;
+                     font-size:14px; font-family:inherit; }
+
+footer { text-align:center; padding:24px; color:var(--text-3); font-size:12.5px; }
+
+/* ===== 打印 ===== */
+@media print {
+  body { background:white; font-size:12px; }
+  header.top { padding:12px; }
+  .summary .actions, .filter { display:none; }
+  .case.hidden { display:block; }
+  section { box-shadow:none; page-break-inside:avoid; }
+}
+
+/* ===== 窄屏 ===== */
+@media (max-width:640px) {
+  .meta-bar { grid-template-columns:1fr; }
+  .intro .steps { grid-template-columns:1fr; }
+  header.top { padding:20px 16px; }
+  header.top h1 { font-size:20px; }
+  .summary { flex-direction:column; align-items:stretch; }
+  .case .controls { flex-direction:column; align-items:stretch; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===================== 顶部 ===================== -->
+<header class="top">
+  <h1>MyDazy 验机清单</h1>
+  <div class="sub">收到设备后照着做一遍，确认每项都正常 · 大概 30 分钟</div>
+  <div class="badges">
+    <span>📦 拿到货第一件事</span>
+    <span>✏️ 边测边打勾</span>
+    <span>🆘 哪项不对找客服</span>
+  </div>
+</header>
+
+<!-- ===================== 介绍 ===================== -->
+<div class="intro">
+  <h2>怎么用这份清单</h2>
+  <p>下面把设备所有功能拆成 10 个场景，每条只告诉你三件事：<b>怎么做、应该看到/听到什么、过没过</b>。<b>不需要懂技术</b>。</p>
+  <div class="steps">
+    <div class="step"><b>1. 填好上面三栏</b><span>板号、姓名、日期</span></div>
+    <div class="step"><b>2. 按顺序一项项试</b><span>每条点 ✓ 或 ✗</span></div>
+    <div class="step"><b>3. 有问题写备注</b><span>结束点「导出报告」给客服</span></div>
+  </div>
+</div>
+
+<!-- ===================== 元信息 ===================== -->
+<div class="meta-bar">
+  <div class="field"><label>设备编号 / 板号</label><input id="m-board-id" placeholder="如 P30-001"></div>
+  <div class="field"><label>你的姓名</label><input id="m-tester" placeholder="姓名"></div>
+  <div class="field"><label>测试日期</label><input id="m-date" type="date"></div>
+</div>
+
+<!-- ===================== 汇总 ===================== -->
+<div class="summary">
+  <div class="stat pass">✅ <b id="s-pass">0</b> 项过</div>
+  <div class="stat fail">❌ <b id="s-fail">0</b> 项不过</div>
+  <div class="stat pending">○ <b id="s-pending">50</b> 项没试</div>
+  <div class="progress"><div id="s-progress"></div></div>
+  <div class="actions">
+    <button class="btn" onclick="exportText()">导出报告</button>
+    <button class="btn" onclick="window.print()">打印</button>
+    <button class="btn danger" onclick="resetAll()">重来</button>
+  </div>
+</div>
+
+<!-- ===================== 筛选 ===================== -->
+<div class="filter">
+  <span class="label">只看：</span>
+  <span class="chip active" data-filter="all">全部</span>
+  <span class="chip pass"    data-filter="pass">✅ 过的</span>
+  <span class="chip fail"    data-filter="fail">❌ 不过的</span>
+  <span class="chip pending" data-filter="pending">○ 没试的</span>
+</div>
+
+<main id="root">
+  <!-- 章节由 JS 渲染 -->
+
+  <!-- 反馈区 -->
+  <div class="feedback">
+    <h2>📝 整体感受 / 补充</h2>
+    <p>除了上面这些，你还有什么觉得奇怪、不顺手、或者想反馈的？</p>
+    <textarea id="m-feedback" placeholder="例：屏幕颜色偏冷 / 按钮手感偏硬 / 包装少一根线..."></textarea>
+  </div>
+</main>
+
+<footer>
+  MyDazy P30 用户验机清单 · 数据保存在本浏览器，关闭页面也不丢 · 客服微信见说明书
+</footer>
+
+<script>
+/* ============================================================
+   50 项用户视角测试用例（已按 P30-4G v2.2.10 代码校准）
+   - num:    显示编号（与工程版有对应关系但不暴露）
+   - title:  一句话告诉用户做什么
+   - expect: 应该看到/听到什么（避开技术词）
+   - tip:    可选 · 操作小提示
+   ============================================================ */
+const SECTIONS = [
+  { id:"sec-boot", emoji:"🔌", title:"开机和关机",
+    intro:"先确认能正常开、能正常关、能再开。",
+    cases:[
+      { num:"1", title:"按住右侧 BOOT 键 1.5 秒，开机",
+        expect:"屏幕亮起 → logo 渐现 → 3-5 秒后显示时钟主屏",
+        tip:"如果按 1 秒就松手，应该开不了机（防口袋误触）。请试一次确认。" },
+      { num:"2", title:"首次开机听欢迎语",
+        expect:"开机后约 1.5 秒，听到一句欢迎语，并自动进入对话",
+        tip:"这是出厂第一次开机才有的，重启后不会再播。" },
+      { num:"3", title:"重启一次，确认欢迎语不再播放",
+        expect:"再次开机只显示时钟，不再播欢迎音",
+        tip:"重启方法：长按 BOOT 直到关机，再长按 BOOT 1.5 秒开机。" },
+      { num:"4", title:"长按 BOOT 3 秒（不松手）",
+        expect:"屏幕弹出『关机中』提示 + 听到一声提示音",
+        tip:"再继续按住约 1 秒（共约 4 秒），设备会真关机；松开则取消。" },
+      { num:"5", title:"接上一步，继续按到第 4 秒不松手",
+        expect:"约 1.5 秒后屏幕熄灭，真的关机",
+        tip:"加起来从开始按到关机大约 5-5.5 秒。" },
+      { num:"6", title:"再试一次：长按 3 秒提示出现后立刻松手",
+        expect:"提示消失，关机被取消，回到原界面",
+        tip:"这是『按错了想反悔』的安全设计。松手时无提示音，只有屏幕变化。" },
+      { num:"7", title:"关机状态下短按 BOOT（碰一下立刻松）",
+        expect:"屏幕不亮，设备保持关机",
+        tip:"防止口袋里被误碰开机。" }
+    ]},
+
+  { id:"sec-button", emoji:"🔘", title:"按键操作",
+    intro:"BOOT 键有多种敲法，每种都对应一个动作。",
+    cases:[
+      { num:"8", title:"在时钟主屏，单击 BOOT 一次",
+        expect:"听到唤醒音 → 进入对话状态，等你说话" },
+      { num:"9", title:"对话时（它在说话），单击 BOOT",
+        expect:"立刻打断它，回到主屏" },
+      { num:"10", title:"在播放音乐时，单击 BOOT",
+        expect:"音乐立刻停 → 退出播放器 → 进入对话状态" },
+      { num:"11", title:"双击 BOOT（间隔 < 0.5 秒）",
+        expect:"屏幕弹出『回声消除 开/关』之类提示",
+        tip:"这是辅助功能切换，可忽略具体含义，只要弹出提示就算过。" },
+      { num:"12", title:"连续 3 次按 BOOT（已联网状态下）",
+        expect:"WiFi 模式 → 清掉 WiFi 配置重新配网；4G 模式 → 切回 WiFi；配网中 → 切到 4G。任一种都会自动重启",
+        tip:"具体走哪条要看当前是什么网络，不固定。" },
+      { num:"13", title:"连续 4 次按 BOOT",
+        expect:"听到『再见』→ 2.5 秒后自动关机" },
+      { num:"14", title:"长按 BOOT 0.7 秒后松手",
+        expect:"什么都不会发生（这是有意的，避免误录音）",
+        tip:"老版本会进入录音模式，新固件已取消。" }
+    ]},
+
+  { id:"sec-touch", emoji:"👆", title:"屏幕触摸",
+    intro:"屏幕中下部分是主操作区，状态栏（最顶部那 1 厘米）由 UI 自己处理。",
+    cases:[
+      { num:"15", title:"在主屏点屏幕（中间或下方）一下",
+        expect:"听到唤醒音 → 进入对话状态",
+        tip:"和按 BOOT 单击效果一样。" },
+      { num:"16", title:"对话时双击屏幕",
+        expect:"退出对话音 → 回到主屏" },
+      { num:"17", title:"播放音乐时点屏幕一下",
+        expect:"音乐继续播放（屏幕中央的播放/暂停按钮才管控制）",
+        tip:"音乐界面只有正中那个圆圆的按钮响应单击。" },
+      { num:"18", title:"上下左右滑动屏幕",
+        expect:"什么都不会发生（滑动手势已禁用）",
+        tip:"避免在使用中误滑出菜单。" }
+    ]},
+
+  { id:"sec-volume", emoji:"🔊", title:"音量调节",
+    intro:"侧面的 VOL+ / VOL- 两颗按键。",
+    cases:[
+      { num:"19", title:"单击 VOL+ 或 VOL-",
+        expect:"音量加/减 10，屏幕顶部出现 1.5 秒的音量提示" },
+      { num:"20", title:"长按 VOL+ 或 VOL- 不松",
+        expect:"应该没有连续变化，只是单次 ±10",
+        tip:"老固件按住能连续调，新固件（v2.2.10）已取消，避免误操作。" },
+      { num:"21", title:"调到某个音量后重启设备",
+        expect:"重启后音量保持你刚才调的值",
+        tip:"如果你调得很小（小于 50），重启后系统会自动调到 80，避免下次听不见。" }
+    ]},
+
+  { id:"sec-network", emoji:"📶", title:"联网 / 切换网络",
+    intro:"首次开机会进入配网模式，已联网后可以用 3 连击切换网络类型。",
+    cases:[
+      { num:"23", title:"首次开机或恢复出厂后",
+        expect:"自动进入配网状态 → 屏幕显示二维码（蓝牙配网或 WiFi 热点二选一）" },
+      { num:"24", title:"配网界面双击屏幕",
+        expect:"切换『蓝牙配网 / 热点配网』模式 → 二维码内容更新 + 提示音" },
+      { num:"25", title:"配网成功",
+        expect:"设备自动重启 → 进入正常对话流程" },
+      { num:"26", title:"已联网设备 3 连击 BOOT",
+        expect:"切换 WiFi ↔ 4G ↔ 重新配网 三态轮换 + 提示音 + 自动重启",
+        tip:"WiFi 板没有 4G，会在 WiFi 和『重新配网』之间切换。" }
+    ]},
+
+  { id:"sec-chat", emoji:"💬", title:"和它对话",
+    intro:"核心功能：你说话，它回答。",
+    cases:[
+      { num:"27", title:"按 BOOT 唤醒后，对它说一句话",
+        expect:"屏幕显示『聆听中』→ 你说完后显示『回复中』→ 它说完回到主屏" },
+      { num:"28", title:"试试用唤醒词（如『小智』）",
+        expect:"无需按键，听到唤醒词后自动进入聆听状态" },
+      { num:"29", title:"它正在回答时，双击屏幕",
+        expect:"立刻打断它，回到主屏" },
+      { num:"30", title:"对它说很长时间不说话",
+        expect:"几秒后自动结束聆听，回到主屏" },
+      { num:"31", title:"路由器拔掉、再插上",
+        expect:"设备自动重连 → 重连后可继续对话",
+        tip:"重连最长可能要 1 分钟，请耐心等。" }
+    ]},
+
+  { id:"sec-music", emoji:"🎵", title:"播放音乐",
+    intro:"对它说『放一首歌』或类似指令。",
+    cases:[
+      { num:"32", title:"让它播一首歌",
+        expect:"屏幕切到播放器界面：曲名、播放/暂停按钮、进度条" },
+      { num:"33", title:"播放中点屏幕中央的圆形按钮",
+        expect:"在『播放』和『暂停』之间切换，按钮图标也跟着变" },
+      { num:"34", title:"播放中按 BOOT 一次",
+        expect:"音乐立刻停 → 退出播放器 → 进入对话状态" },
+      { num:"35", title:"歌曲自然播完",
+        expect:"自动退出播放器 → 回到主屏" }
+    ]},
+
+  { id:"sec-edu", emoji:"📚", title:"学习卡（教育卡）",
+    intro:"对它说『学单词 cat』『学这个字鸟』之类，会跳出学习卡。学习卡只有上下两行：上方拼音/音标（薄荷绿小字）+ 中间大字（金黄色）。",
+    cases:[
+      { num:"36", title:"说『学单词 cat』",
+        expect:"上方薄荷绿小字显示音标（如 kæt） + 中间金黄色大字 cat",
+        tip:"没有底部释义行，只有这两行。" },
+      { num:"37", title:"说『学这个字 鸟』",
+        expect:"上方薄荷绿拼音 niǎo + 中间金黄色大字鸟",
+        tip:"没有田字格、没有组词行。如果你期待看到田字格，那是旧版描述。" },
+      { num:"38", title:"试很长的英文单词『elephant』",
+        expect:"字会自动缩小一档（56 → 48），保证完整显示，不被屏幕截掉" },
+      { num:"39", title:"学习卡显示中，点屏幕任何位置",
+        expect:"卡片消失 → 回到下面原来的画面（时钟或表情）",
+        tip:"按 BOOT 不会关学习卡，只能点屏幕。" },
+      { num:"40", title:"说『教我写鸟字的笔顺』（WiFi 模式）",
+        expect:"几秒后看到笔画动画一笔一划写出汉字",
+        tip:"WiFi 模式才会下载笔画动画，4G 模式为省流量直接显示大字。" },
+      { num:"41", title:"说『教我写鸟字的笔顺』（4G 模式）",
+        expect:"不下载动画，直接弹出大字学习卡（同 37）",
+        tip:"4G 流量保护设计。要看动画请切回 WiFi。" }
+    ]},
+
+  { id:"sec-sleep", emoji:"💤", title:"省电 / 自动休眠 / 摇一摇",
+    intro:"放着不动会自动省电，再不动就会进入深度休眠。",
+    cases:[
+      { num:"42", title:"放着不动 1 分钟",
+        expect:"屏幕变暗（背光降低）",
+        tip:"叫『省电模式』，叫一声唤醒词或动一下就能恢复。" },
+      { num:"43", title:"继续放着不动直到 5 分钟",
+        expect:"屏幕显示『休眠中 / 拿起唤醒』后进入深度休眠（屏幕黑）",
+        tip:"省电模式后再过 4 分钟才进深睡。插着充电线时不会进深睡，会保持降亮。" },
+      { num:"44", title:"深度休眠时拿起来摇一摇",
+        expect:"设备唤醒 → 进入对话状态" },
+      { num:"45", title:"深度休眠时长按 BOOT 1.5 秒",
+        expect:"设备唤醒 → 进入对话状态",
+        tip:"和开机用的时长一样。" },
+      { num:"46", title:"主屏状态下拿起设备甩 3 下（600 毫秒内）",
+        expect:"听到提示音 → 自动触发『启蒙学习场景』",
+        tip:"对话中或播放音乐时甩不会响应，避免误触。" }
+    ]},
+
+  { id:"sec-battery", emoji:"🔋", title:"电量",
+    intro:"电量低时会自动提醒。",
+    cases:[
+      { num:"47", title:"电量降到比较低（约 20% 以下）",
+        expect:"屏幕弹出『电量不足请充电』+ 提示音",
+        tip:"可以让它跑到没电观察，也可以跳过这条。" },
+      { num:"48", title:"电量极低（< 5%）",
+        expect:"自动提示『电量过低 / 强制关机』→ 关机" }
+    ]},
+
+  { id:"sec-reset", emoji:"♻️", title:"恢复出厂",
+    intro:"如果想把设备重置成全新状态。",
+    cases:[
+      { num:"49", title:"连续 9 次按 BOOT",
+        expect:"屏幕提示『10 秒内双击屏幕确认恢复出厂』" },
+      { num:"50", title:"接上一步，10 秒内双击屏幕",
+        expect:"屏幕显示『确认恢复』→ 几秒后自动重启 → 重新进入配网" },
+      { num:"51", title:"如果 9 连击后什么都不做（超过 10 秒）",
+        expect:"自动取消恢复，回到原状",
+        tip:"安全设计，避免误操作擦除数据。" }
+    ]}
+];
+
+/* 总数 */
+const TOTAL = SECTIONS.reduce((s, sec) => s + sec.cases.length, 0);
+
+/* ====== 状态 ====== */
+const STORAGE_KEY = "p30-user-sop-v1";
+let state = load();
+function load() {
+  try { const r = localStorage.getItem(STORAGE_KEY); if (r) return JSON.parse(r); } catch(e) {}
+  return { cases:{}, meta:{}, feedback:"" };
+}
+function save() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch(e) {}
+}
+
+/* ====== 渲染 ====== */
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);}
+
+function render() {
+  const root = document.getElementById("root");
+  const feedback = root.querySelector(".feedback");
+  Array.from(root.querySelectorAll("section")).forEach(n => n.remove());
+
+  SECTIONS.forEach(sec => {
+    const el = document.createElement("section");
+    el.id = sec.id;
+    el.innerHTML = `
+      <h2><span class="emoji">${sec.emoji}</span>${escapeHtml(sec.title)}
+        <span class="count" id="${sec.id}-count">0/${sec.cases.length}</span></h2>
+      <p class="intro-sec">${escapeHtml(sec.intro)}</p>
+      ${sec.cases.map(c => caseHtml(c)).join("")}
+    `;
+    root.insertBefore(el, feedback);
+  });
+
+  // 绑事件
+  document.querySelectorAll("[data-status-btn]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.closest(".case").dataset.id;
+      const st = btn.dataset.status;
+      setStatus(id, state.cases[id]?.status === st ? null : st);
+    });
+  });
+  document.querySelectorAll("input.note").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const id = inp.dataset.id;
+      state.cases[id] = state.cases[id] || {};
+      state.cases[id].note = inp.value;
+      inp.classList.toggle("has-content", !!inp.value);
+      save();
+    });
+  });
+  document.getElementById("m-feedback").addEventListener("input", e => {
+    state.feedback = e.target.value;
+    save();
+  });
+
+  // 恢复 meta
+  ["m-board-id","m-tester","m-date","m-feedback"].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (id === "m-feedback") el.value = state.feedback || "";
+    else if (state.meta[id]) el.value = state.meta[id];
+    el.addEventListener("input", () => {
+      if (id === "m-feedback") state.feedback = el.value;
+      else state.meta[id] = el.value;
+      save();
+    });
+  });
+  if (!state.meta["m-date"]) {
+    const d = new Date();
+    document.getElementById("m-date").value =
+      d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  }
+
+  updateAll();
+}
+
+function caseHtml(c) {
+  const id = "c" + c.num;
+  const cur = state.cases[id] || {};
+  const st = cur.status || "";
+  const note = cur.note || "";
+  return `
+    <div class="case ${st}" data-id="${id}">
+      <div class="title">
+        <span class="num">${c.num}</span>${escapeHtml(c.title)}
+      </div>
+      <div class="expect">
+        <span class="lead">应该看到 / 听到</span>${escapeHtml(c.expect)}
+      </div>
+      ${c.tip ? `<div class="tip">💡 ${escapeHtml(c.tip)}</div>` : ""}
+      <div class="controls">
+        <div class="btn-group">
+          <button data-status-btn data-status="pass" class="${st==='pass'?'active pass':''}">✓ 过</button>
+          <button data-status-btn data-status="fail" class="${st==='fail'?'active fail':''}">✗ 不过</button>
+        </div>
+        <input class="note ${note?'has-content':''}" data-id="${id}" value="${escapeHtml(note)}" placeholder="备注（哪里不对 / 视频或照片文件名）">
+      </div>
+    </div>`;
+}
+
+function setStatus(id, status) {
+  state.cases[id] = state.cases[id] || {};
+  if (status) state.cases[id].status = status;
+  else delete state.cases[id].status;
+  save();
+  const card = document.querySelector(`.case[data-id="${id}"]`);
+  if (card) {
+    card.classList.remove("pass","fail");
+    if (status) card.classList.add(status);
+    card.querySelectorAll("[data-status-btn]").forEach(b => {
+      b.classList.toggle("active", b.dataset.status === status);
+      b.classList.toggle("pass", b.dataset.status === status && status === "pass");
+      b.classList.toggle("fail", b.dataset.status === status && status === "fail");
+    });
+  }
+  updateAll();
+}
+
+function updateAll() {
+  let pass = 0, fail = 0;
+  SECTIONS.forEach(sec => {
+    let done = 0;
+    sec.cases.forEach(c => {
+      const st = state.cases["c"+c.num]?.status;
+      if (st === "pass") { pass++; done++; }
+      else if (st === "fail") { fail++; done++; }
+    });
+    const el = document.getElementById(sec.id+"-count");
+    if (el) el.textContent = done+"/"+sec.cases.length;
+  });
+  const pending = TOTAL - pass - fail;
+  document.getElementById("s-pass").textContent = pass;
+  document.getElementById("s-fail").textContent = fail;
+  document.getElementById("s-pending").textContent = pending;
+  document.getElementById("s-progress").style.width =
+    Math.round(((pass+fail)/TOTAL)*100) + "%";
+  applyFilter();
+}
+
+/* ====== 筛选 ====== */
+let curFilter = "all";
+document.querySelectorAll(".filter .chip").forEach(c => {
+  c.addEventListener("click", () => {
+    document.querySelectorAll(".filter .chip").forEach(x => x.classList.remove("active"));
+    c.classList.add("active");
+    curFilter = c.dataset.filter;
+    applyFilter();
+  });
+});
+function applyFilter() {
+  document.querySelectorAll(".case").forEach(card => {
+    const id = card.dataset.id;
+    const st = state.cases[id]?.status || "";
+    let show = true;
+    if (curFilter === "pass")    show = st === "pass";
+    if (curFilter === "fail")    show = st === "fail";
+    if (curFilter === "pending") show = !st;
+    card.classList.toggle("hidden", !show);
+  });
+}
+
+/* ====== 导出报告（文本，能直接发微信） ====== */
+function exportText() {
+  let pass = 0, fail = 0;
+  const fails = [];
+  SECTIONS.forEach(sec => {
+    sec.cases.forEach(c => {
+      const cs = state.cases["c"+c.num] || {};
+      if (cs.status === "pass") pass++;
+      else if (cs.status === "fail") {
+        fail++;
+        fails.push({ sec:sec.title, num:c.num, title:c.title, note:cs.note });
+      }
+    });
+  });
+  const m = state.meta;
+  let txt = `===== MyDazy P30 验机报告 =====\n\n`;
+  txt += `设备编号: ${m["m-board-id"]||"____"}\n`;
+  txt += `测试人: ${m["m-tester"]||"____"}\n`;
+  txt += `日期: ${m["m-date"]||"____"}\n\n`;
+  txt += `结果: ${pass} 项通过 / ${fail} 项不通过 / ${TOTAL-pass-fail} 项未测\n\n`;
+
+  if (fails.length) {
+    txt += `===== 不通过的项目 =====\n`;
+    fails.forEach(f => {
+      txt += `\n[${f.sec}] ${f.num}. ${f.title}\n`;
+      if (f.note) txt += `  备注: ${f.note}\n`;
+    });
+    txt += `\n`;
+  } else if (pass === TOTAL) {
+    txt += `🎉 全部通过！\n\n`;
+  }
+
+  if (state.feedback) {
+    txt += `===== 整体感受 / 补充 =====\n${state.feedback}\n\n`;
+  }
+  txt += `（请把这份报告通过微信或邮件发给客服）\n`;
+
+  const blob = new Blob([txt], { type:"text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "MyDazy-验机报告-" + (m["m-board-id"]||"未编号") + ".txt";
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+}
+
+/* ====== 重来 ====== */
+function resetAll() {
+  if (!confirm("确定清空所有记录？（包括备注和反馈）")) return;
+  state = { cases:{}, meta:{}, feedback:"" };
+  save();
+  render();
+}
+
+/* ====== 启动 ====== */
+render();
+</script>
+
+</body>
+</html>

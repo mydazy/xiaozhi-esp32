@@ -2,7 +2,7 @@
 #include "audio_service.h"
 #include "system_info.h"
 #include "assets.h"
-#include "settings.h"  // [MCP wakeword v1] Initialize 内读 NVS command 覆盖 commands_[].action
+#include "settings.h"
 
 #include <esp_log.h>
 #include <esp_mn_iface.h>

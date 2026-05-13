@@ -378,6 +378,8 @@ void UiDisplay::SwitchToChatMode() {
         lv_obj_add_flag(clock_container_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_background(clock_container_);
     }
+    // 软独占：从 Pomodoro 切到 Chat（用户唤醒对话）· 隐藏番茄钟容器，让 emoji_box 接管
+    if (pomodoro_container_) lv_obj_add_flag(pomodoro_container_, LV_OBJ_FLAG_HIDDEN);
 
     if (container_) {
         lv_obj_remove_flag(container_, LV_OBJ_FLAG_HIDDEN);
@@ -508,10 +510,16 @@ void UiDisplay::FontGif(uint8_t* gif_buffer, size_t size, uint32_t request_id) {
         return;
     }
 
-    // ① 先装载 + 切 src + 拉前 → emoji_box 已经覆盖在 EduCard 之上显示新 GIF
+    // ① 先装载 + 切 src + 拉前 → emoji_box 覆盖底层场景显示新 GIF
     emoji_collection->ReplaceEmoji("font", raw);
     LcdDisplay::SetEmotion("font");                              // 切表情 src（绕守护直调父类）
-    if (emoji_box_) lv_obj_move_foreground(emoji_box_);          // 拉到最前盖住 EduCard
+    if (emoji_box_) {
+        // 🔴 番茄钟/时钟/Player 主屏 emoji_box 被 HIDDEN · FontGif 必须显式解开才能可见
+        //   历史只在 kChat 触发（emoji_box 本就显示）所以没暴露 · 软独占改造后需补
+        lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_opa(emoji_box_, LV_OPA_COVER, 0);       // 防 boot fade_out 残留 TRANSP
+        lv_obj_move_foreground(emoji_box_);                      // z-order 拉到最前盖住底层
+    }
     in_font_mode_ = true;
     font_pending_.store(false, std::memory_order_release);       // pending → active
 
@@ -610,7 +618,20 @@ void UiDisplay::HideFontGif() {
     ShowBottomBar();
     LcdDisplay::SetEmotion("neutral");
 
-    ESP_LOGI(TAG, "[font_gif] hide: was_in_font=%d → bottom_bar shown + emotion=neutral", was_in_font);
+    // FontGif 借用 emoji_box 作为 GIF 载体（非真 overlay），退出后需按 active_scene_
+    auto restore_container = [this](lv_obj_t* container) {
+        if (emoji_box_) lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+        if (container) lv_obj_move_foreground(container);
+    };
+    switch (active_scene_) {
+        case SceneType::kClock:    restore_container(clock_container_);    break;
+        case SceneType::kPlayer:   restore_container(player_container_);   break;
+        case SceneType::kPomodoro: restore_container(pomodoro_container_); break;
+        default: break;  // kChat 保持现状
+    }
+
+    ESP_LOGI(TAG, "[font_gif] hide: was_in_font=%d scene=%d → bottom_bar shown + emotion=neutral",
+             was_in_font, (int)active_scene_);
 }
 
 // bottom_bar 显示（其他场景下让字幕条可见）

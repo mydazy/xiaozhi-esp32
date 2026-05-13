@@ -70,8 +70,8 @@ ul.compact li { margin: 2px 0; }
 <body>
 
 <header>
-  <h1>MyDazy P30 · FlowEngine 测试 SOP</h1>
-  <div class="meta">v1.0 · 2026-05-13 · 配合 docs/p30-flow-review.html 批次 A · 4 项 P0 修复后验证</div>
+  <h1>MyDazy P30 · MCP + FlowEngine 综合测试 SOP</h1>
+  <div class="meta">v1.1 · 2026-05-13 · FlowEngine 4 P0（F1+F5/R1/R6）+ MCP 描述瘦身（9418B→~4KB）回归</div>
 </header>
 
 <div class="layout">
@@ -86,6 +86,8 @@ ul.compact li { margin: 2px 0; }
   <a href="#tools">6. 推送工具</a>
   <a href="#regression">7. 回归 checklist</a>
   <a href="#gate">8. 量产前闸口</a>
+  <a href="#mcp-slim">9. MCP 瘦身回归（新）</a>
+  <a href="#changelog">10. 变更日志</a>
 </nav>
 
 <main>
@@ -115,6 +117,9 @@ ul.compact li { margin: 2px 0; }
 <tr><td><span class="pill p0">F5</span></td><td>加载期死区消除</td><td><code>loading_</code> 守护 OnDeviceStateChanged</td><td>T-F5 弱网+唤醒</td></tr>
 <tr><td><span class="pill p0">R1</span></td><td>main_loop vTaskDelay 异步化</td><td><code>esp_timer + ScheduleDelayedAction</code></td><td>T-R1 reboot 时闹钟</td></tr>
 <tr><td><span class="pill p0">R6</span></td><td>OnFlow URL 双层 Schedule</td><td>删 OnFlow 外层（Start 内已 Schedule）</td><td>T-R6 latency 打点</td></tr>
+<tr><td><span class="pill p0">M1</span></td><td>MCP tools/list 瘦身</td><td>28 处描述瘦身 · 中文口语化</td><td>T-M1 payload &lt; 5KB</td></tr>
+<tr><td><span class="pill p0">M2</span></td><td>MQTT 不再 RST 循环</td><td>SendText 前置 IsConnected · 日志 truncate</td><td>T-M2 启动 60s soak</td></tr>
+<tr><td><span class="pill p1">M3</span></td><td>触发词识别保留</td><td>瘦身后关键触发词保留</td><td>T-M3 5 场景真机测</td></tr>
 </tbody>
 </table>
 </section>
@@ -368,16 +373,19 @@ def slow():
 
 <h3>7.2 必跑测试（按顺序）</h3>
 <div class="checklist">
-<label><input type="checkbox"> ① T1 冒烟（&lt; 30s · 验最基础链路）</label>
-<label><input type="checkbox"> ② T3 WS 直推（验 StartWithScript 路径独立）</label>
-<label><input type="checkbox"> ③ T4 stop/restart/status 三连</label>
-<label><input type="checkbox"> ④ F1-a 重入压测（5 次连发 · 验拒重入日志）</label>
-<label><input type="checkbox"> ⑤ F1-b Stop 后 Start 不卡</label>
-<label><input type="checkbox"> ⑥ <b>F5-a 加载期唤醒（弱网 · 关键 · 量产 blocker）</b></label>
-<label><input type="checkbox"> ⑦ F5-b 加载中 Stop 取消</label>
-<label><input type="checkbox"> ⑧ <b>R1-a reboot 时闹钟准时（30s 实测）</b></label>
-<label><input type="checkbox"> ⑨ R1-b OTA 时 LVGL 不卡</label>
-<label><input type="checkbox"> ⑩ R1-c Sleep 时 LVGL 不卡</label>
+<label><input type="checkbox"> ① <b>T-M1 tools/list payload &lt; 5KB（启动 30s 内即可读出）</b></label>
+<label><input type="checkbox"> ② <b>T-M2 MQTT 60s 无 RST · 0 次 "Connection reset by peer"</b></label>
+<label><input type="checkbox"> ③ T1 冒烟（&lt; 30s · 验最基础链路）</label>
+<label><input type="checkbox"> ④ T3 WS 直推（验 StartWithScript 路径独立）</label>
+<label><input type="checkbox"> ⑤ T4 stop/restart/status 三连</label>
+<label><input type="checkbox"> ⑥ F1-a 重入压测（5 次连发 · 验拒重入日志）</label>
+<label><input type="checkbox"> ⑦ F1-b Stop 后 Start 不卡</label>
+<label><input type="checkbox"> ⑧ <b>F5-a 加载期唤醒（弱网 · 关键 · 量产 blocker）</b></label>
+<label><input type="checkbox"> ⑨ F5-b 加载中 Stop 取消</label>
+<label><input type="checkbox"> ⑩ <b>R1-a reboot 时闹钟准时（30s 实测）</b></label>
+<label><input type="checkbox"> ⑪ R1-b OTA 时 LVGL 不卡</label>
+<label><input type="checkbox"> ⑫ R1-c Sleep 时 LVGL 不卡</label>
+<label><input type="checkbox"> ⑬ T-M3 触发词 5 场景真机测（≥ 4/5 通过）</label>
 </div>
 
 <h3>7.3 长稳测试（可选 · 量产前 1 周）</h3>
@@ -401,11 +409,14 @@ def slow():
 
 <div class="callout bad">
 <b>🚦 必过项（缺一不可）</b><br>
-① T1 冒烟过<br>
-② <b>F5-a 弱网加载期唤醒过</b>（这是 P0 中的 P0 · 直播伴侣量产事故根因）<br>
-③ R1-a reboot 时闹钟准时<br>
-④ Free heap INT 在 T2 长脚本 1h 后仍 &gt; 60KB<br>
-⑤ Guru Meditation 0 出现
+① <b>T-M1 tools/list payload &lt; 5KB</b>（不过 = 整机连不上 MQTT · 量产 0/0）<br>
+② <b>T-M2 MQTT 60s 0 RST</b>（不过 = 设备每 10s 重连死循环）<br>
+③ T1 冒烟过<br>
+④ <b>F5-a 弱网加载期唤醒过</b>（直播伴侣量产事故根因）<br>
+⑤ R1-a reboot 时闹钟准时<br>
+⑥ T-M3 触发词 5 场景 ≥ 4/5 通过<br>
+⑦ Free heap INT 在 T2 长脚本 1h 后仍 &gt; 60KB<br>
+⑧ Guru Meditation 0 出现
 </div>
 
 <div class="callout warn">
@@ -440,10 +451,169 @@ R2 stt_post TCB yield · R3 OnDownload 死代码 · R7 OnMusicPlay 顺序 · R11
 | R1-b OTA 不卡 | ✅/❌ |  |
 | R1-c Sleep 不卡 | ✅/❌ |  |
 | R6 latency | ___ ms |  |
+| M1 payload | ___ B | 必 &lt; 5000 |
+| M2 MQTT 60s soak | ✅/❌ | 0 次 RST |
+| M3 触发词 5 场景 | ___/5 | |
 | 1h Free heap | ___ KB |  |
 
 闸口判定: 通过 / 不通过
 签名: ___</pre>
+</section>
+
+<!-- =============== 9 MCP 瘦身回归 =============== -->
+<section id="mcp-slim">
+<h2><span class="num">9</span> MCP 描述瘦身回归（v1.1 新增）</h2>
+
+<p class="sub">2026-05-13 完成 28 处 MCP 工具描述瘦身（中文口语化），tools/list payload 从 <b>9418B → 预期 ~4KB</b>。本章节为 MCP 瘦身专项回归。</p>
+
+<h3>9.1 起因回顾</h3>
+<div class="callout bad">
+<b>修复前事故</b>：设备启动时云端下发 tools/list 请求 → 设备 publish 9418B 响应 → MQTT broker 单包上限约 8KB → 直接 RST 连接 → 设备每 10s 重连重发死循环。
+<br><br>
+<b>关键日志特征（修复前）</b>：
+<pre class="bash">E transport_base: poll_write select error 104, errno = Connection reset by peer
+W mqtt_client: Publish: Losing qos0 data when client not connected
+E MQTT: Failed to publish message (9418 B): {"session_id":...
+W Application: Alert [circle_xmark] 错误: 发送失败，请检查网络
+<span class="c"># 每 10s 重复 · 设备永远连不上</span></pre>
+</div>
+
+<h3>9.2 <span class="pill p0">T-M1</span> payload 大小回归</h3>
+<table>
+<thead><tr><th>步</th><th>操作</th><th>期望</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>烧录新固件 · 启动</td><td>—</td></tr>
+<tr><td>2</td><td>等设备连上 MQTT（日志看到 "MQTT: Connected"）</td><td>30s 内</td></tr>
+<tr><td>3</td><td><code>grep "tools/list: id=.*payload="</code></td><td>找到至少一条</td></tr>
+<tr><td>4</td><td>读 <code>payload=N B</code> 数字</td><td><b>N &lt; 5000</b> · 修复前 9418 · 修复后预期 3700-4500</td></tr>
+<tr><td>5</td><td>读 <code>paged=no</code></td><td>不应分页（&lt; 12000 max）</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>边界判定</b>：<br>
+&lt; 5KB：✅ 健康 · 任何 MQTT broker 都能过<br>
+5-8KB：⚠ 需测试本环境 broker · 大多数仍能过<br>
+&gt; 8KB：❌ 多数 broker RST · 必须再瘦身<br>
+&gt; 12KB：❌ 触发本地 cursor 分页 · 云端处理待验证
+</div>
+
+<h3>9.3 <span class="pill p0">T-M2</span> MQTT 60s 稳定性测试</h3>
+<table>
+<thead><tr><th>步</th><th>操作</th><th>期望</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>启动后连续观察日志 60s</td><td>—</td></tr>
+<tr><td>2</td><td><code>grep "Connection reset by peer"</code></td><td><b>0 命中</b>（修复前 6 次/min）</td></tr>
+<tr><td>3</td><td><code>grep "MQTT disconnected, schedule reconnect"</code></td><td>≤ 1 次（启动早期可能 1 次）</td></tr>
+<tr><td>4</td><td><code>grep "Losing qos0 data"</code></td><td><b>0 命中</b>（mqtt_protocol.cc IsConnected 前置拦截）</td></tr>
+<tr><td>5</td><td><code>grep "Alert.*发送失败"</code></td><td>0 命中（无错误 Alert 浪涌）</td></tr>
+<tr><td>6</td><td>10 分钟后 free INT RAM</td><td>&gt; 60KB（CLAUDE.md 红线）</td></tr>
+</tbody>
+</table>
+
+<h3>9.4 <span class="pill p1">T-M3</span> 关键触发词识别（5 场景真机测）</h3>
+<p class="sub">瘦身保留了核心触发关键词。本测试验证 LLM 仍能在用户口语触发时正确选择工具。每场景测 3 次取多数。</p>
+
+<table>
+<thead><tr><th>#</th><th>用户口语</th><th>期望 LLM 调用</th><th>验证点</th></tr></thead>
+<tbody>
+<tr><td>M3-a</td><td>"花字怎么写"<br>"教我写花"<br>"我不会写花"</td><td><code>self.education.show_stroke({"character":"花"})</code></td><td>设备屏幕显示笔顺动画 · LOG <code>show_stroke</code></td></tr>
+<tr><td>M3-b</td><td>"来首儿歌"<br>"放点音乐"<br>"播放小星星"</td><td><code>self.music.play({"url":"...","title":"..."})</code></td><td>云端返回 MP3 URL · 设备进入播放页</td></tr>
+<tr><td>M3-c</td><td>（闹钟响铃中）<br>"知道了"<br>"别响了"<br>"OK 起床了"</td><td><code>self.alarm.dismiss()</code></td><td>响铃停止 · LOG <code>self.alarm.dismiss</code></td></tr>
+<tr><td>M3-d</td><td>（闹钟响铃中）<br>"再睡 5 分钟"</td><td>① <code>self.alarm.dismiss()</code><br>② <code>self.alarm.add({"message":"...","hour":...,"minute":...,"repeat_days":0})</code></td><td>响铃停 + 设 5 分钟一次性闹钟</td></tr>
+<tr><td>M3-e</td><td>"25 分钟番茄钟"<br>"专注 30 分钟"<br>"学习半小时"</td><td><code>self.pomodoro.start({"duration_min":25/30/30})</code></td><td>设备屏幕显示倒计时 · LOG <code>pomodoro.start</code></td></tr>
+<tr><td>M3-f</td><td>"关闭休眠"<br>"别睡了"<br>"一直亮着"</td><td><code>self.power.set_sleep_mode({"enabled":false})</code></td><td>屏幕不再 60s 后降亮</td></tr>
+<tr><td>M3-g</td><td>"音量调到 70"<br>"声音大一点"</td><td><code>self.audio_speaker.set_volume({"volume":70/+10})</code></td><td>音量改变 · 屏幕 Alert</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>⚠ 触发率阈值</b>：每场景 3 次 ≥ 2 次正确触发 = 通过。<br>
+若某场景多次未触发（≤ 1/3），说明瘦身砍掉了 LLM 需要的关键词 → 回头补回必要触发词到该工具描述。
+</div>
+
+<h3>9.5 工具描述瘦身明细（参考）</h3>
+<table>
+<thead><tr><th>工具</th><th>瘦身前</th><th>瘦身后</th><th>节省</th></tr></thead>
+<tbody>
+<tr><td>education.show_stroke</td><td>~1050B</td><td>~280B</td><td><b>-770B</b></td></tr>
+<tr><td>music.play</td><td>540B</td><td>130B</td><td>-410B</td></tr>
+<tr><td>power.set_sleep_mode</td><td>460B</td><td>110B</td><td>-350B</td></tr>
+<tr><td>pomodoro.start</td><td>430B</td><td>150B</td><td>-280B</td></tr>
+<tr><td>get_device_status</td><td>320B</td><td>80B</td><td>-240B</td></tr>
+<tr><td>education.show_card</td><td>280B</td><td>150B</td><td>-130B</td></tr>
+<tr><td>alarm.dismiss</td><td>280B</td><td>130B</td><td>-150B</td></tr>
+<tr><td>power.get_sleep_mode</td><td>250B</td><td>60B</td><td>-190B</td></tr>
+<tr><td>audio.set_stt_popup</td><td>200B</td><td>75B</td><td>-125B</td></tr>
+<tr><td>audio.set_wakeword</td><td>200B</td><td>95B</td><td>-105B</td></tr>
+<tr><td>camera.take_photo</td><td>200B</td><td>90B</td><td>-110B</td></tr>
+<tr><td>pomodoro.pause/resume/stop/status × 4</td><td>~190B × 4</td><td>~50B × 4</td><td>-560B</td></tr>
+<tr><td>alarm.add</td><td>220B</td><td>130B</td><td>-90B</td></tr>
+<tr><td>audio_speaker.set_volume</td><td>165B</td><td>75B</td><td>-90B</td></tr>
+<tr><td>alarm.list</td><td>130B</td><td>60B</td><td>-70B</td></tr>
+<tr><td>music.stop</td><td>110B</td><td>50B</td><td>-60B</td></tr>
+<tr><td>audio.get_wakeword + audio.get_stt_popup</td><td>~170B</td><td>~60B</td><td>-110B</td></tr>
+<tr><td>gps × 3 (P31)</td><td>290B</td><td>90B</td><td>-200B</td></tr>
+<tr><td>user-only × 6</td><td>~200B 总</td><td>~60B 总</td><td>-140B</td></tr>
+<tr><td><b>合计</b></td><td><b>~9400B</b></td><td><b>~3700B</b></td><td><b>-5700B</b></td></tr>
+</tbody>
+</table>
+
+<h3>9.6 防回退验证（PR 自检）</h3>
+<div class="checklist">
+<label><input type="checkbox"> 任何新加 MCP 工具描述 ≤ 200B（中文 ≤ 70 字）</label>
+<label><input type="checkbox"> 描述只用中文 · 不混杂英文段</label>
+<label><input type="checkbox"> 必含 2-3 个用户口语触发关键词（让 LLM 识别时机）</label>
+<label><input type="checkbox"> 不写返回格式（callback 内 JSON 自描述就够）</label>
+<label><input type="checkbox"> 不写"重要"、"必调"、"## Section"等 markdown 标记</label>
+<label><input type="checkbox"> PR 描述里贴新增工具的描述全文 + 字节数</label>
+<label><input type="checkbox"> 烧录后看 tools/list payload 增量 &lt; 200B</label>
+</div>
+
+<h3>9.7 长描述工具特殊规则</h3>
+<table>
+<thead><tr><th>工具</th><th>为何描述更长</th><th>当前预算</th></tr></thead>
+<tbody>
+<tr><td>education.show_stroke</td><td>识字核心 · 必须区分『怎么写』vs『怎么读』vs『什么意思』三类意图</td><td>≤ 300B（触发词 ≥ 5 个）</td></tr>
+<tr><td>music.play</td><td>必须告知"播放期间听不到语音"副作用（影响用户预期）</td><td>≤ 150B</td></tr>
+<tr><td>alarm.add</td><td>必须强制 LLM 先问"提醒什么" · 防敷衍闹钟</td><td>≤ 150B（含 repeat_days 编码）</td></tr>
+<tr><td>alarm.dismiss</td><td>必须含『再睡 N 分钟』两连规则</td><td>≤ 150B</td></tr>
+<tr><td>pomodoro.start</td><td>必须含『半=30 一刻钟=15』时长抽取规则</td><td>≤ 200B</td></tr>
+<tr><td>其他</td><td>无特殊场景</td><td>≤ 100B</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 10 变更日志 =============== -->
+<section id="changelog">
+<h2><span class="num">10</span> 变更日志</h2>
+
+<h3>v1.1 · 2026-05-13（本次更新）</h3>
+<ul class="compact">
+<li>新增 § 9 MCP 描述瘦身回归（T-M1 payload / T-M2 MQTT 稳定 / T-M3 触发词 5 场景）</li>
+<li>§ 1.2 修复点速查表新增 M1/M2/M3 三行</li>
+<li>§ 8.1 测试执行模板新增 M1/M2/M3 三行</li>
+<li>新增 § 9.6 防回退 PR 自检清单（7 项）</li>
+<li>新增 § 9.7 长描述工具特殊规则（5 类例外 + 字节预算）</li>
+</ul>
+
+<h3>v1.0 · 2026-05-13（首版）</h3>
+<ul class="compact">
+<li>FlowEngine 4 项 P0 修复（F1+F5/R1/R6）的测试 SOP</li>
+<li>10 项 P0 针对性测试用例 · 推送格式 3 种 · 测试脚本 T1-T4</li>
+<li>量产前闸口 5 项必过</li>
+</ul>
+
+<h3>下一版预告 v1.2</h3>
+<ul class="compact">
+<li>批次 B 修复后追加：R7 OnMusicPlay 顺序 / R11 dispatch 表化 / F6 TOCTOU 等</li>
+<li>触发词通过率统计模板（多设备压测）</li>
+<li>云端协作测试用例（服务端配合验证 tools/call 调用准确性）</li>
+</ul>
+
+<div class="callout ok">
+<b>📐 文档关系</b>：本 SOP 与 <code>p30-flow-review.html</code>（26 项发现） · <code>p30-flow-engine.html</code>（架构 + 28 项扩展） · <code>p30-mcp-flows.html</code>（MCP 体系评审）并列。每个 P0 修复必有对应测试用例 · 每个测试通过必更新 review § 8.4 已修 log。
+</div>
 </section>
 
 </main>

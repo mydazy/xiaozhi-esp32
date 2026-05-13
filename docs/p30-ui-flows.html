@@ -92,8 +92,9 @@ ul.compact li { margin: 2px 0; }
   <a href="#states">4. 主状态机</a>
   <a href="#chain">5. 教育卡链路</a>
   <a href="#review">6. 流程评审</a>
-  <a href="#optimize">7. 后续候选</a>
-  <a href="#verify">8. 量产收尾</a>
+  <a href="#fullflow">7. 完整流转 · 用户视角</a>
+  <a href="#optimize">8. 后续候选</a>
+  <a href="#verify">9. 量产收尾</a>
 </nav>
 
 <main>
@@ -111,7 +112,7 @@ ul.compact li { margin: 2px 0; }
     <tr><td>2</td><td><b>kPlayer</b></td><td>✅</td><td>MCP <code>music_play</code> · 唤醒词退出</td></tr>
     <tr><td>3</td><td><b>kConfigQr</b></td><td>✅</td><td>配网 / 激活 · 完成自动隐藏</td></tr>
     <tr><td>4</td><td><b>kControlCenter</b></td><td>✅（stub）</td><td>量产稳定期下线，stub 保留</td></tr>
-    <tr><td>5</td><td><b>kPomodoro</b></td><td>🟡 预留</td><td>番茄钟（未实现）</td></tr>
+    <tr><td>5</td><td><b>kPomodoro</b></td><td>✅</td><td>MCP <code>pomodoro.start</code> · finish 自动回时钟 · 物理按键单击退出 · <b>独占 UI</b></td></tr>
     <tr><td>6</td><td><b>kTodo</b></td><td>🟡 预留</td><td>待办清单（未实现）</td></tr>
     <tr><td>7</td><td><b>kRoleSwitcher</b></td><td>🟡 预留</td><td>AI 角色切换（未实现）</td></tr>
   </tbody>
@@ -134,6 +135,11 @@ ul.compact li { margin: 2px 0; }
         <td><code>SwitchToPlayerMode(title)</code> / <code>SwitchOutPlayerMode()</code></td><td>MCP <code>music_play</code> / 唤醒词</td></tr>
     <tr><td><code>UpdatePlayerProgress()</code> / <code>SetPlayerPaused()</code></td><td>PlayerTickCb / MCP 暂停</td></tr>
     <tr><td><code>OnPlayerPauseToggle(cb)</code></td><td>注册暂停按钮回调</td></tr>
+    <tr><td rowspan="4"><b>番茄钟</b></td>
+        <td><code>SwitchToPomodoroMode(remain, running)</code> / <code>SwitchOutPomodoroMode()</code></td><td>application.cc tick_cb / finish_cb</td></tr>
+    <tr><td><code>UpdatePomodoro(remain, running)</code></td><td>PomodoroManager 1Hz tick · 仅 kPomodoro 主屏内容</td></tr>
+    <tr><td><code>UpdatePomodoroBadge(remain, active)</code></td><td>status_bar 左上 🍅XX:XX 角标 · 跨场景常驻</td></tr>
+    <tr><td><code>OnPomodoroToggle(cb)</code></td><td>注册中央按钮 Pause↔Resume 回调</td></tr>
     <tr><td><b>QR 激活</b></td>
         <td><code>ShowQrCode(content, ...)</code> / <code>HideQrCode()</code></td><td>配网 BLE / 激活流程</td></tr>
     <tr><td rowspan="4"><b>查询</b></td>
@@ -339,7 +345,9 @@ ul.compact li { margin: 2px 0; }
     <tr><td>Listening</td><td>kChat <b>不清场</b></td><td>tts:start sync / WakeWord</td><td>SetEmotion("neutral") · 但 font 守护挡住 → <b>EduCard / FontGIF 全部保留</b></td></tr>
     <tr><td>Speaking</td><td>kChat <b>+ 清场</b></td><td>tts:start asr</td><td><b>HideEduCard + HideFontGif</b> · 下轮对话起点 · 后续 LLM 触发新显示</td></tr>
     <tr><td>kIdle</td><td>kClock <b>+ 清场</b></td><td>空闲超时 / 启动完成</td><td>SwitchToClockMode（内含 HideEduCard + HideFontGif）</td></tr>
-    <tr><td>(any)</td><td>kPlayer</td><td>MCP music_play</td><td>SwitchToPlayerMode（内含清场）</td></tr>
+    <tr><td>(any)</td><td>kPlayer</td><td>MCP music_play</td><td>SwitchToPlayerMode（内含清场）· <b>硬独占</b>（音频流冲突）</td></tr>
+    <tr><td>Idle + Pomodoro.IsActive</td><td>kPomodoro</td><td>pomodoro.start · 对话结束回归 · tick_cb 持续</td><td>SwitchToPomodoroMode · <b>软独占</b>：DeviceState=Idle 时才占 UI</td></tr>
+    <tr><td>Listening/Speaking + Pomodoro.IsActive</td><td>kChat</td><td>用户唤醒对话 · LLM 说话</td><td>SwitchToChatMode · 番茄钟 1Hz tick 后台继续 · UI 让位对话 · tts.stop → Idle → 自动回 kPomodoro</td></tr>
     <tr><td>AudioTesting / Upgrading / FatalError</td><td>kClock + overlay</td><td>系统异常</td><td>专用页面（量产期罕见）</td></tr>
   </tbody>
 </table>
@@ -352,12 +360,13 @@ ul.compact li { margin: 2px 0; }
     <tr><td><b>Speaking</b></td><td>HideEduCard + HideFontGif</td><td>❌ 清</td><td>❌ 清</td><td>下轮起点：清场后等 LLM 触发新显示</td></tr>
     <tr><td><b>kIdle</b></td><td>SwitchToClockMode 内含清场</td><td>❌ 清</td><td>❌ 清</td><td>回时钟主屏</td></tr>
     <tr><td><b>kPlayer</b></td><td>SwitchToPlayerMode 内含清场</td><td>❌ 清</td><td>❌ 清</td><td>进音乐播放器</td></tr>
-    <tr><td><b>Connecting</b></td><td>SwitchToChatMode 内含清场</td><td>❌ 清</td><td>❌ 清</td><td>对话连接中</td></tr>
+    <tr><td><b>kPomodoro</b></td><td>SwitchToPomodoroMode 内含清场</td><td>❌ 清</td><td>❌ 清</td><td>进番茄钟（独占）</td></tr>
+    <tr><td><b>Connecting</b></td><td>SwitchToChatMode 内含清场（仅 active_scene_==kClock 时生效）</td><td>❌ 清 / ⚠️ Pomodoro 拦截</td><td>❌ 清 / ⚠️ Pomodoro 拦截</td><td>对话连接中 · <b>Pomodoro 模式下 SwitchToChatMode return → 不清场</b></td></tr>
   </tbody>
 </table>
 
 <div class="callout ok">
-  <b>产品语义</b>：Listening 保留 = 同轮稳定 · Speaking 清场 = 下轮起点 · Idle / Player 清场 = 离开对话场景。
+  <b>产品语义</b>：Listening 保留 = 同轮稳定 · Speaking 清场 = 下轮起点 · Idle / Player / Pomodoro 清场 = 离开对话场景。
   <br><b>Listening 保留机制</b>：SetEmotion("neutral") 被 <code>in_font_mode_</code> 守护挡住 → FontGIF 保留；EduCard 是 overlay 不受 emoji_image 切换影响 → 自动保留。
 </div>
 
@@ -384,6 +393,280 @@ ul.compact li { margin: 2px 0; }
   <b>核心规则</b>：FontGIF 优先级最高（同轮锁定）· EduCard 可被任何新触发覆盖 · QR 与 EduCard / FontGIF 互斥（SetEmotion("font") 内显式 HideQrCode · RenderEduCardLayout 入口 HideQrCode）。
 </div>
 
+<h3>主容器 × Overlay 触发能力矩阵</h3>
+<p class="sub">前两个矩阵是"overlay 之间互斥" + "DeviceState 进入时清谁"。这个矩阵回答：<b>当前主容器是 X 时，能不能触发 overlay Y · 退出后能不能正确恢复 X</b>？</p>
+
+<table>
+  <thead><tr>
+    <th>主容器 ↓ \ Overlay →</th>
+    <th>EduCard<br><span style="color:#999;font-size:11px">独立 lv_obj</span></th>
+    <th>FontGIF<br><span style="color:#999;font-size:11px">借用 emoji_box</span></th>
+    <th>QR<br><span style="color:#999;font-size:11px">独立 lv_obj</span></th>
+  </tr></thead>
+  <tbody>
+    <tr><td><b>kClock</b><br><span style="color:#999;font-size:11px">clock_container_</span></td>
+        <td class="judge-ok">✅ 触发 → 退出 ✓ 回 Clock</td>
+        <td class="judge-ok">✅ 触发 + 退出 ✓<br>（P0-1 修：进入解 HIDDEN + 退出场景路由）</td>
+        <td class="judge-ok">✅ 触发 → 退出 ✓ 回 Clock</td></tr>
+    <tr><td><b>kChat</b><br><span style="color:#999;font-size:11px">emoji_box 即主体</span></td>
+        <td class="judge-ok">✅ 触发 → 退出 ✓ 回 Chat</td>
+        <td class="judge-ok">✅ 触发 → 退出 ✓ 回 Chat</td>
+        <td class="judge-ok">✅ 触发 → 退出 ✓ 回 Chat</td></tr>
+    <tr><td><b>kPlayer</b><br><span style="color:#999;font-size:11px">player_container_</span></td>
+        <td class="judge-ok">✅ 触发 → 退出 ✓ 回 Player</td>
+        <td class="judge-ok">✅ 触发 + 退出 ✓<br>（P0-1 修：进入解 HIDDEN + 退出场景路由）</td>
+        <td class="judge-ok">✅ 触发 → 退出 ✓ 回 Player</td></tr>
+    <tr><td><b>kPomodoro</b><br><span style="color:#999;font-size:11px">pomodoro_container_<br>（Idle + Pomodoro.IsActive）</span></td>
+        <td class="judge-ok">✅ 触发 → 退出 ✓ 回 Pomodoro</td>
+        <td class="judge-ok">✅ 触发 + 退出 ✓<br>（P0-1 修：进入解 HIDDEN + 退出场景路由）</td>
+        <td class="judge-ok">✅ 触发 → 退出 ✓ 回 Pomodoro</td></tr>
+  </tbody>
+</table>
+
+<div class="callout ok">
+  <b>注意</b>：番茄钟 <b>对话期间</b> active_scene_ = kChat（不是 kPomodoro），EduCard/FontGIF 走 kChat 行；只有用户停止说话回到 Idle 后才进入 kPomodoro 行。这是"软独占"设计带来的好处——番茄钟期间 EduCard/FontGIF 大多数情况下走 Chat 路径（已经稳定）。
+</div>
+
+<div class="callout bad">
+  <b>P0 问题统一根因</b>：FontGIF 借用 <code>emoji_box_</code>（kChat 的 L0 容器）作为 GIF 渲染载体。在 kChat 场景 emoji_box 本就显示，无 bug；但 kClock/kPlayer/kPomodoro 场景下 SwitchTo*Mode 显式 <code>add_flag(HIDDEN)</code> 隐藏了 emoji_box，FontGIF 处理不对称：
+  <ul class="compact">
+    <li><b>进入 bug</b>：<code>FontGif()</code> 只做 <code>move_foreground(emoji_box_)</code>，<b>没有 remove_flag(HIDDEN)</b> → emoji_box 仍是 HIDDEN → 用户看不到 GIF</li>
+    <li><b>退出 bug</b>：<code>HideFontGif()</code> 没收回 emoji_box · 不重新前台 L0 容器 → emoji_box 滞留覆盖底层</li>
+  </ul>
+  → <b>3 个场景全部受影响</b>：kClock / kPlayer / kPomodoro。kChat 例外（emoji_box 本就是主体）。
+</div>
+
+<h3>📌 P0 修复（小改 · 量产期保守）</h3>
+<p class="sub"><b>稳定优先</b>：不动 FontGIF 架构（不改"借用 emoji_box"），只在进入/退出对 emoji_box 做对称处理。</p>
+
+<h4>进入修复：FontGif() 内显式解 HIDDEN</h4>
+<pre>
+<span class="kw">if</span> (emoji_box_) {
+    <span class="com">// 🔴 修复 P0 进入 bug：番茄钟/Clock/Player 主屏 emoji_box 被 HIDDEN，必须显式解开</span>
+    lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(emoji_box_, LV_OPA_COVER, 0);   <span class="com">// 防 boot fade_out 残留 TRANSP</span>
+    lv_obj_move_foreground(emoji_box_);                  <span class="com">// z-order 拉前盖底层</span>
+}
+</pre>
+
+<h4>退出修复：HideFontGif() 末尾场景路由</h4>
+<pre>
+<span class="kw">void</span> UiDisplay::HideFontGif() {
+    font_pending_.store(<span class="kw">false</span>);
+    font_request_active_.store(0);
+    DisplayLockGuard lock(<span class="kw">this</span>);
+    in_font_mode_ = <span class="kw">false</span>;
+    ShowBottomBar();
+    LcdDisplay::SetEmotion(<span class="str">"neutral"</span>);
+
+    <span class="com">// 🔴 修复 P0 退出 bug：按 active_scene_ 收回 emoji_box · 恢复 L0 容器前台</span>
+    <span class="kw">auto</span> restore = [&](lv_obj_t* container) {
+        <span class="kw">if</span> (emoji_box_) lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+        <span class="kw">if</span> (container) lv_obj_move_foreground(container);
+    };
+    <span class="kw">switch</span> (active_scene_) {
+      <span class="kw">case</span> SceneType::kClock:    restore(clock_container_);    <span class="kw">break</span>;
+      <span class="kw">case</span> SceneType::kPlayer:   restore(player_container_);   <span class="kw">break</span>;
+      <span class="kw">case</span> SceneType::kPomodoro: restore(pomodoro_container_); <span class="kw">break</span>;
+      <span class="kw">case</span> SceneType::kChat:    <span class="kw">break</span>;   <span class="com">// emoji_box 本就是主体，不动</span>
+      <span class="kw">default</span>: <span class="kw">break</span>;
+    }
+}
+</pre>
+
+<div class="callout ok">
+  <b>对称性原则</b>：进入和退出对 emoji_box 的处理必须对称——进入解 HIDDEN，退出加 HIDDEN；进入提顶，退出降底。否则会出现"进得去退不出"或"退得出进不去"的不对称 bug。
+</div>
+
+<h3>📌 P0 修复 · 物理按键 OnClick 决策树</h3>
+<p class="sub">当前 OnClick 不感知 overlay 状态：EduCard / FontGIF 显示中按物理按键 = 走 ToggleChat → Pomodoro 模式下 SwitchToChat 被互斥拦截 → 用户感受卡死。</p>
+
+<table>
+  <thead><tr><th>优先级</th><th>条件</th><th>动作</th><th>修复状态</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>AlarmRinger 响铃中</td><td>停闹钟 · return</td><td>✅ 已做（TryStopAlarmRinger）</td></tr>
+    <tr><td>2</td><td><b>FontGIF 显示中</b>（in_font_mode_）</td><td>HideFontGif · return</td><td>❌ 需补</td></tr>
+    <tr><td>3</td><td><b>EduCard 显示中</b>（IsEduCardActive）</td><td>HideEduCard · return</td><td>❌ 需补</td></tr>
+    <tr><td>4</td><td>番茄钟运行中（IsActive）</td><td>Stop · 提示音 · return</td><td>✅ 已做</td></tr>
+    <tr><td>5</td><td>MP3 播放中</td><td>Stop + SwitchOutPlayer</td><td>✅ 已做</td></tr>
+    <tr><td>6</td><td>Connecting</td><td>CloseChannel · 兜底 Idle · return</td><td>✅ 已做</td></tr>
+    <tr><td>7</td><td>Idle/Listening/Speaking</td><td>ToggleChatState</td><td>✅ 已做</td></tr>
+    <tr><td>8</td><td>其他</td><td>return（不响应）</td><td>✅ 已做</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <b>修复点 2/3 的设计理由</b>：overlay 优先级高于场景操作——用户的物理按键应当先关 overlay 回到底层场景，再做下一步。
+  <br>· 优先级 2（FontGIF）高于 3（EduCard）—— 与 ShowEduCard 入口的 <code>if (in_font_mode_) return</code> 同向（FontGIF 始终最高）。
+  <br>· 触屏单击退出 overlay 的能力已有（OnEduCardClicked / OnFontExitClicked），物理按键补齐对称性。
+</div>
+
+<h3>📌 P1 候选 · FontGIF 重构为独立 overlay（中长期）</h3>
+<div class="callout">
+  <b>目标</b>：FontGIF 不再借用 emoji_box，改为 <code>fontgif_overlay_</code> + 独立 <code>lv_image</code>，与 EduCard 同构。
+  <br><b>收益</b>：HideFontGif 只切 HIDDEN flag → 底层 L0 容器自动重见 · P0 修复中的 switch 分支可删 · SetEmotion("font") 守护可删 · 架构一致性。
+  <br><b>侵入</b>：emoji_collection 的 <code>ReplaceEmoji("font")</code> 需解耦"GIF 内容"和"表情系统"——这是核心阻碍。
+  <br><b>建议</b>：量产 v2.2.x 保持现状（用 P0 短期修复）· v2.3.x 重构。
+</div>
+
+<h3>🟢 P0 核心改造 · 番茄钟"软独占 + 状态机回归"</h3>
+<p class="sub">目标：番茄钟期间用户可以正常对话 / 看教育卡 / 看写字 GIF · 对话结束自动回到番茄钟显示。</p>
+
+<h4>语义模型变化</h4>
+<table>
+  <thead><tr><th>角度</th><th>原（硬独占）</th><th>新（软独占 + 回归）</th></tr></thead>
+  <tbody>
+    <tr><td>SceneType::kPomodoro 含义</td><td>"番茄钟运行中永远占 UI"</td><td>"番茄钟运行 + 当前 DeviceState=Idle 时占 UI"</td></tr>
+    <tr><td>对话期间 UI</td><td>切不进来（互斥拦截）</td><td>正常 SwitchToChatMode · 番茄钟后台 1Hz tick 继续</td></tr>
+    <tr><td>对话结束 UI</td><td>—</td><td>tts.stop → kIdle → 检查 IsActive → SwitchToPomodoroMode</td></tr>
+    <tr><td>finish 时 UI</td><td>SwitchOutPomodoroMode</td><td>不变（Stop + finish_cb）</td></tr>
+  </tbody>
+</table>
+
+<h4>互斥规则更新</h4>
+<table>
+  <thead><tr><th>函数</th><th>原拦截</th><th>新拦截</th><th>理由</th></tr></thead>
+  <tbody>
+    <tr><td><code>SwitchToChatMode</code></td><td>active_scene_ != kClock</td><td>active_scene_ == kChat（幂等）<br>active_scene_ == kPlayer（硬独占）</td><td>允许 Pomodoro/Clock → Chat（对话切入）</td></tr>
+    <tr><td><code>SwitchToClockMode</code></td><td>active_scene_ == kPomodoro<br>active_scene_ == kPlayer</td><td>active_scene_ == kPlayer<br>（去掉 Pomodoro 拦截）</td><td>外部决策：Idle 时调 Pomodoro 或 Clock</td></tr>
+    <tr><td><code>SwitchToPomodoroMode</code></td><td>无</td><td>active_scene_ == kPomodoro（幂等 Update）<br>active_scene_ == kPlayer（硬独占）</td><td>幂等避免重复构建 · Player 仍硬独占</td></tr>
+  </tbody>
+</table>
+
+<h4>状态机回归点（application.cc OnDeviceStateChanged）</h4>
+<pre>
+<span class="kw">case</span> kDeviceStateIdle:
+    ...
+    <span class="kw">if</span> (lcd) {
+        <span class="com">// 🔴 软独占核心：Idle 时检查番茄钟是否活跃 · 优先回番茄钟显示</span>
+        <span class="kw">auto</span>& pm = PomodoroManager::GetInstance();
+        <span class="kw">if</span> (pm.IsActive()) {
+            <span class="kw">bool</span> running = (pm.GetState() == PomodoroManager::State::kRunning);
+            lcd->SwitchToPomodoroMode(pm.GetRemainSec(), running);
+        } <span class="kw">else</span> {
+            lcd->SwitchToClockMode();
+        }
+    }
+    <span class="kw">break</span>;
+</pre>
+
+<h4>tick_cb 改造（每秒触发）</h4>
+<pre>
+SetTickCallback([](State state, uint32_t remain, uint32_t total) {
+    <span class="kw">bool</span> running = (state == State::kRunning);
+    <span class="kw">bool</span> active  = (state != State::kIdle);
+    Application::GetInstance().Schedule([remain, running, active]() {
+        <span class="kw">auto</span>& app = Application::GetInstance();
+        <span class="kw">auto</span>* ui = dynamic_cast&lt;UiDisplay*&gt;(Board::GetInstance().GetDisplay());
+        <span class="kw">if</span> (!ui) <span class="kw">return</span>;
+
+        <span class="kw">if</span> (!active) {
+            <span class="com">// Stop / Finish → 切回 clock（应用层调 SwitchOutPomodoroMode）</span>
+            ui->SwitchOutPomodoroMode();
+            <span class="kw">return</span>;
+        }
+
+        <span class="com">// 🔴 关键：仅在 Idle 状态下切 UI · 对话中只更新已在 Pomodoro 的内容</span>
+        <span class="kw">if</span> (app.GetDeviceState() == kDeviceStateIdle) {
+            <span class="kw">if</span> (!ui->IsPomodoroMode()) ui->SwitchToPomodoroMode(remain, running);
+            <span class="kw">else</span>                       ui->UpdatePomodoro(remain, running);
+        } <span class="kw">else</span> {
+            <span class="com">// 对话 / 配网中：UI 让位 · 番茄钟后台 tick · UI 不切走 Chat</span>
+            <span class="kw">if</span> (ui->IsPomodoroMode()) ui->UpdatePomodoro(remain, running);
+        }
+    });
+});
+</pre>
+
+<h4>完整生命周期走查（番茄钟 + 对话）</h4>
+<table>
+  <thead><tr><th>事件</th><th>DeviceState</th><th>active_scene_</th><th>PomodoroManager</th><th>用户视觉</th></tr></thead>
+  <tbody>
+    <tr><td>① 用户说"番茄钟 25 分钟"</td><td>Listening</td><td>kChat</td><td>kIdle → kRunning</td><td>对话 UI</td></tr>
+    <tr><td>② TTS 答完 → Idle</td><td>kIdle</td><td>kChat → <b>kPomodoro</b></td><td>kRunning</td><td>番茄钟界面（OnDeviceStateChanged 检查 IsActive）</td></tr>
+    <tr><td>③ tick 1Hz 后台跑</td><td>kIdle</td><td>kPomodoro（不变）</td><td>kRunning</td><td>倒计时持续刷新</td></tr>
+    <tr><td>④ 用户唤醒"嗨小麦"</td><td>kIdle → Connecting → Listening</td><td>kPomodoro → <b>kChat</b></td><td>kRunning（后台）</td><td>对话 UI（emoji_box 显示）</td></tr>
+    <tr><td>⑤ 用户问"猫怎么写"</td><td>Speaking</td><td>kChat</td><td>kRunning</td><td>kChat + FontGIF overlay 盖屏</td></tr>
+    <tr><td>⑥ 触屏退 GIF</td><td>Speaking</td><td>kChat</td><td>kRunning</td><td>回 Chat UI（FontGIF 走 kChat 路径，正确）</td></tr>
+    <tr><td>⑦ TTS 答完 → Idle</td><td>kIdle</td><td>kChat → <b>kPomodoro</b></td><td>kRunning</td><td>✅ 自动回番茄钟界面</td></tr>
+    <tr><td>⑧ 物理按键单击</td><td>kIdle</td><td>kPomodoro → kChat → <b>kClock</b></td><td>kRunning → kIdle</td><td>提示音 + 时钟主屏</td></tr>
+    <tr><td>⑨ 倒计时归零（场景 A：Idle）</td><td>kIdle</td><td>kPomodoro → kClock</td><td>kRunning → kIdle</td><td>SwitchOutPomodoroMode + AlarmRinger</td></tr>
+    <tr><td>⑩ 倒计时归零（场景 B：对话中）</td><td>Listening/Speaking</td><td>kChat → kClock</td><td>kRunning → kIdle</td><td>对话被 AlarmRinger 打断 + UI 切 clock</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <b>场景 ⑩ 风险评估</b>：用户正在对话时番茄钟到时 → AlarmRinger.Start 抢音频，对话被中断。
+  <br>解决：finish_cb 内判断 DeviceState · 对话中（Speaking/Listening）则<b>延迟 5s 再响铃</b>（让 TTS 收尾）或<b>仅停 timer 不响铃</b>。本次量产保留现状（直接打断），下次迭代细化。
+</div>
+
+<h4>代码改造清单（5 处）</h4>
+<table>
+  <thead><tr><th>#</th><th>文件 · 函数</th><th>改动</th><th>行数</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>ui_display.cc</code> SwitchToChatMode</td><td>去 <code>!= kClock</code> 拦截 · 改幂等 + kPlayer 互斥</td><td>~3</td></tr>
+    <tr><td>2</td><td><code>ui_display.cc</code> SwitchToClockMode</td><td>去 <code>== kPomodoro</code> 拦截</td><td>~1</td></tr>
+    <tr><td>3</td><td><code>ui_display.cc</code> SwitchToPomodoroMode</td><td>顶部加幂等 Update + kPlayer 互斥</td><td>~6</td></tr>
+    <tr><td>4</td><td><code>application.cc</code> OnDeviceStateChanged kIdle</td><td>SwitchToClockMode → 先 IsActive 判定</td><td>~8</td></tr>
+    <tr><td>5</td><td><code>application.cc</code> tick_cb</td><td>Idle 才切 UI · 对话只更新</td><td>~10</td></tr>
+  </tbody>
+</table>
+
+<h4>🍅 Layer 2 · status_bar 番茄钟角标（专注感视觉传递）</h4>
+<p class="sub">软独占允许 Chat / EduCard / FontGIF 覆盖番茄钟主屏，但<b>对话期间剩余时间消失</b>会稀释"专注承诺"价值。补一个常驻角标 → 任何场景下番茄钟运行时左上角持续显示 MM:SS。</p>
+
+<table>
+  <thead><tr><th>触发点</th><th>调用</th><th>效果</th></tr></thead>
+  <tbody>
+    <tr><td>SwitchToPomodoroMode 进入</td><td>UpdatePomodoroBadge(remain, true)</td><td>瞬间显示，不等 tick</td></tr>
+    <tr><td>tick_cb 1Hz</td><td>UpdatePomodoroBadge(remain, true)</td><td>跨场景每秒刷新</td></tr>
+    <tr><td>tick_cb (state=kIdle)</td><td>UpdatePomodoroBadge(0, false)</td><td>Stop/Finish 时隐藏</td></tr>
+    <tr><td>finish_cb</td><td>UpdatePomodoroBadge(0, false)</td><td>显式兜底隐藏</td></tr>
+  </tbody>
+</table>
+
+<div class="callout ok">
+  <b>显示效果</b>：番茄钟运行时无论 active_scene_ 是 kClock / kChat / kPomodoro，<code>status_bar</code> 左上 4px 处常驻 <code style="color:#FF7043">18:45</code>（番茄红）· 不与 status_label（chat 状态文本，居中）冲突 · 隐藏时不占位置。
+</div>
+
+<h4>🎉 Layer 3 · 完成鼓励语（产品价值闭环）</h4>
+<p class="sub">finish_cb 不响铃（与闹钟区分），改为 <b>WakeWordInvoke 让 AI 用孩子向温暖语气夸赞</b>。完成番茄钟是值得肯定的成就，AI 一句话强化"专注承诺"价值。</p>
+
+<pre>
+SetFinishCallback([]() {
+    uint32_t total_min = (PomodoroManager::GetInstance().GetTotalSec() + 30) / 60;
+    Application::GetInstance().Schedule([total_min]() {
+        <span class="kw">char</span> prompt[200];
+        snprintf(prompt, <span class="kw">sizeof</span>(prompt),
+            <span class="str">"小主人专注完成了 %u 分钟的番茄钟，请用温暖鼓励的语气夸赞他，"
+            "并建议他起身活动 5 分钟。语气孩子化、自然简短、不超过 30 字。"</span>,
+            (<span class="kw">unsigned</span>)total_min);
+        Application::GetInstance().WakeWordInvoke(prompt);
+        <span class="kw">if</span> (<span class="kw">auto</span>* ui = dynamic_cast&lt;UiDisplay*&gt;(...)) {
+            ui->SwitchOutPomodoroMode();
+            ui->UpdatePomodoroBadge(0, <span class="kw">false</span>);
+        }
+    });
+});
+</pre>
+
+<div class="callout ok">
+  <b>产品收益</b>：完成时 AI 说"哇，你专注了 25 分钟太棒啦，去喝口水活动一下吧～" · 由 LLM 生成 → 每次话术都不同 · 孩子获得即时正反馈 → <b>番茄钟从"计时器"升级为"专注承诺达成感"产品</b>。
+</div>
+
+<div class="callout ok">
+  <b>评审结论</b>：方案"软独占 + 状态机回归 + Layer 2/3"在不破坏现有结构的前提下，让番茄钟成为完整的产品体验。
+  <ul class="compact">
+    <li>✅ Layer 1 · 番茄钟期间正常对话 / EduCard / FontGIF（已实施）</li>
+    <li>✅ Layer 2 · status_bar 🍅XX:XX 角标跨场景常驻（已实施）</li>
+    <li>✅ Layer 3 · 完成时 AI 温暖鼓励语 + 休息建议（已实施）</li>
+    <li>✅ 对话结束自动回番茄钟（OnDeviceStateChanged kIdle 路径）</li>
+    <li>✅ 物理按键单击 = Stop 番茄钟（保留 · v3 可重定义为"软退出"）</li>
+    <li>✅ FontGIF 跨场景进入/退出对称修复（P0-1 完整）</li>
+    <li>⚠️ 番茄钟到时遇到 Speaking/Listening 仍直接打断 → 下次迭代细化（finish_cb 加状态判定延迟）</li>
+  </ul>
+</div>
+
 <h3>SwitchTo* 通用清场模板</h3>
 <pre>
 <span class="kw">void</span> SwitchToXxxMode() {
@@ -395,6 +678,52 @@ ul.compact li { margin: 2px 0; }
     active_scene_ = SceneType::kXxx;
 }
 </pre>
+
+<h3>详细案例：番茄钟期间问"教育卡 / 怎么写字"的完整状态走查</h3>
+<p class="sub">产品场景：番茄钟独占 UI（25 分钟专注），但孩子可能在专注期问"苹果是 apple 吗"或"猫怎么写"——同向需求（学习场景），不应被独占机制阻断。下面 7 行串起完整流程。</p>
+<table>
+  <thead><tr><th>用户行为</th><th>底层链路</th><th>SceneType 变化</th><th>用户视觉</th></tr></thead>
+  <tbody>
+    <tr><td>启动番茄钟（"番茄钟 25 分钟"）</td>
+        <td>MCP <code>pomodoro.start</code> → tick_cb(running) → Schedule → SwitchToPomodoroMode</td>
+        <td>kChat → <b>kPomodoro</b></td>
+        <td>番茄钟界面 + 中央 ⏸ 按钮 + 剩余时间倒计时</td></tr>
+    <tr><td>问"苹果是 apple 吗"</td>
+        <td>LLM 答 + MCP <code>show_card</code> → ShowEduCard → 渲染 overlay</td>
+        <td>kPomodoro（不变）</td>
+        <td>教育卡 overlay 盖屏 + 番茄钟时间继续走（屏后台 1Hz tick）</td></tr>
+    <tr><td>触屏点 EduCard 退出</td>
+        <td>OnEduCardClicked → HideEduCard</td>
+        <td>kPomodoro（不变）</td>
+        <td class="judge-ok">✅ 回番茄钟界面</td></tr>
+    <tr><td>问"猫怎么写"</td>
+        <td>MCP <code>show_stroke</code> → 下载 GIF → Schedule → FontGif → emoji_box 前台</td>
+        <td>kPomodoro（不变）</td>
+        <td>笔画 GIF 全屏播放（盖住番茄钟）</td></tr>
+    <tr><td>触屏点 GIF 退出</td>
+        <td>OnFontExitClicked → Schedule → HideFontGif</td>
+        <td>kPomodoro（不变）</td>
+        <td class="judge-warn">⚠️ <b>当前 bug</b>：看到 neutral emoji 表情而非番茄钟（emoji_box 滞留）</td></tr>
+    <tr><td>物理按键单击</td>
+        <td>OnClick guard → PomodoroManager.Stop() → tick_cb(idle) → Schedule → SwitchOutPomodoroMode → SwitchToClockMode</td>
+        <td>kPomodoro → kChat → <b>kClock</b></td>
+        <td>✅ 时钟主屏 + OGG_EXITCHAT 提示音</td></tr>
+    <tr><td>倒计时归零</td>
+        <td>OnTick remain=0 → state=kIdle + EmitTick + finish_cb → AlarmRinger.Start + SwitchOutPomodoroMode</td>
+        <td>kPomodoro → <b>kClock</b></td>
+        <td>✅ 时钟主屏 + 闹钟铃声"番茄钟时间到"</td></tr>
+  </tbody>
+</table>
+
+<div class="callout ok">
+  <b>评审结论</b>：
+  <ul class="compact">
+    <li>✅ <b>EduCard 在番茄钟期间可用，无 bug</b>——独立 overlay 设计正确</li>
+    <li>⚠️ <b>FontGIF 在番茄钟期间退出有 bug</b>——HideFontGif 需要按 active_scene_ 路由（同 Player / Clock 模式）</li>
+    <li>✅ 番茄钟独占 SceneType 是合理设计（专注不被打扰），物理按键单击 = Stop 提供唯一退出路径</li>
+    <li>📌 短期：补 HideFontGif 场景路由 · 中长期：FontGIF 重构为真 overlay（去 emoji_box 依赖）</li>
+  </ul>
+</div>
 </section>
 
 
@@ -532,9 +861,98 @@ channel 未开路径已遵循此设计（Connecting + Schedule 异步开 channel
 </section>
 
 
-<!-- ================== 7. 代码优化候选 ================== -->
+<!-- ================== 7. 完整流转 · 用户视角 ================== -->
+<section id="fullflow">
+<h2><span class="num">7</span> 完整流转 · 用户视角评审</h2>
+<p class="sub">汇总当前 4 层显示模型 + 番茄钟 / Chat / EduCard / FontGIF 共存的完整流转路径，从孩子日常使用习惯角度评判每个节点。</p>
+
+<h3>4 层显示模型</h3>
+<pre>
+┌──── L3: AI 引导（LLM Prompt 注入"专注模式"）────┐
+│   完成时鼓励语已就位 · 专注期 prompt 待 v3       │  🟡 部分
+├──── L2: status_bar 常驻角标 ─────────────────┤
+│   🍅18:45（番茄红 · 跨场景持续可见）             │  ✅ 已就位
+├──── L1: Overlay（独立 lv_obj 或借用 emoji_box）─┤
+│   EduCard / QR · FontGIF（借emoji_box）         │  ✅ 软覆盖任意 L0
+├──── L0: SceneType 主容器（互斥）──────────────┤
+│   Clock / Chat / Player / Pomodoro              │  软独占 + 状态机回归
+└─────────────────────────────────────────────┘
+</pre>
+
+<h3>真实场景 10 步流转（番茄钟 25 分钟 + 中途学习）</h3>
+<table>
+  <thead><tr>
+    <th>#</th><th>用户行为</th><th>触发链路</th>
+    <th>L0</th><th>L1</th><th>L2 角标</th><th>用户视觉</th>
+  </tr></thead>
+  <tbody>
+    <tr><td>1</td><td>"番茄钟 25 分钟"</td><td>MCP→tick_cb→SwitchToPomodoroMode</td>
+        <td><b>kPomodoro</b></td><td>—</td><td>🍅25:00</td><td>番茄钟界面 + 角标</td></tr>
+    <tr><td>2</td><td>沉默 24 分钟</td><td>1Hz tick → UpdatePomodoro</td>
+        <td>kPomodoro</td><td>—</td><td>🍅1:00</td><td>倒计时刷新</td></tr>
+    <tr><td>3</td><td>唤醒"猫怎么写"</td><td>OnDeviceStateChanged Listening → SwitchToChatMode</td>
+        <td>kPomodoro→<b>kChat</b></td><td>—</td><td>🍅0:55</td><td>对话 UI · <b>专注感保留</b></td></tr>
+    <tr><td>4</td><td>看 FontGIF 笔顺</td><td>FontGif→emoji_box remove HIDDEN + 前台</td>
+        <td>kChat</td><td><b>FontGIF</b></td><td>🍅0:54</td><td>GIF 全屏 · 角标依然可见</td></tr>
+    <tr><td>5</td><td>触屏退出 GIF</td><td>OnFontExitClicked→HideFontGif（kChat 路径）</td>
+        <td>kChat</td><td>—</td><td>🍅0:53</td><td>回 Chat UI</td></tr>
+    <tr><td>6</td><td>TTS 答完静默</td><td>tts.stop→Idle→IsActive→SwitchToPomodoroMode</td>
+        <td>kChat→<b>kPomodoro</b></td><td>—</td><td>🍅0:50</td><td class="judge-ok">✅ 自动回番茄钟</td></tr>
+    <tr><td>7</td><td>物理按键单击</td><td>OnClick→IsActive→Stop→tick_cb(idle)</td>
+        <td>kPomodoro→<b>kClock</b></td><td>—</td><td>隐藏</td><td>提示音 + 时钟主屏</td></tr>
+    <tr><td>8</td><td>倒计时归零（Idle 中）</td><td>OnTick remain=0→finish_cb→WakeWordInvoke</td>
+        <td>kPomodoro→<b>kClock</b></td><td>—</td><td>隐藏</td><td class="judge-ok">✅ AI 鼓励语 + 切时钟</td></tr>
+    <tr><td>9</td><td>倒计时归零（对话中）</td><td>同 8 但当前 Speaking</td>
+        <td>kChat→kClock</td><td>—</td><td>隐藏</td><td class="judge-warn">⚠️ TTS 被打断 + AI 鼓励</td></tr>
+    <tr><td>10</td><td>EduCard 显示中按物理键</td><td>OnClick → 不感知 overlay → ToggleChat</td>
+        <td>不变</td><td>EduCard 残留</td><td>🍅可见</td><td class="judge-warn">⚠️ 期望关 overlay 但走 Chat</td></tr>
+  </tbody>
+</table>
+
+<h3>用户使用习惯评审矩阵</h3>
+<table>
+  <thead><tr><th>用户期望</th><th>当前实现</th><th>评判</th></tr></thead>
+  <tbody>
+    <tr><td>"任何时候都能看到剩余时间"</td><td>L2 角标跨场景常驻</td><td class="judge-ok">✅ 满足</td></tr>
+    <tr><td>"说话设备能回应不被番茄钟挡"</td><td>软独占 + Chat 路径正常</td><td class="judge-ok">✅ 满足</td></tr>
+    <tr><td>"对话结束自动回番茄钟"</td><td>tts.stop → Idle → IsActive 路径</td><td class="judge-ok">✅ 满足</td></tr>
+    <tr><td>"番茄钟期间能学习辅助"</td><td>EduCard/FontGIF 覆盖允许</td><td class="judge-ok">✅ 满足</td></tr>
+    <tr><td>"完成番茄钟有成就感"</td><td>L3 AI 鼓励语 + 话术多样</td><td class="judge-ok">✅ 满足</td></tr>
+    <tr><td>"物理按键 = 返回 / 退出当前界面"</td><td>单击直接 Stop（不可逆清零）</td><td class="judge-warn">⚠️ 偏重</td></tr>
+    <tr><td>"对话期间到时不要被打断"</td><td>finish_cb 立即 WakeWordInvoke</td><td class="judge-warn">⚠️ 需迭代</td></tr>
+    <tr><td>"Overlay 显示时按键关 overlay"</td><td>OnClick 不感知 overlay</td><td class="judge-warn">⚠️ 需 P0-2</td></tr>
+  </tbody>
+</table>
+
+<h3>P1 候选改进（量产观察期内决策）</h3>
+<table>
+  <thead><tr><th>问题</th><th>修复方案</th><th>工作量</th><th>优先级</th></tr></thead>
+  <tbody>
+    <tr><td>单击物理按键 = Stop 不可逆</td>
+        <td>① 加 Stop 提示音弱化误触代价（量产首版）<br>② v3 重定义：单击 = 软退出（番茄钟后台跑 + 角标），双击 = Stop</td>
+        <td>① 0 行（已有 OGG_EXITCHAT）<br>② ~10 行 × 2 板</td>
+        <td>P1（量产观察）</td></tr>
+    <tr><td>对话中番茄钟到时立即打断</td>
+        <td>finish_cb 内检测 DeviceState · Speaking/Listening 时 esp_timer_start_once 延迟 5s 再触发</td>
+        <td>~15 行</td>
+        <td>P1（边界场景）</td></tr>
+    <tr><td>Overlay 显示中物理按键不感知</td>
+        <td>OnClick 优先级 2/3 加 IsFontGifActive / IsEduCardActive guard → 关 overlay return</td>
+        <td>~10 行 × 2 板</td>
+        <td>P1（已有决策树）</td></tr>
+  </tbody>
+</table>
+
+<div class="callout ok">
+  <b>核心评判</b>：当前 4 层显示模型 + 软独占 + 状态机回归 + L2 角标 + L3 鼓励语，<b>主流学习场景</b>（写字+识字+番茄钟专注）的用户习惯<b>已经全部满足</b>。剩余 3 个 P1 候选都是<b>边界场景的体验打磨</b>，不影响主链路工作。
+  <br>建议：量产 v2.2.x 先上线，烧板 2 周观察用户反馈，再决定 P1 取舍。
+</div>
+</section>
+
+
+<!-- ================== 8. 代码优化候选 ================== -->
 <section id="optimize">
-<h2><span class="num">7</span> 后续候选（量产稳定后）</h2>
+<h2><span class="num">8</span> 后续候选（量产稳定后）</h2>
 <p class="sub">当前架构 14/14 环节 ✅ · 零 hack · 零死代码 · 零跨轮泄漏。下列候选属于"打磨项"，量产烧板 3 个月稳定后第 2 迭代评估。</p>
 
 <h3>候选 · ContentOverlay enum 三态合并</h3>
@@ -560,7 +978,7 @@ ContentOverlay overlay_mode_ = ContentOverlay::kNone;
 
 <!-- ================== 8. 量产收尾 ================== -->
 <section id="verify">
-<h2><span class="num">8</span> 量产收尾</h2>
+<h2><span class="num">9</span> 量产收尾</h2>
 
 <h3>烧板验收清单（15 项）</h3>
 <table>

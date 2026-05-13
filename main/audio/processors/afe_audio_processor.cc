@@ -39,9 +39,8 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     
     afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_HIGH_PERF);
     afe_config->aec_mode = AEC_MODE_VOIP_HIGH_PERF;
-    afe_config->vad_mode = VAD_MODE_0;      // 保持默认 · "想触发更多语音用最低档"
-    afe_config->vad_min_noise_ms = 100;     // 保持默认 100ms · 改小会把语音中间停顿切碎成多个 ASR 片段
-    afe_config->vad_min_speech_ms = 64;     // 默认 128ms → 64ms · 短语("嗯/对/好")也能触发 (硬下限 32ms)
+    afe_config->vad_mode = VAD_MODE_0;
+    afe_config->vad_min_noise_ms = 100;
     if (vad_model_name != nullptr) {
         afe_config->vad_model_name = vad_model_name;
     }
@@ -54,7 +53,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         afe_config->ns_init = false;
     }
 
-    afe_config->afe_linear_gain = 4.0f;     // 3.0 → 5.0 (≈ +4.4 dB) · 取值范围 [0.1, 10.0] · 嘈杂环境若底噪明显可回退 4.0
+    afe_config->afe_linear_gain = 5.0f;     // 3.0 → 5.0 (≈ +4.4 dB) · 取值范围 [0.1, 10.0] · 嘈杂环境若底噪明显可回退 4.0
     afe_config->agc_init = true;
     afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;  // WAKENET → WEBRTC · WAKENET 只在唤醒瞬间激进, 持续对话需 WebRTC AGC
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
