@@ -818,7 +818,7 @@ private:
             if (shutdown_armed_.exchange(true)) return;
             ESP_LOGI(TAG, "长按 3 秒 → 直接关机");
             Application::GetInstance().Schedule([this]() {
-                ShutdownOrSleep("再见", "", Lang::Sounds::OGG_SHUTDOWN, 2500, false);
+                ShutdownOrSleep("再见", "", Lang::Sounds::OGG_REBOOT, 2500, false);
             });
         }, 3000);
 

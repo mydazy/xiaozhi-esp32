@@ -823,7 +823,7 @@ private:
             ESP_LOGI(TAG, "长按 3 秒 → 直接关机");
             // ShutdownOrSleep 含 2.5s vTaskDelay · 派发到 main_app
             Application::GetInstance().Schedule([this]() {
-                ShutdownOrSleep("再见", "", Lang::Sounds::OGG_SHUTDOWN, 2500, false);
+                ShutdownOrSleep("再见", "", Lang::Sounds::OGG_REBOOT, 2500, false);
             });
         }, 3000);
 
