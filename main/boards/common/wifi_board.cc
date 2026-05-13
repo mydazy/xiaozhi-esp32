@@ -181,7 +181,7 @@ bool WifiBoard::StartConfigMode(ConfigMode mode, bool is_switch) {
                 display->ShowQrCode(wifi_qr.c_str(),
                                     show_name.c_str(),         // highlight：设备名（蓝色加亮）
                                     "双击切换模式",            // top
-                                    "连接WiFi热点",       // bottom：辅助说明
+                                    "连接设备WiFi",       // bottom：辅助说明
                                     "蓝牙配网", "热点配网", false);
             }
         }

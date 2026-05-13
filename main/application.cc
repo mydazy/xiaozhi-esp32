@@ -486,7 +486,7 @@ void Application::HandleActivationDoneEvent() {
 
     Schedule([this]() {
         // Play the success sound to indicate the device is ready
-        audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+        audio_service_.PlaySound(Lang::Sounds::OGG_CONNECT);
     });
 }
 

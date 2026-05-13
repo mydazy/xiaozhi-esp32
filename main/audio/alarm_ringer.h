@@ -41,11 +41,11 @@ private:
     static void OnTimeoutStatic(void* arg);
 
     std::atomic<bool> ringing_{false};
-    esp_timer_handle_t ring_timer_ = nullptr;     // 周期 5s · 渐入 + 再响
-    esp_timer_handle_t timeout_timer_ = nullptr;  // 一次性 5min · 兜底自停
-    int64_t start_us_ = 0;                        // Start 时戳（算 elapsed 渐入档位）
+    esp_timer_handle_t ring_timer_ = nullptr;     // 周期 5s · 三次响铃推进
+    esp_timer_handle_t timeout_timer_ = nullptr;  // 一次性兜底自停（防 ring_timer 异常）
+    int64_t start_us_ = 0;                        // Start 时戳（仅 LOG elapsed 用）
     int saved_volume_ = -1;                       // 原音量 · Stop 时恢复
-    int last_ai_prompt_sec_ = 0;                  // 上次 AI 念叨时点（控 20s 重念周期）
+    int ring_count_ = 0;                          // 已响铃次数（1/2/3 · 第 3 次后自停）
     std::string message_;                         // AI 播报用 · 仅 Start 内更新
 };
 

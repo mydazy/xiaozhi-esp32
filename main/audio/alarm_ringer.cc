@@ -10,25 +10,17 @@
 
 #define TAG "AlarmRinger"
 
-// 渐入档位（saved_volume 倍率）
-//   0-10s : 60%   起步清晰可闻 · 不吓人
-//   10-30s: 80%   加强
-//   30s+  : 100%  最大 · 必醒
-static constexpr int kStage1Sec = 10;
-static constexpr int kStage2Sec = 30;
-static constexpr int kVolStage0Pct = 60;
-static constexpr int kVolStage1Pct = 80;
-static constexpr int kVolStage2Pct = 100;
+// 三次提醒 · 绝对音量（不再按 saved_volume 倍率缩放）
+static constexpr int kRingTotal = 3;
+static constexpr int kVolStep1 = 60;
+static constexpr int kVolStep2 = 80;
+static constexpr int kVolStep3 = 100;
 
-// 响铃 tick 周期 · 每次再放 1 次 OGG_VIBRATION + 更新音量档位
-static constexpr int64_t kTickIntervalUs = 5 * 1000 * 1000;  // 5s
+// 响铃 tick 周期 · 5s 一次
+static constexpr int64_t kTickIntervalUs = 5 * 1000 * 1000;
 
-// AI 重复念叨周期 · 每隔 N 秒让 AI 重新提醒一次（覆盖"用户耳朵记住提醒事项"）
-// 第 0 秒念一次 · 之后每 20 秒念一次 · 5 分钟内最多念 ~15 次
-static constexpr int kAiRepromptSec = 20;
-
-// 自动停超时 · 防扰民兜底
-static constexpr int64_t kAutoStopUs = 5 * 60 * 1000 * 1000ULL;  // 5min
+// 兜底自停 · 防 ring_timer 异常时无限响（正常路径 t=10s 自停，远早于此）
+static constexpr int64_t kAutoStopUs = 30 * 1000 * 1000ULL;  // 30s
 
 AlarmRinger& AlarmRinger::GetInstance() {
     static AlarmRinger instance;
@@ -62,15 +54,14 @@ void AlarmRinger::Start(const std::string& message) {
     // 抑制自动休眠 · 响铃期间禁止 PowerSaveTimer 进深睡（用户没响应不能再睡过头）
     board.EnableAutoSleep(false);
 
-    // 设初始音量（渐入起点 70%）· 立即放第一声铃
-    if (codec && saved_volume_ > 0) {
-        codec->SetOutputVolume(saved_volume_ * kVolStage0Pct / 100);
+    // 第 1 次响铃 · 绝对音量 60 · 立即响（OnTick 会接续第 2/3 次）
+    if (codec) {
+        codec->SetOutputVolume(kVolStep1);
     }
-    app.PlaySound(Lang::Sounds::OGG_VIBRATION);   // vibration.ogg · 闹铃 / 番茄钟到点共用
+    app.PlaySound(Lang::Sounds::OGG_VIBRATION);   // vibration.ogg
+    ring_count_ = 1;
 
     // 首次唤醒词：模拟"被主人喊醒"让 AI 接管对话（含 listening 等待用户响应）
-    // OnTick 每 20s 会再 wake 一次直到关停
-    last_ai_prompt_sec_ = 0;
     app.Schedule([text = BuildWakeWord(message, 0)]() {
         Application::GetInstance().WakeWordInvoke(text);
     });
@@ -113,30 +104,23 @@ void AlarmRinger::OnTick() {
     auto* codec = Board::GetInstance().GetAudioCodec();
     int elapsed_s = static_cast<int>((esp_timer_get_time() - start_us_) / 1000000);
 
-    // 渐入音量
-    if (codec && saved_volume_ > 0) {
-        int vol_pct;
-        if      (elapsed_s < kStage1Sec) vol_pct = kVolStage0Pct;  // 60%
-        else if (elapsed_s < kStage2Sec) vol_pct = kVolStage1Pct;  // 80%
-        else                              vol_pct = kVolStage2Pct;  // 100%
-        codec->SetOutputVolume(saved_volume_ * vol_pct / 100);
+    // 已响完 3 次 → 自停（不再循环）
+    if (ring_count_ >= kRingTotal) {
+        Stop("done");
+        return;
     }
 
-    // 每 5s 响一次铃 · ESP_TIMER_TASK 不阻塞（PlaySound 内部异步 dispatch）
-    app.PlaySound(Lang::Sounds::OGG_VIBRATION);   // vibration.ogg · 闹铃 / 番茄钟到点共用
+    // 第 2 次（ring_count_=1 → 80） / 第 3 次（ring_count_=2 → 100）
+    int vol = (ring_count_ == 1) ? kVolStep2 : kVolStep3;
+    if (codec) codec->SetOutputVolume(vol);
+    app.PlaySound(Lang::Sounds::OGG_VIBRATION);
+    ring_count_++;
 
-    // 周期重唤醒：每 kAiRepromptSec(20s) 再调一次 WakeWordInvoke
-    // 用户没响应就反复"喊" AI 来提醒（AI Speaking 中会先 Abort 再起）
-    // 跳过 elapsed_s=0（Start 已 wake 第一次）
-    if (elapsed_s > 0 && (elapsed_s - last_ai_prompt_sec_) >= kAiRepromptSec) {
-        last_ai_prompt_sec_ = elapsed_s;
-        app.Schedule([text = BuildWakeWord(message_, elapsed_s)]() {
-            Application::GetInstance().WakeWordInvoke(text);
-        });
-        ESP_LOGI(TAG, "Re-wake @ %ds", elapsed_s);
-    }
-
-    ESP_LOGD(TAG, "Tick · elapsed=%ds", elapsed_s);
+    // 每次响铃都让 AI 再喊一次（≤10 字唤醒词）· 用户没响应就持续提醒
+    app.Schedule([text = BuildWakeWord(message_, elapsed_s)]() {
+        Application::GetInstance().WakeWordInvoke(text);
+    });
+    ESP_LOGI(TAG, "Ring #%d @ %ds · vol=%d", ring_count_, elapsed_s, vol);
 }
 
 void AlarmRinger::OnTimeoutStatic(void* arg) {
