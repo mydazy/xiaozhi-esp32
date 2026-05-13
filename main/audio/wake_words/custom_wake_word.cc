@@ -2,6 +2,7 @@
 #include "audio_service.h"
 #include "system_info.h"
 #include "assets.h"
+#include "settings.h"  // [MCP wakeword v1] Initialize 内读 NVS command 覆盖 commands_[].action
 
 #include <esp_log.h>
 #include <esp_mn_iface.h>
@@ -96,6 +97,18 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     } else {
         models_ = models_list;
         ParseWakenetModelConfig();
+    }
+
+    // MCP 自定义唤醒词 · NVS text 命中 → action="wake"，其余 action=""（仍识别但不回调）
+    {
+        Settings s("wakeword", false);
+        std::string text = s.GetString("text", "");
+        if (!text.empty()) {
+            for (auto& c : commands_) {
+                c.action = (c.text == text || c.command == text) ? "wake" : "";
+            }
+            ESP_LOGI(TAG, "wakeword custom: %s", text.c_str());
+        }
     }
 
     if (models_ == nullptr || models_->num == -1) {
@@ -216,6 +229,10 @@ void CustomWakeWord::StoreWakeWordData(const std::vector<int16_t>& data) {
 }
 
 void CustomWakeWord::EncodeWakeWordData() {
+    if (encode_in_progress_.exchange(true)) {
+        ESP_LOGW(TAG, "encode busy · skip this round (双连唤醒丢弃第二段)");
+        return;
+    }
     const size_t stack_size = 4096 * 7;
     wake_word_opus_.clear();
     if (wake_word_encode_task_stack_ == nullptr) {
@@ -240,6 +257,7 @@ void CustomWakeWord::EncodeWakeWordData() {
                 std::lock_guard<std::mutex> lock(this_->wake_word_mutex_);
                 this_->wake_word_opus_.push_back(std::vector<uint8_t>());
                 this_->wake_word_cv_.notify_all();
+                this_->encode_in_progress_ = false;
                 return;
             }
             // Get frame size
@@ -288,6 +306,7 @@ void CustomWakeWord::EncodeWakeWordData() {
             this_->wake_word_opus_.push_back(std::vector<uint8_t>());
             this_->wake_word_cv_.notify_all();
         }
+        this_->encode_in_progress_ = false;
         vTaskDelete(NULL);
     }, "encode_wake_word", stack_size, this, 2, wake_word_encode_task_stack_, wake_word_encode_task_buffer_, 1);
 }

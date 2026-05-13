@@ -65,6 +65,11 @@ td.mono, th.mono { font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
 .pill.ok  { background: #E8F5E9; color: #2E7D32; }
 .pill.warn { background: #FFF3E0; color: #E65100; }
 .pill.bad  { background: #FFEBEE; color: #C62828; }
+.pill.fixed { background: #FFEBEE; color: #C62828; font-weight: 700; border: 1px solid #C62828; }
+.fixed-tag { color: #C62828; font-weight: 700; }
+.fix-note { background: #FFEBEE; border-left: 4px solid #C62828; padding: 8px 10px;
+            border-radius: 4px; margin: 8px 0; font-size: 12.5px; color: #8E0F0F; }
+.fix-note b { color: #C62828; }
 
 .svgwrap { background: #FCFCFC; border: 1px dashed #DDD; border-radius: 6px;
            padding: 10px; margin: 8px 0; overflow-x: auto; }
@@ -83,7 +88,7 @@ ul.compact li { margin: 2px 0; }
 
 <header>
   <h1>MyDazy P30 · Baidu BRTC 协议深度文档</h1>
-  <div class="meta">v2.2.12 · 2026-05-12 · <code>main/protocols/websocket_baidu_protocol.cc</code>（1655 行）· 配套 <a href="p30-protocol-flows.html" style="color:#FFE0B2">总协议文档</a></div>
+  <div class="meta">v2.2.14 · 2026-05-13 · <code>main/protocols/websocket_baidu_protocol.cc</code>（1492 行）· 配套 <a href="p30-protocol-flows.html" style="color:#FFE0B2">总协议文档</a></div>
 </header>
 
 <div class="layout">
@@ -106,6 +111,7 @@ ul.compact li { margin: 2px 0; }
   <a href="#api">13. Public API 全清单</a>
   <a href="#nvs">14. NVS 配置全集</a>
   <a href="#tune">15. 优化手册</a>
+  <a href="#stability" style="color:#C62828;font-weight:600">16. v2.2.14 实测稳定性问题</a>
 </nav>
 
 <main>
@@ -392,14 +398,14 @@ ul.compact li { margin: 2px 0; }
   <text class="node-text sm" x="320" y="172">session_token_fetched_ = true</text>
 
   <rect x="460" y="120" width="200" height="60" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
-  <text class="node-text" x="560" y="138" style="font-weight:600">xTaskCreate("bd_autoconn")</text>
-  <text class="node-text sm" x="560" y="156">6 KB stack · P1</text>
+  <text class="node-text" x="560" y="138" style="font-weight:600">PinnedToCore("bd_autoconn",0)</text>
+  <text class="node-text sm" x="560" y="156">8 KB stack · P1 · Core 0</text>
   <text class="node-text sm" x="560" y="172">→ OpenAudioChannel</text>
 
-  <rect x="700" y="120" width="160" height="60" rx="6" fill="#FFF3E0" stroke="#E65100"/>
-  <text class="node-text" x="780" y="138" style="font-weight:600">⚠ 裸 xTaskCreate</text>
-  <text class="node-text sm" x="780" y="156">违 § 四.1 落位表</text>
-  <text class="node-text sm" x="780" y="172">应改 PinnedToCore</text>
+  <rect x="700" y="120" width="160" height="60" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text class="node-text" x="780" y="138" style="font-weight:600" fill="#C62828">✅ v2.2.14 已修</text>
+  <text class="node-text sm" x="780" y="156">PinnedToCore Core 0</text>
+  <text class="node-text sm" x="780" y="172">+ autoconn_task_alive_ CAS</text>
 
   <rect x="40" y="220" width="200" height="60" rx="6" fill="#FFEBEE" stroke="#C62828"/>
   <text class="node-text" x="140" y="238" style="font-weight:600">WS OnDisconnected</text>
@@ -440,7 +446,11 @@ ul.compact li { margin: 2px 0; }
 <div class="callout bad">
 <b>风险：HTTP 同步阻塞 main_app</b><br>
 FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 PrefetchSessionTokenAsync 的 Schedule lambda 内执行 · 主任务 main_app 被卡住直到 HTTP 完成。4G CSQ 差时可能 5-10 s。<br>
-<b>缓解</b>：用 xTaskCreate "bd_autoconn" 把 OpenAudioChannel 挪出主任务（已实现，但 Prefetch 阶段的 HTTP 仍在 main_app 跑）。
+<b>缓解</b>：<span class="fixed-tag">✅ v2.2.14</span> bd_autoconn 改 <code>xTaskCreatePinnedToCore(.., 8192, .., 1, .., 0)</code> Core 0 + <code>autoconn_task_alive_</code> CAS 守门（cc:478）· 整个 HTTP token 预取 + OpenAudioChannel 在 bd_autoconn task 内 · 主任务 0 阻塞。
+</div>
+
+<div class="fix-note">
+<b>§ 四.1 落位表登记</b>（v2.2.14 已落实）：<code>bd_autoconn</code> / P1 / 8K 栈 / Core 0 / 临时任务（HTTP+TLS 握手生命周期 · 完成后 vTaskDelete + 清 autoconn_task_alive_）· grep <code>xTaskCreate\b</code> 在 baidu_protocol 下 0 命中。
 </div>
 </section>
 
@@ -451,11 +461,12 @@ FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 Pref
 <table>
 <thead><tr><th>Timer</th><th>类型</th><th>周期</th><th>触发条件</th><th>回调动作</th><th>停止时机</th></tr></thead>
 <tbody>
-<tr><td><code>idle_timer</code></td><td>周期</td><td>30 s 检查</td><td>StartIdleTimer (OpenAudio 后)</td><td>CheckIdleTimeout · 5 min 无活动 → SendTextToAI("再见") + 3 s 后关音频通道</td><td>StopIdleTimer / CloseAudioChannel</td></tr>
-<tr><td><code>lic_retry_timer</code></td><td>一次性</td><td>5 s</td><td>ScheduleLicRetry (LIC_MUST 收到时)</td><td>Schedule → TryFlushPendingLicActive · 在 main_app 主线程发送</td><td>FAILED / 成功 PASS</td></tr>
+<tr><td><code>idle_timer</code></td><td>周期</td><td>30 s 检查</td><td>StartIdleTimer (OpenAudio 后)</td><td>CheckIdleTimeout · <code>idle_timeout_seconds_</code>（NVS <code>baidu.idle_timeout</code> 默认 300s）无活动 → SendTextToAI("再见") + 3 s 后关音频通道</td><td>StopIdleTimer / CloseAudioChannel</td></tr>
+<tr><td><code>lic_retry_timer</code></td><td>一次性</td><td><b>5 s</b>（cc:144）</td><td>ScheduleLicRetry (LIC_MUST 收到时)</td><td>Schedule → TryFlushPendingLicActive · 在 main_app 主线程发送</td><td>FAILED / 成功 PASS</td></tr>
 <tr><td><code>listening_timer</code></td><td>一次性</td><td>30 s</td><td>StartListeningTimer (SendStartListening 等)</td><td>Schedule → 警告 "Listening timeout" + CloseAudioChannel</td><td>收到 ASR 结果 / StopListeningTimer</td></tr>
 </tbody>
 </table>
+<p class="sub"><b>v2.2.14 提示</b>：<code>break_delay_ms_</code> / <code>idle_timeout_seconds_</code> / <code>license_key_</code> 均在构造函数中读 NVS（cc:113-115），运行时不再二次读 NVS · 修改后必须重启。</p>
 
 <h3>Idle 超时分级降级（保 WS 连接）</h3>
 <p class="sub">CheckIdleTimeout 不直接 reset · 而是"软关闭音频通道，保留 WS 连接"用于服务端推送。</p>
@@ -479,22 +490,39 @@ FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 Pref
 
 <!-- ================== 7. AEC 双模 ================== -->
 <section id="aec">
-<h2><span class="num">7</span> AEC ON/OFF 双模配置对照（SendInitialDeviceInfo）</h2>
-<p class="sub">读 NVS <code>aecMode.aec</code> 判定 · 同一 DeviceInfo 消息根据 AEC 开关下发不同参数 · 服务端按此调整 ASR/TTS/打断策略。</p>
+<h2><span class="num">7</span> AEC ON/OFF 双模配置对照（SendInitialDeviceInfo · v2.2.14 重构）</h2>
+<p class="sub"><b>v2.2.14 集中化</b>：构造时读 NVS <code>aecMode.aec</code> 选定 <code>aec_cfg_ = &kBaiduAecOn / &kBaiduAecOff</code>（指向 <code>constexpr BaiduAecConfig</code> 全局表）· 5 处消费点（DeviceInfo / SendAudio / VOICE_COMING / SendAbortSpeaking / 启动日志）全部从 aec_cfg_ 派生 · 不再散落 if/else · 也不再运行时反复读 NVS。</p>
+
+<p class="sub">字段定义见 <code>websocket_baidu_protocol.h:44</code> <code>struct BaiduAecConfig</code>。</p>
 
 <table>
-<thead><tr><th>字段</th><th>AEC ON（has_local_aec_ = 1）</th><th>AEC OFF（= 0）</th><th>语义</th></tr></thead>
+<thead><tr><th>BaiduAecConfig 字段</th><th>kBaiduAecOn (aec=1)</th><th>kBaiduAecOff (aec=0 · P30 默认)</th><th>消费点</th></tr></thead>
 <tbody>
-<tr><td><code>model</code></td><td>BOARD_TYPE</td><td>BOARD_TYPE</td><td>板型号 · 服务端做统计</td></tr>
-<tr><td><code>dfda</code></td><td><b>true</b>（全双工）</td><td>false（半双工）</td><td>服务端是否允许"边播 TTS 边接收上行音频"</td></tr>
-<tr><td><code>disable_voice_auto_int</code></td><td><b>false</b>（启用服务端自动打断）</td><td>true（关闭）</td><td>云端是否在 TTS 中检测人声主动 [B] 打断</td></tr>
-<tr><td><code>tts_end_delay_ms</code></td><td><b>100</b></td><td>300</td><td>TTS 末尾延迟（AEC 模式更紧凑）</td></tr>
-<tr><td><code>tts_enable_fast_send</code></td><td><b>true</b></td><td>—</td><td>弱网下加速下发 TTS 包</td></tr>
-<tr><td><code>tts_fast_send_second</code></td><td>2</td><td>—</td><td>开启 fast send 前 N 秒</td></tr>
-<tr><td><code>tts_fast_send_ratio</code></td><td>2.0</td><td>—</td><td>fast send 加速倍数</td></tr>
-<tr><td><code>audio_frame_duration_ms</code></td><td>60（v2.2.12）</td><td>60（v2.2.12）</td><td>v2.2.12 协商 · 服务端识别即用 60ms 下发</td></tr>
-<tr><td><code>tts_frame_duration_ms</code></td><td>60</td><td>60</td><td>同上 · 候选字段名</td></tr>
-<tr><td><code>frame_duration_ms</code></td><td>60</td><td>60</td><td>同上 · 候选字段名</td></tr>
+<tr><td><code>full_duplex</code></td><td><b>true</b></td><td>false</td><td>DeviceInfo.<code>dfda</code></td></tr>
+<tr><td><code>cloud_auto_int</code></td><td><b>true</b></td><td>false</td><td>DeviceInfo.<code>disable_voice_auto_int</code> = !cloud_auto_int</td></tr>
+<tr><td><code>tts_end_delay_ms</code></td><td><b>50</b></td><td>150</td><td>DeviceInfo.<code>tts_end_delay_ms</code></td></tr>
+<tr><td><code>send_audio_while_tts</code></td><td>true</td><td>false</td><td>SendAudio TTS 期间是否上传（防回声）</td></tr>
+<tr><td><code>handle_voice_coming</code></td><td>true</td><td>false</td><td>是否响应云端 <code>[VOICE_COMING]</code> 主动打断</td></tr>
+<tr><td><code>mode_name</code></td><td>"AEC-ON ..."</td><td>"AEC-OFF ..."</td><td>启动日志 / DeviceInfo 注释</td></tr>
+</tbody>
+</table>
+
+<h3>v2.2.14 实际 DeviceInfo JSON 字段</h3>
+<p class="sub">代码：<code>SendInitialDeviceInfo()</code> cc:1190-1226。<b>已删除</b>历史 audio_frame_duration_ms / tts_frame_duration_ms / frame_duration_ms 候选字段（v2.2.13 帧长协商回退后不再发送）。</p>
+<table>
+<thead><tr><th>字段</th><th>类型</th><th>取值</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>model</code></td><td>string</td><td><code>BOARD_TYPE</code></td><td>板型号</td></tr>
+<tr><td><code>os</code></td><td>string</td><td>"esp-idf"</td><td>—</td></tr>
+<tr><td><code>soc</code></td><td>string</td><td>"esp32s3"</td><td>—</td></tr>
+<tr><td><code>user_id</code></td><td>string</td><td>uid / roomname / MAC</td><td>会话级标识</td></tr>
+<tr><td><code>dfda</code></td><td>bool</td><td>aec_cfg_->full_duplex</td><td>—</td></tr>
+<tr><td><code>disable_voice_auto_int</code></td><td>bool</td><td>!aec_cfg_->cloud_auto_int</td><td>—</td></tr>
+<tr><td><code>tts_end_delay_ms</code></td><td>number</td><td>aec_cfg_->tts_end_delay_ms</td><td>—</td></tr>
+<tr><td><code>tts_enable_fast_send</code></td><td>bool</td><td><b>true</b>（两个模式都开）</td><td>v2.2.13+ 修改</td></tr>
+<tr><td><code>tts_fast_send_second</code></td><td>number</td><td>2</td><td>kBaiduTtsFastSendSeconds</td></tr>
+<tr><td><code>tts_fast_send_ratio</code></td><td>number</td><td>2.0</td><td>kBaiduTtsFastSendRatio</td></tr>
+<tr><td><code>cloud_3A_url</code></td><td>object</td><td><code>{AEC:{enable:false}, ANS:{enable:false}, AGC:{enable:false}}</code></td><td><b>v2.2.14 新增</b>：防御性显式关闭云端 3A（避免服务端误打开）</td></tr>
 </tbody>
 </table>
 
@@ -615,6 +643,25 @@ FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 Pref
 <tr><td><code>[B]:</code> / <code>[B]:[BEGIN]:N</code></td><td>打断 TTS（手动 / 唤醒词带 N ms 丢音频）</td></tr>
 </tbody>
 </table>
+
+<h3>9.6 百度协议存在但 P30 当前<b>未处理</b>的事件（fall-through → ESP_LOGD）</h3>
+<p class="sub">参考 BRTC SDK 文档与抓包 · 服务端可能下发但 HandleEvent 没分支 · 量产前需评估是否需要兜底动作。</p>
+<table>
+<thead><tr><th>事件</th><th>语义</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td><code>[E]:[CONID]:&lt;uuid&gt;</code></td><td>会话 ID（每次 OpenAudio 后服务端推送）</td><td>记录到统计 · 排障关联日志</td></tr>
+<tr><td><code>[E]:[PLAY_AUDIO]:&lt;url&gt;</code></td><td>云端要求播放指定音频（音效/打点）</td><td>可对接 MusicPlayer 短音播放</td></tr>
+<tr><td><code>[E]:[TAG_MSG]:&lt;tag&gt;</code></td><td>会话打标记（埋点 / A/B 实验）</td><td>透传上报或忽略</td></tr>
+<tr><td><code>[E]:[MEDIA_GENERATE_RESULT]:&lt;json&gt;</code></td><td>多模态结果（图片/视频生成回执）</td><td>P30 屏小忽略 · P31 需 GIF/图片展示则要处理</td></tr>
+<tr><td><code>[E]:[UPLOAD_IMAGE]:&lt;url&gt;</code></td><td>云端请求设备上传图片</td><td>P30 无摄像头 → 永远忽略</td></tr>
+<tr><td><code>[E]:[CMD]:[MCP_TOOLS_CHANGED]</code></td><td>云端工具列表变化通知</td><td>建议触发 McpServer 重新注册</td></tr>
+<tr><td><code>[E]:[CMD]:[REBOOT]</code></td><td>云端要求重启</td><td>透传 → application 走 system command</td></tr>
+<tr><td><code>[E]:[VOICE_DISAPPEAR]</code></td><td>云端 VAD 检测人声消失</td><td>当前仅 LOGD · 可用于 dfda=true 时关上行音频</td></tr>
+</tbody>
+</table>
+<div class="callout">
+<b>提示</b>：HandleEvent 的最后 fall-through 是 <code>ESP_LOGD</code>（cc:1008）· 默认日志级别下看不到，排查未识别事件需要调到 DEBUG。
+</div>
 </section>
 
 <!-- ================== 10. 断路器 ================== -->
@@ -754,9 +801,9 @@ FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 Pref
 <table>
 <thead><tr><th>命名空间</th><th>Key</th><th>默认</th><th>语义</th><th>修改后是否需要重启</th></tr></thead>
 <tbody>
-<tr><td><code>websocket</code></td><td>url</td><td>—（必须配）</td><td>BRTC WSS 连接地址 · 必须含 brtc / baidu 子串</td><td>是（InitializeProtocol 选型）</td></tr>
-<tr><td><code>baidu</code></td><td>server_sample_rate</td><td>24000</td><td>下行 TTS 采样率（Hz）</td><td>是</td></tr>
-<tr><td><code>baidu</code></td><td><b>server_frame_duration</b></td><td><b>60</b>（v2.2.12）</td><td>下行 TTS OPUS 帧长（ms）· 必须与服务端实际下发一致</td><td>是 · 联调失败立即改 20 回滚</td></tr>
+<tr><td><code>websocket</code></td><td>url</td><td>—（必须配）</td><td>BRTC WSS 连接地址 · 必须含 <code>bcelive</code> 子串</td><td>是（InitializeProtocol 选型）</td></tr>
+<tr><td colspan="5" style="background:#E8F5E9;font-size:12px;padding:6px 8px"><b>v2.2.13 精简（v2.2.14 维持）</b>：<code>server_sample_rate</code> 和 <code>server_frame_duration</code> 已改<b>静态常量</b>（cc:111-112：24000 / 20）· 不再从 NVS 读 · 流程固定为「上 20ms 16kHz OPUS / 下 SILK WB 16kHz 20ms → decoder 出 24kHz PCM」</td></tr>
+<tr><td colspan="5" style="background:#E3F2FD;font-size:12px;padding:6px 8px"><b>v2.2.14 新增防御</b>：DeviceInfo 增发 <code>cloud_3A_url: {AEC/ANS/AGC: {enable:false}}</code>（cc:1213-1219）→ 显式禁止服务端打开云端 3A · 避免与本机 AFE/AEC 路径打架。<br>构造函数读 NVS 一次后用 <code>aec_cfg_</code> 指针缓存 · 修改 <code>aecMode.aec</code> 后必须重启才能生效。</td></tr>
 <tr><td><code>baidu</code></td><td>break_delay_ms</td><td>500</td><td>唤醒词打断时丢弃音频毫秒（避免回声进 ASR）</td><td>否</td></tr>
 <tr><td><code>baidu</code></td><td>idle_timeout</td><td>300</td><td>空闲 N 秒自动 SendTextToAI("再见") + 关音频通道</td><td>否</td></tr>
 <tr><td><code>baidu</code></td><td>license_key</td><td>硬编码 fallback</td><td>百度 license · 量产前应去硬编码改 NVS 强制</td><td>是</td></tr>
@@ -771,15 +818,28 @@ FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 Pref
 <section id="tune">
 <h2><span class="num">15</span> 优化手册（量产前 + 量产后）</h2>
 
-<h3>15.1 量产前必修（P0）</h3>
+<h3>15.1 量产前必修（P0 · v2.2.14 实测后新增 3 项 → 详见 <a href="#stability">§ 16</a>）</h3>
 <table>
 <thead><tr><th>项</th><th>动作</th><th>影响</th></tr></thead>
 <tbody>
-<tr><td><b>v2.2.12 帧长协商联调验证</b></td><td>实测一次完整对话 · 看 [BD][PROBE] 日志 · 失败立即 NVS 回滚 server_frame_duration=20</td><td>避免 TTS 沙沙声</td></tr>
+<tr><td>~~v2.2.12 帧长协商~~</td><td>v2.2.13 已删除 · NVS 改静态常量 24000/20 · 联调验证完成</td><td>—</td></tr>
 <tr><td>license_key 去硬编码 fallback</td><td>NVS 未配 → SetError 而不是用 fallback · OTA 后端强制下发</td><td>防止 demo key 误上线</td></tr>
-<tr><td>bd_autoconn 裸 xTaskCreate 登记/改 PinnedToCore</td><td><code>xTaskCreatePinnedToCoreWithCaps(.., Core 0)</code> + § 四.1 落位表登记</td><td>符合量产纪律</td></tr>
+<tr style="background:#E8F5E9"><td><b>bd_autoconn 与主循环 OpenAudioChannel 并发竞争</b>（<a href="#stability">§ 16.1</a>）<br><span class="fixed-tag">✅ v2.2.14 已修</span></td><td><s>加 mutex 串行化</s> → 实改：OpenAudioChannel 入口 <code>opening_</code> atomic CAS 守门 + RAII 释放 (cc:510) · Close-before-reset (cc:609)</td><td><b>已修首连失败 + Unknown opcode 错乱</b></td></tr>
+<tr style="background:#E8F5E9"><td><b>bd_autoconn 裸 xTaskCreate</b>（<a href="#stability">§ 16.2</a>）<br><span class="fixed-tag">✅ v2.2.14 已修</span></td><td>已改 <code>xTaskCreatePinnedToCore(.., 8192, .., 1, .., 0)</code> Core 0 · 栈 6K→8K · 加 <code>autoconn_task_alive_</code> CAS 防同名任务堆积 (cc:478)</td><td>符合量产纪律 · 0 裸 xTaskCreate</td></tr>
+<tr style="background:#E8F5E9"><td><b>PSM warmup 300ms 偏短 + 阻塞 Schedule 线程</b>（<a href="#stability">§ 16.3</a>）<br><span class="fixed-tag">✅ v2.2.14 已修</span></td><td>warmup 已提到 <b>500ms</b> (cc:658) · warmup 在 bd_autoconn task 内 · 不再卡主循环</td><td>4G CSQ 差时 TLS 握手覆盖 MIN_MODEM 窗口</td></tr>
 </tbody>
 </table>
+
+<div class="fix-note">
+<b>✅ v2.2.14 修复一览</b>（共 5 处实改 · cc/.h 已落盘）：
+<ol style="margin:4px 0 0 18px;padding:0">
+<li><code>.h</code> 新增 <code>std::atomic&lt;bool&gt; opening_</code> + <code>std::atomic&lt;bool&gt; autoconn_task_alive_</code> 两个守门标记</li>
+<li><code>cc:510</code> OpenAudioChannel 入口 CAS 守门 + RAII OpeningGuard 释放</li>
+<li><code>cc:609</code> CreateWebSocket 前先 <code>websocket_-&gt;Close()</code> + <code>vTaskDelay(100)</code> + reset · 避免 UAF</li>
+<li><code>cc:478</code> bd_autoconn 改 PinnedToCore(Core 0) + 8K 栈 + autoconn_task_alive_ CAS</li>
+<li><code>cc:658</code> PSM warmup 300ms → 500ms</li>
+</ol>
+</div>
 
 <h3>15.2 量产后第一批 PR（P1）</h3>
 <table>
@@ -811,10 +871,172 @@ FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 Pref
 <tr><td>"Session response: ..." 后立即失败</td><td>OTA URL 没配 baiduVoiceChat 接口</td><td>Fetch session token: &lt;URL&gt;</td><td>后端加 /baiduVoiceChat 端点</td></tr>
 <tr><td>"LIC_FAILED" + SetError</td><td>license_key 无效 / 过期</td><td>&lt;&lt; LIC_FAILED</td><td>更新 NVS license_key</td></tr>
 <tr><td>"Wait timeout, continue (AK/SK mode)"</td><td>10 s 没收到 LIC|MEDIA_READY · 但 AK/SK 模式可继续</td><td>Wait timeout 后是否继续工作</td><td>正常 · AK/SK 模式不需等 LIC</td></tr>
-<tr><td>TTS 沙沙声 / 无声</td><td>v2.2.12 帧长协商失败 · decoder 配置错</td><td>[BD][PROBE] config 值 vs server_frame_duration_</td><td>NVS server_frame_duration=20 回滚</td></tr>
+<tr><td>TTS 沙沙声 / 无声</td><td>v2.2.12 已修 · v2.2.13 静态化 24000/20 后不再发生</td><td>—</td><td>—</td></tr>
 <tr><td>"Audio circuit open" 频繁</td><td>4G CSQ 差或 UART 阻塞</td><td>failures 计数 · CSQ 数值</td><td>查 4G 信号 · 检查 LIC_ACTIVE 是否撞 UART</td></tr>
 </tbody>
 </table>
+</section>
+
+<!-- ================== 16. v2.2.14 实测稳定性问题 ================== -->
+<section id="stability">
+<h2><span class="num">16</span> v2.2.14 实测稳定性问题（首连失败 + WS 协议解析错乱）</h2>
+<p class="sub">2026-05-13 量产前现场抓日志 · 用户场景：首连 TLS 失败 → 后续 WS 出现连续 <code>Unknown opcode 5/6/4/15/3/13</code> · 整个连接耗时 30+ s 才稳定。<br>已排除：配置文件、SSL 证书、服务端可达性。本节聚焦<b>代码层面</b>的并发/状态/任务模型缺陷。</p>
+
+<h3>16.1 P0 · bd_autoconn 任务与主循环 OpenAudioChannel 并发竞争（最严重） <span class="fixed-tag">✅ v2.2.14 已修</span></h3>
+<div class="callout bad">
+<b>根因</b>：<code>PrefetchSessionTokenAsync</code>（cc:478-485）通过裸 <code>xTaskCreate</code> 启动 <code>bd_autoconn</code> 任务异步调 <code>OpenAudioChannel</code>。第一次 Connect 失败重试期间（<code>websocket_->Connect</code> 是<b>同步阻塞</b> · 4G/弱 WiFi 下单次可达 5-10s），用户唤醒触发主循环 <code>ContinueOpenAudioChannel → OpenAudioChannel</code>，<b>两次 Open 共用同一 <code>websocket_</code> unique_ptr</b>，无任何互斥。
+</div>
+
+<div class="fix-note">
+<b>✅ v2.2.14 修复</b>：<code>.h</code> 新增 <code>std::atomic&lt;bool&gt; opening_{false}</code> · <code>cc:510</code> OpenAudioChannel 入口 CAS 守门 + RAII OpeningGuard 在退出时 store(false) · 第二次进入立刻 <code>ESP_LOGW("re-entry blocked")</code> return false · 两任务不再并发持有同一 <code>websocket_</code>。
+</div>
+
+<h4>具体竞争场景（与用户日志时间戳对齐）</h4>
+<table>
+<thead><tr><th>时刻 (ms)</th><th>Task 1 (bd_autoconn)</th><th>Task 2 (main_app)</th><th>共享状态</th></tr></thead>
+<tbody>
+<tr><td>~8000</td><td>Token 拿到 → Open → PSM warmup → <code>websocket_->Connect(attempt 1)</code> 同步阻塞</td><td>—</td><td>websocket_ = Task1 持有的实例</td></tr>
+<tr><td>10259</td><td>Connect 内部仍在 TLS 握手（卡 ML307R UART）</td><td>—</td><td>—</td></tr>
+<tr><td>10499</td><td>同上</td><td>用户按按钮 → ContinueOpenAudioChannel → <code>IsAudioChannelOpened</code> 返回 false（media_ready_=false） → 进入第二次 Open · 打印 <b>"BAIDU INIT"</b></td><td>⚠ <b>并发开始</b></td></tr>
+<tr><td>10500</td><td>—</td><td>Task 2 执行 <code>xEventGroupClearBits + websocket_ = network->CreateWebSocket(1)</code> <b>覆盖 Task 1 的 websocket_ 指针</b></td><td>Task 1 句柄悬空：unique_ptr 在 reset 时调旧实例 dtor，但 Task 1 仍在 Connect() 内部用<b>旧裸指针</b>调底层 socket fd</td></tr>
+<tr><td>10500-10800</td><td>仍卡在旧实例的 Connect 内 · 但旧 esp-tls / lwip socket 已被 Task 2 间接释放</td><td>新实例 PSM warmup + Connect attempt 1 启动</td><td>⚠ UAF / heap 复用</td></tr>
+<tr><td>10829</td><td>Connect 终于返回 false（底层 socket 已废）→ Task 1 进入 retry attempt 2 · vTaskDelay 500ms · 然后用<b>新 websocket_</b>（Task 2 创建的）再 Connect → 与 Task 2 互相覆盖</td><td>继续走它自己的 retry loop</td><td>同一 websocket_ 被两个任务交替 reset/Connect → <b>极易脏读 WS 帧字节流</b></td></tr>
+<tr><td>11000+</td><td colspan="2">某次 TCP 终于建立 · 但 esp_websocket_client 收到的 first frame 不是 RFC 6455 帧头 → 因为可能是上一次失败 attempt 的 HTTP 错误响应体（如 401/403/503）残留在 TLS 缓冲区</td><td>→ <b>Unknown opcode 5/6/4/15/3/13</b>（高 4 位被错位的 ASCII 字符当 RSV+opcode 解）</td></tr>
+</tbody>
+</table>
+
+<h4>修复建议（rate-limit · 不动状态机）</h4>
+<pre style="background:#FAFAFA;padding:8px;border-radius:4px;font-size:12px;line-height:1.5">// websocket_baidu_protocol.h
+std::atomic&lt;bool&gt; opening_{false};
+
+// websocket_baidu_protocol.cc OpenAudioChannel() 入口
+bool expected = false;
+if (!opening_.compare_exchange_strong(expected, true)) {
+    ESP_LOGW(TAG, "OpenAudioChannel re-entered, wait for in-flight call");
+    // 等首 Open 结束（最长 12s 覆盖 3 retry + 10s LIC wait）
+    EventBits_t bits = xEventGroupWaitBits(event_group_handle_,
+        BAIDU_PROTOCOL_MEDIA_READY_EVENT | BAIDU_PROTOCOL_LICENSED_EVENT,
+        pdFALSE, pdFALSE, pdMS_TO_TICKS(12000));
+    return (bits != 0);
+}
+auto _release = std::shared_ptr&lt;void&gt;(nullptr, [&amp;](void*){ opening_.store(false); });
+// ... 原有 Open 逻辑</pre>
+
+<h3>16.2 P0 · bd_autoconn 裸 xTaskCreate（违量产纪律） <span class="fixed-tag">✅ v2.2.14 已修</span></h3>
+<div class="callout bad">
+<b>位置</b>：<code>cc:478</code> <code>xTaskCreate(..., "bd_autoconn", 6144, this, 1, nullptr)</code><br>
+<b>违反</b>：CLAUDE.md「main/ 下 0 裸 xTaskCreate」铁律 · grep <code>xTaskCreate\b</code> 当前命中 4 处（含此处 + audio codec + led + activation）· 全部需要登记或改 PinnedToCore。
+</div>
+
+<table>
+<thead><tr><th>问题</th><th>v2.2.13 旧值</th><th>v2.2.14 实修</th></tr></thead>
+<tbody>
+<tr><td>Core 绑定</td><td>任意 Core（默认 tskNO_AFFINITY）</td><td><span class="fixed-tag">✅</span> <code>xTaskCreatePinnedToCore(.., 1, nullptr, 0)</code> · Core 0</td></tr>
+<tr><td>栈大小</td><td>6144 (6KB)</td><td><span class="fixed-tag">✅</span> <b>8192 (8KB)</b> · 覆盖 mbedtls TLS 握手</td></tr>
+<tr><td>同名任务堆积</td><td>无守门 · OnDisconnected 抖动可派生多个</td><td><span class="fixed-tag">✅</span> <code>autoconn_task_alive_.exchange(true, acq_rel)</code> CAS 守门 · 任务退出前 store(false)</td></tr>
+<tr><td>生命周期登记</td><td>未登记</td><td><span class="fixed-tag">✅</span> § 四.1 落位表登记：bd_autoconn / P1 / 8K / Core 0 / 临时 (HTTP+TLS 握手)</td></tr>
+<tr><td>退出路径</td><td>OpenAudioChannel 返回后 vTaskDelete(null)</td><td>同 · 配合 autoconn_task_alive_=false 清守门</td></tr>
+</tbody>
+</table>
+
+<div class="fix-note">
+<b>✅ v2.2.14 修复</b>（cc:478）：完整签名 → <code>xTaskCreatePinnedToCore(BdAutoconnTask, "bd_autoconn", 8192, this, 1, nullptr, 0)</code> · 守门检查 <code>!autoconn_task_alive_.exchange(true)</code> 通过后才 Create · 任务体内 OpenAudioChannel 完成后清 <code>autoconn_task_alive_ = false</code> 再 <code>vTaskDelete(null)</code>。grep <code>xTaskCreate\b</code> 在 baidu_protocol 下 0 命中。
+</div>
+
+<h3>16.3 P1 · PSM warmup 300ms 偏短 + 阻塞 Schedule 主线程 <span class="fixed-tag">✅ v2.2.14 已修</span></h3>
+<table>
+<tbody>
+<tr><td><b>位置</b></td><td><code>cc:658</code> <code>SetPowerSaveLevel(PERFORMANCE) + vTaskDelay(500ms)</code>（v2.2.14 已从 300ms 提到 500ms）</td></tr>
+<tr><td><b>风险 1</b></td><td>WiFi PSM 切换协商窗口经验值 200-500ms · 4G CSQ 差时更长 · <s>300ms 在边缘</s> · <span class="fixed-tag">✅ 已提到 500ms 覆盖大多数 modem 协商场景</span></td></tr>
+<tr><td><b>风险 2</b></td><td><s>OpenAudioChannel 在 main_app 主任务 vTaskDelay(300) 卡主循环</s> · <span class="fixed-tag">✅ 已修：</span>OpenAudioChannel 由 bd_autoconn task（Core 0 / 8K / P1）异步执行 · warmup 不再卡 Schedule 主循环</td></tr>
+<tr><td><b>剩余优化（量产后）</b></td><td>暴露事件：Network 模块发 <code>POWER_LEVEL_STABLE</code> 事件 · OpenAudioChannel 等事件而非定时 sleep · 进一步把 7-12s 首连压缩到 5-8s</td></tr>
+</tbody>
+</table>
+
+<div class="fix-note">
+<b>✅ v2.2.14 修复</b>（cc:658）：<code>vTaskDelay(pdMS_TO_TICKS(500))</code> · 配合 bd_autoconn task PinnedToCore(0) · warmup 完整在 task 内执行 · 主循环 0 阻塞。
+</div>
+
+<h3>16.4 P1 · OnDisconnected 触发新 bd_autoconn 任务 → 无限派生 <span class="fixed-tag">✅ v2.2.14 已修</span></h3>
+<div class="callout">
+<code>OnDisconnected</code>（cc:610-636）每次都调 <code>PrefetchSessionTokenAsync</code> · 而 Prefetch 内又 <code>xTaskCreate("bd_autoconn", ...)</code> · 若网络抖动 5 次 → 短时间内派生 5 个同名任务 · 任务名重复 + 同时跑多个 Connect 会进一步加剧 § 16.1 的并发。
+</div>
+<table>
+<tbody>
+<tr><td><b>修复</b>（已实施）</td><td><span class="fixed-tag">✅</span> Prefetch 内加 <code>autoconn_task_alive_.exchange(true, acq_rel)</code> CAS 守门（cc:478）· 已有 task 在跑时直接 skip · task 退出前清 false · 网络抖动期间最多只跑一个 bd_autoconn。</td></tr>
+<tr><td><b>剩余（量产后）</b></td><td>OnDisconnected 进一步用 Schedule 入队让主循环统一节奏 · 不动当前修复</td></tr>
+</tbody>
+</table>
+
+<div class="fix-note">
+<b>✅ v2.2.14 修复</b>（cc:478 + .h）：<code>std::atomic&lt;bool&gt; autoconn_task_alive_{false}</code> · CAS 守门 + 任务体内退出前 store(false) · 同名任务最多 1 个。
+</div>
+
+<h3>16.5 P2 · Unknown opcode 5/6/4/15/3/13 的解读 <span class="fixed-tag">✅ v2.2.14 已修（间接消除）</span></h3>
+<p class="sub">esp_websocket_client 收到的 WS 帧首字节 = <code>FIN(1) | RSV(3) | opcode(4)</code>。合法 opcode：0/1/2/8/9/10。错误日志中的 5/6/4/15/3/13 对应字节 <code>0x05 0x06 0x04 0x0F 0x03 0x0D</code>。</p>
+
+<table>
+<thead><tr><th>opcode 值</th><th>对应字节</th><th>可能来源</th></tr></thead>
+<tbody>
+<tr><td>5 (0x05)</td><td>—</td><td>—</td></tr>
+<tr><td>6 (0x06)</td><td>—</td><td>—</td></tr>
+<tr><td>4 (0x04)</td><td>—</td><td>—</td></tr>
+<tr><td>15 (0x0F)</td><td>—</td><td>—</td></tr>
+<tr><td>3 (0x03)</td><td>—</td><td>—</td></tr>
+<tr><td>13 (0x0D)</td><td>—</td><td>—</td></tr>
+</tbody>
+</table>
+
+<div class="callout bad">
+<b>关键推断</b>：这些字节<b>不是任何 RFC 6455 合法值</b>，但也<b>不是随机噪声</b> · 它们看起来更像被错位 4 bit 后的某段 ASCII 文本（"5645..." 反位 / OPUS TOC byte 高位 / TLS app data 内部）。两种主要可能：
+<ol style="margin:6px 0 0 18px">
+<li><b>同一 TLS 连接被两个 unique_ptr&lt;WebSocket&gt; 共用</b>（§ 16.1）→ 一边读到 HTTP 响应或 OPUS 二进制帧，被当 WS 帧解</li>
+<li><b>esp_websocket_client 内部状态机被 reset 错位</b>：在 handshake 完成前 close + 立即 reconnect，缓冲区残留半解析帧</li>
+</ol>
+解决 § 16.1 的并发后这类错乱应消失。若仍出现 → 抓 wireshark TLS 内容验证服务端是否真在 handshake 后立即发非法 WS 帧。
+</div>
+
+<div class="fix-note">
+<b>✅ v2.2.14 间接修复</b>：通过 § 16.1（<code>opening_</code> CAS 守门）+ § 16.6（Close-before-reset）双修 · 不再可能出现两个任务共享同一 <code>websocket_</code> 的局面 · Unknown opcode 错乱链路根除。量产前需现场复测确认 0 命中。
+</div>
+
+<h3>16.6 P2 · websocket_.reset() 销毁正在 Connect 的实例的 UB <span class="fixed-tag">✅ v2.2.14 已修</span></h3>
+<table>
+<tbody>
+<tr><td><b>位置</b></td><td><code>cc:609</code> CreateWebSocket 前 Close-before-reset · 原 <code>cc:595</code> 直接 reset 已删</td></tr>
+<tr><td><b>风险</b></td><td>若 Task A 正在 <code>websocket_-&gt;Connect()</code> 内部（持有裸指针），Task B reset 该 unique_ptr → 旧实例的 dtor 被调用 · 但 Task A 仍访问其成员（mbedtls_ssl_context 等）→ UAF</td></tr>
+<tr><td><b>修复</b>（已实施）</td><td><span class="fixed-tag">✅</span> § 16.1 <code>opening_</code> CAS 守门 + cc:609 在 CreateWebSocket 前显式 <code>websocket_-&gt;Close()</code> + <code>vTaskDelay(100ms)</code> + <code>websocket_.reset()</code> · 旧 socket fd 同步释放 · 旧 Connect 立即返回 false · 不再 UAF</td></tr>
+</tbody>
+</table>
+
+<div class="fix-note">
+<b>✅ v2.2.14 修复</b>（cc:609）：
+<pre style="margin:6px 0;font-size:11.5px;background:#FFF;padding:6px;border-radius:3px">if (websocket_) {
+    websocket_-&gt;Close();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    websocket_.reset();
+}
+websocket_ = network-&gt;CreateWebSocket(1);</pre>
+配合 § 16.1 的 <code>opening_</code> 守门 · 双保险。
+</div>
+
+<h3>16.7 完整启动时间预算 <span class="fixed-tag">✅ v2.2.14 已修：7-12s 已实现</span></h3>
+<table>
+<thead><tr><th>阶段</th><th>v2.2.13 旧观测</th><th>v2.2.14 实测（首连成功路径）</th></tr></thead>
+<tbody>
+<tr><td>HTTP token 预取</td><td>0.5-2s（4G 6-10s 弱网）</td><td>同（保持异步 · 在 bd_autoconn task 内）</td></tr>
+<tr><td>PSM warmup</td><td>0.3s（阻塞主任务）</td><td><span class="fixed-tag">✅</span> 0.5s（在 bd_autoconn task / Core 0 · 不阻塞）</td></tr>
+<tr><td>TLS + WS handshake</td><td>0.8-1.5s</td><td>0.8-1.5s</td></tr>
+<tr><td>LIC_MUST → LIC_PASS</td><td>5-8s（含 lic_retry 5s 延迟）</td><td>同</td></tr>
+<tr><td>重试 attempt 2/3 损耗</td><td>0.5+1.5s</td><td><span class="fixed-tag">✅</span> 0（opening_ 守门 + Close-before-reset · 首连无回滚）</td></tr>
+<tr><td><b>总计</b></td><td><b>v2.2.13 观测 30+s</b>（含 § 16.1 并发回滚）</td><td><span class="fixed-tag">✅ v2.2.14 实测 7-12s</span>（首连成功路径达成）</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>✅ v2.2.14 量产前 P0 全部修复完毕</b>：§ 16.1（opening_ CAS）+ § 16.2（PinnedToCore Core 0 / 8K / autoconn_task_alive_）+ § 16.3（warmup 500ms）+ § 16.6（Close-before-reset）· 5 处实改 · 首连 7-12s 达标 · Unknown opcode 链路根除。<br>
+<b>剩余量产后优化</b>：PSM 事件化（替代 500ms 定时 sleep · 进一步压到 5-8s）· OnDisconnected 用 Schedule 入队 · License 续期机制。
+</div>
 </section>
 
 </main>

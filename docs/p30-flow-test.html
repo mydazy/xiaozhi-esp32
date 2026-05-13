@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · FlowEngine 测试 SOP</title>
+<style>
+:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+        --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
+        --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       margin: 0; background: #F5F5F5; color: var(--text); line-height: 1.55; font-size: 14px; }
+header { background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+         color: white; padding: 24px 40px; }
+header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 600; }
+header .meta { opacity: .9; font-size: 12px; }
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav { width: 200px; flex-shrink: 0; background: white; padding: 18px 0;
+      border-right: 1px solid var(--border); position: sticky; top: 0;
+      align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+nav h3 { margin: 0 14px 8px; font-size: 11px; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: .5px; }
+nav a { display: block; padding: 5px 14px; color: var(--text); text-decoration: none;
+        font-size: 13px; border-left: 3px solid transparent; }
+nav a:hover { background: var(--brand-light); border-left-color: var(--brand); color: var(--brand-deep); }
+main { flex: 1; padding: 24px 36px; max-width: 980px; }
+section { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
+             border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
+section h2 .num { display: inline-block; background: var(--brand); color: white;
+                  padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
+section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section h4 { margin: 12px 0 4px 0; font-size: 13.5px; color: var(--text); }
+section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
+code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
+       font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px; color: #C2185B; }
+pre { background: #F8F8F8; border: 1px solid var(--border); border-radius: 6px;
+      padding: 12px 14px; overflow-x: auto; font-size: 12.5px; line-height: 1.5;
+      font-family: "SFMono-Regular", Consolas, monospace; margin: 8px 0; color: var(--text); }
+pre.json { color: #1565C0; }
+pre.bash { background:#263238; color:#ECEFF1; border-color:#37474F; }
+pre.bash .c { color:#78909C; font-style:italic; }
+table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 13px; }
+th { background: #F5F5F5; padding: 6px 9px; text-align: left; border: 1px solid var(--border);
+     font-weight: 600; font-size: 12.5px; }
+td { padding: 5px 9px; border: 1px solid var(--border); vertical-align: top; font-size: 12.5px; }
+tr:nth-child(even) td { background: #FAFAFA; }
+.callout { padding: 10px 14px; border-radius: 6px; margin: 10px 0;
+           border-left: 4px solid var(--text-2); background: #FAFAFA; font-size: 13px; }
+.callout.ok    { border-left-color: var(--ok); background: #E8F5E9; }
+.callout.warn  { border-left-color: var(--warn); background: #FFF3E0; }
+.callout.bad   { border-left-color: var(--bad); background: #FFEBEE; }
+.callout.info  { border-left-color: var(--core0-line); background: var(--core0); }
+ul.compact { padding-left: 18px; margin: 6px 0; }
+ul.compact li { margin: 2px 0; }
+.pill { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+.pill.p0 { background:#FFEBEE; color:var(--bad); }
+.pill.p1 { background:#FFF3E0; color:var(--warn); }
+.pill.smoke { background:#E8F5E9; color:var(--ok); }
+.pill.stress { background:#FFEBEE; color:var(--bad); }
+.checklist { background: #FAFAFA; border: 1px solid var(--border); border-radius: 6px;
+             padding: 10px 14px; margin: 8px 0; }
+.checklist label { display:block; padding: 3px 0; font-size: 13px; }
+.checklist input { margin-right: 8px; transform: scale(1.1); vertical-align: middle; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MyDazy P30 · FlowEngine 测试 SOP</h1>
+  <div class="meta">v1.0 · 2026-05-13 · 配合 docs/p30-flow-review.html 批次 A · 4 项 P0 修复后验证</div>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>目录</h3>
+  <a href="#overview">1. 概览</a>
+  <a href="#push">2. 推送格式</a>
+  <a href="#scripts">3. 测试脚本范例</a>
+  <a href="#p0-tests">4. P0 针对性测试</a>
+  <a href="#logs">5. 日志监控</a>
+  <a href="#tools">6. 推送工具</a>
+  <a href="#regression">7. 回归 checklist</a>
+  <a href="#gate">8. 量产前闸口</a>
+</nav>
+
+<main>
+
+<!-- =============== 1 概览 =============== -->
+<section id="overview">
+<h2><span class="num">1</span> 概览</h2>
+
+<p class="sub">本 SOP 针对 2026-05-13 完成的 4 项 P0 修复（F1+F5/R1/R6）给出针对性回归测试方法。范围限于 <code>main/flow_engine.{h,cc}</code> 与 <code>main/remote_cmd.{h,cc}</code>。</p>
+
+<h3>1.1 配套文档</h3>
+<table>
+<thead><tr><th>文档</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>docs/p30-flow-review.html</code></td><td>26 项发现的完整评审 · P0 来源</td></tr>
+<tr><td><code>docs/p30-flow-engine.html</code></td><td>FlowEngine 深度架构 + 28 项互动扩展</td></tr>
+<tr><td><code>docs/p30-mcp-flows.html</code></td><td>MCP 体系评审（评审标准源头）</td></tr>
+<tr><td><b>本文档</b></td><td>P0 修复后的测试 SOP</td></tr>
+</tbody>
+</table>
+
+<h3>1.2 修复点速查</h3>
+<table>
+<thead><tr><th>编号</th><th>修复点</th><th>核心机制</th><th>测试脚本</th></tr></thead>
+<tbody>
+<tr><td><span class="pill p0">F1</span></td><td>静态栈重入保护</td><td><code>loading_</code> atomic CAS 拒重入</td><td>T-F1 连发 Start</td></tr>
+<tr><td><span class="pill p0">F5</span></td><td>加载期死区消除</td><td><code>loading_</code> 守护 OnDeviceStateChanged</td><td>T-F5 弱网+唤醒</td></tr>
+<tr><td><span class="pill p0">R1</span></td><td>main_loop vTaskDelay 异步化</td><td><code>esp_timer + ScheduleDelayedAction</code></td><td>T-R1 reboot 时闹钟</td></tr>
+<tr><td><span class="pill p0">R6</span></td><td>OnFlow URL 双层 Schedule</td><td>删 OnFlow 外层（Start 内已 Schedule）</td><td>T-R6 latency 打点</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 2 推送格式 =============== -->
+<section id="push">
+<h2><span class="num">2</span> 推送格式 · 三选一</h2>
+
+<p class="sub">设备端 <code>RemoteCmd::Handle()</code> 兼容三种包装（remote_cmd.cc:38-51）。云端正式服务推荐用方式 1，调试用方式 2，本地测试用方式 3。</p>
+
+<h3>2.1 方式 1 · 双层 string-wrapped（生产）</h3>
+<pre class="json">{"type":"custom","payload":{"message":"{\"type\":\"flow\",\"action\":\"start\",\"url\":\"https://xxx/test.json\"}"}}</pre>
+
+<h3>2.2 方式 2 · object 直传（调试）</h3>
+<pre class="json">{"type":"custom","payload":{"message":{"type":"flow","action":"start","url":"https://xxx/test.json"}}}</pre>
+
+<h3>2.3 方式 3 · 顶层格式（本地最简）</h3>
+<pre class="json">{"type":"flow","action":"start","url":"https://xxx/test.json"}</pre>
+
+<h3>2.4 action 列表</h3>
+<table>
+<thead><tr><th>action</th><th>额外字段</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>start</code></td><td><code>url</code> 或 <code>script</code> 二选一</td><td>启动脚本 · URL 走 HTTP 拉取 · script 直传 JSON 对象</td></tr>
+<tr><td><code>stop</code></td><td>—</td><td>停止 + 清 items_</td></tr>
+<tr><td><code>restart</code></td><td>—</td><td>从头开始当前脚本</td></tr>
+<tr><td><code>status</code></td><td>—</td><td>设备屏幕显示 + LOG 当前状态</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 3 测试脚本 =============== -->
+<section id="scripts">
+<h2><span class="num">3</span> 测试脚本范例（4 例）</h2>
+
+<h3>3.1 <span class="pill smoke">T1</span> 短脚本 · 冒烟（10s 内验完）</h3>
+<pre class="json">{
+  "name": "T1冒烟",
+  "loop": false,
+  "items": [
+    {"type":"tts","text":"测试一"},
+    {"type":"tts","text":"测试二","delay_ms":1000}
+  ]
+}</pre>
+<p class="sub">期望：屏幕 Alert "开始播放: 2 项" · 第一句完后等 1s · 第二句完后自动 Idle · 共 ~8s。</p>
+
+<h3>3.2 <span class="pill stress">T2</span> 长脚本 · F5 压测（30 项循环）</h3>
+<pre class="json">{
+  "name": "T2压测",
+  "loop": true,
+  "resume_delay_s": 5,
+  "items": [
+    {"type":"tts","text":"第一项，请等待"},
+    {"type":"ttai","text":"用一句话夸夸今天的小听众"},
+    {"type":"tts","text":"第三项"}
+    // ... 复制扩展到 30 项
+  ]
+}</pre>
+<p class="sub">期望：循环播放不停 · 1 小时后 free heap 稳定（INT &gt; 60KB 红线）· loop_count_ 增长。</p>
+
+<h3>3.3 <span class="pill smoke">T3</span> WS 直推 script（不需 HTTP 服务器）</h3>
+<pre class="json">{"type":"flow","action":"start","script":{
+  "name":"T3直推","loop":false,
+  "items":[{"type":"tts","text":"WS 推送测试"}]
+}}</pre>
+<p class="sub">期望：跳过 HTTP 拉取 · 直接 ParseScript → 播放。日志 <code>flow start: inline script (N bytes)</code>。</p>
+
+<h3>3.4 <span class="pill smoke">T4</span> 远程控制集</h3>
+<pre class="json">{"type":"flow","action":"stop"}
+{"type":"flow","action":"restart"}
+{"type":"flow","action":"status"}</pre>
+<p class="sub">在 T2 运行中依次推送。期望：stop → "直播伴侣停止" Alert · restart → 从第 1 项重播 · status → 屏幕显示当前进度。</p>
+
+<h3>3.5 测试服务器（最简 Python · 拉脚本场景）</h3>
+<pre class="bash">python3 -m http.server 8000 --directory /path/to/scripts/
+<span class="c"># 然后推送 url 为 http://&lt;your-ip&gt;:8000/T1.json</span></pre>
+</section>
+
+<!-- =============== 4 P0 针对性测试 =============== -->
+<section id="p0-tests">
+<h2><span class="num">4</span> P0 针对性测试矩阵</h2>
+
+<table>
+<thead><tr><th>#</th><th>测试目标</th><th>操作步骤</th><th>期望日志 / 现象</th></tr></thead>
+<tbody>
+<tr>
+<td><span class="pill p0">F1-a</span></td>
+<td>静态栈重入不崩</td>
+<td>间隔 100ms 推 5 次 T2 url（用脚本批量）</td>
+<td>① 4 行 <code>Start: 上次 load_task 未结束，拒绝重入</code><br>② 设备不崩 · 第一次脚本正常播<br>③ free heap 不掉</td>
+</tr>
+<tr>
+<td><span class="pill p0">F1-b</span></td>
+<td>Stop 后立即 Start 不卡</td>
+<td>推 T2 url → 等 1s → 推 stop → 立即推 T1 url</td>
+<td>T1 应成功启动 · <b>不会</b>被"拒绝重入"卡住<br>（loading_ 被 Stop 清掉）</td>
+</tr>
+<tr>
+<td><span class="pill p0">F5-a</span></td>
+<td>加载期唤醒不被覆盖</td>
+<td>1. 限速路由器 50KB/s 或脚本服务器加 3s sleep<br>2. 推 T2 url<br>3. 看到 "加载脚本中..." Alert 后 2s 内说"嗨小爱"</td>
+<td>① 用户对话正常进入 Speaking<br>② 加载完成后 <b>不</b>触发 <code>开始播放</code> 强切<br>③ log 含 <code>OnDeviceStateChanged</code> 早 return（loading_=true）</td>
+</tr>
+<tr>
+<td><span class="pill p0">F5-b</span></td>
+<td>加载中 Stop 取消</td>
+<td>推 T2 url（弱网下需 5-15s 加载）→ 1s 内推 stop</td>
+<td>① 日志含 <code>Start: 入队 main_loop 后被 Stop 取消</code><br>  或 <code>LoadScriptTask: 入队 main_loop 后被 Stop 取消</code><br>② 不切 kPlaying · 不出 "开始播放" Alert</td>
+</tr>
+<tr>
+<td><span class="pill p0">F5-c</span></td>
+<td>正常路径不受影响</td>
+<td>WiFi 良好 · 推 T1 url</td>
+<td>① <code>Script started: 2 items</code><br>② T1 正常播完<br>③ <code>loading_</code> 清除（grep <code>loading.*false</code>）</td>
+</tr>
+<tr>
+<td><span class="pill p0">R1-a</span></td>
+<td>reboot 时闹钟准时</td>
+<td>设闹钟 30s 后响 → 25s 时推 <code>{"type":"reboot"}</code><br>→ 等闹钟时间到</td>
+<td>① 闹钟仍准时响（≤200ms 偏差）<br>② 修复前会延迟 2s<br>③ 日志 <code>AlarmRinger.Start</code> 时间戳 ≈ 闹钟设定时间</td>
+</tr>
+<tr>
+<td><span class="pill p0">R1-b</span></td>
+<td>OTA 时 LVGL 不卡</td>
+<td>推 <code>{"type":"ota"}</code> · 观察屏幕</td>
+<td>① "检查更新 / 检查激活状态" Alert 立即显示<br>② 1.5s 内屏幕响应正常（按键 / 状态切换）<br>③ <b>不</b>出现 1-2s 黑屏静止</td>
+</tr>
+<tr>
+<td><span class="pill p0">R1-c</span></td>
+<td>Sleep 时 LVGL 不卡</td>
+<td>推 <code>{"type":"sleep","gyro":true}</code></td>
+<td>① "解绑设备 / 进入休眠" Alert 立即显示<br>② 3s 后正常进入 deep sleep<br>③ 期间 main_loop 仍能处理事件（如再推 status 应响应或入队）</td>
+</tr>
+<tr>
+<td><span class="pill p0">R6</span></td>
+<td>start latency 减半</td>
+<td>推 T1 url · 测从 OnFlow 入口到 "加载脚本中..." Alert</td>
+<td>修复前 ~40ms（2 个 main_loop tick）<br>修复后 ~20ms（1 个 tick）</td>
+</tr>
+<tr>
+<td><span class="pill p1">综合</span></td>
+<td>修复链路联动</td>
+<td>1. 弱网 + 推 T2 url<br>2. 加载期推 stop<br>3. 立即推 reboot<br>4. 等 reboot 完启动</td>
+<td>① loading_ 清除链路完整<br>② reboot 不阻塞 main_loop<br>③ 重启后 RemoteCmd 构造日志含 <code>remote_delay</code> esp_timer 创建</td>
+</tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>⚠ 弱网测试是 P0 关键</b><br>
+F5 死区只在网络慢 200ms-15s 期间暴露，本地高速网很难复现。<b>必须用路由器限速或加 sleep 的 mock 服务器</b>，否则等于没测。
+</div>
+</section>
+
+<!-- =============== 5 日志监控 =============== -->
+<section id="logs">
+<h2><span class="num">5</span> 日志监控关键字</h2>
+
+<h3>5.1 修复点核心日志</h3>
+<pre class="bash"><span class="c"># F1 + F5 · 重入保护与加载期守护</span>
+grep -E "load_task|loading|拒绝重入|入队 main_loop 后被 Stop"
+
+<span class="c"># R1 · 异步延后</span>
+grep -E "ScheduleDelayedAction|DelayTimerCallback|remote_delay"
+
+<span class="c"># R6 · OnFlow 单层 Schedule</span>
+grep "flow start: http"
+
+<span class="c"># 系统健康（修复后应连续 · 不再有 2-3s 中断）</span>
+grep CLOCK_TICK   <span class="c"># 每 10s 必有一行 · 间隔异常 = main_loop 被阻塞</span>
+
+<span class="c"># 闹钟准时</span>
+grep AlarmRinger  <span class="c"># Start 时间戳 vs 闹钟设定时间</span></pre>
+
+<h3>5.2 异常日志（出现即问题）</h3>
+<table>
+<thead><tr><th>日志</th><th>含义</th><th>处理</th></tr></thead>
+<tbody>
+<tr><td><code>Failed to create load task</code></td><td>静态 TCB 已被占（F1 拒重入失败）</td><td>查 loading_ atomic 是否泄漏</td></tr>
+<tr><td><code>Guru Meditation Error</code> · SP 异常</td><td>栈溢出（F1 修复失败的标志）</td><td>立即回滚 + 检查 loading_ CAS 逻辑</td></tr>
+<tr><td><code>CLOCK_TICK</code> 间隔 &gt; 12s</td><td>main_loop 被阻塞（R1 修复失败）</td><td>查是否还有 vTaskDelay &gt; 100ms 在 Schedule lambda 内</td></tr>
+<tr><td>加载期触发 <code>开始播放</code> Alert 但用户对话已开始</td><td>F5 守护失效</td><td>查 OnDeviceStateChanged 入口 loading_ 早 return</td></tr>
+</tbody>
+</table>
+
+<h3>5.3 性能监控点</h3>
+<pre class="bash"><span class="c"># 跑 T2 长脚本 1h 后检查（CLAUDE.md 红线 INT &gt; 60KB）</span>
+heap_caps_get_free_size(MALLOC_CAP_INTERNAL)   <span class="c"># 应稳定 &gt; 60KB</span>
+heap_caps_get_free_size(MALLOC_CAP_SPIRAM)     <span class="c"># 应稳定</span>
+heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)  <span class="c"># 碎片化检测</span></pre>
+</section>
+
+<!-- =============== 6 推送工具 =============== -->
+<section id="tools">
+<h2><span class="num">6</span> 推送工具 · 三选一</h2>
+
+<h3>6.1 A · Python WS client（最简）</h3>
+<pre>import asyncio, websockets, json
+
+async def push(msg):
+    async with websockets.connect("ws://&lt;device_ip&gt;:&lt;port&gt;") as ws:
+        await ws.send(json.dumps(msg))
+        print("sent:", msg)
+
+# 单次推送
+asyncio.run(push({
+    "type":"flow","action":"start",
+    "script":{"name":"T1","loop":False,
+              "items":[{"type":"tts","text":"测试"}]}
+}))
+
+# 连发 5 次（F1 重入测试）
+async def burst():
+    for i in range(5):
+        await push({"type":"flow","action":"start",
+                    "url":f"http://&lt;ip&gt;:8000/T2.json?n={i}"})
+        await asyncio.sleep(0.1)
+asyncio.run(burst())</pre>
+
+<h3>6.2 B · 服务端管理后台</h3>
+<p>如果一报目 / mydazy 自己的服务端已有 device 命令接口（参照 OnReload 调 SwitchProtocol 的协议），直接通过后台 API 下发即可。</p>
+
+<h3>6.3 C · 设备调试串口（USB）</h3>
+<p>如果板子开了串口注入通道（OpenClaw 调试套件），可直接 echo JSON 进串口。</p>
+
+<h3>6.4 弱网 mock 服务器（F5 必备）</h3>
+<pre>from flask import Flask, send_file
+import time
+app = Flask(__name__)
+
+@app.route('/T2.json')
+def slow():
+    time.sleep(3)   # 模拟 3s 加载延迟
+    return send_file('T2.json')
+
+# python3 slow_server.py · 设备拉 http://&lt;ip&gt;:5000/T2.json</pre>
+</section>
+
+<!-- =============== 7 回归 checklist =============== -->
+<section id="regression">
+<h2><span class="num">7</span> 回归测试 checklist</h2>
+
+<h3>7.1 前置准备</h3>
+<div class="checklist">
+<label><input type="checkbox"> <code>idf.py build</code> 通过（本次修改未引入新依赖，应顺利编过）</label>
+<label><input type="checkbox"> 烧录后启动日志看到 RemoteCmd 构造（含 <code>remote_delay</code> esp_timer 创建）</label>
+<label><input type="checkbox"> 设备 WS 连上服务端 · grep "Audio channel opened" 日志</label>
+<label><input type="checkbox"> HTTP 测试服务器就位（python http.server 或 Flask mock）</label>
+<label><input type="checkbox"> 弱网环境备好（路由器限速 / Flask sleep 二选一）</label>
+</div>
+
+<h3>7.2 必跑测试（按顺序）</h3>
+<div class="checklist">
+<label><input type="checkbox"> ① T1 冒烟（&lt; 30s · 验最基础链路）</label>
+<label><input type="checkbox"> ② T3 WS 直推（验 StartWithScript 路径独立）</label>
+<label><input type="checkbox"> ③ T4 stop/restart/status 三连</label>
+<label><input type="checkbox"> ④ F1-a 重入压测（5 次连发 · 验拒重入日志）</label>
+<label><input type="checkbox"> ⑤ F1-b Stop 后 Start 不卡</label>
+<label><input type="checkbox"> ⑥ <b>F5-a 加载期唤醒（弱网 · 关键 · 量产 blocker）</b></label>
+<label><input type="checkbox"> ⑦ F5-b 加载中 Stop 取消</label>
+<label><input type="checkbox"> ⑧ <b>R1-a reboot 时闹钟准时（30s 实测）</b></label>
+<label><input type="checkbox"> ⑨ R1-b OTA 时 LVGL 不卡</label>
+<label><input type="checkbox"> ⑩ R1-c Sleep 时 LVGL 不卡</label>
+</div>
+
+<h3>7.3 长稳测试（可选 · 量产前 1 周）</h3>
+<div class="checklist">
+<label><input type="checkbox"> T2 长脚本 1 小时（看 INT/PSRAM 是否稳定）</label>
+<label><input type="checkbox"> 24h soak：随机推 start/stop/reboot/sleep（脚本化）</label>
+<label><input type="checkbox"> 多设备并发（≥ 3 台同时跑 T2）</label>
+</div>
+
+<h3>7.4 性能验证（可选）</h3>
+<div class="checklist">
+<label><input type="checkbox"> R6 start latency 打点：~20ms（修复前 ~40ms）</label>
+<label><input type="checkbox"> R1 main_loop p99 阻塞：&lt;50ms（修复前 2-3s）</label>
+<label><input type="checkbox"> Free heap INT &gt; 60KB（CLAUDE.md 红线）</label>
+</div>
+</section>
+
+<!-- =============== 8 量产前闸口 =============== -->
+<section id="gate">
+<h2><span class="num">8</span> 量产前最后一道闸</h2>
+
+<div class="callout bad">
+<b>🚦 必过项（缺一不可）</b><br>
+① T1 冒烟过<br>
+② <b>F5-a 弱网加载期唤醒过</b>（这是 P0 中的 P0 · 直播伴侣量产事故根因）<br>
+③ R1-a reboot 时闹钟准时<br>
+④ Free heap INT 在 T2 长脚本 1h 后仍 &gt; 60KB<br>
+⑤ Guru Meditation 0 出现
+</div>
+
+<div class="callout warn">
+<b>⏸ 留到批次 B（量产前 1-2 周）</b><br>
+F6 OnDeviceStateChanged TOCTOU · F7 recap prompt 长度 · F8 Listening 强切宽限 · F9 PlayCurrentItem 持锁内 Send<br>
+R2 stt_post TCB yield · R3 OnDownload 死代码 · R7 OnMusicPlay 顺序 · R11 dispatch 表化
+</div>
+
+<div class="callout ok">
+<b>✅ 测试通过后</b><br>
+① 在 <code>docs/p30-flow-review.html § 8</code> 追加"已修 log"小节，与 mcp-flows.html § 8.4 同款体例<br>
+② 把本 SOP 链接挂到团队飞书"P30 量产看板"<br>
+③ 把测试脚本 T1-T4 收入 <code>main/test/</code> 目录（如有）
+</div>
+
+<h3>8.1 测试执行模板（复制到 PR 描述）</h3>
+<pre>## P0 修复测试执行记录
+
+测试日期: 2026-05-__
+固件版本: ___
+测试设备: P30-WiFi / P30-4G / P31（圈选）
+测试人: ___
+
+| 项 | 结果 | 备注 |
+|---|---|---|
+| T1 冒烟 | ✅/❌ |  |
+| F1-a 重入压测 | ✅/❌ |  |
+| F1-b Stop+Start | ✅/❌ |  |
+| F5-a 弱网唤醒 | ✅/❌ |  |
+| F5-b Stop 取消 | ✅/❌ |  |
+| R1-a 闹钟准时 | ✅/❌ |  |
+| R1-b OTA 不卡 | ✅/❌ |  |
+| R1-c Sleep 不卡 | ✅/❌ |  |
+| R6 latency | ___ ms |  |
+| 1h Free heap | ___ KB |  |
+
+闸口判定: 通过 / 不通过
+签名: ___</pre>
+</section>
+
+</main>
+</div>
+
+</body>
+</html>

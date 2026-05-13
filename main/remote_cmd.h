@@ -2,6 +2,8 @@
 #define REMOTE_CMD_H
 
 #include <cJSON.h>
+#include <esp_timer.h>
+#include <functional>
 #include <string>
 #include <atomic>
 
@@ -38,6 +40,7 @@ class Application;
  * │ music_resume  │ {"type":"music_resume"}                                     │
  * │ update_prompt │ {"type":"update_prompt","model_type":2,"prompt":"..."}      │
  * │ mic_calibrate │ {"type":"mic_calibrate"}
+ * │ wakeword      │ {"type":"wakeword","mode":"afe|custom","text":"..."} · 无 mode = 查询
  * └───────────────┴────────────────────────────────────────────────────────────┘
  *
  * 完整示例:
@@ -48,12 +51,15 @@ class Application;
 class RemoteCmd {
 public:
     explicit RemoteCmd(Application* app);
+    ~RemoteCmd();
     bool Handle(const cJSON* payload);
 
     // STT 文本回调：在后台 POST 到 stt_url（由 Application 在收到完整 STT 时调用）
     void PostSttText(const std::string& text);
 
 private:
+    void ScheduleDelayedAction(int ms, std::function<void()> action);
+    static void DelayTimerCallback(void* arg);
     void OnReboot();
     void OnOta();
     void OnReconnect();
@@ -74,10 +80,14 @@ private:
     void OnMusicResume();
     void OnEduPool(const cJSON* msg);
     void OnUpdatePrompt(const cJSON* msg);
+    void OnWakeWord(const cJSON* msg);
 
     Application* app_;
     std::string stt_url_;  // 运行时缓存，启动时从 NVS 加载
     std::atomic<bool> stt_posting_{false};  // 防止并发 POST
+
+    esp_timer_handle_t delay_timer_ = nullptr;
+    std::function<void()> pending_action_;
 };
 
 #endif

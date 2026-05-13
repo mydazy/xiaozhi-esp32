@@ -224,7 +224,7 @@ Core 0（网络/协议栈/编解码/主循环 · 占 ~50%）        Core 1（实
 | `audio_output` | `audio_service.cc:144/158` | 4096 | **P10** ⬆ | **Core 0 ✅** | Start→Stop | PCM → DAC DMA（2026-04-29：P4→P10 · 与 codec 同核） |
 | `opus_codec` | `audio_service.cc:166` | 24576 | P7 | **Core 0 ✅** | Start→Stop | Opus 编/解码（24KB 栈刻意保留 · 必须 Core 0 否则 Core 1 占用爆 88%） |
 | `audio_communication` | `processors/afe_audio_processor.cc:74` | 4096 | **P7** ⬆ | Core 1 | Start→Stop | AFE 回声消除（2026-04-29：P3→P7 · 提升 AEC 优先级避免 ringbuffer 饥饿） |
-| `audio_detection` | `audio/wake_words/afe_wake_word.cc:87` | 4096 | P7 | Core 1 ✅ | 永久 | 唤醒词 WakeNet 检测主循环 |
+| `audio_detection` | `audio/wake_words/afe_wake_word.cc:108` | 6144 | P7 | Core 1 ✅ | 永久 | 唤醒词 WakeNet 检测主循环（2026-05-13 rest-P0-4/5：栈 4096→6144 + P5→P7 与 doc 对齐）|
 | `encode_wake_word` (AFE) | `audio/wake_words/afe_wake_word.cc:179` | 24KB INT | P2 | Core 1 ✅ | 一次性（栈复用） | AFE 路径唤醒词 Opus 编码上报（2026-04-28 P0：PSRAM→INT 红线修复） |
 | `encode_wake_word` (Custom) | `audio/wake_words/custom_wake_word.cc` | 24KB INT | P2 | Core 1 ✅ | 一次性（栈复用） | Custom 路径同上（2026-04-29 P1：StaticPin Core 1） |
 | `mp3_decode` | `audio/music_player.cc` | PSRAM | P7 | Core 1 | 触发→完成 | MP3 解码（远程 music.play 命令触发） |

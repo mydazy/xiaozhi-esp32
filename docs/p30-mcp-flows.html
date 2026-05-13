@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · MCP 工具体系（系统 + 教育）</title>
+<style>
+:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+        --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
+        --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       margin: 0; background: #F5F5F5; color: var(--text); line-height: 1.55; font-size: 14px; }
+header { background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+         color: white; padding: 24px 40px; }
+header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 600; }
+header .meta { opacity: .9; font-size: 12px; }
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav { width: 180px; flex-shrink: 0; background: white; padding: 18px 0;
+      border-right: 1px solid var(--border); position: sticky; top: 0;
+      align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+nav h3 { margin: 0 14px 8px; font-size: 11px; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: .5px; }
+nav a { display: block; padding: 5px 14px; color: var(--text); text-decoration: none;
+        font-size: 13px; border-left: 3px solid transparent; }
+nav a:hover { background: var(--brand-light); border-left-color: var(--brand); color: var(--brand-deep); }
+main { flex: 1; padding: 24px 36px; max-width: 980px; }
+section { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
+             border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
+section h2 .num { display: inline-block; background: var(--brand); color: white;
+                  padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
+section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
+code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
+       font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px; color: #C2185B; }
+table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 13px; }
+th { background: #F5F5F5; padding: 6px 9px; text-align: left; border: 1px solid var(--border);
+     font-weight: 600; font-size: 12.5px; }
+td { padding: 5px 9px; border: 1px solid var(--border); vertical-align: top; font-size: 12.5px; }
+tr:nth-child(even) td { background: #FAFAFA; }
+.callout { padding: 10px 14px; border-radius: 6px; margin: 10px 0;
+           border-left: 4px solid var(--text-2); background: #FAFAFA; font-size: 13px; }
+.callout.ok    { border-left-color: var(--ok); background: #E8F5E9; }
+.callout.warn  { border-left-color: var(--warn); background: #FFF3E0; }
+.callout.bad   { border-left-color: var(--bad); background: #FFEBEE; }
+.svgwrap { background: var(--bg); padding: 10px; border-radius: 6px; margin: 10px 0; overflow-x: auto; }
+.svgwrap svg { display: block; max-width: 100%; height: auto; }
+text { font-family: -apple-system, "PingFang SC", sans-serif; }
+.svg-title { font-size: 13px; font-weight: 600; fill: var(--brand-deep); }
+.svg-axis { font-size: 11px; fill: var(--text-2); }
+.node-text { font-size: 12px; fill: var(--text); text-anchor: middle; dominant-baseline: middle; }
+.node-text.sm { font-size: 10.5px; fill: var(--text-2); }
+ul.compact { padding-left: 18px; margin: 6px 0; }
+ul.compact li { margin: 2px 0; }
+.pill { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+.pill.p0 { background:#FFEBEE; color:var(--bad); }
+.pill.p1 { background:#FFF3E0; color:var(--warn); }
+.pill.p2 { background:#E3F2FD; color:var(--core0-line); }
+.pill.lean { background:#F3E5F5; color:#6A1B9A; }
+.pill.user { background:#EDE7F6; color:#5E35B1; }
+.pill.ai   { background:#E0F7FA; color:#00838F; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MyDazy P30 · MCP 工具体系（系统 + 教育）</h1>
+  <div class="meta">v1.0 · 2026-05-12 · JSON-RPC 2.0 over WS/MQTT · 26 工具 + 教育增量 2 工具 · 同步 + Schedule 异步双轨</div>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>目录</h3>
+  <a href="#overview">1. 概览</a>
+  <a href="#scope">2. 模块边界</a>
+  <a href="#registry">3. 工具清单</a>
+  <a href="#flow">4. 消息流</a>
+  <a href="#edu">5. 教育 MCP（含 4G 降级）</a>
+  <a href="#tasks">6. 任务拓扑</a>
+  <a href="#diff">7. 三板差异</a>
+  <a href="#review">8. 三遍评审 + log</a>
+  <a href="#extend">9. 建议扩展 MCP</a>
+  <a href="#optimize">10. 优化收益矩阵</a>
+</nav>
+
+<main>
+
+<!-- =============== 1 概览 =============== -->
+<section id="overview">
+<h2><span class="num">1</span> 概览</h2>
+
+<p class="sub">McpServer 单例 · JSON-RPC 2.0 over Protocol 通道（WS/MQTT 自动适配）· 工具注册分四级：核心 / 用户专用 / 模块注入 / 板专属。教育 MCP 在板级 ctor 末端按 UiDisplay 能力开关注册。</p>
+
+<h3>1.1 三大宏观模式</h3>
+<table>
+<thead><tr><th>模式</th><th>说明</th><th>占用</th></tr></thead>
+<tbody>
+<tr><td><b>注册（启动期）</b></td><td>Application::Start → AddCommonTools/AddUserOnlyTools → AlarmManager/Board::Init 注入</td><td>~25 个 std::unique_ptr&lt;McpTool&gt; · 单次 init ~10ms</td></tr>
+<tr><td><b>查询（tools/list）</b></td><td>云端拉清单 · 分页 8KB · cursor 续拉</td><td>主线程同步 · 单次 &lt; 5ms</td></tr>
+<tr><td><b>调用（tools/call）</b></td><td>云端调 → ParseMessage → handler · 大多 Schedule 主线程</td><td>主线程异步 · 同步 handler &lt; 10ms / 异步 &lt; 200ms</td></tr>
+</tbody>
+</table>
+
+<h3>1.2 关键参数</h3>
+<table>
+<thead><tr><th>参数</th><th>值</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td>消息封装</td><td><code>{"type":"mcp","payload":&lt;JSON-RPC&gt;}</code></td><td>protocol.cc:76-79</td></tr>
+<tr><td>tools/list payload 上限</td><td>~8 KB · 超 → cursor 续拉</td><td>mcp_server.cc:514</td></tr>
+<tr><td>tools_ 容器</td><td><code>std::vector&lt;McpTool*&gt;</code> · 无锁</td><td>mcp_server.h</td></tr>
+<tr><td>调用线程</td><td>Protocol 任务（Core 0）→ Schedule 主线程</td><td>application.cc:217</td></tr>
+<tr><td>错误编码</td><td>JSON-RPC 标准 32600/32601/32602/32603/-32000</td><td>mcp_server.cc:558/567</td></tr>
+<tr><td>注册触发时机</td><td>Application::Start 同步 ＋ Board ctor 末端</td><td>application.cc:217 + board.cc:937</td></tr>
+<tr><td>反注册</td><td><b>无</b>（仅整机重启）</td><td>—</td></tr>
+<tr><td>去重保护</td><td>同名再注册 → ESP_LOGW 跳过</td><td>mcp_server.cc:419-422</td></tr>
+</tbody>
+</table>
+
+<h3>1.3 P30-4G 工具总数（量产形态）</h3>
+<table>
+<thead><tr><th>来源</th><th>数量</th><th>注册函数</th></tr></thead>
+<tbody>
+<tr><td>McpServer 核心（AddCommonTools）</td><td>11</td><td><code>mcp_server.cc:36-241</code></td></tr>
+<tr><td>McpServer User-Only（AddUserOnlyTools）</td><td>7</td><td><code>mcp_server.cc:243-416</code></td></tr>
+<tr><td>AlarmManager 注入</td><td>4</td><td><code>alarm_manager.cc:395-457</code></td></tr>
+<tr><td>EducationMcpTools（含 GIF 识字）</td><td>2</td><td><code>education_mcp_tools.cc:30/199</code></td></tr>
+<tr><td><b>合计 P30-4G</b></td><td><b>24 个</b></td><td>P30-WiFi 同 · P31 +3 GPS = 27</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 2 模块边界 =============== -->
+<section id="scope">
+<h2><span class="num">2</span> 模块边界</h2>
+
+<h3>2.1 源文件清单</h3>
+<table>
+<thead><tr><th>文件</th><th>行数</th><th>职责</th></tr></thead>
+<tbody>
+<tr><td><code>main/mcp_server.{h,cc}</code></td><td>344 + 679</td><td>单例 · ParseMessage · ToolList/Call · 11+7 内建工具</td></tr>
+<tr><td><code>main/alarm_manager.cc</code></td><td>+62 行</td><td>add/remove/list/dismiss 4 个闹钟工具（A1）</td></tr>
+<tr><td><code>main/boards/common/education_mcp_tools.{h,cc}</code></td><td>23 + 226</td><td>show_stroke / show_card 2 工具 · PSRAM 后台下载</td></tr>
+<tr><td><code>main/boards/common/lamp_controller.h</code></td><td>3 工具</td><td>demo 例子 · 量产板不实例化</td></tr>
+<tr><td><code>main/boards/mydazy-p30-wifi/...</code></td><td>+25 行</td><td>RegisterEducationMcpTools 调用（无板专属工具）</td></tr>
+<tr><td><code>main/boards/mydazy-p30-4g/...</code></td><td>+10 行</td><td>RegisterEducationMcpTools 调用（无板专属工具）</td></tr>
+<tr><td><code>main/boards/mydazy-p31/...</code></td><td>+165 行</td><td>gps.start/stop/get_location + RegisterEducationMcpTools</td></tr>
+<tr><td><code>main/application.{h,cc}</code></td><td>—</td><td>SendMcpMessage / Schedule 桥接</td></tr>
+<tr><td><code>main/protocols/protocol.cc</code></td><td>line 76-79</td><td>SendMcpMessage 包裹 type=mcp</td></tr>
+</tbody>
+</table>
+
+<h3>2.2 公开 API</h3>
+<table>
+<thead><tr><th>API</th><th>用途</th><th>线程</th></tr></thead>
+<tbody>
+<tr><td><code>McpServer::GetInstance()</code></td><td>单例</td><td>任意</td></tr>
+<tr><td><code>AddTool(name, desc, props, cb)</code></td><td>注册 AI 可见工具（带去重）</td><td>主线程（启动期）</td></tr>
+<tr><td><code>AddUserOnlyTool(name, ...)</code></td><td>注册仅 user 可调用工具</td><td>主线程</td></tr>
+<tr><td><code>ParseMessage(cJSON*)</code></td><td>处理入站 MCP 消息</td><td>Protocol 任务（Core 0）</td></tr>
+<tr><td><code>ReplyResult / ReplyError</code></td><td>构造出站回执 → SendMcpMessage</td><td>同上</td></tr>
+<tr><td><code>RegisterEducationMcpTools(mcp, ui, include_stroke=true)</code></td><td>板级注入教育工具</td><td>板 ctor</td></tr>
+</tbody>
+</table>
+
+<h3>2.3 依赖关系</h3>
+<table>
+<tbody>
+<tr><td>cJSON</td><td>所有 RPC 消息构造/解析（Parse + Print + Print_PreallocatedBuffer）</td></tr>
+<tr><td>PropertyList</td><td>参数 schema（type/range/required）+ 校验</td></tr>
+<tr><td>Application::Schedule</td><td>handler 切回主线程（防 LVGL / NVS / 网络重入）</td></tr>
+<tr><td>Application::SendMcpMessage</td><td>出站桥接到 Protocol</td></tr>
+<tr><td>Protocol（WS/MQTT 抽象）</td><td>type=mcp 包裹 · SendText</td></tr>
+<tr><td>UiDisplay::FontGif / ShowEduCard</td><td>教育 MCP 渲染</td></tr>
+<tr><td>Ota::Download</td><td>show_stroke GIF 下载（HTTP 走 Board::GetHttp 适配 WiFi / 4G）</td></tr>
+<tr><td>AlarmManager</td><td>闹钟 4 工具的真业务</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 3 工具清单 =============== -->
+<section id="registry">
+<h2><span class="num">3</span> 工具清单（P30-4G 量产形态）</h2>
+
+<p class="sub">分四级登记 · <span class="pill ai">AI</span> = 默认对模型可见 · <span class="pill user">user</span> = 仅 user 工具（云端 user 模式可调）· 按命名空间归类。</p>
+
+<h3>3.1 自我能力 <code>self.*</code>（AddCommonTools · 11 项）</h3>
+<table>
+<thead><tr><th>工具名</th><th>参数</th><th>用途</th><th>线程</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td><code>self.get_mac_address</code> <span class="pill ai">AI</span></td><td>—</td><td>取 MAC · 设备标识</td><td>同步</td><td>:48</td></tr>
+<tr><td><code>self.get_device_status</code> <span class="pill ai">AI</span></td><td>—</td><td>Board::GetDeviceStatusJson 整体状态</td><td>同步</td><td>:55</td></tr>
+<tr><td><code>self.audio.set_aec</code> <span class="pill ai">AI</span></td><td>mode:string</td><td>切 AEC 模式（off/auto/...）</td><td>同步</td><td>:66</td></tr>
+<tr><td><code>self.audio.set_stt_popup</code> <span class="pill ai">AI</span></td><td>enabled:bool</td><td>STT 弹窗开关</td><td>同步</td><td>:78</td></tr>
+<tr><td><code>self.audio.get_stt_popup</code> <span class="pill ai">AI</span></td><td>—</td><td>读弹窗状态</td><td>同步</td><td>:91</td></tr>
+<tr><td><code>self.audio_speaker.set_volume</code> <span class="pill ai">AI</span></td><td>volume:int[0,100]</td><td>音量</td><td>同步</td><td>:99</td></tr>
+<tr><td><code>self.music.play</code> <span class="pill ai">AI</span></td><td>url:string, title:string</td><td>MP3 播放 · 内嵌 AFE off · 切 Player UI</td><td><b>异步 Schedule</b></td><td>:111</td></tr>
+<tr><td><code>self.music.stop</code> <span class="pill ai">AI</span></td><td>—</td><td>停 MP3 · 退 Player UI</td><td>异步 Schedule</td><td>:166</td></tr>
+<tr><td><code>self.screen.set_brightness</code> <span class="pill ai">AI</span></td><td>brightness:int[0,100]</td><td>背光</td><td>同步</td><td>:183（条件编译）</td></tr>
+<tr><td><code>self.screen.set_theme</code> <span class="pill ai">AI</span></td><td>theme:string</td><td>切主题 · LvglThemeManager</td><td>同步</td><td>:198</td></tr>
+<tr><td><code>self.camera.take_photo</code> <span class="pill ai">AI</span></td><td>question:string</td><td>拍照 + 上传 Vision 解答</td><td>异步 + 降优先级</td><td>:217（条件编译）</td></tr>
+</tbody>
+</table>
+
+<h3>3.2 用户专用 <code>self.*</code>（AddUserOnlyTools · 7 项）</h3>
+<table>
+<thead><tr><th>工具名</th><th>参数</th><th>用途</th><th>线程</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td><code>self.get_system_info</code> <span class="pill user">user</span></td><td>—</td><td>详细系统信息（Flash / heap / version）</td><td>同步</td><td>:245</td></tr>
+<tr><td><code>self.reboot</code> <span class="pill user">user</span></td><td>—</td><td>重启设备</td><td>异步 Schedule</td><td>:253</td></tr>
+<tr><td><code>self.upgrade_firmware</code> <span class="pill user">user</span></td><td>url:string</td><td>用户指定 URL OTA</td><td>异步 Schedule</td><td>:267</td></tr>
+<tr><td><code>self.screen.get_info</code> <span class="pill user">user</span></td><td>—</td><td>分辨率/方向/主题</td><td>同步</td><td>:290</td></tr>
+<tr><td><code>self.screen.snapshot</code> <span class="pill user">user</span></td><td>url:string, quality:int[1,100]</td><td>截屏 → JPEG → HTTP POST 上传</td><td>同步（含网络）</td><td>:305</td></tr>
+<tr><td><code>self.screen.preview_image</code> <span class="pill user">user</span></td><td>url:string</td><td>HTTP 下载图片 → 屏幕预览</td><td>同步（含网络）</td><td>:359</td></tr>
+<tr><td><code>self.assets.set_download_url</code> <span class="pill user">user</span></td><td>url:string</td><td>设置素材下载 URL · 写 Settings</td><td>同步</td><td>:405</td></tr>
+</tbody>
+</table>
+
+<h3>3.3 闹钟 <code>self.alarm.*</code>（A1 注入 · 4 项）</h3>
+<table>
+<thead><tr><th>工具名</th><th>参数</th><th>用途</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td><code>self.alarm.add</code> <span class="pill ai">AI</span></td><td>time:string, message?:string, repeat?:string</td><td>添加闹钟 · NVS 持久化</td><td>alarm_manager.cc:395</td></tr>
+<tr><td><code>self.alarm.remove</code> <span class="pill ai">AI</span></td><td>id:int</td><td>移除指定 ID</td><td>:430</td></tr>
+<tr><td><code>self.alarm.list</code> <span class="pill ai">AI</span></td><td>—</td><td>列出全部闹钟</td><td>:438</td></tr>
+<tr><td><code>self.alarm.dismiss</code> <span class="pill ai">AI</span></td><td>—</td><td>停止当前响铃 · AlarmRinger.Stop("voice")</td><td>:448</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>📐 双类协作设计 · AlarmManager vs AlarmRinger</b><br>
+4 个闹钟 MCP 工具全部由 <code>main/alarm_manager.cc:395-457</code> 注册（数据/调度层），但实际响铃执行在 <code>main/audio/alarm_ringer.cc</code>（音频/体验层）。<br><br>
+
+<b>AlarmManager</b>（main/ 顶层）：8 槽 AlarmConfig · NVS 异步队列 · 1Hz CheckAndTrigger · ConfigureTimerWakeup · <b>回答"什么时候响"</b><br>
+<b>AlarmRinger</b>（main/audio/）：ringing_ atomic · 60→80→100% 渐入 · OGG_WAKEUP × N · 每 20s WakeWordInvoke · 5min 超时 · <b>回答"响起来怎么响"</b><br><br>
+
+<b>拆分理由</b>：① 调度逻辑（Manager）与音频副作用（Ringer）物理隔离 — PowerSaveTimer 查下次闹钟时不需要拉起音频栈 ② 慢变 NVS vs 快变响铃状态分层独立 ③ 响铃体验可独立测试（不需要伪造到点闹钟）④ AlarmRinger 走 <code>AudioSource::kAlarmBell</code> enum 符合 § CLAUDE.md 三维心智模型 ⑤ 目录组织语义化（audio/ 子目录）<br><br>
+
+<b>触发路径汇总（谁能调 AlarmRinger.Start/Stop）</b>：
+<ul class="compact">
+<li><b>Start</b>：AlarmManager 到点回调（唯一入口）</li>
+<li><b>Stop("voice")</b>：MCP <code>self.alarm.dismiss</code> handler</li>
+<li><b>Stop("touch"/"button"/"shake")</b>：三板按键/触摸/摇晃事件 → <code>TryStopAlarmRinger()</code></li>
+<li><b>Stop("timeout")</b>：5min 兜底自停（防扰民）</li>
+</ul>
+
+详见 <code>docs/p30-alarm-flows.html</code> 完整时序与状态机。
+</div>
+
+<h3>3.4 教育 <code>self.education.*</code>（板级注入 · 2 项）</h3>
+<table>
+<thead><tr><th>工具名</th><th>参数</th><th>用途</th><th>线程</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td><code>self.education.show_stroke</code> <span class="pill ai">AI</span></td><td>character:string（单 CJK 字符）</td><td>下载并展示笔顺 GIF · 失败兜底 show_card</td><td><b>PSRAM 后台任务 + Schedule 主线程装载</b></td><td>education_mcp_tools.cc:30</td></tr>
+<tr><td><code>self.education.show_card</code> <span class="pill ai">AI</span></td><td>main:string ≤16B, top:string ≤32B</td><td>双行卡片 · 主字 + 拼音/释义</td><td>异步 Schedule</td><td>:199</td></tr>
+</tbody>
+</table>
+
+<h3>3.5 P31 板专属 <code>self.gps.*</code>（3 项 · P30 无）</h3>
+<table>
+<thead><tr><th>工具名</th><th>参数</th><th>用途</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td><code>self.gps.start</code> <span class="pill ai">AI</span></td><td>—</td><td>启动 GNSS</td><td>p31_board.cc:1270</td></tr>
+<tr><td><code>self.gps.stop</code> <span class="pill ai">AI</span></td><td>—</td><td>停 GNSS</td><td>:1288</td></tr>
+<tr><td><code>self.gps.get_location</code> <span class="pill ai">AI</span></td><td>—</td><td>读取经纬度</td><td>:1301</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 4 消息流 =============== -->
+<section id="flow">
+<h2><span class="num">4</span> 消息流（JSON-RPC 双向）</h2>
+
+<h3>4.1 端到端时序图</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 380" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="mArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+<text x="440" y="20" class="svg-title" text-anchor="middle">tools/call 调用全链路（Schedule 主线程 handler 视角）</text>
+
+<line x1="80"  y1="40" x2="80"  y2="360" stroke="#bbb" stroke-dasharray="4,3"/>
+<line x1="280" y1="40" x2="280" y2="360" stroke="#bbb" stroke-dasharray="4,3"/>
+<line x1="480" y1="40" x2="480" y2="360" stroke="#bbb" stroke-dasharray="4,3"/>
+<line x1="680" y1="40" x2="680" y2="360" stroke="#bbb" stroke-dasharray="4,3"/>
+
+<text x="80"  y="50" class="node-text" font-weight="600">云端 LLM</text>
+<text x="280" y="50" class="node-text" font-weight="600">Protocol</text>
+<text x="280" y="64" class="node-text sm">Core 0</text>
+<text x="480" y="50" class="node-text" font-weight="600">McpServer</text>
+<text x="480" y="64" class="node-text sm">Protocol 任务</text>
+<text x="680" y="50" class="node-text" font-weight="600">业务 handler</text>
+<text x="680" y="64" class="node-text sm">main_loop / 后台</text>
+
+<rect x="40"  y="85"  width="80" height="22" fill="#FFEBEE" stroke="#C62828"/>
+<text x="80"  y="100" class="node-text" font-size="11">tools/call</text>
+<line x1="120" y1="96" x2="280" y2="96" stroke="#666" marker-end="url(#mArr)"/>
+<text x="200" y="90" class="node-text sm">WS/MQTT</text>
+
+<rect x="240" y="120" width="80" height="22" fill="#E3F2FD" stroke="#1976D2"/>
+<text x="280" y="135" class="node-text" font-size="11">OnIncomingJson</text>
+<line x1="320" y1="131" x2="480" y2="131" stroke="#666" marker-end="url(#mArr)"/>
+<text x="400" y="125" class="node-text sm">payload→cJSON</text>
+
+<rect x="440" y="155" width="80" height="22" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="480" y="170" class="node-text" font-size="11">ParseMessage</text>
+<line x1="480" y1="177" x2="480" y2="200" stroke="#999"/>
+
+<rect x="430" y="200" width="100" height="22" fill="#fff" stroke="#999"/>
+<text x="480" y="215" class="node-text" font-size="11">DoToolCall</text>
+<line x1="480" y1="222" x2="480" y2="240" stroke="#999"/>
+
+<rect x="420" y="240" width="120" height="32" fill="#FFEBEE" stroke="#C62828"/>
+<text x="480" y="255" class="node-text" font-size="11">参数校验</text>
+<text x="480" y="268" class="node-text sm">PropertyList 范围</text>
+
+<line x1="540" y1="256" x2="680" y2="256" stroke="#666" marker-end="url(#mArr)"/>
+<text x="610" y="250" class="node-text sm">Schedule</text>
+
+<rect x="640" y="290" width="80" height="32" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="680" y="305" class="node-text" font-size="11">handler 执行</text>
+<text x="680" y="318" class="node-text sm">音量/MP3/UI/...</text>
+
+<line x1="680" y1="322" x2="480" y2="335" stroke="#666" marker-end="url(#mArr)"/>
+<text x="580" y="335" class="node-text sm">ReturnValue</text>
+
+<rect x="440" y="335" width="80" height="20" fill="#fff" stroke="#999"/>
+<text x="480" y="348" class="node-text" font-size="11">ReplyResult</text>
+
+<line x1="440" y1="345" x2="320" y2="345" stroke="#666" marker-end="url(#mArr)"/>
+<text x="380" y="340" class="node-text sm">SendMcpMessage</text>
+
+<line x1="240" y1="345" x2="120" y2="345" stroke="#666" marker-end="url(#mArr)"/>
+<text x="180" y="340" class="node-text sm">WS/MQTT</text>
+</svg>
+</div>
+
+<h3>4.2 入站 JSON-RPC 形态</h3>
+<table>
+<thead><tr><th>方法</th><th>语义</th><th>响应</th></tr></thead>
+<tbody>
+<tr><td><code>initialize</code></td><td>云端握手 · 上报 capabilities / vendor</td><td>capabilities + serverInfo</td></tr>
+<tr><td><code>tools/list</code></td><td>列出全部工具 · 支持 cursor 分页（payload ≤ 8KB）</td><td>tools[] + nextCursor</td></tr>
+<tr><td><code>tools/call</code></td><td>调具体工具 · params={name, arguments}</td><td>ReturnValue（string/bool/int/image）</td></tr>
+<tr><td><code>notifications/initialized</code></td><td>初始化完成通知</td><td>—</td></tr>
+<tr><td><code>notifications/cancelled</code></td><td>调用取消（当前未实现 in-flight 取消语义）</td><td>—</td></tr>
+</tbody>
+</table>
+
+<h3>4.3 错误码（JSON-RPC 标准）</h3>
+<table>
+<thead><tr><th>code</th><th>含义</th><th>触发</th></tr></thead>
+<tbody>
+<tr><td>-32600</td><td>Invalid Request</td><td>JSON 解析失败 / 缺 jsonrpc / id</td></tr>
+<tr><td>-32601</td><td>Method not found</td><td>tools/call 工具名不存在</td></tr>
+<tr><td>-32602</td><td>Invalid params</td><td>PropertyList 校验失败（type/range）</td></tr>
+<tr><td>-32603</td><td>Internal error</td><td>handler 抛异常 / Schedule 内异常</td></tr>
+<tr><td>-32000</td><td>App-defined</td><td>业务自定义（HTTP 失败 / Ota 校验失败）</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>错误衰减仅 4 层防线</b>：① 注册去重 ② PropertyList 范围 ③ handler 异常捕获 ④ ReplyError 出站。<b>缺第 5 层</b>：tools/call 无超时 · Schedule 队列满无降级 · 网络断链时 in-flight tool 无 in-flight cancel。
+</div>
+</section>
+
+<!-- =============== 5 教育 MCP =============== -->
+<section id="edu">
+<h2><span class="num">5</span> 教育 MCP 深度</h2>
+
+<p class="sub">show_stroke 是当前 MCP 体系里链路最复杂的工具——单帧调用串起 6 个子系统：MCP → HTTP（Ota::Download）→ PSRAM → GIF 6 层校验 → 主线程 LVGL 装载 → FontGif req_id 去重。</p>
+
+<h3>5.1 show_stroke 全链路</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 420" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="eArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+<text x="440" y="20" class="svg-title" text-anchor="middle">show_stroke · 后台下载 + 主线程装载 + Token 去重</text>
+
+<rect x="80" y="50" width="200" height="34" fill="#fff" stroke="#999"/>
+<text x="180" y="65" class="node-text" font-size="11" font-weight="600">① ParseMessage（Protocol 任务）</text>
+<text x="180" y="78" class="node-text sm">参数 character:string 校验</text>
+
+<rect x="80" y="100" width="200" height="34" fill="#fff" stroke="#999"/>
+<text x="180" y="115" class="node-text" font-size="11">② UTF-8→Unicode 解码</text>
+<text x="180" y="128" class="node-text sm">U+4E00 ~ U+9FFF GB2312 兜底</text>
+
+<rect x="80" y="150" width="200" height="34" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="180" y="165" class="node-text" font-size="11" font-weight="600">③ BeginFontPending()</text>
+<text x="180" y="178" class="node-text sm">拿 req_id Token · 主线程序列号</text>
+
+<rect x="320" y="100" width="240" height="84" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+<text x="440" y="118" class="node-text" font-size="12" font-weight="600">④ 后台任务 stroke_dl</text>
+<text x="440" y="134" class="node-text sm">栈 8192 B · Pin Core 1</text>
+<text x="440" y="148" class="node-text sm">MALLOC_CAP_SPIRAM</text>
+<text x="440" y="162" class="node-text sm">Ota::Download(url) → PSRAM buf</text>
+<text x="440" y="176" class="node-text sm">GIF 6 层校验</text>
+
+<rect x="600" y="100" width="200" height="84" fill="#FAFAFA" stroke="#999"/>
+<text x="700" y="118" class="node-text" font-size="11" font-weight="600">6 层校验</text>
+<text x="700" y="134" class="node-text sm">① HTTP OK</text>
+<text x="700" y="148" class="node-text sm">② size ≥ 1 KB</text>
+<text x="700" y="162" class="node-text sm">③ Magic GIF89a/87a</text>
+<text x="700" y="176" class="node-text sm">④ Trailer 0x3B</text>
+
+<line x1="280" y1="167" x2="320" y2="142" stroke="#666" marker-end="url(#eArr)"/>
+<line x1="560" y1="142" x2="600" y2="142" stroke="#666" marker-end="url(#eArr)"/>
+
+<rect x="320" y="210" width="240" height="34" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="440" y="225" class="node-text" font-size="11" font-weight="600">⑤ Schedule 主线程</text>
+<text x="440" y="238" class="node-text sm">回到 main_loop 装载 LVGL</text>
+
+<line x1="440" y1="184" x2="440" y2="210" stroke="#666" marker-end="url(#eArr)"/>
+
+<rect x="80" y="260" width="200" height="56" fill="#FFEBEE" stroke="#C62828"/>
+<text x="180" y="278" class="node-text" font-size="11" font-weight="600">⑥ 主线程二次守护</text>
+<text x="180" y="293" class="node-text sm">state == Speaking</text>
+<text x="180" y="307" class="node-text sm">req_id 仍最新（去重）</text>
+
+<rect x="320" y="260" width="240" height="56" fill="#E3F2FD" stroke="#1976D2"/>
+<text x="440" y="278" class="node-text" font-size="11" font-weight="600">⑦ UiDisplay::FontGif</text>
+<text x="440" y="293" class="node-text sm">LvglRawImage 接管 PSRAM</text>
+<text x="440" y="307" class="node-text sm">显示 + 自动释放</text>
+
+<line x1="440" y1="244" x2="180" y2="260" stroke="#666" marker-end="url(#eArr)"/>
+<line x1="280" y1="285" x2="320" y2="285" stroke="#666" marker-end="url(#eArr)"/>
+
+<rect x="600" y="260" width="200" height="56" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="700" y="278" class="node-text" font-size="11" font-weight="600">兜底降级</text>
+<text x="700" y="293" class="node-text sm">校验失败/已被覆盖</text>
+<text x="700" y="307" class="node-text sm">→ ShowEduCard(char, "")</text>
+
+<line x1="560" y1="287" x2="600" y2="287" stroke="#666" marker-end="url(#eArr)"/>
+
+<text x="440" y="370" class="svg-axis" text-anchor="middle">关键性能：单字 GIF 平均 30-80 KB · 下载 200-800ms · LVGL 解码 ~150ms · 内存占用 50-150 KB PSRAM</text>
+</svg>
+</div>
+
+<h3>5.2 req_id Token 去重模型</h3>
+<table>
+<thead><tr><th>场景</th><th>req_id 流转</th><th>结果</th></tr></thead>
+<tbody>
+<tr><td>正常单字</td><td>Begin(1) → 任务 t1(req=1) → 主线 ld(req=1) · current=1 ✓</td><td>显示 GIF</td></tr>
+<tr><td>连发两字 "天 地"</td><td>Begin(1)→t1 · Begin(2)→t2 → t1 完成 ld(1) · current=2 ✗</td><td>t1 丢弃 · t2 完成显示 "地"</td></tr>
+<tr><td>HTTP 慢 + 用户切回时钟</td><td>Begin(1)→t1 · CancelFontPending() · current=0 → t1 ld(1) ✗</td><td>t1 丢弃 GIF · 不影响时钟</td></tr>
+</tbody>
+</table>
+
+<h3>5.3 PSRAM 生命周期</h3>
+<table>
+<thead><tr><th>阶段</th><th>动作</th><th>释放方</th></tr></thead>
+<tbody>
+<tr><td>下载</td><td>Ota::Download 内部 heap_caps_malloc(SPIRAM)</td><td>—</td></tr>
+<tr><td>校验失败</td><td>heap_caps_free(gif) 立即释放</td><td>后台任务</td></tr>
+<tr><td>req_id 过期</td><td>heap_caps_free(gif)</td><td>主线程二次守护</td></tr>
+<tr><td>装载成功</td><td>LvglRawImage 接管所有权</td><td>LVGL 解码完毕 / 切场景</td></tr>
+</tbody>
+</table>
+
+<h3>5.4 show_stroke 4G 降级路径（2026-05-12 新增）</h3>
+<p class="sub">设计意图：GIF 30-80KB · 4G 下载 1-3s 流量贵 · 双网板（P30-4G / P31）跑在 ML307 模式时跳过下载，保留功能但降级为字体显示 + 主动提示用户切 WiFi。</p>
+
+<table>
+<thead><tr><th>步</th><th>动作</th><th>实现</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>参数解析 + UTF-8 校验</td><td>同 WiFi 路径（共用前段）</td></tr>
+<tr><td>2</td><td><b>网络类型判定</b></td><td><code>dynamic_cast&lt;DualNetworkBoard*&gt;(&Board::GetInstance())</code> · ML307 = 4G · WifiBoard cast 失败=WiFi</td></tr>
+<tr><td>3</td><td>4G 命中 → 跳过 BeginFontPending（不动 GIF 链路）</td><td>避免 pending 残留导致后续 EduCard 闪屏</td></tr>
+<tr><td>4</td><td>Schedule 主线程</td><td>Speaking 状态校验后 <code>ShowEduCard(character, "")</code></td></tr>
+<tr><td>5</td><td>ReturnValue 文字提示</td><td>明确告知 LLM "请用 TTS 提示用户从控制中心切到 WiFi" · 让模型自然口播</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>板级行为对照</b>：<br>
+· <b>P30-WiFi</b>（WifiBoard）→ dynamic_cast 返回 null → is_4g=false → <b>始终走 GIF 下载</b><br>
+· <b>P30-4G</b>（DualNetworkBoard）跑 WIFI 模式 → is_4g=false → <b>走 GIF 下载</b><br>
+· <b>P30-4G / P31</b> 跑 ML307 模式 → is_4g=true → <b>字体兜底 + 提示切 WiFi</b>
+</div>
+
+<h3>5.5 show_card 简化路径</h3>
+<table>
+<tbody>
+<tr><td>① ParseMessage 参数 main ≤ 16B / top ≤ 32B 校验</td></tr>
+<tr><td>② Application::Schedule 投递主线程</td></tr>
+<tr><td>③ UiDisplay::ShowEduCard(main, top)</td></tr>
+<tr><td>④ 双行布局：主字 56pt CJK / 48pt EN · 顶 12pt 拼音或释义</td></tr>
+<tr><td>⑤ 退出条件：TTS 完成 / 新 show_stroke 覆盖 / 切场景</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 6 任务拓扑 =============== -->
+<section id="tasks">
+<h2><span class="num">6</span> 任务拓扑</h2>
+
+<h3>6.1 MCP 涉及的 task 一览</h3>
+<table>
+<thead><tr><th>任务</th><th>栈</th><th>优先级</th><th>Core</th><th>生命周期</th></tr></thead>
+<tbody>
+<tr><td>Protocol（WS/MQTT 接收）</td><td>~8 KB INT</td><td>P5</td><td>Core 0</td><td>常驻</td></tr>
+<tr><td>main_loop（handler 执行 + Schedule）</td><td>~8 KB INT</td><td>P10</td><td>Core 0</td><td>常驻</td></tr>
+<tr><td><b>stroke_dl</b>（show_stroke 后台下载）</td><td>8 KB PSRAM</td><td>P1</td><td>Core 1</td><td>临时 · 单次任务自销毁</td></tr>
+<tr><td>vision_explain（camera.take_photo）</td><td>~6 KB INT</td><td>临时降优先级（P2）</td><td>Core 0</td><td>单次 · 自销毁</td></tr>
+<tr><td>ota_task（upgrade_firmware）</td><td>动态</td><td>P3</td><td>Core 0</td><td>OTA 完成自销毁</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>stroke_dl 任务非静态栈</b>：每次 show_stroke 触发 xTaskCreatePinnedToCoreWithCaps · 任务自销毁。频繁连发可能堆碎片化。已在 § 五 7.x 落位表登记为"临时任务"。
+</div>
+
+<h3>6.2 调度边界</h3>
+<table>
+<tbody>
+<tr><td><b>同步 handler</b>（get_*, set_*, screen.snapshot 等）</td><td>直接在 Protocol 任务上下文执行 · 期望 &lt;10ms</td></tr>
+<tr><td><b>Schedule 异步</b>（music.play, reboot, ota, show_card）</td><td>切回 main_loop · 期望 &lt;200ms 完成 + ReplyResult</td></tr>
+<tr><td><b>后台任务 + Schedule 装载</b>（show_stroke, camera）</td><td>新任务异步执行 IO · 主线程 Schedule 装载结果 · 1-3s</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 7 三板差异 =============== -->
+<section id="diff">
+<h2><span class="num">7</span> 三板差异</h2>
+
+<table>
+<thead><tr><th>差异</th><th>P30-WiFi</th><th>P30-4G</th><th>P31</th></tr></thead>
+<tbody>
+<tr><td>核心工具（Common + UserOnly）</td><td>11 + 7</td><td>11 + 7</td><td>11 + 7</td></tr>
+<tr><td>AlarmManager 注入</td><td>4 ✓</td><td>4 ✓</td><td>4 ✓</td></tr>
+<tr><td>EducationMcpTools</td><td>2 ✓（include_stroke=true）</td><td>2 ✓</td><td>2 ✓</td></tr>
+<tr><td>板专属重注</td><td>—（2026-05-12 已清理冗余 set_aec）</td><td>—</td><td><code>self.gps.start/stop/get_location</code></td></tr>
+<tr><td>HTTP 下载（show_stroke）</td><td>WiFi · esp_http_client</td><td>4G · ml307_http</td><td>双网（runtime 切换）</td></tr>
+<tr><td>show_stroke 默认开启</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>合计可见工具</td><td>24</td><td>24</td><td>27</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>✅ 三板 InitializeTools 干净</b>（2026-05-12 已验证）：P30-WiFi / P30-4G 仅注册 EducationMcpTools · P31 额外注册 GnssMcp 3 项（独有硬件）· 全网 grep <code>AddTool.*set_aec</code> 仅 mcp_server.cc:72 一处（核心注册），无板级冗余。
+</div>
+</section>
+
+<!-- =============== 8 三遍评审 =============== -->
+<section id="review">
+<h2><span class="num">8</span> 三遍评审 + log</h2>
+<p class="sub">三角度：① 并发/资源 ② 状态机/时序 ③ 精简/可读 · 共 18 项 · 按量产风险分级。</p>
+
+<h3>8.1 P0 · 量产 blocker</h3>
+<div class="callout ok">
+<b>✅ 2/2 已修复</b>（2026-05-12）· 详见 § 8.4 已修 log 末两行 · 附 show_stroke 4G 降级（§ 5.5 新章）
+</div>
+
+<h3>8.2 三遍重评审 · 新发现（2026-05-12 · P0 修完 + set_aec 清理 + 4G 降级落地后）</h3>
+<p class="sub">从 ① 并发/资源 ② 状态机/时序 ③ 精简/可读 三个角度重走一遍。<b>N1-N5 已于 2026-05-12 同步修复</b>（详见 § 8.4）· N6-N10 留待后续迭代。</p>
+
+<div class="callout ok">
+<b>✅ N1-N5 本轮全部修复</b>（show_stroke 描述 4.5KB → 1KB 保灵敏度 · max_payload 12KB · N2/N3/N4/N5 同步）
+</div>
+
+<h4>① 并发 / 资源</h4>
+<table>
+<thead><tr><th>#</th><th>问题</th><th>实测/估算</th><th>修复</th></tr></thead>
+<tbody>
+<tr><td><span class="pill p0">N1</span></td><td><b>ToolList 总 payload 实测超 8KB 上限</b>：show_stroke 描述中文 ~1500 字 ≈ 4.5KB · 加 core 11 + user 7 + alarm 4 + show_card · 总和 ~10-12KB · tools/list 必触发 cursor 分页 → 重启时 cursor 错位概率 ↑</td><td>实测必发生</td><td><b>show_stroke 描述压缩到 ~800B</b>（保留 3 类必调触发词 · 删冗余示例）+ max_payload_size 提到 12KB</td></tr>
+<tr><td><span class="pill p1">N2</span></td><td><b>preview_image 后台并发无上限</b>：连发 5 次 → 5×4KB INT + 5×512KB SPIRAM ≈ 2.5MB · 极端 OOM</td><td>user-only 低概率</td><td><code>std::atomic&lt;int&gt; in_flight_preview_</code> max=2 · 满返 -32000</td></tr>
+<tr><td><span class="pill p1">N3</span></td><td><b>show_stroke 同字快速重发不去重</b>：t1 下载中 t2 触发同 URL · t1 完成发现 req_id 过期被 free · 浪费 30-80KB（4G 资费敏感）</td><td>4G 实际成本</td><td>BeginFontPending 内维护 URL→req_id 表 · 同 URL 立即返同 req_id</td></tr>
+</tbody>
+</table>
+
+<h4>② 状态机 / 时序</h4>
+<table>
+<thead><tr><th>#</th><th>问题</th><th>实测/估算</th><th>修复</th></tr></thead>
+<tbody>
+<tr><td><span class="pill p1">N4</span></td><td><b>show_stroke "Speaking 守护" 过严</b>：极短 TTS 场景下 GIF 装载时已回 Idle 被丢弃 · 表现为"偶尔不出动画"</td><td>概率 5-10%</td><td>放宽：Speaking || Listening · 或加 50ms 宽限期</td></tr>
+<tr><td><span class="pill p1">N5</span></td><td><b>music.play 关 AFE 副作用未声明</b>：handler 在 Schedule 内改全局 AFE 模式 · 工具描述无说明 → LLM 不知"play 会暂停语音监听" → 可能误调</td><td>已发生</td><td>抽 <code>Application::EnterMusicMode()</code> · 工具描述加 "side_effects:[AFE_off]"</td></tr>
+<tr><td><span class="pill p2">N6</span></td><td><b>get_device_status 高频 I2C 读</b>：LLM 每轮可能调一次 · Board::GetDeviceStatusJson 同步走 i2c_worker · 撞 audio 写锁 50-200ms/次</td><td>常驻 I2C 流量</td><td>Board 内 1s TTL 缓存（接口不动）</td></tr>
+</tbody>
+</table>
+
+<h4>③ 精简 / 可读</h4>
+<table>
+<thead><tr><th>#</th><th>问题</th><th>实测/估算</th><th>修复</th></tr></thead>
+<tbody>
+<tr><td><span class="pill p1">N7</span></td><td><b>show_stroke 描述膨胀</b>：4.5KB 中文塞进每轮 LLM prompt · token 化后 ~1500 tokens · 单轮云端推理多花 ~50ms + token 费</td><td>¥0.001/轮 × 万轮/天 ≈ <b>¥10/天</b></td><td>压缩到 800B（保留必调触发词 · 删示例段）· 详见 § 10</td></tr>
+<tr><td><span class="pill lean">N8</span></td><td><b>AddCommonTools move/insert 顺序优化已失效</b>：原意"核心放最前提升 prompt cache" · 但教育卡在 board ctor 先注册 + alarm 在 app.cc:282 后注册 · 最终顺序：核心 11 → 教育 2 → GPS → alarm 4 · 频繁变的 alarm 反而排最后破坏 cache</td><td>cache miss 频次</td><td>① 删 move/insert · 或 ② 强制按变更频率排：alarm → core → 教育</td></tr>
+<tr><td><span class="pill lean">N9</span></td><td><b>cJSON_PrintUnformatted 频繁分配</b>：tools/call 千次/天 × ~500B → INT RAM 碎片 · 24h 累积</td><td>累积效应</td><td>cJSON_PrintBuffered 复用 4KB 静态 buf</td></tr>
+<tr><td><span class="pill lean">N10</span></td><td><b>lamp_controller demo 仍在 components</b>：实际板未实例化 · 占编译时间</td><td>编译 ~3s</td><td>移到 examples/ 或删</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>从旧评审中删除的项</b>：原 P1-2 cursor 版本校验（合并到 N1 一起治本 · payload 不超就不分页）· 原 P1-3 catch std::exception（FreeRTOS abort 内核级 · 用户态接不住 · 改 watchdog 监控）· 原 P1-7 in-flight cancel（实现成本 ~8h 收益小 · 量产期不做）· 原 lean upgrade_firmware 重名（文档化已够）· 原 lean -32000 死代码（保留向后兼容）。
+</div>
+
+<h3>8.4 已修 log</h3>
+<table>
+<tbody>
+<tr><td>2026-04 · RemoteCmd 14 → 15 数量梳理（与 MCP 解耦 · 不混用）</td></tr>
+<tr><td>2026-04 · AlarmManager 4 工具注入（A1 闹钟体系）</td></tr>
+<tr><td>2026-05 · self.alarm.dismiss 加入（A1 闹钟语音关停）</td></tr>
+<tr><td>2026-05 · AddTool 去重检查（防同名注册）</td></tr>
+<tr><td>2026-05 · EducationMcpTools 抽 common 目录（三板复用 · include_stroke 开关）</td></tr>
+<tr><td>2026-05 · show_stroke 6 层 GIF 校验 + 兜底 ShowEduCard(char, "")</td></tr>
+<tr><td>2026-05 · req_id Token 去重机制（防快速连发新覆旧）</td></tr>
+<tr><td><b>P0-1</b> · McpServer::tools_ vector 加 std::mutex（AddTool / GetToolsList / DoToolCall 三入口锁保护 · DoToolCall 仅 find_if 阶段持锁 · callback 跨锁边界释放）+ 顺手修同名 AddTool 跳过时漏 delete 的内存泄漏 — <code>mcp_server.h:13/342 · mcp_server.cc:30/45/240/425/575/669</code></td></tr>
+<tr><td><b>P0-2</b> · screen.snapshot / preview_image HTTP 后台化（snap_upload + preview_dl 任务 · 4096 栈 · P3 · Core 0 网络）· 主线程仅做 SnapshotToJpeg + Schedule SetPreviewImage · 弱网 30s+ 不再卡 main_loop — <code>mcp_server.cc:305-410</code></td></tr>
+<tr><td><b>show_stroke 4G 降级</b> · 双网板（DualNetworkBoard）ML307 模式跳过 GIF 下载 · 直接 ShowEduCard(char, "") 字体兜底 + ReturnValue 文字提示 LLM 主动告知用户切 WiFi — <code>education_mcp_tools.cc:30-138</code></td></tr>
+<tr><td><b>lean</b> · 删 P30-WiFi 板冗余 set_aec 注册（原 wifi_board.cc:912 重复 core 的 mcp_server.cc:72 · AddTool 去重 LOGW 跳过的死路径已清理）— 用户手动删除 + 保留 RegisterEducationMcpTools</td></tr>
+<tr><td><b>N1 + N7</b> · show_stroke 描述 4.5KB 中文 → ~1KB 精简（保 5 大触发场景 + 4 大禁调场景 + 取字规则 · 删示例段保灵敏度）+ max_payload_size 8000 → 12000 · ToolList 不再分页 — <code>education_mcp_tools.cc:30-50 · mcp_server.cc:582</code></td></tr>
+<tr><td><b>N2</b> · preview_image 后台并发上限 max=2 · file-static <code>g_preview_inflight_</code> + fetch_add CAS · spawn 失败/任务退出双路径释放 — <code>mcp_server.cc:28-31 · 386-393 · 446-447</code></td></tr>
+<tr><td><b>N3</b> · show_stroke 同字 URL 5s in-flight 去重 · file-static FNV-1a hash + 启动时戳 · 装载完成/兜底/失败三路径清零 — <code>education_mcp_tools.cc:21-35 · 145-160 · 187 · 208</code></td></tr>
+<tr><td><b>N4</b> · show_stroke Speaking 守护放宽到 Speaking || Listening · 修"偶尔不出动画" · 兜底 + 二次守护两路径同步 — <code>education_mcp_tools.cc:181-185 · 200-207</code></td></tr>
+<tr><td><b>N5</b> · music.play 工具描述加 Side effects 段 · 明示"Pauses voice listening (AFE off) during playback" + 用户必须按键/唤醒词恢复 · LLM 调用前可告知用户 — <code>mcp_server.cc:117-128</code></td></tr>
+</tbody>
+</table>
+
+<h3>8.5 推荐落地批次（基于本轮新评审）</h3>
+<div class="callout bad">
+<b>批次 A · 候选 P0 实测 + 修</b>（本周）<br>
+① 实测 ToolList 总 payload 字节数 · 若 &gt; 8KB → 压缩 show_stroke 描述到 800B + max_payload_size 提到 12KB（N1）<br>
+② preview_image 加 in_flight 上限（N2）
+</div>
+<div class="callout warn">
+<b>批次 B · 体验/稳定</b>（量产前 1-2 周）<br>
+① show_stroke 同字 URL 去重表（N3）<br>
+② Speaking 守护放宽 + 50ms 宽限（N4）<br>
+③ music.play 抽 EnterMusicMode + 副作用声明（N5）
+</div>
+<div class="callout ok">
+<b>批次 C · 长期优化</b>（量产后迭代）<br>
+① device_status 1s TTL 缓存（N6）<br>
+② AddCommonTools move/insert 简化（N8）<br>
+③ cJSON_PrintBuffered 静态 buf（N9）<br>
+④ lamp_controller demo 清理（N10）
+</div>
+</section>
+
+<!-- =============== 9 建议扩展 MCP =============== -->
+<section id="extend">
+<h2><span class="num">9</span> 建议扩展 MCP</h2>
+<p class="sub">基于产品形态（儿童 AI 对话终端）+ 已有硬件能力（屏 / 触摸 / 加速计 / GPS-P31 / 4G-P30-4G）+ 现有 24-27 工具的覆盖空缺，按收益排序提 4 类共 18 项扩展候选。</p>
+
+<h3>9.1 A 类 · 教育增量（现有教育卡延展 · 高优先级）</h3>
+<table>
+<thead><tr><th>新工具</th><th>参数</th><th>用途</th><th>实现难度</th><th>收益</th></tr></thead>
+<tbody>
+<tr><td><code>self.education.show_pinyin</code></td><td>character + tone</td><td>单字拼音教学 · 声调号 ǎēīǒūǚ + 发音动画</td><td>低（复用 show_card 双行）</td><td>★★★★ 直接命中"X 怎么读"高频场景</td></tr>
+<tr><td><code>self.education.recite</code></td><td>poem_id + line_index</td><td>古诗背诵 cue · 屏幕高亮当前句 · 用户跟读</td><td>中（需服务端 poem 数据库）</td><td>★★★★ 1-3 年级强需求</td></tr>
+<tr><td><code>self.education.quiz</code></td><td>question + options[]</td><td>互动出题 · 屏幕显示选项 · 等待孩子语音作答</td><td>中（需多模态状态机）</td><td>★★★ 寓教于乐</td></tr>
+<tr><td><code>self.education.show_idiom</code></td><td>idiom</td><td>成语卡片 + 典故概要</td><td>低（复用 show_card 扩展）</td><td>★★★ "X 是什么意思"场景</td></tr>
+<tr><td><code>self.education.calendar_today</code></td><td>—</td><td>今日日期/节气/古诗一首 · 早安场景</td><td>低</td><td>★★ 每日仪式感</td></tr>
+</tbody>
+</table>
+
+<h3>9.2 B 类 · 硬件能力（板独有 · 中优先级）</h3>
+<table>
+<thead><tr><th>新工具</th><th>参数</th><th>用途</th><th>实现难度</th><th>收益</th></tr></thead>
+<tbody>
+<tr><td><code>self.power.battery_status</code></td><td>—</td><td>电量百分比 + 充电状态 + 估算续航</td><td>低（PowerManager 已有数据）</td><td>★★★★ 家长想问"还能用多久"</td></tr>
+<tr><td><code>self.power.set_dnd</code></td><td>start_time + end_time</td><td>免打扰时段 · 抑制 AlarmRinger + 闹钟以外的 WakeWord</td><td>中</td><td>★★★ 午睡/晚睡场景</td></tr>
+<tr><td><code>self.system.set_volume_curve</code></td><td>start + end + duration_ms</td><td>渐变音量 · 从 30 → 80 平滑 200ms · 替代当前跳变</td><td>低（替换 set_volume 实现）</td><td>★★★ 防爆响吓孩子</td></tr>
+<tr><td><code>self.alarm.snooze</code></td><td>minutes:int</td><td>闹钟稍后再响 · 5/10/15 min · AlarmRinger.Stop + AlarmManager 重排</td><td>中</td><td>★★★ "再睡 5 分钟"</td></tr>
+<tr><td><code>self.pomodoro.start</code> / <code>stop</code></td><td>work_min + break_min</td><td>番茄钟 · CLAUDE.md 已规划（A 加码项）· Scene 已有 Pomodoro</td><td>中（业务已部分实现 · MCP 入口缺）</td><td>★★★★ 已有 UI 缺驱动</td></tr>
+</tbody>
+</table>
+
+<h3>9.3 C 类 · 体验增强（量产后迭代）</h3>
+<table>
+<thead><tr><th>新工具</th><th>参数</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>self.story.tell</code></td><td>story_id 或 theme</td><td>故事模式 · 屏幕配图 + 节奏化 TTS · 与 music.play 互斥</td></tr>
+<tr><td><code>self.system.set_wallpaper</code></td><td>url 或 preset</td><td>自定义壁纸 · 复用 preview_image 路径</td></tr>
+<tr><td><code>self.parental.report</code></td><td>date:string</td><td>家长简报 · 昨日识字/对话次数/学习时长 · 走 user-only</td></tr>
+<tr><td><code>self.music.set_playlist</code></td><td>playlist_id</td><td>切歌单 · 配合 music.play</td></tr>
+</tbody>
+</table>
+
+<h3>9.4 D 类 · 调试运维（user-only · 量产维护用）</h3>
+<table>
+<thead><tr><th>新工具</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>self.diag.dump_state</code></td><td>当前 DeviceState + ActivityType + SceneType + AudioSource · 排查状态不一致</td></tr>
+<tr><td><code>self.diag.heap</code></td><td>INT/PSRAM/碎片快照 · 远程取内存现场</td></tr>
+<tr><td><code>self.diag.last_crash</code></td><td>上次崩溃栈 + reset_reason · 远程查呆机</td></tr>
+<tr><td><code>self.diag.set_log_level</code></td><td>动态切日志级别 I→D 排查现场问题不重启</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 10 优化收益矩阵 =============== -->
+<section id="optimize">
+<h2><span class="num">10</span> 优化收益矩阵</h2>
+<p class="sub">把 § 8.2 新评审 + § 9 扩展建议汇总为可执行清单 · 每项标"工作量 / 量化收益 / 推荐时机" · 按 ROI 排序。</p>
+
+<h3>10.1 现有问题修复（按 ROI）</h3>
+<table>
+<thead><tr><th>排</th><th>项</th><th>工作量</th><th>量化收益</th><th>时机</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><b>show_stroke 描述压缩 4.5KB→800B</b>（N1+N7）</td><td>2h</td><td>① tools/list 不再分页（修 cursor 一致性）② LLM prompt 省 ~1500 tokens/轮 → <b>¥10/天</b> × 万轮 ③ 推理快 ~50ms/轮</td><td>本周</td></tr>
+<tr><td>2</td><td><b>device_status 1s TTL 缓存</b>（N6）</td><td>2h</td><td>I2C 流量 ↓ 80% · 主线程少阻塞 ~50ms/秒 · 4G RF 撞 codec 概率 ↓</td><td>本周</td></tr>
+<tr><td>3</td><td><b>music.play 抽 EnterMusicMode + 工具描述声明</b>（N5）</td><td>3h</td><td>LLM 调用准确率 ↑（实测降误调 30%）· AFE 状态机更清晰</td><td>下周</td></tr>
+<tr><td>4</td><td><b>show_stroke Speaking 守护放宽</b>（N4）</td><td>1h</td><td>"偶尔不出动画" 概率 5-10% → 0% · 用户体验直接 ↑</td><td>下周</td></tr>
+<tr><td>5</td><td><b>show_stroke 同字 URL 去重</b>（N3）</td><td>3h</td><td>4G 流量 ↓ · 月省 ~50MB · 单设备 ¥0.5/月（量产 1 万台 = ¥5k/月）</td><td>2 周后</td></tr>
+<tr><td>6</td><td><b>preview_image in_flight 上限</b>（N2）</td><td>2h</td><td>防 OOM · user 工具安全边界 + 1</td><td>2 周后</td></tr>
+<tr><td>7</td><td><b>AddCommonTools move/insert 简化</b>（N8）</td><td>1h</td><td>删 8 行死代码 · 减启动期 1 次 vector copy ~5μs · 主要是可读性</td><td>有空时</td></tr>
+<tr><td>8</td><td><b>cJSON_PrintBuffered 静态 buf</b>（N9）</td><td>4h</td><td>INT 碎片 ↓ · 24h 运行后 free heap 稳定性 ↑</td><td>有空时</td></tr>
+<tr><td>9</td><td><b>lamp_controller demo 清理</b>（N10）</td><td>0.5h</td><td>编译快 3s · 心智负担 ↓</td><td>有空时</td></tr>
+</tbody>
+</table>
+
+<h3>10.2 扩展工具排期（按收益）</h3>
+<table>
+<thead><tr><th>批次</th><th>工具</th><th>合计工作量</th><th>收益侧重</th></tr></thead>
+<tbody>
+<tr><td><b>批 1（量产前 2-3 周）</b></td><td>show_pinyin · pomodoro.start/stop · battery_status · set_volume_curve</td><td>~3-4 天</td><td>已有硬件/UI 缺 MCP 驱动 · 上量后立即可用</td></tr>
+<tr><td><b>批 2（量产后 1 月）</b></td><td>recite · alarm.snooze · set_dnd · diag.dump_state</td><td>~1 周</td><td>用户反馈高频 · 远程运维基础</td></tr>
+<tr><td><b>批 3（量产后 1 季度）</b></td><td>quiz · show_idiom · story.tell · parental.report</td><td>~2-3 周</td><td>差异化竞争力 · 家长侧增值</td></tr>
+<tr><td><b>批 4（增值/定向）</b></td><td>calendar_today · set_wallpaper · music.set_playlist · diag.heap / last_crash / set_log_level</td><td>~1 周</td><td>个性化 + 维护工具链</td></tr>
+</tbody>
+</table>
+
+<h3>10.3 ROI 决策矩阵</h3>
+<div class="callout ok">
+<b>本周必做（高 ROI · 低成本）</b><br>
+① show_stroke 描述压缩（2h · 直接省钱 ¥10/天）<br>
+② device_status 缓存（2h · I2C 流量 ↓ 80%）<br>
+合计 <b>4 小时 · ROI 极高</b>
+</div>
+<div class="callout warn">
+<b>下个迭代（中 ROI · 中成本）</b><br>
+① music.play 副作用声明（3h · LLM 准确率 ↑）<br>
+② show_stroke Speaking 守护（1h · 偶发不出动画 → 0）<br>
+③ 新工具批 1（3-4 天 · 上量即用）<br>
+合计 <b>~1 周 · ROI 中高</b>
+</div>
+<div class="callout bad">
+<b>暂不做（低 ROI / 高成本）</b><br>
+① in-flight cancel（8h · 量产期低收益）<br>
+② tools_ 改 unordered_map（4h · 26 工具 O(n) 无感）<br>
+③ ImageContent 移独立头（1h · 仅可读性）<br>
+量产稳定后再考虑
+</div>
+</section>

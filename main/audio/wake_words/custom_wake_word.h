@@ -59,6 +59,7 @@ private:
     TaskHandle_t wake_word_encode_task_ = nullptr;
     StaticTask_t* wake_word_encode_task_buffer_ = nullptr;
     StackType_t* wake_word_encode_task_stack_ = nullptr;
+    std::atomic<bool> encode_in_progress_{false};
     std::deque<std::vector<int16_t>> wake_word_pcm_;
     std::deque<std::vector<uint8_t>> wake_word_opus_;
     std::mutex wake_word_mutex_;

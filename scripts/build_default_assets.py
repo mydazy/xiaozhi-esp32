@@ -910,7 +910,7 @@ def main():
     wakenet_model_paths = []
     multinet_model_paths = []
     
-    # 1. Only package wakenet models if USE_ESP_WAKE_WORD=y or USE_AFE_WAKE_WORD=y
+    # 1. Only package wakenet models if USE_AFE_WAKE_WORD=y
     if wake_word_config['use_esp_wake_word'] or wake_word_config['use_afe_wake_word']:
         wakenet_model_paths = get_wakenet_model_paths(wakenet_model_names, args.esp_sr_model_path)
     elif wakenet_model_names:

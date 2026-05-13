@@ -21,6 +21,7 @@
 #include "lvgl_display.h"
 #include "audio/music_player.h"
 #include "power_manager.h"  // PowerManager::IsChargingGlobal · self.power.get_sleep_mode 用
+#include "assets/lang_config.h"  // Lang::Sounds::OGG_VIBRATION · self.audio.set_wakeword Alert 用
 
 #define TAG "MCP"
 
@@ -104,6 +105,34 @@ void McpServer::AddCommonTools() {
         [](const PropertyList& properties) -> ReturnValue {
             bool enabled = Application::GetInstance().IsSttPopupEnabled();
             return std::string("{\"enabled\":") + (enabled ? "true" : "false") + "}";
+        });
+
+    // 唤醒词配置 · mode=afe 回归默认 · mode=custom + text 启用自定义（须在 MultiNet 词表内 · 重启生效）
+    AddTool("self.audio.set_wakeword",
+        "Set wake word: mode='afe' resets to default; mode='custom' enables a custom wake word (text required, must be in preloaded MultiNet command list). Reboot required to apply.",
+        PropertyList({
+            Property("mode", kPropertyTypeString),
+            Property("text", kPropertyTypeString, "")
+        }),
+        [](const PropertyList& properties) -> ReturnValue {
+            std::string mode = properties["mode"].value<std::string>();
+            std::string text = properties["text"].value<std::string>();
+            Settings s("wakeword", true);
+            s.SetString("mode", mode);
+            s.SetString("text", text);
+            Application::GetInstance().Schedule([]() {
+                Application::GetInstance().Alert("唤醒词已更新", "重启后生效", "", Lang::Sounds::OGG_VIBRATION);
+            });
+            return std::string("{\"success\":true,\"mode\":\"") + mode + "\",\"text\":\"" + text + "\"}";
+        });
+
+    AddTool("self.audio.get_wakeword",
+        "Get current wake word config. Returns JSON {\"mode\":\"afe|custom\",\"text\":\"...\"}.",
+        PropertyList(),
+        [](const PropertyList&) -> ReturnValue {
+            Settings s("wakeword", false);
+            return std::string("{\"mode\":\"") + s.GetString("mode", "afe") +
+                   "\",\"text\":\"" + s.GetString("text", "") + "\"}";
         });
 
     AddTool("self.audio_speaker.set_volume",

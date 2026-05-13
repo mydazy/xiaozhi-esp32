@@ -30,6 +30,41 @@ RemoteCmd::RemoteCmd(Application* app) : app_(app) {
     if (!stt_url_.empty()) {
         ESP_LOGI(TAG, "STT URL loaded: %s", stt_url_.c_str());
     }
+
+    // R1 修：创建延后定时器（reboot/ota/sleep 异步执行，不阻塞 main_loop）
+    esp_timer_create_args_t timer_args = {
+        .callback = DelayTimerCallback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "remote_delay",
+        .skip_unhandled_events = true,
+    };
+    esp_timer_create(&timer_args, &delay_timer_);
+}
+
+RemoteCmd::~RemoteCmd() {
+    if (delay_timer_) {
+        esp_timer_stop(delay_timer_);
+        esp_timer_delete(delay_timer_);
+        delay_timer_ = nullptr;
+    }
+}
+
+// R1 修：延后动作 · 替代 vTaskDelay 阻塞 main_loop
+// 单 timer 复用：reboot/ota/sleep 互斥下发，不会并发
+void RemoteCmd::ScheduleDelayedAction(int ms, std::function<void()> action) {
+    esp_timer_stop(delay_timer_);  // 防止前一次未完成（保守）
+    pending_action_ = std::move(action);
+    esp_timer_start_once(delay_timer_, (uint64_t)ms * 1000);
+}
+
+void RemoteCmd::DelayTimerCallback(void* arg) {
+    auto* self = static_cast<RemoteCmd*>(arg);
+    if (self->pending_action_) {
+        // 切回主线程执行真正的动作（reboot/ota/sleep 都涉及主线程资源）
+        auto action = std::move(self->pending_action_);
+        Application::GetInstance().Schedule(std::move(action));
+    }
 }
 
 bool RemoteCmd::Handle(const cJSON* payload) {
@@ -76,6 +111,7 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "music_resume") == 0) OnMusicResume();
     else if (strcmp(type, "edu_pool") == 0) OnEduPool(msg);
     else if (strcmp(type, "update_prompt") == 0) OnUpdatePrompt(msg);
+    else if (strcmp(type, "wakeword") == 0) OnWakeWord(msg);
     else {
         ESP_LOGW(TAG, "未知命令: %s", type);
         handled = false;
@@ -89,8 +125,9 @@ void RemoteCmd::OnReboot() {
     ESP_LOGI(TAG, "reboot");
     app_->Schedule([this]() {
         app_->Alert("重启设备", "正在重启", "", Lang::Sounds::OGG_VIBRATION);
-        vTaskDelay(pdMS_TO_TICKS(2000));
-        app_->Reboot();
+        ScheduleDelayedAction(2000, []() {
+            Application::GetInstance().Reboot();
+        });
     });
 }
 
@@ -108,9 +145,10 @@ void RemoteCmd::OnOta() {
 
         // 执行 OTA 检查（包括激活状态）
         app_->Alert("检查更新", "检查激活状态", "", Lang::Sounds::OGG_VIBRATION);
-        vTaskDelay(pdMS_TO_TICKS(1500));
-        Ota ota;
-        ota.CheckVersion();
+        ScheduleDelayedAction(1500, []() {
+            Ota ota;
+            ota.CheckVersion();
+        });
     });
 }
 
@@ -265,9 +303,7 @@ void RemoteCmd::OnFlow(const cJSON* msg) {
         if (cJSON_IsString(url_item) && url_item->valuestring[0] != '\0') {
             std::string url = url_item->valuestring;
             ESP_LOGI(TAG, "flow start: %s", url.c_str());
-            app_->Schedule([lc, url = std::move(url)]() {
-                lc->Start(url);
-            });
+            lc->Start(url);
             return;
         }
         // 方式2: 脚本直接通过 WS 推送（script 字段为 JSON 对象）
@@ -321,14 +357,13 @@ void RemoteCmd::OnSleep(const cJSON* msg) {
             app_->AbortSpeaking(kAbortReasonNone);
         }
         app_->Alert("解绑设备", "进入休眠", "", Lang::Sounds::OGG_UNBUNDLE);
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        ScheduleDelayedAction(3000, [enable_gyro_wakeup]() {
+            ESP_LOGI(TAG, "RemoteCmd 触发 EnterDeepSleep（gyro=%d）", enable_gyro_wakeup);
+            Board::GetInstance().EnterDeepSleep(enable_gyro_wakeup);
 
-        ESP_LOGI(TAG, "RemoteCmd 触发 EnterDeepSleep（gyro=%d）", enable_gyro_wakeup);
-        Board::GetInstance().EnterDeepSleep(enable_gyro_wakeup);
-
-        // 兜底：基类默认空实现（未 override 的板）才会走到这里，复位回安全态
-        ESP_LOGW(TAG, "EnterDeepSleep 未实现，降级 esp_restart");
-        esp_restart();
+            ESP_LOGW(TAG, "EnterDeepSleep 未实现，降级 esp_restart");
+            esp_restart();
+        });
     });
 }
 
@@ -559,5 +594,27 @@ void RemoteCmd::OnEduPool(const cJSON* msg) {
         bool ok = EduScenePool::GetInstance().UpdateFromString(s.c_str());
         Board::GetInstance().GetDisplay()->ShowNotification(
             ok ? "启蒙场景已更新" : "启蒙场景更新失败", 2000);
+    });
+}
+
+// MCP 唤醒词 · {"type":"wakeword","mode":"afe|custom","text":"..."} · 无 mode = 查询当前
+void RemoteCmd::OnWakeWord(const cJSON* msg) {
+    auto mi = cJSON_GetObjectItem(msg, "mode");
+    if (!cJSON_IsString(mi)) {
+        Settings s("wakeword", false);
+        ESP_LOGI(TAG, "wakeword: mode=%s text=%s",
+                 s.GetString("mode", "afe").c_str(), s.GetString("text", "").c_str());
+        return;
+    }
+    std::string mode = mi->valuestring;
+    auto ti = cJSON_GetObjectItem(msg, "text");
+    std::string text = cJSON_IsString(ti) ? ti->valuestring : "";
+
+    app_->Schedule([this, mode = std::move(mode), text = std::move(text)]() {
+        Settings s("wakeword", true);
+        s.SetString("mode", mode);
+        s.SetString("text", text);
+        ESP_LOGI(TAG, "wakeword: %s text=%s · 重启生效", mode.c_str(), text.c_str());
+        app_->Alert("唤醒词已更新", "重启后生效", "", Lang::Sounds::OGG_VIBRATION);
     });
 }

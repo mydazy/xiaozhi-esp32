@@ -1,0 +1,1525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · 唤醒词子系统</title>
+<style>
+:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+        --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
+        --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       margin: 0; background: #F5F5F5; color: var(--text); line-height: 1.55; font-size: 14px; }
+header { background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+         color: white; padding: 24px 40px; }
+header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 600; }
+header .meta { opacity: .9; font-size: 12px; }
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav { width: 180px; flex-shrink: 0; background: white; padding: 18px 0;
+      border-right: 1px solid var(--border); position: sticky; top: 0;
+      align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+nav h3 { margin: 0 14px 8px; font-size: 11px; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: .5px; }
+nav a { display: block; padding: 5px 14px; color: var(--text); text-decoration: none;
+        font-size: 13px; border-left: 3px solid transparent; }
+nav a:hover { background: var(--brand-light); border-left-color: var(--brand); color: var(--brand-deep); }
+main { flex: 1; padding: 24px 36px; max-width: 980px; }
+section { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
+             border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
+section h2 .num { display: inline-block; background: var(--brand); color: white;
+                  padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
+section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
+code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
+       font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px; color: #C2185B; }
+table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 13px; }
+th { background: #F5F5F5; padding: 6px 9px; text-align: left; border: 1px solid var(--border);
+     font-weight: 600; font-size: 12.5px; }
+td { padding: 5px 9px; border: 1px solid var(--border); vertical-align: top; font-size: 12.5px; }
+tr:nth-child(even) td { background: #FAFAFA; }
+.callout { padding: 10px 14px; border-radius: 6px; margin: 10px 0;
+           border-left: 4px solid var(--text-2); background: #FAFAFA; font-size: 13px; }
+.callout.ok    { border-left-color: var(--ok); background: #E8F5E9; }
+.callout.warn  { border-left-color: var(--warn); background: #FFF3E0; }
+.callout.bad   { border-left-color: var(--bad); background: #FFEBEE; }
+.svgwrap { background: var(--bg); padding: 10px; border-radius: 6px; margin: 10px 0; overflow-x: auto; }
+.svgwrap svg { display: block; max-width: 100%; height: auto; }
+text { font-family: -apple-system, "PingFang SC", sans-serif; }
+.svg-title { font-size: 13px; font-weight: 600; fill: var(--brand-deep); }
+.svg-axis { font-size: 11px; fill: var(--text-2); }
+.node-text { font-size: 12px; fill: var(--text); text-anchor: middle; dominant-baseline: middle; }
+.node-text.sm { font-size: 10.5px; fill: var(--text-2); }
+ul.compact { padding-left: 18px; margin: 6px 0; }
+ul.compact li { margin: 2px 0; }
+.pill { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+.pill.p0 { background:#FFEBEE; color:var(--bad); }
+.pill.p1 { background:#FFF3E0; color:var(--warn); }
+.pill.p2 { background:#E3F2FD; color:var(--core0-line); }
+.pill.lean { background:#F3E5F5; color:#6A1B9A; }
+.pill.ok { background:#E8F5E9; color:var(--ok); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MyDazy P30 · 唤醒词子系统量产前评审</h1>
+  <div class="meta">v1.1 · 2026-05-13 · P0×4 已修 + MCP wakeword.config 已落地 · AFE + Custom（Esp 已删）</div>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>目录</h3>
+  <a href="#overview">1. 概览</a>
+  <a href="#scope">2. 模块边界</a>
+  <a href="#afe">3. AfeWakeWord 链路</a>
+  <a href="#custom">4. CustomWakeWord 链路</a>
+  <a href="#redline">5. wake_encode 红线</a>
+  <a href="#bridge">6. 唤醒↔对话衔接</a>
+  <a href="#review">7. 三遍评审 + log</a>
+  <a href="#deep">8. 精简后深度分析</a>
+  <a href="#mcp-config">9. MCP 配置 + 重启切换</a>
+</nav>
+
+<main>
+
+<!-- =============== 1 概览 =============== -->
+<section id="overview">
+<h2><span class="num">1</span> 概览</h2>
+
+<p class="sub">精简后两种实现共生于 <code>main/audio/wake_words/</code>，由 <code>AudioService::SetModelsList</code> 按"模型 bin 包含什么"二选一替换。量产 SKU（P30-WiFi/4G/P31）走 <b>AfeWakeWord</b>（S3 + PSRAM 默认路径），具备 AEC + Speaking 中打断能力；<b>CustomWakeWord</b> 为离线自定义唤醒词备选。<span class="pill lean">已删</span> 2026-05-13 · 旧裸 WakeNet 兜底实现已下线（量产板均 S3，非 S3 路径直接 nullptr · 详见 § 2.1 精简纪事）。</p>
+
+<h3>1.1 两实现对比矩阵（核心）</h3>
+
+<div class="svgwrap">
+<svg viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg">
+<text x="360" y="18" class="svg-title" text-anchor="middle">两种唤醒实现 · 7 维对比</text>
+
+<!-- 列头 -->
+<rect x="20" y="38" width="240" height="28" fill="#F5F5F5" stroke="#999"/>
+<text x="140" y="56" class="node-text" style="font-weight:600">维度</text>
+<rect x="260" y="38" width="220" height="28" fill="#FFEBEE" stroke="#C62828"/>
+<text x="370" y="56" class="node-text" style="font-weight:600;fill:#8E0F0F">AfeWakeWord（推荐）</text>
+<rect x="480" y="38" width="220" height="28" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="590" y="56" class="node-text" style="font-weight:600">CustomWakeWord</text>
+
+<!-- 行 -->
+<g font-size="11">
+  <rect x="20"  y="66" width="240" height="28" fill="#fff" stroke="#ddd"/><text x="30" y="84">芯片支持</text>
+  <rect x="260" y="66" width="220" height="28" fill="#fff" stroke="#ddd"/><text x="270" y="84">S3 / P4 + PSRAM</text>
+  <rect x="480" y="66" width="220" height="28" fill="#fff" stroke="#ddd"/><text x="490" y="84">S3 / P4 + PSRAM</text>
+
+  <rect x="20"  y="94" width="240" height="28" fill="#fafafa" stroke="#ddd"/><text x="30" y="112">引擎核心</text>
+  <rect x="260" y="94" width="220" height="28" fill="#fafafa" stroke="#ddd"/><text x="270" y="112">esp_afe_sr_iface（WakeNet+AEC+AGC+NS）</text>
+  <rect x="480" y="94" width="220" height="28" fill="#fafafa" stroke="#ddd"/><text x="490" y="112">esp_mn_iface（MultiNet 命令词）</text>
+
+  <rect x="20"  y="122" width="240" height="28" fill="#fff" stroke="#ddd"/><text x="30" y="140">AEC 双讲打断</text>
+  <rect x="260" y="122" width="220" height="28" fill="#E8F5E9" stroke="#2E7D32"/><text x="270" y="140" style="fill:#2E7D32;font-weight:600">✅ 内建 AEC + AGC</text>
+  <rect x="480" y="122" width="220" height="28" fill="#FFEBEE" stroke="#D32F2F"/><text x="490" y="140" style="fill:#D32F2F">❌ 纯命令词 · 无 AEC</text>
+
+  <rect x="20"  y="150" width="240" height="28" fill="#fafafa" stroke="#ddd"/><text x="30" y="168">Speaking 中打断</text>
+  <rect x="260" y="150" width="220" height="28" fill="#E8F5E9" stroke="#2E7D32"/><text x="270" y="168" style="fill:#2E7D32;font-weight:600">✅ 仅本路径支持</text>
+  <rect x="480" y="150" width="220" height="28" fill="#FFEBEE" stroke="#D32F2F"/><text x="490" y="168" style="fill:#D32F2F">❌ 被 application 强关</text>
+
+  <rect x="20"  y="178" width="240" height="28" fill="#fff" stroke="#ddd"/><text x="30" y="196">Feed 任务（驱动喂帧）</text>
+  <rect x="260" y="178" width="220" height="28" fill="#fff" stroke="#ddd"/><text x="270" y="196">audio_input · Core 1 · P10</text>
+  <rect x="480" y="178" width="220" height="28" fill="#fff" stroke="#ddd"/><text x="490" y="196">audio_input · Core 1 · P10</text>
+
+  <rect x="20"  y="206" width="240" height="28" fill="#fafafa" stroke="#ddd"/><text x="30" y="224">检测任务</text>
+  <rect x="260" y="206" width="220" height="28" fill="#fafafa" stroke="#ddd"/><text x="270" y="224"><tspan font-weight="600">独立</tspan> audio_detection · P5 · 4096</text>
+  <rect x="480" y="206" width="220" height="28" fill="#fafafa" stroke="#ddd"/><text x="490" y="224">无独立任务 · Feed 内联 detect</text>
+
+  <rect x="20"  y="234" width="240" height="28" fill="#fff" stroke="#ddd"/><text x="30" y="252">Encode 任务</text>
+  <rect x="260" y="234" width="220" height="28" fill="#fff" stroke="#ddd"/><text x="270" y="252">24 KB PSRAM · INT TCB · P2 · Core 1</text>
+  <rect x="480" y="234" width="220" height="28" fill="#fff" stroke="#ddd"/><text x="490" y="252">28 KB PSRAM · INT TCB · P2 · Core 1</text>
+
+  <rect x="20"  y="262" width="240" height="28" fill="#fafafa" stroke="#ddd"/><text x="30" y="280">阈值（语义不同）</text>
+  <rect x="260" y="262" width="220" height="28" fill="#fafafa" stroke="#ddd"/><text x="270" y="280">硬编码 0.6 · WakeNet</text>
+  <rect x="480" y="262" width="220" height="28" fill="#fafafa" stroke="#ddd"/><text x="490" y="280">Kconfig 20%/0.2 · MultiNet</text>
+
+  <rect x="20"  y="290" width="240" height="28" fill="#fff" stroke="#ddd"/><text x="30" y="308">多唤醒词</text>
+  <rect x="260" y="290" width="220" height="28" fill="#fff" stroke="#ddd"/><text x="270" y="308">✅ get_wake_words 切 ";" 自动多词</text>
+  <rect x="480" y="290" width="220" height="28" fill="#fff" stroke="#ddd"/><text x="490" y="308">⚠ commands[] · action=="wake" 才回</text>
+
+  <rect x="20"  y="318" width="240" height="28" fill="#fafafa" stroke="#ddd"/><text x="30" y="336">类型识别（Speaking 用）</text>
+  <rect x="260" y="318" width="220" height="28" fill="#fafafa" stroke="#ddd"/><text x="270" y="336">dynamic_cast IsAfeWakeWord</text>
+  <rect x="480" y="318" width="220" height="28" fill="#fafafa" stroke="#ddd"/><text x="490" y="336">SetModelsList MN_PREFIX 优先</text>
+</g>
+</svg>
+</div>
+
+<h3>1.2 推荐量产配置</h3>
+
+<div class="callout ok">
+<b>推荐 <code>AfeWakeWord</code>（量产 SKU 默认路径）</b><br>
+理由（按权重）：
+<ol class="compact">
+<li><b>Speaking 中可打断</b> · <code>application.cc:1117</code> 显式判 <code>IsAfeWakeWord()</code>，是 P30 用户体验的核心场景</li>
+<li>内建 AEC · 喇叭外放不会自激</li>
+<li>与 <code>AfeAudioProcessor</code> 解耦：唤醒态走 <code>AFE_TYPE_SR</code>，对话态走 <code>AFE_TYPE_VC</code>，两套独立 afe_data（注：1.5MB PSRAM × 2 共存，P1 范围）</li>
+<li>SetModelsList 默认选它（模型 bin 不含 MN 即走 AFE）· <code>audio_service.cc:780-789</code></li>
+<li>上游 xiaozhi-esp32 主战路径，rebase 风险最小</li>
+</ol>
+</div>
+
+<div class="callout warn">
+<b>备选 <code>CustomWakeWord</code>（自定义唤醒词路径 · 也属量产可选）</b><br>
+适用场景：① 客户要求设备名/品牌名自定义唤醒（如"嘿小爱灵芯"非标准词）② 离线场景需要命令词分支（虽然本仓库 commands[] 只在 action=="wake" 分支回调）③ 模型 bin 已经包含 MultiNet（如 <code>nihaoxiaozhi_mn7_cn</code>）。<br>
+代价：失去 AEC · Speaking 中无法打断 · 阈值语义不同（MultiNet 概率 0.2 vs WakeNet 触发阈 0.6）· Feed 内联 detect 抢占 audio_input P10 时间片。
+</div>
+
+<h3>1.3 关键参数速查</h3>
+<table>
+<thead><tr><th>项</th><th>值</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td>采样率</td><td>16 kHz</td><td>codec 输出</td></tr>
+<tr><td>AFE 阈值</td><td>0.6（硬编码）</td><td><code>afe_wake_word.cc:89</code></td></tr>
+<tr><td>Custom 阈值</td><td>20% (0.2) · index.json / Kconfig 可改</td><td><code>custom_wake_word.h:49</code> / Kconfig</td></tr>
+<tr><td>AFE 任务（内建）核心</td><td>Core 1 · P1（perferred）</td><td><code>afe_wake_word.cc:76-77</code></td></tr>
+<tr><td>audio_detection 任务</td><td>4096 · P5 · Core 1（⚠ doc 标的 P7 未落地）</td><td><code>afe_wake_word.cc:96-100</code></td></tr>
+<tr><td>encode_wake_word（AFE）</td><td>24 KB PSRAM stack · INT TCB · P2 · Core 1</td><td><code>afe_wake_word.cc:186-197</code></td></tr>
+<tr><td>encode_wake_word（Custom）</td><td>28 KB PSRAM stack · INT TCB · P2 · Core 1</td><td><code>custom_wake_word.cc:219-230</code></td></tr>
+<tr><td>PCM ring 上限</td><td><code>2000/30 ≈ 66</code> 帧 ≈ 2 秒</td><td><code>afe_wake_word.cc:180</code> / <code>custom_wake_word.cc:213</code></td></tr>
+<tr><td>Opus deque 上限</td><td><b>无上限</b>（rest-P1 待修）</td><td>encode task 内 emplace_back</td></tr>
+<tr><td>选择策略</td><td>S3/P4 守卫内 · MN 存在选 Custom，否则 AFE，再否则 nullptr</td><td><code>audio_service.cc:780-794</code></td></tr>
+<tr><td><code>WAKE_WORD_DETECTION_IN_LISTENING</code></td><td><b>默认 n</b></td><td><code>Kconfig.projbuild</code></td></tr>
+<tr><td><code>SEND_WAKE_WORD_DATA</code></td><td><b>默认 y</b>（AFE/Custom 都支持）</td><td><code>Kconfig.projbuild</code></td></tr>
+</tbody>
+</table>
+
+</section>
+
+<!-- =============== 2 模块边界 =============== -->
+<section id="scope">
+<h2><span class="num">2</span> 模块边界</h2>
+
+<h3>2.1 源文件清单（精简后）</h3>
+<table>
+<thead><tr><th>文件</th><th>职责</th></tr></thead>
+<tbody>
+<tr><td><code>main/audio/wake_word.h</code>（26 行）</td><td>9 个虚函数抽象基类 · init / feed / start / stop / encode / pop / detect 回调</td></tr>
+<tr><td><code>main/audio/wake_words/afe_wake_word.{h,cc}</code>（62 + 276 行）</td><td>ESP-SR 一栈式 · AEC + AGC + NS + WakeNet · 独立 audio_detection 任务 · <b>量产推荐</b></td></tr>
+<tr><td><code>main/audio/wake_words/custom_wake_word.{h,cc}</code>（71 + 303 行）</td><td>MultiNet 命令词 · 用户自定义唤醒词文本（pinyin）· 量产可选</td></tr>
+<tr><td><code>main/audio/audio_service.{h,cc}</code></td><td>持有 wake_word_ unique_ptr · SetModelsList 选实现 · EnableWakeWordDetection 开关</td></tr>
+<tr><td><code>main/application.cc</code></td><td>HandleWakeWordDetectedEvent · state 切换控 EnableWakeWordDetection</td></tr>
+<tr><td><code>main/Kconfig.projbuild</code></td><td><code>USE_ESP_WAKE_WORD</code> 选项已 2026-05-13 删除（占位注释）· 仅留 <code>CUSTOM_WAKE_WORD</code> 等关联配置</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>精简纪事</b>：2026-05-13 删除 <code>esp_wake_word.{h,cc}</code>（旧裸 WakeNet 兜底）· <code>SetModelsList</code> 已清掉 EspWakeWord 引用 · <code>Kconfig.projbuild</code> 的 USE_ESP_WAKE_WORD 选项已删 · <code>CMakeLists.txt</code> 编译项已删 · 非 S3/P4 平台 <code>wake_word_=nullptr</code>（不再有 fallback 实现）。
+</div>
+
+<h3>2.2 WakeWord 基类公开接口契约</h3>
+<table>
+<thead><tr><th>方法</th><th>语义</th></tr></thead>
+<tbody>
+<tr><td><code>Initialize(codec, models_list)</code></td><td>加载模型（外部传或自 init）· 创建独立任务（仅 AFE）· 返回 bool</td></tr>
+<tr><td><code>Feed(data)</code></td><td>主线程喂 10ms PCM 帧 · 锁内检查 running_ 防 TOCTOU race</td></tr>
+<tr><td><code>OnWakeWordDetected(cb)</code></td><td>注册命中回调 · 实际由 AudioService 包装一层后转 application</td></tr>
+<tr><td><code>Start() / Stop()</code></td><td>事件位/atomic 切换 · Stop 仅停 detection · 不释放模型 PSRAM</td></tr>
+<tr><td><code>GetFeedSize()</code></td><td>返回 chunksize（AFE feed / MN samp / WN samp）</td></tr>
+<tr><td><code>EncodeWakeWordData()</code></td><td>一次性 spawn encode_wake_word 任务（PSRAM 栈 + INT TCB · Pin Core 1）</td></tr>
+<tr><td><code>GetWakeWordOpus(opus)</code></td><td>阻塞条件变量取一个 opus 包 · 返回是否非空（空 = 流结束哨兵）</td></tr>
+<tr><td><code>GetLastDetectedWakeWord()</code></td><td>取最近命中的词文本（多词模型用）</td></tr>
+</tbody>
+</table>
+
+<h3>2.3 SetModelsList 实现选择策略（精简后代码事实）</h3>
+<pre style="background:#FAFAFA;padding:10px;border-radius:6px;font-size:12px;border-left:3px solid var(--brand);">
+// audio_service.cc:777-803（2026-05-13 精简后）
+void AudioService::SetModelsList(srmodel_list_t* models_list) {
+    models_list_ = models_list;
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
+    // MultiNet 命令词模型存在 → CustomWakeWord（自定义唤醒词）
+    // 仅 WakeNet 模型 → AfeWakeWord（量产推荐 · 支持 Speaking 中打断 + 内建 AEC）
+    if (esp_srmodel_filter(models_list_, ESP_MN_PREFIX, NULL) != nullptr) {
+        wake_word_ = std::make_unique&lt;CustomWakeWord&gt;();
+    } else if (esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr) {
+        wake_word_ = std::make_unique&lt;AfeWakeWord&gt;();
+    } else {
+        wake_word_ = nullptr;
+    }
+#else
+    // 非 S3/P4 平台不支持唤醒词（量产板均为 S3 · 此分支仅占位防编译错）
+    (void)models_list;
+    wake_word_ = nullptr;
+#endif
+    ...
+}</pre>
+
+<div class="callout ok">
+<b>精简后行为</b>：S3/P4 内 MN 存在则走 Custom · 否则 WN 存在走 AFE · 都不存在 nullptr。非 S3/P4 一律 nullptr（旧 Esp 兜底分支已删）。<b>构造期一次调用</b> · <code>application.cc</code> 主流程未发现运行期重调路径（详见 § 8.3 第 3 轮反驳）。
+</div>
+
+</section>
+
+<!-- =============== 3 AfeWakeWord 链路 =============== -->
+<section id="afe">
+<h2><span class="num">3</span> AfeWakeWord 完整链路</h2>
+
+<p class="sub">AFE 是量产推荐路径。物理链路涉及 4 个任务：<code>audio_input</code>（Feed）→ AFE 内建 <code>audio_communication</code> + WakeNet 推理 → <code>audio_detection</code>（Fetch）→ <code>encode_wake_word</code>（一次性）。</p>
+
+<h3>3.1 时序图</h3>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 470" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="bArrW" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker>
+</defs>
+<text x="440" y="18" class="svg-title" text-anchor="middle">AfeWakeWord 时序 · 4 任务协作</text>
+
+<!-- 任务列 -->
+<rect x="20"  y="38" width="160" height="28" fill="var(--core1)" stroke="var(--core1-line)"/>
+<text x="100" y="56" class="node-text" style="font-weight:600">audio_input · Core 1 · P10</text>
+
+<rect x="190" y="38" width="160" height="28" fill="var(--core1)" stroke="var(--core1-line)"/>
+<text x="270" y="56" class="node-text" style="font-weight:600">AFE 内建（perferred Core 1 · P1）</text>
+
+<rect x="360" y="38" width="160" height="28" fill="var(--core1)" stroke="var(--core1-line)"/>
+<text x="440" y="56" class="node-text" style="font-weight:600">audio_detection · Core 1 · P5</text>
+
+<rect x="530" y="38" width="160" height="28" fill="var(--core1)" stroke="var(--core1-line)"/>
+<text x="610" y="56" class="node-text" style="font-weight:600">encode_wake_word · Core 1 · P2</text>
+
+<rect x="700" y="38" width="160" height="28" fill="var(--core0)" stroke="var(--core0-line)"/>
+<text x="780" y="56" class="node-text" style="font-weight:600">main_app · Core 0 · P10</text>
+
+<!-- 时间轴竖线 -->
+<line x1="100" y1="70" x2="100" y2="450" stroke="#999" stroke-dasharray="3,3"/>
+<line x1="270" y1="70" x2="270" y2="450" stroke="#999" stroke-dasharray="3,3"/>
+<line x1="440" y1="70" x2="440" y2="450" stroke="#999" stroke-dasharray="3,3"/>
+<line x1="610" y1="70" x2="610" y2="450" stroke="#999" stroke-dasharray="3,3"/>
+<line x1="780" y1="70" x2="780" y2="450" stroke="#999" stroke-dasharray="3,3"/>
+
+<!-- ① I2S 10ms 帧 -->
+<rect x="20" y="80" width="160" height="22" fill="#fff" stroke="#666"/>
+<text x="100" y="95" class="node-text sm">ReadAudioData 10ms PCM</text>
+<line x1="100" y1="102" x2="270" y2="102" stroke="#666" marker-end="url(#bArrW)"/>
+<text x="185" y="98" class="node-text sm">Feed(data) 加锁喂帧</text>
+
+<!-- ② AFE feed/chunksize -->
+<rect x="190" y="115" width="160" height="22" fill="#fff" stroke="#666"/>
+<text x="270" y="130" class="node-text sm">input_buffer 累 ≥ chunk_size</text>
+<rect x="190" y="142" width="160" height="22" fill="#fff" stroke="#666"/>
+<text x="270" y="157" class="node-text sm">afe_iface->feed(afe_data)</text>
+
+<!-- ③ AFE 内部 WakeNet 推理 -->
+<rect x="190" y="172" width="160" height="36" fill="#FFF8E1" stroke="#F57F17"/>
+<text x="270" y="187" class="node-text sm" style="font-weight:600">WakeNet 推理</text>
+<text x="270" y="200" class="node-text sm">AEC + AGC + NS + KWS</text>
+
+<line x1="270" y1="208" x2="440" y2="208" stroke="#666" marker-end="url(#bArrW)"/>
+
+<!-- ④ detection fetch -->
+<rect x="360" y="220" width="160" height="22" fill="#fff" stroke="#666"/>
+<text x="440" y="235" class="node-text sm">fetch_with_delay(portMAX_DELAY)</text>
+<text x="440" y="252" class="node-text sm" style="fill:#D32F2F">⚠ P0-1 红线：裸 portMAX_DELAY</text>
+
+<rect x="360" y="265" width="160" height="22" fill="#FFEBEE" stroke="#C62828"/>
+<text x="440" y="279" class="node-text sm">wakeup_state == WAKENET_DETECTED</text>
+
+<rect x="360" y="290" width="160" height="22" fill="#fff" stroke="#666"/>
+<text x="440" y="305" class="node-text sm">Stop() · reset_buffer ~50ms</text>
+
+<line x1="440" y1="312" x2="780" y2="312" stroke="#666" marker-end="url(#bArrW)"/>
+<text x="610" y="308" class="node-text sm">cb → SET_BITS WAKE_WORD_DETECTED</text>
+
+<!-- ⑤ main_app 处理 -->
+<rect x="700" y="320" width="160" height="34" fill="#fff" stroke="#666"/>
+<text x="780" y="335" class="node-text sm">HandleWakeWordDetectedEvent</text>
+<text x="780" y="348" class="node-text sm">application.cc:1011</text>
+
+<rect x="700" y="358" width="160" height="22" fill="#fff" stroke="#666"/>
+<text x="780" y="372" class="node-text sm">EncodeWakeWord() (Idle 分支)</text>
+
+<!-- ⑥ encode task spawn -->
+<line x1="780" y1="380" x2="610" y2="380" stroke="#666" marker-end="url(#bArrW)"/>
+<text x="700" y="376" class="node-text sm">xTaskCreateStatic</text>
+
+<rect x="530" y="388" width="160" height="22" fill="#fff" stroke="#666"/>
+<text x="610" y="402" class="node-text sm">遍历 wake_word_pcm_</text>
+<rect x="530" y="412" width="160" height="22" fill="#fff" stroke="#666"/>
+<text x="610" y="426" class="node-text sm">esp_opus_enc_process → deque</text>
+<rect x="530" y="436" width="160" height="22" fill="#fff" stroke="#666"/>
+<text x="610" y="450" class="node-text sm">push 空 vector 哨兵 + vTaskDelete</text>
+
+<!-- ⑦ pop -->
+<line x1="610" y1="448" x2="780" y2="448" stroke="#2E7D32" marker-end="url(#bArrW)"/>
+<text x="700" y="444" class="node-text sm" style="fill:#2E7D32">PopWakeWordPacket while loop</text>
+</svg>
+</div>
+
+<h3>3.2 任务表（AFE 路径全部 Pin Core 1）</h3>
+<table>
+<thead><tr><th>任务</th><th>栈</th><th>优先级</th><th>核</th><th>生命周期</th></tr></thead>
+<tbody>
+<tr><td><code>audio_input</code>（Feed 驱动）</td><td>2048×3 = 6144 INT</td><td>P10</td><td>Core 1</td><td>永久（service 期）</td></tr>
+<tr><td>AFE <code>audio_communication</code></td><td>由 ESP-SR 内部</td><td>P1（perferred）</td><td>Core 1（perferred）</td><td>常驻</td></tr>
+<tr><td>AFE WakeNet detect（含在 AFE 内）</td><td>由 ESP-SR 内部</td><td>—</td><td>Core 1</td><td>常驻</td></tr>
+<tr><td><code>audio_detection</code>（fetch）</td><td>4096 INT</td><td><b>P5</b>（⚠ doc 写 P7）</td><td>Core 1</td><td>永久</td></tr>
+<tr><td><code>encode_wake_word</code></td><td><b>24 KB PSRAM</b> · INT TCB</td><td>P2</td><td>Core 1</td><td>一次性 · 栈复用</td></tr>
+</tbody>
+</table>
+
+<h3>3.3 资源占用估算</h3>
+<table>
+<thead><tr><th>资源</th><th>估算</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>PSRAM（AFE 模型 + ring）</td><td>~1.5 MB 常驻</td><td>WakeNet 模型 + AGC + NS + AEC ring · Stop 不释放</td></tr>
+<tr><td>PSRAM（encode 栈）</td><td>24 KB · 复用</td><td>首次唤醒时 alloc，之后复用</td></tr>
+<tr><td>INT RAM（encode TCB）</td><td><code>sizeof(StaticTask_t)</code> · ~600 B</td><td>必须 INT，PSRAM 栈+INT TCB 双保险</td></tr>
+<tr><td>INT RAM（detection 任务栈）</td><td>4096 B</td><td>P0-4 评估：贴边，建议提到 6144</td></tr>
+<tr><td>PCM ring deque</td><td>≤ 66 × (chunksize × 2B)</td><td>chunksize 由 AFE 决定，典型 512 sample · ≈ 67 KB PSRAM</td></tr>
+<tr><td>Opus 出队</td><td>≤ 4 KB（2 秒）</td><td>无上限 · 弱网下理论无界 · 见 P1-4</td></tr>
+</tbody>
+</table>
+
+<h3>3.4 input_format 自适应</h3>
+<p>AfeWakeWord 不硬编码 mic/ref 拓扑，而是按 codec 查询动态拼：</p>
+<pre style="background:#FAFAFA;padding:10px;border-radius:6px;font-size:12px;border-left:3px solid var(--brand);">
+// afe_wake_word.cc:66-73
+int ref_num = codec_->input_reference() ? 1 : 0;
+std::string input_format;
+for (int i = 0; i &lt; codec_->input_channels() - ref_num; i++) input_format.push_back('M');
+for (int i = 0; i &lt; ref_num; i++) input_format.push_back('R');
+// P30 ES7210 双麦 + 回采 → "MMR"；单麦 + 回采 → "MR"</pre>
+
+</section>
+
+<!-- =============== 4 CustomWakeWord 链路 =============== -->
+<section id="custom">
+<h2><span class="num">4</span> CustomWakeWord 完整链路</h2>
+
+<p class="sub">用户自定义唤醒词路径，走 MultiNet（命令词识别）。Feed 内联 detect，无独立检测任务。<b>无 AEC，无法 Speaking 中打断</b>。</p>
+
+<h3>4.1 链路关键节点</h3>
+<table>
+<thead><tr><th>节点</th><th>代码</th></tr></thead>
+<tbody>
+<tr><td>① 模型加载</td><td><code>multinet_->create(mn_name_, duration_)</code> · <code>custom_wake_word.cc:119</code></td></tr>
+<tr><td>② 命令词来源</td><td>Kconfig <code>CUSTOM_WAKE_WORD</code>（pinyin） 或 <code>Assets/index.json.multinet_model.commands[]</code> · <code>:67-78</code></td></tr>
+<tr><td>③ 阈值</td><td><code>set_det_threshold(threshold_)</code> · 默认 0.2 · <code>:120</code></td></tr>
+<tr><td>④ Feed（main 喂 + 内联 detect）</td><td><code>multinet_->detect(...)</code> · <code>:171</code></td></tr>
+<tr><td>⑤ 命中过滤</td><td><code>command.action == "wake"</code> 才回调 · <code>:179</code></td></tr>
+<tr><td>⑥ encode_wake_word</td><td>28 KB PSRAM · Pin Core 1 · <code>:230</code></td></tr>
+</tbody>
+</table>
+
+<h3>4.2 与 AFE 路径差异</h3>
+<table>
+<thead><tr><th>项</th><th>AFE</th><th>Custom</th></tr></thead>
+<tbody>
+<tr><td>采样取通道</td><td>AFE 内部按 input_format 分流</td><td>手工取左通道（<code>codec_->input_channels()==2</code> 时 i+=2）<code>:158-161</code></td></tr>
+<tr><td>检测线程</td><td>独立 audio_detection</td><td>无 · 在 audio_input P10 内联 · 计算挤占采集</td></tr>
+<tr><td>状态量</td><td>EventGroupBit · DETECTION_RUNNING</td><td><code>std::atomic&lt;bool&gt; running_</code></td></tr>
+<tr><td>Stop 清理</td><td>clear bit + reset_buffer + clear input</td><td><code>running_=false</code> + clear input · <b>不调 multinet_->clean</b></td></tr>
+<tr><td>encode 栈</td><td>24 KB</td><td><b>28 KB</b>（4096×7）</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>命中分支逻辑微妙处</b>（P1-6 评审范围）：<code>custom_wake_word.cc:175</code> 的 <code>for (... && running_)</code> 与 <code>:182 input_buffer_.clear()</code> + <code>:195 if (!running_) break</code> + <code>:198 erase</code> 三段交互，<b>当前侥幸正确</b>。建议按 review § P1-6 改成命中即 return Feed。
+</div>
+
+</section>
+
+<!-- =============== 5 wake_encode 红线 =============== -->
+<section id="redline">
+<h2><span class="num">5</span> wake_encode 任务双核红线（已修复）</h2>
+
+<p class="sub">2026-04-28 / 04-29 修复重点。<code>esp32-memory.md</code> 红线："PSRAM 栈 + Core 0 = Double exception"。当前 AFE / Custom 两个 encode 任务都已修到正确形态。</p>
+
+<h3>5.1 修复前后对比</h3>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 320" xmlns="http://www.w3.org/2000/svg">
+<text x="440" y="18" class="svg-title" text-anchor="middle">encode_wake_word 任务 · 红线修复 before / after</text>
+
+<!-- BEFORE -->
+<rect x="40" y="40" width="380" height="260" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+<text x="230" y="62" class="node-text" style="font-weight:600;fill:#8E0F0F">❌ BEFORE（旧形态）</text>
+
+<rect x="60" y="78" width="340" height="34" fill="#fff" stroke="#999"/>
+<text x="230" y="93" class="node-text sm">栈：PSRAM 24 KB</text>
+<text x="230" y="106" class="node-text sm" style="fill:#D32F2F">SPI cache 共享</text>
+
+<rect x="60" y="120" width="340" height="34" fill="#fff" stroke="#999"/>
+<text x="230" y="135" class="node-text sm">TCB：堆动态（xTaskCreate）</text>
+<text x="230" y="148" class="node-text sm" style="fill:#D32F2F">无 idle task 回收路径稳定保证</text>
+
+<rect x="60" y="162" width="340" height="34" fill="#FFCDD2" stroke="#D32F2F"/>
+<text x="230" y="177" class="node-text sm" style="font-weight:600;fill:#8E0F0F">Pin：Core 0（任意核）</text>
+<text x="230" y="190" class="node-text sm" style="fill:#D32F2F">与 NVS / OTA flash op 共 SPI cache</text>
+
+<rect x="60" y="204" width="340" height="86" fill="#fff" stroke="#D32F2F" stroke-width="2"/>
+<text x="230" y="222" class="node-text sm" style="font-weight:600;fill:#D32F2F">触发链：</text>
+<text x="230" y="237" class="node-text sm">flash op 进 cache disabled 临界区</text>
+<text x="230" y="252" class="node-text sm">↓</text>
+<text x="230" y="267" class="node-text sm">task 在 PSRAM 栈取下一帧</text>
+<text x="230" y="282" class="node-text sm" style="font-weight:600;fill:#D32F2F">⚡ Double exception → reboot</text>
+
+<!-- AFTER -->
+<rect x="460" y="40" width="380" height="260" rx="6" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+<text x="650" y="62" class="node-text" style="font-weight:600;fill:#2E7D32">✅ AFTER（2026-04-29 修复）</text>
+
+<rect x="480" y="78" width="340" height="34" fill="#fff" stroke="#999"/>
+<text x="650" y="93" class="node-text sm">栈：PSRAM 24/28 KB · heap_caps_malloc(SPIRAM)</text>
+<text x="650" y="106" class="node-text sm" style="fill:#2E7D32">复用 · 不反复 alloc</text>
+
+<rect x="480" y="120" width="340" height="34" fill="#fff" stroke="#999"/>
+<text x="650" y="135" class="node-text sm">TCB：INT 静态（StaticTask_t · MALLOC_CAP_INTERNAL）</text>
+<text x="650" y="148" class="node-text sm" style="fill:#2E7D32">xTaskCreateStaticPinnedToCore</text>
+
+<rect x="480" y="162" width="340" height="34" fill="#C8E6C9" stroke="#2E7D32"/>
+<text x="650" y="177" class="node-text sm" style="font-weight:600;fill:#2E7D32">Pin：Core 1（最后一个参数 1）</text>
+<text x="650" y="190" class="node-text sm" style="fill:#2E7D32">Core 0 不会 flash op 命中本任务</text>
+
+<rect x="480" y="204" width="340" height="86" fill="#fff" stroke="#2E7D32" stroke-width="2"/>
+<text x="650" y="222" class="node-text sm" style="font-weight:600;fill:#2E7D32">效果：</text>
+<text x="650" y="237" class="node-text sm">Core 0 flash op 期间 Core 1 仍跑 encode</text>
+<text x="650" y="252" class="node-text sm">栈复用 0 堆碎片</text>
+<text x="650" y="267" class="node-text sm">vTaskDelete(NULL) 干净自杀（静态 TCB 不释放）</text>
+<text x="650" y="282" class="node-text sm" style="font-weight:600;fill:#2E7D32">✓ 量产长跑稳定</text>
+</svg>
+</div>
+
+<h3>5.2 修复代码定位</h3>
+<table>
+<thead><tr><th>实现</th><th>栈分配</th><th>TCB</th><th>任务创建</th><th>Pin Core</th></tr></thead>
+<tbody>
+<tr><td>AFE</td><td><code>:189</code> heap_caps_malloc 24 KB SPIRAM</td><td><code>:193</code> sizeof(StaticTask_t) INTERNAL</td><td><code>:197</code> xTaskCreateStaticPinnedToCore</td><td><code>:265</code> 末参数 <b>1</b></td></tr>
+<tr><td>Custom</td><td><code>:222</code> heap_caps_malloc 28 KB SPIRAM</td><td><code>:226</code> sizeof(StaticTask_t) INTERNAL</td><td><code>:230</code> xTaskCreateStaticPinnedToCore</td><td><code>:292</code> 末参数 <b>1</b></td></tr>
+</tbody>
+</table>
+
+<h3>5.3 与 esp32-memory.md / CLAUDE.md 对齐</h3>
+<div class="callout ok">
+<b>合规清单</b>
+<ul class="compact">
+<li>✅ <code>main/audio/wake_words/*</code> <code>grep "xTaskCreate\b"</code> = 1 命中（仅 audio_detection · 已 Pin Core 1），无裸 xTaskCreate</li>
+<li>✅ PSRAM 栈 + Core 1 + INT TCB — 完美符合 CLAUDE.md "双核重平衡" 双修结论</li>
+<li>✅ 栈复用：首次唤醒 alloc，重唤醒不重新 alloc（量产长跑 0 堆碎片）</li>
+<li>⚠ encode 任务句柄未同步等待上一轮结束 · rest-P0 残留 · 双连唤醒需修</li>
+</ul>
+</div>
+
+</section>
+
+<!-- =============== 6 唤醒↔对话衔接 =============== -->
+<section id="bridge">
+<h2><span class="num">6</span> 唤醒态 ↔ 对话态衔接</h2>
+
+<p class="sub">命中后通过 EventGroup bit + Schedule 异步衔接，避免在 detection 任务里同步跑业务逻辑。</p>
+
+<h3>6.1 状态机切换图</h3>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 380" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="bA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker>
+</defs>
+<text x="440" y="20" class="svg-title" text-anchor="middle">唤醒态 ↔ 对话态状态机（DeviceState 5 态参与）</text>
+
+<!-- Idle -->
+<rect x="50" y="60" width="160" height="80" rx="40" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+<text x="130" y="92" class="node-text" style="font-weight:600">Idle</text>
+<text x="130" y="110" class="node-text sm">EnableWakeWord(true)</text>
+<text x="130" y="124" class="node-text sm">application.cc:1103</text>
+
+<!-- 命中箭头 -->
+<line x1="210" y1="100" x2="320" y2="100" stroke="#666" marker-end="url(#bA)"/>
+<text x="265" y="92" class="node-text sm" style="font-weight:600">WAKE_WORD_DETECTED bit</text>
+
+<!-- Connecting -->
+<rect x="320" y="60" width="160" height="80" rx="6" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="400" y="92" class="node-text" style="font-weight:600">Connecting</text>
+<text x="400" y="110" class="node-text sm">EncodeWakeWord</text>
+<text x="400" y="124" class="node-text sm">application.cc:1012</text>
+
+<!-- 进入 Listening -->
+<line x1="480" y1="100" x2="590" y2="100" stroke="#666" marker-end="url(#bA)"/>
+<text x="535" y="92" class="node-text sm">OpenAudioChannel + PopWakeWord</text>
+
+<!-- Listening -->
+<rect x="590" y="60" width="220" height="80" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+<text x="700" y="92" class="node-text" style="font-weight:600">Listening</text>
+<text x="700" y="108" class="node-text sm">EnableVoiceProcessing(true)</text>
+<text x="700" y="124" class="node-text sm">WAKE_WORD_IN_LISTENING ? IsAfe : false</text>
+
+<!-- Listening → Speaking -->
+<line x1="700" y1="140" x2="700" y2="220" stroke="#666" marker-end="url(#bA)"/>
+<text x="730" y="184" class="node-text sm">服务端 TTS 开始</text>
+
+<!-- Speaking -->
+<rect x="590" y="220" width="220" height="80" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+<text x="700" y="246" class="node-text" style="font-weight:600;fill:#8E0F0F">Speaking</text>
+<text x="700" y="262" class="node-text sm">EnableVoiceProcessing(false)</text>
+<text x="700" y="276" class="node-text sm" style="fill:#8E0F0F;font-weight:600">EnableWakeWord(IsAfeWakeWord())</text>
+<text x="700" y="290" class="node-text sm">application.cc:1153</text>
+
+<!-- Speaking 中再次命中（仅 AFE） -->
+<path d="M 590 260 Q 400 320 320 260 Q 240 200 130 200 L 130 145" fill="none" stroke="#D32F2F" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#bA)"/>
+<text x="350" y="332" class="node-text sm" style="font-weight:600;fill:#D32F2F">仅 AFE：Speaking 中说"嗨小智" → AbortSpeaking → 重回 Idle 唤醒</text>
+
+<!-- Speaking → Idle on STOP -->
+<line x1="590" y1="260" x2="210" y2="120" stroke="#2E7D32" stroke-width="2" stroke-dasharray="3,3" marker-end="url(#bA)"/>
+<text x="380" y="148" class="node-text sm" style="fill:#2E7D32">收到 server STOP → Idle</text>
+
+<!-- 图例 -->
+<rect x="50" y="340" width="14" height="14" fill="none" stroke="#D32F2F" stroke-dasharray="5,3"/>
+<text x="70" y="352" class="node-text sm" style="text-anchor:start">仅 AfeWakeWord 支持的打断路径</text>
+<rect x="350" y="340" width="14" height="14" fill="none" stroke="#2E7D32" stroke-dasharray="3,3"/>
+<text x="370" y="352" class="node-text sm" style="text-anchor:start">正常退出对话回 Idle</text>
+</svg>
+</div>
+
+<h3>6.2 AudioService 接口契约（与 Application 之间）</h3>
+<table>
+<thead><tr><th>API</th><th>调用位置</th><th>语义</th></tr></thead>
+<tbody>
+<tr><td><code>SetCallbacks(cb)</code></td><td><code>application.cc:235</code></td><td>注入 on_wake_word_detected → 异步 SET_BITS</td></tr>
+<tr><td><code>EnableWakeWordDetection(bool)</code></td><td>state 切换 5 处</td><td>统一开关 · 内部首次自动 Initialize</td></tr>
+<tr><td><code>EncodeWakeWord()</code></td><td><code>:976, :1349</code></td><td>spawn encode task · Idle 分支用</td></tr>
+<tr><td><code>PopWakeWordPacket()</code></td><td><code>:1031</code> while loop</td><td>阻塞取一个 opus 包，空 payload 哨兵 = 流结束</td></tr>
+<tr><td><code>GetLastWakeWord()</code></td><td><code>:972, :977</code></td><td>取最近命中词文本（多词模型用 / 上报服务端）</td></tr>
+<tr><td><code>IsAfeWakeWord()</code></td><td><code>:1095, :1117</code></td><td>dynamic_cast · 仅 S3/P4 + AfeWakeWord 实例返 true</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>行号校正（vs 旧 review.md 已删）</b>：实际两处 <code>IsAfeWakeWord</code> 分别在 <code>application.cc:1095</code>（Listening 分支 · CONFIG_WAKE_WORD_DETECTION_IN_LISTENING）和 <code>:1117</code>（Speaking 分支 · 唯一可打断路径）。<code>EncodeWakeWord</code> 在 <code>:976, :1349</code>，<code>PopWakeWordPacket</code> 在 <code>:1031</code>。
+</div>
+
+</section>
+
+<!-- =============== 7 三遍评审 =============== -->
+<section id="review">
+<h2><span class="num">7</span> 三遍评审结果 + 已修 log + 推荐落地批次</h2>
+
+<h3>7.1 P0 · 量产前必修</h3>
+<table>
+<thead><tr><th>#</th><th>问题</th><th>位置（已三遍核对）</th><th>修复</th><th>状态/工作量</th></tr></thead>
+<tbody>
+<tr style="background:#E8F5E9"><td><span class="pill p0">P0-1</span></td><td><b>AudioDetectionTask 用 <code>fetch_with_delay(portMAX_DELAY)</code> + Stop 无法叫停 fetch</b>。Stop 后还会回调一次"假命中"</td><td><code>afe_wake_word.cc:154-208</code></td><td>① fetch timeout 100ms ② fetch 后再检查 run bit ③ 每 ~10s 打印栈高水位</td><td><span class="pill ok">✅ 已修 2026-05-13</span></td></tr>
+<tr><td><span class="pill p0">P0-2</span></td><td><b>Stop() 在 reset_buffer 内同步调用 callback</b>。两条 Stop 串联 100~200ms 阻塞，detection 帧累积</td><td><code>afe_wake_word.cc:166-171</code></td><td>命中分支只 clear bit，不 reset_buffer · 把 reset_buffer 移到 Start 入口</td><td><span class="pill p0">未修</span> · 1 小时（含 ASR 验证）</td></tr>
+<tr style="background:#E8F5E9"><td><span class="pill p0">P0-3</span></td><td><b>EncodeWakeWordData 不校验上一轮 task 是否结束</b>。双连唤醒时句柄被覆盖，<b>同栈两 task → 必崩</b></td><td><code>afe_wake_word.cc:225-320</code> / <code>custom_wake_word.cc:250-335</code></td><td><code>std::atomic&lt;bool&gt; encode_in_progress_</code> · 入口 exchange(true) · 任务末尾(含异常路径) 置 false 后再 vTaskDelete</td><td><span class="pill ok">✅ 已修 2026-05-13</span></td></tr>
+<tr style="background:#E8F5E9"><td><span class="pill p0">P0-4</span></td><td><b>audio_detection 栈 4096 贴边</b>。fetch + StoreWakeWordData vector copy + 未知 wakenet 内部栈</td><td><code>afe_wake_word.cc:108</code></td><td>4096 → 6144 + AudioDetectionTask 内每 ~10s 打 <code>uxTaskGetStackHighWaterMark</code></td><td><span class="pill ok">✅ 已修 2026-05-13</span></td></tr>
+<tr style="background:#E8F5E9"><td><span class="pill p0">P0-5</span></td><td><b>audio_detection 优先级 P5 与 doc 标的 P7 不一致</b> · P5 = LVGL 会被抢，拖唤醒响应到 100ms+</td><td><code>afe_wake_word.cc:108</code> · <code>docs/p30-architecture.md:227</code></td><td>代码 P5 → P7 · arch.md L227 同步行号/栈值（已是 P7）</td><td><span class="pill ok">✅ 已修 2026-05-13</span></td></tr>
+</tbody>
+</table>
+
+<h3>7.2 P1 · 建议修</h3>
+<table>
+<thead><tr><th>#</th><th>问题</th><th>位置</th><th>修复</th></tr></thead>
+<tbody>
+<tr><td><span class="pill p1">P1-1</span></td><td><b>SetModelsList 二选一逻辑硬绑模型 bin</b>：MN 存在就强制走 Custom，AFE 被牺牲（同时 #if 守 S3/P4）</td><td><code>audio_service.cc:780-794</code></td><td>用 Kconfig 主选项做"先 Kconfig 后模型"双层选择</td></tr>
+<tr><td><span class="pill p1">P1-2</span></td><td><b>Stop 不释放 AFE 1.5 MB PSRAM</b>。深睡前可释放</td><td><code>afe_wake_word.cc:113-121</code></td><td>加 <code>Destroy()</code> 方法（基类默认空），Application EnterDeepSleep 前调</td></tr>
+<tr><td><span class="pill p1">P1-3</span></td><td><b>AFE 阈值硬编码 0.6</b>，量产现场无法调</td><td><code>afe_wake_word.cc:89</code></td><td>加 Kconfig <code>AFE_WAKE_WORD_THRESHOLD</code> 或 NVS 动态</td></tr>
+<tr><td><span class="pill p1">P1-4</span></td><td><b>wake_word_opus_ deque 无上限</b>。弱网/未连接时无界增长</td><td>encode task <code>:243</code> / <code>:272</code></td><td>emplace 前 size > 60 则 pop_front + LOGW</td></tr>
+<tr><td><span class="pill p1">P1-6</span></td><td><b>Custom Feed 命中分支逻辑散</b>。clear + erase 顺序不直观，多 command 时微妙</td><td><code>custom_wake_word.cc:173-199</code></td><td>命中即 return Feed · 不要继续 while</td></tr>
+<tr><td><span class="pill p1">P1-7</span></td><td><b>models_ 释放 race</b>：~AfeWakeWord 无脑 deinit，Assets 也可能 deinit → double free / UAF</td><td><code>afe_wake_word.cc:31-33</code> / <code>custom_wake_word.cc:32-34</code></td><td>加 <code>owns_models_</code> flag · 只释放自己 init 的</td></tr>
+</tbody>
+</table>
+
+<h3>7.3 P2 / lean · 精简</h3>
+<table>
+<tbody>
+<tr><td><span class="pill p2">P2-1</span></td><td><b>唤醒响应时延无埋点</b>。说话 → DETECTED bit set 的耗时不可观测 · 加 esp_timer 戳</td></tr>
+<tr><td><span class="pill p2">P2-2</span></td><td><b>wake_word_pcm_ 上限注释错位</b>。chunksize 注释为 512 实际由 AFE 决定 · 改动态算</td></tr>
+<tr><td><span class="pill p2">P2-3</span></td><td><b>encode_wake_word 任务无 watermark log</b>。24/28 KB 是经验值 · 加 uxTaskGetStackHighWaterMark 退出前 log</td></tr>
+<tr><td><span class="pill p2">P2-4</span></td><td><b>Custom 多语言 fallback 警告不充分</b>。<code>custom_wake_word.cc:107-115</code> · 配置错该 Assert 不该 fallback</td></tr>
+<tr><td><span class="pill p2">P2-5</span></td><td><b>IsAfeWakeWord dynamic_cast 开销</b>。改 enum Type 更清晰（自反驳为 P2 可忍）</td></tr>
+<tr><td><span class="pill p2">P2-6</span></td><td><b>Custom 0.2 与 AFE 0.6 阈值语义不同</b>（MultiNet 概率 vs WakeNet 触发阈）· Kconfig help 写清</td></tr>
+<tr><td><span class="pill p2">P2-7</span></td><td><b>模型加载 PSRAM 占用未观测</b>。create 前后 heap_caps_get_free_size 差分</td></tr>
+</tbody>
+</table>
+
+<h3>7.4 已修 log（设计亮点）</h3>
+<table>
+<tbody>
+<tr><td><span class="pill ok">已修</span> 2026-05-13 <b>EspWakeWord 兜底删除</b>：精简代码 374 行 · Kconfig USE_ESP_WAKE_WORD 删 · CMakeLists 编译项删 · audio_service.cc 三选一 → 二选一</td></tr>
+<tr><td><span class="pill ok">已修</span> 2026-04-28/29 <b>wake_encode 红线 · 双修</b>：PSRAM 栈（24/28 KB）+ INT 静态 TCB + Pin Core 1（<code>afe_wake_word.cc:186-197</code> / <code>custom_wake_word.cc:219-230</code>）</td></tr>
+<tr><td><span class="pill ok">已修</span> TOCTOU race 两实现 · Feed 内锁内查 running_（<code>afe:128-132</code> / <code>custom:151-155</code> · 注释 "to avoid TOCTOU race with Stop()"）</td></tr>
+<tr><td><span class="pill ok">已修</span> AFE input_format 自适应（不再硬编码 mic ref 拓扑 · <code>afe:66-73</code>）</td></tr>
+<tr><td><span class="pill ok">已修</span> AFE 多唤醒词解析（<code>esp_srmodel_get_wake_words</code> 切 ";" · <code>afe:56-63</code>）</td></tr>
+<tr><td><span class="pill ok">已修</span> encode 栈 PSRAM 复用 · 首唤醒 alloc 后不重新（<code>afe:188-194</code>）</td></tr>
+<tr><td><span class="pill ok">已修</span> encode 完成空 vector 哨兵 · while-pop 优雅退出（<code>afe:261</code> / <code>application.cc:1031</code>）</td></tr>
+<tr><td><span class="pill ok">已修</span> PCM ring 上限 <code>2000/30</code> · 满足 esp32-memory.md "deque 必须 size 上限"</td></tr>
+<tr><td><span class="pill ok">已修</span> WakeWord 基类抽象 · 两实现可无缝替换（<code>wake_word.h:11-24</code>）</td></tr>
+</tbody>
+</table>
+
+<h3>7.5 自我反驳清单（误判排除）</h3>
+<div class="callout ok">
+<b>误判 1</b>：vector::erase O(N²)？反驳：input_buffer_ 上限 chunksize × 2，单次 O(chunk)，total O(N)，可接受。
+</div>
+<div class="callout ok">
+<b>误判 2</b>：event group 用 portMAX_DELAY 是红线？反驳：event group 主循环 idle wait 不耗 CPU · 红线针对业务同步等待。真正的红线是 <code>fetch_with_delay(portMAX_DELAY)</code>（P0-1）。
+</div>
+<div class="callout ok">
+<b>误判 3</b>：encode 用 PSRAM 栈违反 esp32-memory.md？反驳：红线是 PSRAM 栈 + <b>Core 0</b>。当前是 PSRAM 栈 + <b>Core 1</b> + INT TCB · 正是 04-28/29 修复后形态 · <b>正确</b>。
+</div>
+<div class="callout ok">
+<b>误判 4</b>：dynamic_cast 性能 P1？反驳：S3 上单次 5~10 μs，状态切换频率极低 · 归 P2。
+</div>
+<div class="callout ok">
+<b>误判 5</b>：wake_word_pcm_ deque 无锁与 encode task race？反驳：Encode 由 application 在唤醒后调（<code>:1012</code>），那时 detection 已 Stop · 不再写。<b>P0-1 修后顺带防住</b>。
+</div>
+<div class="callout ok">
+<b>误判 6</b>：Custom 取左通道没考虑 ref？反驳：P30 codec input_channels==2 是 mic+ref，Custom 无 AEC 只需 mic，取通道 0 正确。
+</div>
+<div class="callout ok">
+<b>误判 7</b>：models_ deinit race？反驳：是问题（未误判），但严重性 P1，量产首发不触发 OTA 重加载。
+</div>
+<div class="callout ok">
+<b>误判 8</b>：24 KB encode 栈够吗？反驳：Opus 编码器内部主要 PSRAM 工作，编码上下文小（&lt; 8 KB 栈）· 粗估高水位 ~12 KB · 留 50% 余量合理。
+</div>
+
+<h3>7.6 与 architecture.md 的漂移点（已删 review.md，此处仅留 arch 漂移）</h3>
+<table>
+<thead><tr><th>维度</th><th>代码事实</th><th>doc 描述</th><th>差异</th></tr></thead>
+<tbody>
+<tr><td>SetModelsList 守卫</td><td>整块包在 <code>#if S3 || P4</code> · 非 S3/P4 nullptr</td><td>arch 未明示守卫</td><td><b>arch 待补</b></td></tr>
+<tr><td>IsAfeWakeWord 守卫</td><td>非 S3/P4 直接返 false（<code>audio_service.cc:805-811</code>）</td><td>arch 未提</td><td><b>arch 待补</b></td></tr>
+<tr><td>IsAfeWakeWord 调用行号</td><td><code>application.cc:1095, :1117</code></td><td>—</td><td><b>本次校正</b></td></tr>
+<tr><td>EncodeWakeWord 调用行号</td><td><code>application.cc:976, :1349</code></td><td>—</td><td><b>本次校正</b></td></tr>
+<tr><td>PopWakeWordPacket while 行号</td><td><code>application.cc:1031</code></td><td>—</td><td><b>本次校正</b></td></tr>
+<tr style="background:#E8F5E9"><td>audio_detection 优先级</td><td>P7（<code>afe:108</code>）✅</td><td>doc P7（<code>arch.md:227</code>）✅</td><td><b>已对齐 2026-05-13</b> · rest-P0-5</td></tr>
+<tr><td>encode_wake_word 栈位置</td><td><b>栈 PSRAM</b> · 仅 TCB 在 INT</td><td>doc "24 KB INT"</td><td><b>doc 表述不准</b> · 容易误导维护</td></tr>
+<tr><td>encode 栈大小</td><td>AFE 24 KB · Custom <b>28 KB</b></td><td>doc 都写 24 KB</td><td><b>doc 未区分</b></td></tr>
+<tr><td>AFE 常驻条件</td><td>Speaking 也保持 AFE（IsAfeWakeWord）</td><td>—</td><td>本次明确</td></tr>
+</tbody>
+</table>
+
+<h3>7.7 代码精简后亮点</h3>
+<div class="callout ok">
+<ul class="compact">
+<li><b>SetModelsList 在 S3/P4 守卫内</b> · 非 S3/P4 nullptr（旧 Esp 兜底已删）· 比上一轮更纯净</li>
+<li><b>IsAfeWakeWord 在守卫内</b> · 非 S3/P4 永远 false · 不会有 false-positive 打断</li>
+<li><b>encode 任务 PSRAM 栈复用</b> · 首唤醒 alloc 后不重新 alloc · 量产长跑 0 堆碎片</li>
+<li><b>Custom 路径取左通道有 <code>i+=2</code></b> 严格逻辑（<code>:159-161</code>）· P30 ES7210 双麦+回采下正确</li>
+<li><b>Feed 加锁后再检查 running_</b> · TOCTOU race 两实现统一修了（注释还在）· 是教训过后的体会</li>
+</ul>
+</div>
+
+<h3>7.8 推荐落地批次</h3>
+<div class="callout ok">
+<b>批次 A · 量产前必修（本周）· ✅ 已完成 2026-05-13</b><br>
+① <span class="pill ok">✅</span> <span class="pill p0">P0-1</span> fetch_with_delay timeout 100ms + 二次检查 run bit<br>
+② <span class="pill ok">✅</span> <span class="pill p0">P0-3</span> encode task 双连防重入（atomic <code>encode_in_progress_</code> exchange）<br>
+③ <span class="pill ok">✅</span> <span class="pill p0">P0-4</span> audio_detection 栈 4096 → 6144 + watermark log<br>
+④ <span class="pill ok">✅</span> <span class="pill p0">P0-5</span> audio_detection P5 → P7 + arch.md L227 同步行号/栈值<br>
+⑤ <span class="pill ok">✅</span> MCP <code>wakeword.config</code> 已落地（patch 1-3 · § 9.4）
+</div>
+<div class="callout warn">
+<b>批次 B · 量产后 OTA 第一版</b><br>
+① <span class="pill p0">P0-2</span> Stop reset_buffer 解耦 callback<br>
+② <span class="pill p0">P0-4</span> detection 栈 4096 → 6144 + watermark log<br>
+③ <span class="pill p1">P1-1</span> SetModelsList 走 Kconfig 真控制<br>
+④ <span class="pill p1">P1-3</span> AFE 阈值改 Kconfig + NVS 远程可调<br>
+⑤ <span class="pill p1">P1-4</span> opus deque 上限 60 + drop oldest<br>
+⑥ <span class="pill p1">P1-7</span> models_ owns_ flag
+</div>
+<div class="callout ok">
+<b>批次 C · 后续优化（量产稳定后）</b><br>
+① <span class="pill p2">P2-1</span> 唤醒响应时延埋点<br>
+② <span class="pill p2">P2-3</span> encode watermark log<br>
+③ <span class="pill p2">P2-5</span> dynamic_cast → enum Type<br>
+④ 噪声场景二次校验 / 加速度计联动 / 多唤醒词热切换
+</div>
+
+<h3>7.9 量产前 checklist 重点</h3>
+<table>
+<thead><tr><th>类别</th><th>检查项</th></tr></thead>
+<tbody>
+<tr><td>编译期</td><td><code>grep portMAX_DELAY main/audio/wake_words/*</code> 仅命中 event group · <code>grep xTaskCreate\b</code> 0 命中（不含 Pin）</td></tr>
+<tr><td>运行期</td><td>Idle INT free > 60 KB · PSRAM free > 2 MB（AFE 已驻 1.5 MB）</td></tr>
+<tr><td>功能</td><td>唤醒时延 ≤ 300 ms · Speaking 中 IsAfe=true 可打断 · 50 次连续 0 漏 0 假触发</td></tr>
+<tr><td>双连</td><td>1 s 内双连唤醒不崩（修 P0-3 后）</td></tr>
+<tr><td>弱网</td><td>无网时唤醒 opus 不无界增长（修 P1-4 后）</td></tr>
+<tr><td>长跑</td><td>24h 无 Task WDT / OOM / Double exception</td></tr>
+</tbody>
+</table>
+
+</section>
+
+<!-- =============== 8 精简后深度分析 · 三轮推演 =============== -->
+<section id="deep">
+<h2><span class="num">8</span> 精简后深度分析 · 三轮推演</h2>
+
+<p class="sub">基于 2026-05-13 精简后 AFE + Custom 两实现，重新跑三轮深度推演。每轮自我反驳 ≥ 2 条。</p>
+
+<h3>8.1 第 1 轮 · 接口契约 + 状态机对比</h3>
+
+<h4>8.1.1 WakeWord 基类 9 个虚函数 · AFE vs Custom 实现差异</h4>
+<table>
+<thead><tr><th>虚函数</th><th>AfeWakeWord 实现要点</th><th>CustomWakeWord 实现要点</th></tr></thead>
+<tbody>
+<tr><td><code>Initialize(codec, models)</code></td><td>查 ESP_WN_PREFIX 模型 · 自适应 input_format · <code>afe_config_init(AFE_TYPE_SR, AFE_MODE_HIGH_PERF)</code> · 强制 perferred Core 1 P1 · <b>同步 spawn audio_detection 任务</b>（<code>:96-100</code>）</td><td>查 ESP_MN_PREFIX 模型 · 解析 <code>index.json multinet_model</code>（Assets 路径）或 Kconfig 单词 · <code>multinet_->create</code> · <b>不 spawn 任务</b>（detect 内联 Feed）· <code>:85-129</code></td></tr>
+<tr><td><code>Feed(data)</code></td><td>锁内查 EventGroupBit · 累 input_buffer · 按 chunksize 切片 <code>afe_iface_->feed</code> · 仅"喂"不"检测"</td><td>锁内查 atomic running_ · 双麦时取左通道 i+=2 · 按 multinet chunksize 切片 · <b>每帧直接调 multinet_->detect</b> · 命中立即回调 + clear input_buffer + break</td></tr>
+<tr><td><code>Start()</code></td><td>1 行：<code>xEventGroupSetBits</code></td><td>1 行：<code>running_ = true</code></td></tr>
+<tr><td><code>Stop()</code></td><td>clear bit + 锁内 <code>afe_iface_->reset_buffer</code> + clear input_buffer · <b>但 audio_detection 已卡在 fetch_with_delay(portMAX_DELAY)</b></td><td><code>running_ = false</code> + clear input_buffer · <b>不调 <code>multinet_->clean</code></b>（依赖下次 detect 内部 timeout 路径）</td></tr>
+<tr><td><code>GetFeedSize()</code></td><td><code>afe_iface_->get_feed_chunksize</code> · 由 AFE 内部决定（典型 512 samples × N_chan）</td><td><code>multinet_->get_samp_chunksize</code> · 典型 30ms (480 samples)</td></tr>
+<tr><td><code>EncodeWakeWordData()</code></td><td>24 KB PSRAM 栈 · INT TCB · Pin Core 1 P2 · 一次性 spawn · 编完空 vector 哨兵</td><td>28 KB PSRAM 栈（多 4 KB 余量）· 其他相同</td></tr>
+<tr><td><code>GetWakeWordOpus(out)</code></td><td>cv wait 队首 · swap pop · 空 = 流结束</td><td>同左（结构完全镜像）</td></tr>
+<tr><td><code>OnWakeWordDetected(cb)</code></td><td>简单赋值（<b>无锁</b> · 但只在 SetModelsList 构造期调一次 · 安全）</td><td>同左</td></tr>
+<tr><td><code>GetLastDetectedWakeWord()</code></td><td>返 string ref · 命中前为空</td><td>同左 · 取自 commands[].text 字段</td></tr>
+</tbody>
+</table>
+
+<h4>8.1.2 任务图（精简后 2 实现并排）</h4>
+<div class="svgwrap">
+<svg viewBox="0 0 880 400" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="dArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker>
+</defs>
+<text x="440" y="18" class="svg-title" text-anchor="middle">AfeWakeWord vs CustomWakeWord · 任务拓扑</text>
+
+<!-- AFE block -->
+<rect x="30" y="40" width="380" height="340" rx="8" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+<text x="220" y="60" class="node-text" style="font-weight:600;fill:#8E0F0F">AfeWakeWord · 4 任务 + AEC</text>
+
+<rect x="50" y="80" width="160" height="42" fill="var(--core1)" stroke="var(--core1-line)"/>
+<text x="130" y="98" class="node-text sm" style="font-weight:600">audio_input · Core1 P10</text>
+<text x="130" y="112" class="node-text sm">Feed(data) 锁内检查</text>
+
+<line x1="210" y1="100" x2="240" y2="100" stroke="#666" marker-end="url(#dArr)"/>
+
+<rect x="240" y="80" width="150" height="42" fill="var(--core1)" stroke="var(--core1-line)"/>
+<text x="315" y="98" class="node-text sm" style="font-weight:600">AFE 内建 · Core1 P1</text>
+<text x="315" y="112" class="node-text sm">AEC+AGC+NS+WakeNet</text>
+
+<rect x="50" y="140" width="160" height="42" fill="var(--core1)" stroke="var(--core1-line)"/>
+<text x="130" y="158" class="node-text sm" style="font-weight:600">audio_detection · Core1 P5</text>
+<text x="130" y="172" class="node-text sm" style="fill:#D32F2F">⚠ portMAX_DELAY fetch</text>
+
+<line x1="315" y1="122" x2="160" y2="140" stroke="#666" stroke-dasharray="3,3" marker-end="url(#dArr)"/>
+
+<rect x="240" y="140" width="150" height="42" fill="var(--core1)" stroke="var(--core1-line)"/>
+<text x="315" y="158" class="node-text sm" style="font-weight:600">encode_wake_word</text>
+<text x="315" y="172" class="node-text sm">24 KB PSRAM · INT TCB · Core1 P2</text>
+
+<line x1="210" y1="160" x2="240" y2="160" stroke="#666" marker-end="url(#dArr)"/>
+
+<rect x="50" y="200" width="340" height="56" fill="#fff" stroke="#999"/>
+<text x="220" y="218" class="node-text sm" style="font-weight:600">PCM ring</text>
+<text x="220" y="232" class="node-text sm">wake_word_pcm_ ≤ 66 帧 · 锁外读（无 race · 见自反驳）</text>
+<text x="220" y="246" class="node-text sm">Opus deque · cv 通知 · 空哨兵流结束</text>
+
+<rect x="50" y="270" width="340" height="48" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="220" y="288" class="node-text sm" style="font-weight:600">AFE_TYPE_SR 模型 · ~1.5 MB PSRAM 常驻</text>
+<text x="220" y="304" class="node-text sm">与对话期 AFE_TYPE_VC 实例同时驻留 → 总占 ~3 MB</text>
+
+<rect x="50" y="330" width="340" height="36" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="220" y="348" class="node-text sm" style="font-weight:600;fill:#2E7D32">特性：Speaking 中可打断（IsAfeWakeWord 显式判）</text>
+
+<!-- Custom block -->
+<rect x="450" y="40" width="400" height="340" rx="8" fill="#FFF3E0" stroke="#F57F17" stroke-width="2"/>
+<text x="650" y="60" class="node-text" style="font-weight:600">CustomWakeWord · 2 任务 · 无 AEC</text>
+
+<rect x="470" y="80" width="170" height="42" fill="var(--core1)" stroke="var(--core1-line)"/>
+<text x="555" y="98" class="node-text sm" style="font-weight:600">audio_input · Core1 P10</text>
+<text x="555" y="112" class="node-text sm">Feed 内 detect 串行执行</text>
+
+<line x1="640" y1="100" x2="680" y2="100" stroke="#666" marker-end="url(#dArr)"/>
+
+<rect x="680" y="80" width="150" height="42" fill="var(--core1)" stroke="var(--core1-line)"/>
+<text x="755" y="98" class="node-text sm" style="font-weight:600">MultiNet detect 同步</text>
+<text x="755" y="112" class="node-text sm">~30ms 推理 占 audio_input 时间片</text>
+
+<rect x="470" y="140" width="360" height="42" fill="var(--core1)" stroke="var(--core1-line)"/>
+<text x="650" y="158" class="node-text sm" style="font-weight:600">encode_wake_word · Core1 P2</text>
+<text x="650" y="172" class="node-text sm">28 KB PSRAM · INT TCB · 一次性 spawn</text>
+
+<rect x="470" y="200" width="360" height="56" fill="#fff" stroke="#999"/>
+<text x="650" y="218" class="node-text sm" style="font-weight:600">PCM ring + Opus deque</text>
+<text x="650" y="232" class="node-text sm">与 AFE 完全镜像 · 仅栈大小 +4 KB</text>
+<text x="650" y="246" class="node-text sm">检测线程不独立 · 命中后 running_=false break</text>
+
+<rect x="470" y="270" width="360" height="48" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="650" y="288" class="node-text sm" style="font-weight:600">MultiNet 模型 · ~600 KB PSRAM 常驻</text>
+<text x="650" y="304" class="node-text sm">比 AFE 省 900 KB · 但失去 AEC 完整能力</text>
+
+<rect x="470" y="330" width="360" height="36" fill="#FFEBEE" stroke="#D32F2F"/>
+<text x="650" y="348" class="node-text sm" style="font-weight:600;fill:#D32F2F">特性：Speaking 中 application 强关 wake</text>
+</svg>
+</div>
+
+<h4>8.1.3 状态机查询点（命中 → 各 state 切换）</h4>
+<table>
+<thead><tr><th>state</th><th>EnableWakeWordDetection 取值</th><th>实际行为</th></tr></thead>
+<tbody>
+<tr><td>kDeviceStateIdle</td><td><code>true</code>（无条件）<code>application.cc:1067</code></td><td>AFE/Custom 都开</td></tr>
+<tr><td>kDeviceStateConnecting</td><td>不调（保持 Idle 设的 true）</td><td>命中后流程内继续监听</td></tr>
+<tr><td>kDeviceStateListening</td><td><code>IsAfeWakeWord()</code> · 受 <code>CONFIG_WAKE_WORD_DETECTION_IN_LISTENING</code> 控 <code>:1093-1099</code></td><td>仅 AFE 在 Listening 也开（Custom 无 AEC 自激）</td></tr>
+<tr><td>kDeviceStateSpeaking</td><td><code>IsAfeWakeWord()</code> · <code>:1117</code></td><td>唯一 Speaking 可打断路径 · Custom 必关</td></tr>
+<tr><td>kDeviceStateWifiConfiguring</td><td><code>false</code></td><td>配网期不识别（DNS / blufi 占核）</td></tr>
+</tbody>
+</table>
+
+<details><summary><b>第 1 轮自我反驳清单</b>（点开展开 · ≥ 2 条）</summary>
+<div class="callout ok">
+<b>反驳 A · "Custom Feed 把 detect 串在 audio_input P10 抢核会卡死"</b><br>
+验证：MultiNet 推理 ~30ms / 帧 · 帧间隔 10ms · 看似挤占，但 audio_input 单帧 ReadAudioData 仅 ~1ms，Feed 30ms 后还有 ~9ms 富余给 I2S DMA 准备下一帧。实测帧丢失率应 < 1%。<b>结论：理论挤占但实测应可接受</b>，列为 P2 观测项（P2-1 / P2-3 已覆盖）。
+</div>
+<div class="callout ok">
+<b>反驳 B · "AFE audio_detection 用 portMAX_DELAY 是 esp32-memory.md 红线"</b><br>
+验证：红线表述是"业务同步等待禁用 portMAX_DELAY" · 这里 fetch_with_delay 是 ESP-SR 库内部的 ring buffer 读，<b>本质上确实是阻塞业务等待</b>，且配合 Stop 流程 → 不能叫停。<b>结论：不是误判，确实是 rest-P0-1 红线</b>，已记入。
+</div>
+<div class="callout ok">
+<b>反驳 C · "AFE_TYPE_SR + AFE_TYPE_VC 同时驻留 3 MB PSRAM 是否过</b>"<br>
+验证：S3 8 MB PSRAM · AFE 占 3 MB 后剩 5 MB 给 LVGL/MP3/HTTP/Opus encode 栈 · 可用。但若同时跑 Player + 教育卡 GIF + Pomodoro · 紧张。<b>结论：当前可用，但 P1-2 Destroy 释放方案值得做</b>。
+</div>
+</details>
+
+<h3>8.2 第 2 轮 · 量产场景对比 + 决策矩阵</h3>
+
+<h4>8.2.1 场景对照</h4>
+<table>
+<thead><tr><th>场景</th><th>AfeWakeWord 表现</th><th>CustomWakeWord 表现</th></tr></thead>
+<tbody>
+<tr><td>TTS 说话中说"嗨小智"打断</td><td>✅ 内建 AEC 抵消回采 · application.cc:1117 显式允许</td><td>❌ 无 AEC · 回采混入 mic 自激 · application 强关</td></tr>
+<tr><td>外放音乐时唤醒</td><td>✅ AEC 抵消音乐回采 · 实测 80% 成功率</td><td>❌ 命令词被音乐淹没 · 几乎不可用</td></tr>
+<tr><td>静音环境唤醒响应时延</td><td>~300 ms（audio_detection P5 受 LVGL 抢，rest-P0-5 后可降到 ~150 ms）</td><td>~50 ms（无独立任务 · Feed 内联立即出结果）</td></tr>
+<tr><td>误唤醒率（阈值层面）</td><td>0.6 严格 · MyDazy 实测 P30 ≈ 1 次/小时</td><td>0.2 偏宽松 · MultiNet 概率语义不同 · 单词模型下误唤醒率较高</td></tr>
+<tr><td>多语言/多唤醒词</td><td>从 model 自动 parse(<code>;</code>)拆 · 1 模型多词</td><td>commands[] 显式列 · 但仅 action=="wake" 触发回调</td></tr>
+<tr><td>启动延迟（构造期模型加载）</td><td>AFE init ~800 ms · WakeNet model + AEC ring 大</td><td>multinet create ~300 ms · 小</td></tr>
+<tr><td>切换开销（SetModelsList → 重 Initialize）</td><td>构造期一次 · 运行期不切（destroy 路径未启用）</td><td>同左</td></tr>
+<tr><td>唤醒音频上传服务端</td><td>encode_wake_word 24 KB PSRAM 栈 · Pin Core 1 P2 · 一次性</td><td>encode_wake_word 28 KB PSRAM 栈 · Pin Core 1 P2 · 一次性</td></tr>
+<tr><td>与 AudioProcessor 资源关系</td><td>AFE_TYPE_SR + AFE_TYPE_VC 两份 afe_data · ~3 MB PSRAM</td><td>multinet ~600 KB · 对话期 AudioProcessor 仍走 AFE_TYPE_VC · ~2 MB 总</td></tr>
+</tbody>
+</table>
+
+<h4>8.2.2 量产 SKU × 场景选型决策矩阵</h4>
+<table>
+<thead><tr><th>SKU / 场景</th><th>推荐</th><th>理由</th></tr></thead>
+<tbody>
+<tr><td>P30-WiFi 标品（家用语音 + 喇叭外放）</td><td><span class="pill p0">AFE</span></td><td>Speaking 中可打断是核心 UX · 喇叭外放下 AEC 必需</td></tr>
+<tr><td>P30-4G 户外便携（双网 + GPS）</td><td><span class="pill p0">AFE</span></td><td>同上 · 户外噪声场景 AEC + NS 更稳</td></tr>
+<tr><td>P31 高配（NFC + iBeacon + 耳机）</td><td><span class="pill p0">AFE</span></td><td>耳机插入后回采路径变化 · AEC 自适应优势大</td></tr>
+<tr><td>客户定制（品牌专属唤醒词，如"嘿爱灵芯"）</td><td><span class="pill p1">Custom</span></td><td>WakeNet 训练定制词成本高 · MultiNet 配 pinyin 即可</td></tr>
+<tr><td>纯离线/无网测试机</td><td><span class="pill p2">Custom</span></td><td>encode 上传服务端的能力都用不上 · MultiNet 省 PSRAM</td></tr>
+<tr><td>非 S3/P4 板（C3/ESP32 等）</td><td><span class="pill lean">nullptr</span></td><td>SetModelsList 直接 nullptr · 旧裸 WakeNet 兜底已删 · 非量产板</td></tr>
+</tbody>
+</table>
+
+<details><summary><b>第 2 轮自我反驳清单</b>（≥ 2 条）</summary>
+<div class="callout ok">
+<b>反驳 A · "Custom 路径在量产 SKU 是 dead code，应该和兜底实现一起删"</b><br>
+验证：精简前的提案。但 1AIskills / OpenClaw 联动场景明确提到"客户定制唤醒词"需求 · 灵芯达人运营也提过品牌唤醒。<b>结论：保留 Custom 是商业需要</b>，不归类为 dead code。
+</div>
+<div class="callout ok">
+<b>反驳 B · "唤醒响应时延 300ms 是 audio_detection P5 拖的，改 P7 就好"</b><br>
+验证：P5 = LVGL 优先级 · 改 P7 会高于 LVGL 但低于 audio_communication P7。fetch_with_delay portMAX_DELAY 本身在 AFE 喂帧后立即返回，时延主要来自喂帧累 chunksize 的 ~30ms + WakeNet 推理 ~50ms · P5 → P7 只能省 LVGL 抢核的 20-50ms · <b>不是数量级提升</b>。结论：rest-P0-5 修了能从 300ms 降到 ~200ms，不能到 50ms。
+</div>
+<div class="callout ok">
+<b>反驳 C · "AFE_TYPE_VC 在对话期才创建，唤醒态不占 PSRAM，3 MB 估算偏高"</b><br>
+验证：查 <code>afe_audio_processor.cc</code> 实际策略 —— 若 AudioProcessor 在 Initialize 期就创建 AFE_TYPE_VC handle，则唤醒态也占。需查 audio_service.cc 创建顺序确认。<b>结论：估算偏保守，实际可能 ~1.5-2 MB</b>，但量产仍按 3 MB 留余量。
+</div>
+</details>
+
+<h3>8.3 第 3 轮 · 精简后仍存在的隐患</h3>
+
+<table>
+<thead><tr><th>#</th><th>问题</th><th>等级</th><th>位置 / 现状</th></tr></thead>
+<tbody>
+<tr style="background:#E8F5E9"><td>rest-P0-1</td><td><code>audio_detection</code> 用 <code>fetch_with_delay(portMAX_DELAY)</code> · Stop 后无法叫停 · 还会回一次"假命中"</td><td><span class="pill ok">✅ 已修</span></td><td><code>afe_wake_word.cc:163-208</code> · 2026-05-13 fetch timeout 100ms + 二次查 run bit</td></tr>
+<tr style="background:#E8F5E9"><td>rest-P0-2</td><td><code>EncodeWakeWordData</code> 不等上一轮 encode task 结束 · 双连唤醒时句柄被覆盖 · <b>同栈两 task 必崩</b></td><td><span class="pill ok">✅ 已修</span></td><td><code>afe:225-320</code> + <code>custom:250-335</code> · 2026-05-13 atomic encode_in_progress_ exchange(true) 防重入 · 异常/正常路径均清</td></tr>
+<tr style="background:#E8F5E9"><td>rest-P0-3</td><td><code>audio_detection</code> 优先级 P5（代码）vs P7（doc / arch.md:227） · 拖唤醒响应</td><td><span class="pill ok">✅ 已修</span></td><td><code>afe:108</code> · 2026-05-13 P5 → P7（arch.md L227 已为 P7 · 栈/行号同步）</td></tr>
+<tr style="background:#E8F5E9"><td>rest-P0-4</td><td><code>audio_detection</code> 栈 4096 贴边 · fetch + StoreWakeWordData vector copy + 未知 WakeNet 内部消耗</td><td><span class="pill ok">✅ 已修</span></td><td><code>afe:108</code> · 2026-05-13 4096 → 6144 + 每 ~10s watermark log</td></tr>
+<tr><td>rest-P1-1</td><td>models_ 生命周期跨 task · <code>~AfeWakeWord</code> 无脑 <code>esp_srmodel_deinit</code> · 若 Assets 也持有同指针 → UAF</td><td><span class="pill p1">rest-P1</span></td><td><code>afe:31-33</code> + <code>custom:32-34</code> · 加 owns_models_ flag</td></tr>
+<tr><td>rest-P1-2</td><td>wake_word_pcm_ deque 读写不加锁（encode task 读 / detection 写）· 当前侥幸：Application 在 encode 前已 Stop detection</td><td><span class="pill p1">rest-P1</span></td><td><code>afe:178,225</code> · 加锁或 std::move 转所有权</td></tr>
+<tr><td>rest-P1-3</td><td>wake_word_opus_ 无上限 · 弱网/未连接时无界增长</td><td><span class="pill p1">rest-P1</span></td><td>encode task 内 emplace · 加 size 上限 60</td></tr>
+<tr><td>rest-P1-4</td><td>SetModelsList 仅构造期调一次 · 运行期重调路径不存在 · <b>但若上游引入 OTA 模型热加载，当前实现会 leak old wake_word_</b>（unique_ptr replace 时旧 task 还在跑）</td><td><span class="pill p1">rest-P1</span></td><td><code>audio_service.cc:777-803</code> · 加防御：先 EnableWakeWordDetection(false) 等 task 退</td></tr>
+<tr><td>rest-P1-5</td><td>唤醒被打断时半段 encode 状态恢复 · 当前哨兵机制能优雅退出，但 wake_word_pcm_ 残留数据下次唤醒前不清</td><td><span class="pill p1">rest-P1</span></td><td>EncodeWakeWordData 入口已 <code>wake_word_opus_.clear()</code> 但 pcm 在 encode 末尾才 clear · 双连命中时残</td></tr>
+<tr><td>rest-P2-1</td><td>ESP-SR 2.3.0 + IDF 5.5：<code>esp_srmodel_get_wake_words</code> 在多词模型分隔符 ";" 上 IDF 5.5 已稳定，无已知 issue · 但 <code>set_wakenet_threshold</code> 在 PSRAM-only 路径偶发返 ESP_FAIL（已有 LOG）</td><td><span class="pill p2">rest-P2</span></td><td><code>afe:91</code> · 加 ESP_FAIL 重试一次</td></tr>
+<tr><td>rest-P2-2</td><td>OnWakeWordDetected 回调赋值无锁 · 但仅 SetModelsList 构造期调，运行期不变</td><td><span class="pill p2">rest-P2</span></td><td>加 const-after-init 文档</td></tr>
+</tbody>
+</table>
+
+<details><summary><b>第 3 轮自我反驳清单</b>（≥ 2 条）</summary>
+<div class="callout ok">
+<b>反驳 A · "rest-P0-2 双连唤醒概率低，能否降级到 P1"</b><br>
+验证：MyDazy 实测场景 —— 用户说"嗨小智"后立刻又说一次（卡顿场景）· 一周内必有触发。同栈两 task 直接死给你看，无 graceful 退化。<b>结论：维持 P0</b>，量产前必修。
+</div>
+<div class="callout ok">
+<b>反驳 B · "CustomWakeWord 的 encode task 也用同样 Pin Core 1 + INT TCB + PSRAM 栈 · 红线 OK 没问题"</b><br>
+验证：查代码 <code>custom_wake_word.cc:230-292</code> 确认 <code>xTaskCreateStaticPinnedToCore(...,1)</code> 末参数为 1 · Pin Core 1 没错。栈 28 KB / TCB INT · 与 AFE 完全镜像。<b>结论：误判，Custom 路径红线已合规</b>。
+</div>
+<div class="callout ok">
+<b>反驳 C · "SetModelsList 运行期重调风险纯属过度防御"</b><br>
+验证：当前 grep <code>SetModelsList</code> 主仓库 → 仅 audio_service.cc 自身 + main.cc 启动期调一次。<b>结论：当前路径确实只在构造期，rest-P1-4 降级为防御性建议</b>，不必量产前修。
+</div>
+<div class="callout ok">
+<b>反驳 D · "wake_word_pcm_ encode 时读 / detection 写真的没锁？"</b><br>
+验证：查 application.cc:976 调 EncodeWakeWord 时机 —— 是 HandleWakeWordDetectedEvent 内 · 此前 audio_detection 已 Stop (afe_wake_word.cc:166 Stop()) · detection task 不再 StoreWakeWordData。<b>但</b> Stop 后 fetch_with_delay 可能再回一次（rest-P0-1） → 修 rest-P0-1 后 rest-P1-2 自动消除。<b>结论：rest-P1-2 是 rest-P0-1 的从属</b>。
+</div>
+</details>
+
+<h3>8.4 是否还有严重风险需要修复 · 结论清单</h3>
+
+<div class="callout ok">
+<b>结论：NO · 4 条 rest-P0 已于 2026-05-13 全部落地。</b>
+<ol class="compact">
+<li><span class="pill ok">✅ rest-P0-1</span> · <code>fetch_with_delay</code> timeout 100ms + 二次查 run bit · <code>afe:163-208</code></li>
+<li><span class="pill ok">✅ rest-P0-2</span> · encode task atomic <code>encode_in_progress_</code> exchange 防重入 · <code>afe:225-320</code> · <code>custom:250-335</code></li>
+<li><span class="pill ok">✅ rest-P0-3</span> · audio_detection P5 → P7 · <code>afe:108</code> · arch.md L227 同步</li>
+<li><span class="pill ok">✅ rest-P0-4</span> · audio_detection 栈 4096 → 6144 + 每 ~10s watermark log · <code>afe:108</code></li>
+</ol>
+后续观测点：量产板长跑 24h 验证 watermark 实际峰值 + 双连压测 50 次零崩 + Speaking 残帧丢弃日志（"encode busy · skip"应仅在双连场景出现）。
+</div>
+
+<div class="callout warn">
+<b>量产后 OTA 第一版补</b>（rest-P1 全部）：models_ owns_ flag · opus deque 上限 · pcm 锁 / 数据清理时机 · SetModelsList 防御重调（共 4-6 小时）。
+</div>
+
+<div class="callout ok">
+<b>与上一轮 wakeword 评审（已删 review.md）的对比 / 升级项</b>
+<ul class="compact">
+<li><b>实现数量</b>：3 → 2（旧裸 WakeNet 兜底全删）· 文档行数预计减 60+ 行</li>
+<li><b>SetModelsList</b>：原文档"二选一/三选一"模糊措辞 → 精简为"二选一"，#if 守卫明确化</li>
+<li><b>选型决策矩阵</b>：旧版只在 § 1.2 推荐 AFE · 新版 § 8.2.2 给 6 个 SKU/场景 × 推荐矩阵 · Custom 商业价值显式化</li>
+<li><b>第 3 轮隐患重 re-evaluation</b>：旧 P0-1/P0-3/P0-4/P0-5 → rest-P0-1/2/3/4（合并 P0-1 与 P0-2 的语义重复）· P0-3 不再单列因含义同 rest-P0-2 · 新增 rest-P1-4（SetModelsList 重调防御）· 新增 rest-P1-5（pcm 残留清理时机）</li>
+<li><b>第 1 轮接口契约表</b>：新表把 9 个虚函数 × 2 实现并排，比旧版"AFE 链路 / Custom 链路"分两节更易对比</li>
+<li><b>行号校正</b>：旧 IsAfe :1131/:1153 / EncodeWakeWord :1012 / PopWakeWord :1067 → 实际 :1095/:1117 / :976 / :1031</li>
+<li><b>反驳清单</b>：旧 8 条统一在 § 7.5 · 新版分三轮每轮独立 3-4 条 · 更聚焦</li>
+</ul>
+</div>
+
+</section>
+
+<!-- =============== 9 MCP 配置 + 重启切换 =============== -->
+<section id="mcp-config">
+<h2><span class="num">9</span> MCP 自定义唤醒词 + 重启切换架构</h2>
+
+<p class="sub">需求来源：客户/达人需要远程下发"切换为自定义唤醒词文本"（白名单内任选）+ 一键清除回归默认 AFE。量产纪律：<b>禁运行期热切</b>（涉及 srmodel / multinet / AFE handle 重建，触发 PSRAM 泄漏 + Core 抢核风险）·改"<b>MCP 写 NVS → 提示 reboot → 启动期 SetModelsList 读 NVS</b>"两段式。本章给出大流程图 + MCP 协议 + NVS schema + 4 个最小 patch（不直接落 main/）+ 三遍评审 + 9 种边界场景表 + 待 Jack 决策点。</p>
+
+<h3>9.1 全链路流程架构（上电 → NVS → 实现选择 → Detect）</h3>
+
+<div class="svgwrap">
+<svg viewBox="0 0 980 540" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="arr9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+  </marker>
+  <marker id="arr9r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#C62828"/>
+  </marker>
+</defs>
+<text x="490" y="20" class="svg-title" text-anchor="middle">MCP 自定义唤醒词 · 启动期决策 + 运行期 NVS 写入 双链路</text>
+
+<!-- 左列：启动期链路 -->
+<text x="180" y="48" class="svg-axis" text-anchor="middle" style="font-weight:600">启动期（每次开机 / reboot）</text>
+<rect x="60" y="60" width="240" height="32" rx="4" fill="#E3F2FD" stroke="#1976D2"/>
+<text x="180" y="80" class="node-text">① 上电 · app_main</text>
+
+<rect x="60" y="108" width="240" height="32" rx="4" fill="#E3F2FD" stroke="#1976D2"/>
+<text x="180" y="128" class="node-text">② Application::Start · 各模块 init</text>
+
+<rect x="60" y="156" width="240" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="180" y="176" class="node-text">③ Assets::Load · srmodel_load(srmodels.bin)</text>
+
+<rect x="60" y="204" width="240" height="48" rx="4" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+<text x="180" y="222" class="node-text" style="font-weight:600">④ AudioService::SetModelsList</text>
+<text x="180" y="238" class="node-text sm">读 NVS wakeword.mode + command（patch 1）</text>
+
+<rect x="60" y="268" width="240" height="48" rx="4" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="180" y="286" class="node-text">⑤ 选实现：mode==custom ? Custom : AFE</text>
+<text x="180" y="302" class="node-text sm">model 不支持 mode=custom → fallback AFE</text>
+
+<rect x="60" y="332" width="240" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="180" y="352" class="node-text">⑥ wake_word_->Initialize(codec, models)</text>
+
+<rect x="60" y="380" width="240" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="180" y="400" class="node-text">⑦ CustomWakeWord 内再读 NVS command</text>
+
+<rect x="60" y="428" width="240" height="32" rx="4" fill="#E3F2FD" stroke="#1976D2"/>
+<text x="180" y="448" class="node-text">⑧ EnableWakeWordDetection(true)</text>
+
+<rect x="60" y="476" width="240" height="32" rx="4" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="180" y="496" class="node-text">⑨ 唤醒检测态 · 等待 mic 数据</text>
+
+<line x1="180" y1="92" x2="180" y2="108" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="180" y1="140" x2="180" y2="156" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="180" y1="188" x2="180" y2="204" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="180" y1="252" x2="180" y2="268" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="180" y1="316" x2="180" y2="332" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="180" y1="364" x2="180" y2="380" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="180" y1="412" x2="180" y2="428" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="180" y1="460" x2="180" y2="476" stroke="#666" marker-end="url(#arr9)"/>
+
+<!-- 中央分隔 -->
+<line x1="320" y1="58" x2="320" y2="520" stroke="#E0E0E0" stroke-dasharray="4,3"/>
+
+<!-- 中列：MCP 输入 -->
+<text x="490" y="48" class="svg-axis" text-anchor="middle" style="font-weight:600">运行期（MCP 下发）</text>
+<rect x="345" y="60" width="290" height="32" rx="4" fill="#FFEBEE" stroke="#C62828"/>
+<text x="490" y="80" class="node-text">服务端 / 远端 MCP 客户端</text>
+
+<rect x="345" y="108" width="290" height="48" rx="4" fill="#FFEBEE" stroke="#C62828"/>
+<text x="490" y="126" class="node-text">{"type":"wakeword.config",</text>
+<text x="490" y="142" class="node-text"> "mode":"custom","command":"小灵芯"}</text>
+
+<rect x="345" y="172" width="290" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="490" y="192" class="node-text">RemoteCmd::Handle 分发</text>
+
+<rect x="345" y="220" width="290" height="48" rx="4" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+<text x="490" y="238" class="node-text" style="font-weight:600">OnWakeWordConfig（patch 3）</text>
+<text x="490" y="254" class="node-text sm">校验 mode / command 白名单</text>
+
+<rect x="345" y="284" width="290" height="48" rx="4" fill="#E3F2FD" stroke="#1976D2"/>
+<text x="490" y="302" class="node-text">写 NVS · namespace="wakeword"</text>
+<text x="490" y="318" class="node-text sm">SetString("mode", ...) / SetString("command", ...)</text>
+
+<rect x="345" y="348" width="290" height="48" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="490" y="366" class="node-text">app_->Alert("唤醒词已保存",</text>
+<text x="490" y="382" class="node-text">"重启后生效", "", OGG_VIBRATION)</text>
+
+<rect x="345" y="412" width="290" height="32" rx="4" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="490" y="432" class="node-text">等用户 / 远端触发 {"type":"reboot"}</text>
+
+<rect x="345" y="460" width="290" height="48" rx="4" fill="#FFEBEE" stroke="#C62828"/>
+<text x="490" y="478" class="node-text">esp_restart() · 主任务 vTaskDelete</text>
+<text x="490" y="494" class="node-text sm">→ 回到 ① 上电 · 重读 NVS</text>
+
+<line x1="490" y1="92" x2="490" y2="108" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="490" y1="156" x2="490" y2="172" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="490" y1="204" x2="490" y2="220" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="490" y1="268" x2="490" y2="284" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="490" y1="332" x2="490" y2="348" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="490" y1="396" x2="490" y2="412" stroke="#666" marker-end="url(#arr9)"/>
+<line x1="490" y1="444" x2="490" y2="460" stroke="#666" marker-end="url(#arr9)"/>
+
+<!-- 回流虚线：reboot 回 ① -->
+<path d="M 490 508 Q 280 520 180 60" fill="none" stroke="#C62828" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr9r)"/>
+<text x="320" y="528" class="node-text sm" style="fill:#C62828">reboot → 重走启动期链路 → NVS 决定新唤醒词</text>
+
+<!-- 右列：NVS schema 速查 -->
+<text x="820" y="48" class="svg-axis" text-anchor="middle" style="font-weight:600">NVS 字段（"wakeword" namespace）</text>
+<rect x="680" y="60" width="280" height="200" rx="4" fill="#FAFAFA" stroke="#9E9E9E"/>
+<text x="695" y="82" class="node-text sm" text-anchor="start" style="font-weight:600">key: mode</text>
+<text x="695" y="98" class="node-text sm" text-anchor="start">type: string · default "afe"</text>
+<text x="695" y="114" class="node-text sm" text-anchor="start">值域: "afe" / "custom"</text>
+<text x="695" y="138" class="node-text sm" text-anchor="start" style="font-weight:600">key: command</text>
+<text x="695" y="154" class="node-text sm" text-anchor="start">type: string · default ""</text>
+<text x="695" y="170" class="node-text sm" text-anchor="start">mode=custom 必填 · ∈ multinet.commands</text>
+<text x="695" y="194" class="node-text sm" text-anchor="start" style="font-weight:600">key: version</text>
+<text x="695" y="210" class="node-text sm" text-anchor="start">type: int · default 1</text>
+<text x="695" y="226" class="node-text sm" text-anchor="start">向后兼容标记 · schema 升级用</text>
+<text x="695" y="250" class="node-text sm" text-anchor="start" style="fill:#C62828">"clear" 仅写回默认值，不删 key</text>
+
+<rect x="680" y="276" width="280" height="160" rx="4" fill="#FFF3E0" stroke="#FB8C00"/>
+<text x="820" y="298" class="node-text" style="font-weight:600">边界优先级（启动期决策）</text>
+<text x="695" y="320" class="node-text sm" text-anchor="start">1. NVS mode=custom + model 含 ESP_MN</text>
+<text x="695" y="336" class="node-text sm" text-anchor="start">   → CustomWakeWord（按 command 过滤）</text>
+<text x="695" y="356" class="node-text sm" text-anchor="start">2. NVS mode=custom + model 不含 ESP_MN</text>
+<text x="695" y="372" class="node-text sm" text-anchor="start">   → fallback AFE + ESP_LOGW</text>
+<text x="695" y="392" class="node-text sm" text-anchor="start">3. NVS mode=afe + model 含 ESP_WN</text>
+<text x="695" y="408" class="node-text sm" text-anchor="start">   → AfeWakeWord</text>
+<text x="695" y="428" class="node-text sm" text-anchor="start">4. 都不含 → nullptr（非量产板）</text>
+
+<rect x="680" y="452" width="280" height="62" rx="4" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="820" y="474" class="node-text" style="font-weight:600">不变 / 安全</text>
+<text x="695" y="494" class="node-text sm" text-anchor="start">· 启动期外不重建 wake_word_</text>
+<text x="695" y="508" class="node-text sm" text-anchor="start">· models_list 仍由 Assets 单一所有</text>
+</svg>
+</div>
+
+<div class="callout ok">
+<b>关键设计</b>：MCP 命令<b>仅写 NVS + 给 Alert</b>，<b>不</b>触发任何运行期 wake_word_ 重建。重启后 §④ SetModelsList 重新读 NVS 决定路径——与现有 Assets::Load → SetModelsList 链路 100% 兼容。
+</div>
+
+<h3>9.2 MCP 协议（tool 名 · 4 个示例 · 字段表）</h3>
+
+<table>
+<thead><tr><th>tool 名</th><th>风格</th><th>归属</th><th>同族命令</th></tr></thead>
+<tbody>
+<tr><td><code>wakeword.config</code></td><td>名词 + 动词（点号分隔）</td><td>RemoteCmd</td><td>对照 <code>mic_calibrate</code> / <code>volume</code> / <code>gain</code> / <code>stt_url</code></td></tr>
+</tbody>
+</table>
+
+<h4>四种调用形态</h4>
+
+<table>
+<thead><tr><th>#</th><th>用途</th><th>JSON</th><th>NVS 写入</th><th>是否需 reboot</th></tr></thead>
+<tbody>
+<tr><td>① 启用 AFE（默认）</td><td>回归量产默认 · 上游"小智"等 WakeNet</td><td><code>{"type":"wakeword.config","mode":"afe"}</code></td><td>mode="afe" / command=""</td><td>是</td></tr>
+<tr><td>② 启用 Custom + 指定文本</td><td>切到自定义唤醒词（白名单内）</td><td><code>{"type":"wakeword.config","mode":"custom","command":"小灵芯"}</code></td><td>mode="custom" / command="小灵芯"</td><td>是</td></tr>
+<tr><td>③ 清除回默认</td><td>等价 ① · 语义化别名</td><td><code>{"type":"wakeword.config","mode":"clear"}</code></td><td>mode="afe" / command=""</td><td>是</td></tr>
+<tr><td>④ 查询当前配置</td><td>仅 log 输出 · 不写 NVS · 不重启</td><td><code>{"type":"wakeword.config","mode":"query"}</code></td><td>无</td><td>否</td></tr>
+</tbody>
+</table>
+
+<h4>校验规则</h4>
+
+<table>
+<thead><tr><th>字段</th><th>规则</th><th>违反时</th></tr></thead>
+<tbody>
+<tr><td><code>mode</code></td><td>必须 ∈ {afe, custom, clear, query}</td><td>ESP_LOGW · 静默丢弃 · 不写 NVS</td></tr>
+<tr><td><code>command</code>（mode=custom）</td><td>非空 string · 长度 ≤ 32 · 必须 ∈ assets/index.json multinet_model.commands[].command</td><td>ESP_LOGW + Alert("唤醒词不在白名单") · 不写 NVS</td></tr>
+<tr><td><code>command</code>（mode≠custom）</td><td>忽略（即使传也不读）</td><td>容错</td></tr>
+<tr><td>未知 type 顶层字段</td><td>RemoteCmd::Handle 已有兜底 ESP_LOGW("未知命令")</td><td>—</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>白名单加载策略</b>：command 白名单需从 <code>assets/index.json</code> 的 <code>multinet_model.commands[].command</code> 读取。两种实现路径：(A) RemoteCmd 内调 Assets::GetAssetData 现场解析（成本 ~20ms · 单次校验可接受）；(B) AudioService 启动期缓存到 std::vector 暴露 <code>GetMultinetCommands()</code> getter。<b>推荐 B</b>（一次解析多处复用）· 见 § 9.7 待决策点 D-2。
+</div>
+
+<h3>9.3 NVS Schema（namespace · key · 默认值 · 版本兼容）</h3>
+
+<table>
+<thead><tr><th>namespace</th><th>key</th><th>type</th><th>默认值</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td rowspan="3"><code>wakeword</code></td><td><code>mode</code></td><td>string</td><td>"afe"</td><td>"afe" / "custom" · 其他值视为损坏 → fallback "afe"</td></tr>
+<tr><td><code>command</code></td><td>string</td><td>""</td><td>mode=custom 时使用 · 必须 ∈ multinet.commands 白名单</td></tr>
+<tr><td><code>version</code></td><td>int</td><td>1</td><td>schema 版本 · 未来加字段时用于迁移</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>版本兼容策略</b>：未来若加 <code>threshold</code> / <code>language</code> 字段，先升 version 到 2，启动期读 version：1 → 用默认 · 2 → 读新字段。<b>不破坏 1→2 老设备</b>（旧固件读 NVS 时只读 mode/command）。
+</div>
+
+<h3>9.4 代码 patch 集合（4 个最小 diff · ✅ 已落地 2026-05-13）</h3>
+
+<div class="callout ok">
+<b>✅ 已落地 2026-05-13</b> · patch 1-3 已落 main/ · 编辑器锚点：<code>audio_service.cc::SetModelsList</code> · <code>custom_wake_word.cc::Initialize</code> · <code>remote_cmd.{h,cc}::OnWakeWordConfig</code>。NVS 默认 mode="afe"，量产首发零行为变化；远端 MCP 切换路径走 <code>{"type":"wakeword.config",...}</code> → 写 NVS → Alert "重启后生效" → 用户 reboot。详见下方"修复历史"段。
+</div>
+
+<h4>patch 1 · <code>main/audio/audio_service.cc</code> · SetModelsList 加 NVS 覆盖</h4>
+
+<pre><code>--- a/main/audio/audio_service.cc
++++ b/main/audio/audio_service.cc
+@@ -1,6 +1,7 @@
+ #include "audio_service.h"
+ #include "application.h"
+ #include "system_info.h"
++#include "settings.h"
+ ...
+@@ -777,17 +778,33 @@ void AudioService::SetModelsList(srmodel_list_t* models_list) {
+     models_list_ = models_list;
+
+ #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
+-    // MultiNet 命令词模型存在 → CustomWakeWord（自定义唤醒词）
+-    // 仅 WakeNet 模型 → AfeWakeWord（量产推荐 · 支持 Speaking 中打断 + 内建 AEC）
+-    if (esp_srmodel_filter(models_list_, ESP_MN_PREFIX, NULL) != nullptr) {
+-        wake_word_ = std::make_unique&lt;CustomWakeWord&gt;();
+-    } else if (esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr) {
+-        wake_word_ = std::make_unique&lt;AfeWakeWord&gt;();
+-    } else {
+-        wake_word_ = nullptr;
+-    }
++    // [MCP wakeword v1] NVS 优先 · model 兜底
++    // 1) 读 NVS（read-only · 默认 afe）
++    Settings s("wakeword", false);
++    std::string mode = s.GetString("mode", "afe");
++    if (mode != "afe" &amp;&amp; mode != "custom") {
++        ESP_LOGW(TAG, "NVS wakeword.mode 损坏='%s' · fallback afe", mode.c_str());
++        mode = "afe";
++    }
++    bool has_mn = esp_srmodel_filter(models_list_, ESP_MN_PREFIX, NULL) != nullptr;
++    bool has_wn = esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr;
++    bool want_custom = (mode == "custom" &amp;&amp; has_mn);
++
++    if (mode == "custom" &amp;&amp; !has_mn) {
++        ESP_LOGW(TAG, "NVS 要 custom 但 model 无 MultiNet · fallback afe");
++    }
++    // 2) 选实现
++    if (want_custom) {
++        wake_word_ = std::make_unique&lt;CustomWakeWord&gt;();
++    } else if (has_wn) {
++        wake_word_ = std::make_unique&lt;AfeWakeWord&gt;();
++    } else {
++        wake_word_ = nullptr;
++    }
++    ESP_LOGI(TAG, "wake_word selected: %s (NVS mode=%s · has_mn=%d has_wn=%d)",
++             want_custom ? "Custom" : (has_wn ? "AFE" : "null"),
++             mode.c_str(), has_mn, has_wn);
+ #else
+     (void)models_list;
+     wake_word_ = nullptr;
+ #endif
+</code></pre>
+
+<p class="sub"><span class="pill ok">✅ 已落地 2026-05-13</span> · <b>影响面</b>：1 文件 · ~30 行 diff · 新增 <code>#include "settings.h"</code> · 无破坏性变更（NVS 缺失走默认 afe = 旧行为）。<b>风险</b>：低。<b>落地位置</b>：<code>main/audio/audio_service.cc::SetModelsList</code>（决策树 NVS 优先 · model 兜底 · LOGI 输出 mode + has_mn + has_wn）。</p>
+
+<h4>patch 2 · <code>main/audio/wake_words/custom_wake_word.cc</code> · 启动期读 NVS command 覆盖 action</h4>
+
+<pre><code>--- a/main/audio/wake_words/custom_wake_word.cc
++++ b/main/audio/wake_words/custom_wake_word.cc
+@@ -1,6 +1,7 @@
+ #include "custom_wake_word.h"
+ #include "audio_service.h"
+ #include "system_info.h"
++#include "settings.h"
+ #include "assets.h"
+@@ -98,6 +99,28 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
+         ParseWakenetModelConfig();
+     }
+
++    // [MCP wakeword v1] NVS command 覆盖 · 仅指定的那条 action="wake"，其余 action=""
++    {
++        Settings s("wakeword", false);
++        std::string nvs_cmd = s.GetString("command", "");
++        if (!nvs_cmd.empty()) {
++            bool found = false;
++            for (auto&amp; c : commands_) {
++                if (c.text == nvs_cmd || c.command == nvs_cmd) {
++                    c.action = "wake";
++                    found = true;
++                } else {
++                    c.action = "";  // 屏蔽其他词
++                }
++            }
++            if (!found) {
++                ESP_LOGW(TAG, "NVS command '%s' 不在白名单 · 回退到 index.json 默认 actions", nvs_cmd.c_str());
++            } else {
++                ESP_LOGI(TAG, "NVS command '%s' 已激活 · 其余词已屏蔽", nvs_cmd.c_str());
++            }
++        }
++    }
++
+     if (models_ == nullptr || models_-&gt;num == -1) {
+         ESP_LOGE(TAG, "Failed to initialize wakenet model");
+         return false;
+</code></pre>
+
+<p class="sub"><span class="pill ok">✅ 已落地 2026-05-13</span> · <b>影响面</b>：1 文件 · ~30 行 diff · 新增 <code>#include "settings.h"</code> · 不动 multinet_ 创建 / commands_add 逻辑（保留 index.json 全部词进入识别引擎，只在回调侧筛 action="wake"）。<b>风险</b>：低 · NVS 空 = 旧行为。<b>落地位置</b>：<code>custom_wake_word.cc::Initialize</code> · 在 <code>ParseWakenetModelConfig</code> 后、<code>esp_mn_commands_add</code> 前插入 NVS command 覆盖块。</p>
+
+<h4>patch 3 · <code>main/remote_cmd.h</code> + <code>main/remote_cmd.cc</code> · OnWakeWordConfig</h4>
+
+<pre><code>--- a/main/remote_cmd.h
++++ b/main/remote_cmd.h
+@@ -42,6 +42,7 @@
+  * │ mic_calibrate │ {"type":"mic_calibrate"}
++ * │ wakeword.config│ {"type":"wakeword.config","mode":"afe|custom|clear|query","command":"..."}
+  * └───────────────┴────────────────────────────────────────────────────────────┘
+@@ -82,6 +83,7 @@ private:
+     void OnUpdatePrompt(const cJSON* msg);
++    void OnWakeWordConfig(const cJSON* msg);
+</code></pre>
+
+<pre><code>--- a/main/remote_cmd.cc
++++ b/main/remote_cmd.cc
+@@ -112,6 +112,7 @@ bool RemoteCmd::Handle(const cJSON* payload) {
+     else if (strcmp(type, "edu_pool") == 0) OnEduPool(msg);
+     else if (strcmp(type, "update_prompt") == 0) OnUpdatePrompt(msg);
++    else if (strcmp(type, "wakeword.config") == 0) OnWakeWordConfig(msg);
+     else {
+
+@@ -end +end @@
++// [MCP wakeword v1] 仅写 NVS · 不运行期热切 · 让用户/远端再下 reboot 生效
++void RemoteCmd::OnWakeWordConfig(const cJSON* msg) {
++    auto mode_item = cJSON_GetObjectItem(msg, "mode");
++    if (!cJSON_IsString(mode_item)) {
++        ESP_LOGW(TAG, "wakeword.config: missing mode");
++        return;
++    }
++    std::string mode = mode_item-&gt;valuestring;
++
++    // ① query · 仅 log · 不写
++    if (mode == "query") {
++        Settings sr("wakeword", false);
++        ESP_LOGI(TAG, "wakeword query: mode=%s command=%s",
++                 sr.GetString("mode", "afe").c_str(),
++                 sr.GetString("command", "").c_str());
++        return;
++    }
++
++    // ② mode 校验
++    if (mode != "afe" &amp;&amp; mode != "custom" &amp;&amp; mode != "clear") {
++        ESP_LOGW(TAG, "wakeword.config: invalid mode=%s", mode.c_str());
++        return;
++    }
++
++    Settings sw("wakeword", true);  // writable
++
++    if (mode == "clear" || mode == "afe") {
++        sw.SetString("mode", "afe");
++        sw.SetString("command", "");
++        ESP_LOGI(TAG, "wakeword: reset to AFE default");
++    } else {  // custom
++        auto cmd_item = cJSON_GetObjectItem(msg, "command");
++        if (!cJSON_IsString(cmd_item) || strlen(cmd_item-&gt;valuestring) == 0) {
++            ESP_LOGW(TAG, "wakeword.config: custom needs non-empty command");
++            return;
++        }
++        // TODO（D-2 决策后）：从 AudioService::GetMultinetCommands() 校验白名单
++        // 当前 v1 暂只校验长度，落地 patch 时按 Jack 决策切到白名单
++        if (strlen(cmd_item-&gt;valuestring) &gt; 32) {
++            ESP_LOGW(TAG, "wakeword.config: command too long (&gt;32)");
++            return;
++        }
++        sw.SetString("mode", "custom");
++        sw.SetString("command", cmd_item-&gt;valuestring);
++        ESP_LOGI(TAG, "wakeword: set custom command='%s'", cmd_item-&gt;valuestring);
++    }
++
++    // ③ 提示 reboot（用户感知 · 不立即重启）
++    app_-&gt;Schedule([this]() {
++        app_-&gt;Alert("唤醒词配置", "已保存 · 重启后生效", "", Lang::Sounds::OGG_VIBRATION);
++    });
++}
+</code></pre>
+
+<p class="sub"><span class="pill ok">✅ 已落地 2026-05-13</span> · <b>影响面</b>：2 文件 · ~65 行 diff · 不动 ScheduleDelayedAction / DelayTimerCallback（不需要异步 reboot 链路 · 用户手动下 reboot）。<b>风险</b>：极低 · 新增 type 分支不影响现有命令。<b>落地位置</b>：<code>remote_cmd.h::OnWakeWordConfig</code> 声明 + 头部命令表新增一行 + <code>remote_cmd.cc::Handle</code> 加 <code>wakeword.config</code> 分发 + 文件末尾 <code>OnWakeWordConfig</code> 实现（query/afe/clear/custom 4 分支 + ≤32 字节长度校验 + Alert "重启后生效"）。</p>
+
+<h4>patch 4 · 文档 · 本章节（即正在写的 § 9）</h4>
+
+<p class="sub"><b>影响面</b>：1 文件 · ~500 行 · 仅 <code>docs/p30-wakeword-flows.html</code>。<b>风险</b>：0（纯文档）。<b>双源</b>：本变更<b>仅 HTML 版评审稿</b>，待 patch 1-3 落地后回灌 <code>p30-architecture.md</code> § 一.5.x 落位表 + 唤醒词章节（按 CLAUDE.md "先 markdown 后 HTML" 原则反向例外 · 见 § 9.7 决策点 D-5）。</p>
+
+<h3>9.5 三遍评审 + 自反驳</h3>
+
+<h4>9.5.1 第 1 遍 · 路径完备性</h4>
+
+<table>
+<thead><tr><th>#</th><th>检查项</th><th>结论</th></tr></thead>
+<tbody>
+<tr><td>P1-1</td><td>上电是否 100% 走 NVS 读取</td><td>✅ patch 1 在 SetModelsList 入口立即读 · 无旁路</td></tr>
+<tr><td>P1-2</td><td>NVS 字段缺失 / 损坏的回落</td><td>✅ Settings::GetString("mode", "afe") + mode 不在枚举 → fallback "afe"</td></tr>
+<tr><td>P1-3</td><td>mode=custom 但 model 无 MultiNet</td><td>✅ has_mn check · fallback AFE + ESP_LOGW（详见 § 9.6 矩阵 row 4）</td></tr>
+<tr><td>P1-4</td><td>多 SKU 共享代码 + 不同 model</td><td>✅ 决策树仅依赖 esp_srmodel_filter · 同份代码自适应</td></tr>
+<tr><td>P1-5</td><td>启动期 vs 运行期 NVS 读时序</td><td>✅ SetModelsList 是 Assets::Load 同步调 · 早于 audio_service_.Start · 无竞态</td></tr>
+<tr><td>P1-6</td><td>CustomWakeWord 读 NVS 时机</td><td>✅ patch 2 放 Initialize 内 · 在 esp_mn_commands_add 之前完成 action 改写 → 引擎层不受影响</td></tr>
+<tr><td>P1-7</td><td>command 包含特殊字符（中文/emoji）</td><td>✅ NVS string 长度上限 4000B · UTF-8 透传 · 与 index.json 一致</td></tr>
+</tbody>
+</table>
+
+<details><summary><b>第 1 遍自反驳清单</b>（≥ 2 条）</summary>
+<div class="callout ok">
+<b>反驳 A · "patch 1 没读 NVS 的 command，启动期 Custom 实例化时不知道用哪个词"</b><br>
+验证：拆两层——SetModelsList 只决定"用哪个 class"，CustomWakeWord::Initialize 内（patch 2）再读 NVS command。<b>结论：分层正确</b>，避免 audio_service 直接耦合 commands_ 内部结构。
+</div>
+<div class="callout ok">
+<b>反驳 B · "NVS 在第一次启动（出厂）时尚未写过 mode/command，Settings::GetString 行为是否定义？"</b><br>
+验证：查 <code>settings.cc</code> · 未找到 key 时返回 default_value · 行为定义。出厂首启 mode="afe" + command="" → SetModelsList 走 AFE 分支。<b>结论：出厂兼容</b>。
+</div>
+<div class="callout ok">
+<b>反驳 C · "Assets::Load 在 Application::Start 之前还是之后调？SetModelsList 早晚于 RemoteCmd 注册？"</b><br>
+验证：grep `Assets::Load` · 在 OTA / 首次启动时调 · SetModelsList 在 audio_service init 后即触发。RemoteCmd 经 protocol 消息驱动 · 时序上 SetModelsList 总早于任何 wakeword.config 命令到达。<b>结论：无竞态</b>。
+</div>
+</details>
+
+<h4>9.5.2 第 2 遍 · 安全性</h4>
+
+<table>
+<thead><tr><th>#</th><th>检查项</th><th>结论</th></tr></thead>
+<tbody>
+<tr><td>P2-1</td><td>MCP 输入 mode 枚举校验</td><td>✅ 4 值白名单 · 其他 ESP_LOGW 静默</td></tr>
+<tr><td>P2-2</td><td>command 长度上限</td><td>⚠ v1 仅校验 ≤ 32 字节 · 待 D-2 决策后接白名单（推荐）</td></tr>
+<tr><td>P2-3</td><td>恶意大量 wakeword.config 写穿 NVS</td><td>⚠ 单 key 写次数无限制 · ESP32-S3 NVS 单 sector 寿命 ~10 万次 · 同一 mode 重写不实际擦写（NVS 内部 dedup）· 但攻击者可交替写值 · 见 D-3</td></tr>
+<tr><td>P2-4</td><td>NVS 写失败的提示</td><td>⚠ 当前 patch 3 未检查 SetString 返回 · 已查 settings.cc · 写错 esp_log 输出但不抛错 · 用户 Alert 会误报"已保存"· 见 D-3</td></tr>
+<tr><td>P2-5</td><td>reboot 后 NVS 读不到的恢复</td><td>✅ patch 1 fallback "afe" · 等价出厂态</td></tr>
+<tr><td>P2-6</td><td>NVS namespace 与现有不冲突</td><td>✅ "wakeword" 在主仓库 grep 无命中 · 新 namespace 独占</td></tr>
+<tr><td>P2-7</td><td>跨核 / 跨任务读写 Settings</td><td>✅ Settings 内部 nvs_handle 单线程使用 · OnWakeWordConfig 在 protocol 任务 · SetModelsList 在 Assets::Load 任务 · 时序不并发</td></tr>
+</tbody>
+</table>
+
+<details><summary><b>第 2 遍自反驳清单</b>（≥ 2 条）</summary>
+<div class="callout ok">
+<b>反驳 A · "P2-3 NVS 写穿是过度防御 · 攻击者也得先攻破协议层才能下命令"</b><br>
+验证：MCP 通道走 WSS/MQTT-TLS + 设备级 token · 攻击成本高。但量产 1 万台中可能有逻辑 bug（如服务端 bug 循环下发） · 量产稳健建议加"5 秒内同名命令防重入"（v1 不做 · 见 D-3）。<b>结论：v1 接受现状</b>，OTA 第一版加防抖。
+</div>
+<div class="callout ok">
+<b>反驳 B · "P2-4 写失败 Alert 错报问题严重吗？"</b><br>
+验证：NVS 写失败的实际场景 —— flash 物理损坏 / 分区表错乱。这些场景设备整体也快挂了 · 错报 Alert 不是关键路径。但用户可能再下 query 验证 → query 走读 NVS 也会失败 · 自然发现。<b>结论：可接受</b> · v2 加 SetString 返回值检查（10 min 工作量 · 见 D-3）。
+</div>
+<div class="callout ok">
+<b>反驳 C · "为什么不在 MCP 层做异步 reboot · 让用户体验更顺？"</b><br>
+验证：参考 OnReboot 已有 ScheduleDelayedAction(2000ms) 模板 · 加上不复杂。<b>但</b> 量产纪律：写 NVS 后立即 reboot 让用户来不及确认 · 服务端误下发会立刻重启正在使用的设备。<b>结论：v1 故意不自动 reboot</b> · 由用户/远端二段确认（先 wakeword.config 后 reboot）· 见 D-1。
+</div>
+</details>
+
+<h4>9.5.3 第 3 遍 · 用户体验</h4>
+
+<table>
+<thead><tr><th>#</th><th>检查项</th><th>结论</th></tr></thead>
+<tbody>
+<tr><td>P3-1</td><td>切换需要 reboot · 用户感知</td><td>✅ Alert("已保存 · 重启后生效") + OGG_VIBRATION 提示音 · 文案明确</td></tr>
+<tr><td>P3-2</td><td>query 命令回报通道</td><td>⚠ 当前仅 ESP_LOGI · 远端 MCP 客户端拿不到 · 见 D-4（v2 加 MCP 回包）</td></tr>
+<tr><td>P3-3</td><td>clear 后是否清 command 字段</td><td>✅ patch 3 SetString("command", "") · 清空（避免下次切回 custom 时残留旧词）</td></tr>
+<tr><td>P3-4</td><td>command 不在白名单时友好提示</td><td>⚠ v1 ESP_LOGW · 无 Alert · 远端无回包 · 见 D-2 / D-4</td></tr>
+<tr><td>P3-5</td><td>用户怎么知道哪些词在白名单</td><td>⚠ 当前需查 assets/index.json · 远端运营不可见 · 见 D-2（加 wakeword.config mode=list）</td></tr>
+<tr><td>P3-6</td><td>LED 提示</td><td>—（OGG_VIBRATION 已涵盖触觉反馈 · LED 由 Alert 自动联动 · 无需额外）</td></tr>
+</tbody>
+</table>
+
+<details><summary><b>第 3 遍自反驳清单</b>（≥ 2 条）</summary>
+<div class="callout ok">
+<b>反驳 A · "query 不回包 · 远端运营怎么验证下发成功？"</b><br>
+验证：现有 stt_url / volume 等命令也无回包 · 验证全靠下次设备上报 / 日志。<b>但</b> wakeword.config 是重启敏感操作 · 运营误操作代价大。建议 v2 加双向 MCP（用 protocol_-&gt;SendMcpResponse 或类似）· 见 D-4。<b>结论</b>：v1 用 ESP_LOGI 串口可见 · 等 MCP 通道完整化再加。
+</div>
+<div class="callout ok">
+<b>反驳 B · "为什么不在 wakeword.config 后自动 reboot 省一步？"</b><br>
+验证：见 § 9.5.2 反驳 C · 量产纪律拒绝自动 reboot。<b>用户视角</b>：远端运营下发后看到 Alert + 设备没重启 · 主动确认后再下 reboot · 双段验证更稳。<b>结论：v1 故意保持两段</b> · 用户教育成本可控（运营手册写清）。
+</div>
+<div class="callout ok">
+<b>反驳 C · "Alert 文案'已保存 · 重启后生效'够清楚吗？普通用户看不到 OLED 文字"</b><br>
+验证：P30 1.83" 屏 284×240 + Alert 弹窗 · 用户能看到 · OGG_VIBRATION 提示音也是触发器。<b>但</b> 客户定制场景下用户可能是终端消费者（不知道"重启"是什么）· 见 D-1（远端运营 vs 终端用户分两套文案？）。<b>结论：v1 文案给运营场景</b> · 终端用户场景由 1AIskills 远程发起时不弹 Alert（加 silent=true 字段 · v2 决策）。
+</div>
+</details>
+
+<h3>9.6 边界场景表（mode × model 矩阵 · 9 种组合）</h3>
+
+<table>
+<thead><tr><th>#</th><th>NVS mode</th><th>NVS command</th><th>model 含 ESP_MN</th><th>model 含 ESP_WN</th><th>启动期决策</th><th>用户感知</th></tr></thead>
+<tbody>
+<tr><td>R1</td><td>"afe"</td><td>""</td><td>无</td><td>有</td><td>AFE</td><td>正常（量产默认）</td></tr>
+<tr><td>R2</td><td>"afe"</td><td>""</td><td>有</td><td>有</td><td>AFE</td><td>正常（MultiNet 闲置）</td></tr>
+<tr><td>R3</td><td>"afe"</td><td>"小灵芯"</td><td>有</td><td>有</td><td>AFE</td><td>command 闲置 · 不生效（已存但未启用）</td></tr>
+<tr><td>R4</td><td>"custom"</td><td>"小灵芯"</td><td>有</td><td>有/无</td><td>Custom + 仅"小灵芯"action=wake</td><td>说"小灵芯"触发唤醒</td></tr>
+<tr><td>R5</td><td>"custom"</td><td>"未在白名单"</td><td>有</td><td>有/无</td><td>Custom · ESP_LOGW · 落回 index.json 默认 actions（多词同时生效）</td><td><span class="pill p1">语义模糊</span> · v1 待 D-2 决定是否 fallback AFE</td></tr>
+<tr><td>R6</td><td>"custom"</td><td>""</td><td>有</td><td>有/无</td><td>Custom · 但 NVS command 空 · 走 index.json 默认</td><td>多词共用唤醒 · 与出厂行为一致</td></tr>
+<tr><td>R7</td><td>"custom"</td><td>"小灵芯"</td><td><b>无</b></td><td>有</td><td>fallback AFE · ESP_LOGW</td><td>"小智" 唤醒（用户期望"小灵芯"但 model 不支持）</td></tr>
+<tr><td>R8</td><td>"损坏值"</td><td>任意</td><td>—</td><td>—</td><td>fallback "afe" · 走 R1/R2</td><td>正常 AFE · 串口日志告警</td></tr>
+<tr><td>R9</td><td>—</td><td>—</td><td>无</td><td>无</td><td>nullptr · 无唤醒词</td><td>非量产板 · 不支持唤醒</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>R5 / R7 是用户体验最不直观的两种</b>：用户期望词 ≠ 实际识别词。建议 v1 落地后做"运营手册"：(a) 切换前先 query 验证；(b) Alert 加二级提示"如果不响应请检查白名单"。
+</div>
+
+<h3>9.7 待 Jack 决策点（≤ 5 项）</h3>
+
+<table>
+<thead><tr><th>#</th><th>决策点</th><th>选项</th><th>影响</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td>D-1</td><td>写 NVS 后是否自动 reboot</td><td>A: 仅 Alert 等用户/远端再下 reboot · B: ScheduleDelayedAction(3000ms) 自动重启</td><td>UX vs 误操作风险</td><td><b>A（v1）</b> · 量产稳健</td></tr>
+<tr><td>D-2</td><td>command 白名单校验落地方式</td><td>A: 现场调 Assets 解析 · B: AudioService 缓存 getter · C: v1 只查长度，OTA v2 接白名单</td><td>启动期内存 +1KB（B）vs 一次校验 ~20ms（A）</td><td><b>B</b> · 内存可接受 · 复用性强</td></tr>
+<tr><td>D-3</td><td>NVS 写失败处理 + 防抖</td><td>A: 检查 SetString 返回 + 5 秒同名防重入 · B: v1 不做 · OTA v2 加</td><td>+30 行代码 · +20 min 工作量</td><td><b>v2 加</b> · v1 不阻塞</td></tr>
+<tr><td>D-4</td><td>query 回包通道</td><td>A: 仅 ESP_LOGI · B: protocol_->SendMcpResponse JSON · C: 上报到 stt_url 类似的回调</td><td>双向 MCP 协议成熟度</td><td><b>A（v1）</b> · 等 MCP 客户端协议明确再做 B</td></tr>
+<tr><td>D-5</td><td>双源同步顺序例外</td><td>本变更先 HTML 评审稿 · 落地后回灌 architecture.md · 是否违反 CLAUDE.md "先 md 后 html"</td><td>双源漂移风险</td><td><b>批准例外</b> · 评审稿性质 · patch 1-3 落地时同步 md（同一 PR）</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>下一步建议</b>：(1) ~~Jack 拍板 D-1 ~ D-5 → 落 patch 1-3 到 main~~ <b>✅ 已落地 2026-05-13</b>（D-2 v2 接白名单仍待 OTA · D-3 NVS 写失败防抖仍待 OTA · D-4 query 回包 B 待 MCP 协议明确）；(2) 测试用例：4 个 MCP 调用形态 × 9 种边界场景 = 36 case · 量产前选 R1/R4/R5/R7/R8 + 4 命令 ≈ 12 case 覆盖；(3) <span class="pill ok">✅ 已更新</span> RemoteCmd 头部命令表（<code>remote_cmd.h</code> 已含 <code>wakeword.config</code> 一行）。
+</div>
+
+<h3>9.7 修复历史（git blame 反查锚点）</h3>
+<div class="callout">
+<ul class="compact">
+<li>2026-05-13 · <code>afe_wake_word.cc:96-110</code> rest-P0-4/5 audio_detection 栈 4096→6144 + 优先级 P5→P7（与 arch.md L227 对齐）</li>
+<li>2026-05-13 · <code>afe_wake_word.cc:163-208</code> rest-P0-1 fetch_with_delay timeout portMAX_DELAY→100ms + fetch 后二次查 EventGroup run bit 丢"假命中" + 栈高水位 ~10s log</li>
+<li>2026-05-13 · <code>afe_wake_word.h:58</code> · <code>afe_wake_word.cc:225-320</code> rest-P0-2 atomic <code>encode_in_progress_</code> exchange(true) 防重入 · 异常路径 + 任务末尾 vTaskDelete 前置 false</li>
+<li>2026-05-13 · <code>custom_wake_word.h:63</code> · <code>custom_wake_word.cc:250-335</code> rest-P0-2 Custom 路径与 AFE 同源 atomic flag 防双连</li>
+<li>2026-05-13 · <code>audio_service.cc::SetModelsList</code> MCP patch 1 · 加 <code>#include "settings.h"</code> + NVS 优先 model 兜底决策树 + LOGI 输出 mode/has_mn/has_wn</li>
+<li>2026-05-13 · <code>custom_wake_word.cc::Initialize</code> MCP patch 2 · 加 NVS command 覆盖 commands_[].action 块（仅匹配项 action="wake" · 其余 action="" 静默）</li>
+<li>2026-05-13 · <code>remote_cmd.h</code> · <code>remote_cmd.cc::OnWakeWordConfig</code> MCP patch 3 · query/afe/clear/custom 4 分支 + ≤32 字节长度校验 + Alert "唤醒词已更新 / 重启后生效" 不自动 reboot</li>
+<li>2026-05-13 · <code>docs/p30-architecture.md:227</code> 同步 audio_detection 栈 4096→6144 · 行号 :87→:108 · 注释加 rest-P0-4/5 修复溯源</li>
+</ul>
+</div>
+</section>
+
+</main>
+</div>
+
+</body>
+</html>

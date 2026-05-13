@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · FlowEngine 深度分析</title>
+<style>
+:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+        --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
+        --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666;
+        --idle:#ECEFF1; --idle-line:#546E7A;
+        --playing:#E8F5E9; --playing-line:#2E7D32;
+        --delay:#FFF3E0; --delay-line:#F57F17;
+        --suspended:#FFEBEE; --suspended-line:#C62828; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       margin: 0; background: #F5F5F5; color: var(--text); line-height: 1.55; font-size: 14px; }
+header { background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+         color: white; padding: 24px 40px; }
+header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 600; }
+header .meta { opacity: .9; font-size: 12px; }
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav { width: 220px; flex-shrink: 0; background: white; padding: 18px 0;
+      border-right: 1px solid var(--border); position: sticky; top: 0;
+      align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+nav h3 { margin: 0 14px 8px; font-size: 11px; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: .5px; }
+nav a { display: block; padding: 5px 14px; color: var(--text); text-decoration: none;
+        font-size: 13px; border-left: 3px solid transparent; }
+nav a:hover { background: var(--brand-light); border-left-color: var(--brand); color: var(--brand-deep); }
+nav a.sub { padding-left: 26px; font-size: 12px; color: var(--text-2); }
+main { flex: 1; padding: 24px 36px; max-width: 980px; }
+section { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
+             border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
+section h2 .num { display: inline-block; background: var(--brand); color: white;
+                  padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
+section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section h4 { margin: 12px 0 4px 0; font-size: 13.5px; color: var(--text); }
+section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
+code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
+       font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px; color: #C2185B; }
+pre { background: #F8F8F8; border: 1px solid var(--border); border-radius: 6px;
+      padding: 12px 14px; overflow-x: auto; font-size: 12.5px; line-height: 1.5;
+      font-family: "SFMono-Regular", Consolas, monospace; margin: 8px 0; }
+table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 13px; }
+th { background: #F5F5F5; padding: 6px 9px; text-align: left; border: 1px solid var(--border);
+     font-weight: 600; font-size: 12.5px; }
+td { padding: 5px 9px; border: 1px solid var(--border); vertical-align: top; font-size: 12.5px; }
+tr:nth-child(even) td { background: #FAFAFA; }
+.callout { padding: 10px 14px; border-radius: 6px; margin: 10px 0;
+           border-left: 4px solid var(--text-2); background: #FAFAFA; font-size: 13px; }
+.callout.ok    { border-left-color: var(--ok); background: #E8F5E9; }
+.callout.warn  { border-left-color: var(--warn); background: #FFF3E0; }
+.callout.bad   { border-left-color: var(--bad); background: #FFEBEE; }
+.callout.info  { border-left-color: var(--core0-line); background: var(--core0); }
+.svgwrap { background: var(--bg); padding: 10px; border-radius: 6px; margin: 10px 0; overflow-x: auto; }
+.svgwrap svg { display: block; max-width: 100%; height: auto; }
+text { font-family: -apple-system, "PingFang SC", sans-serif; }
+.svg-title { font-size: 13px; font-weight: 600; fill: var(--brand-deep); }
+.svg-axis { font-size: 11px; fill: var(--text-2); }
+.node-text { font-size: 12px; fill: var(--text); text-anchor: middle; dominant-baseline: middle; }
+.node-text.sm { font-size: 10.5px; fill: var(--text-2); }
+.node-text.white { fill: white; }
+ul.compact { padding-left: 18px; margin: 6px 0; }
+ul.compact li { margin: 2px 0; }
+.pill { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+.pill.p0 { background:#FFEBEE; color:var(--bad); }
+.pill.p1 { background:#FFF3E0; color:var(--warn); }
+.pill.p2 { background:#E3F2FD; color:var(--core0-line); }
+.pill.now { background:#E8F5E9; color:var(--ok); }
+.pill.next { background:#FFF3E0; color:var(--warn); }
+.pill.later { background:#E3F2FD; color:var(--core0-line); }
+.pill.dream { background:#F3E5F5; color:#6A1B9A; }
+.cap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0; }
+.cap-card { background: #FAFAFA; border: 1px solid var(--border); border-radius: 6px;
+            padding: 12px; }
+.cap-card h4 { margin: 0 0 6px 0; color: var(--brand-deep); font-size: 13.5px; }
+.cap-card .desc { font-size: 12.5px; color: var(--text-2); line-height: 1.5; }
+.cap-card.has { border-left: 4px solid var(--ok); }
+.cap-card.gap { border-left: 4px solid var(--warn); }
+.cap-card.dream { border-left: 4px solid #9C27B0; }
+.lane { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600;
+        margin-right: 4px; }
+.lane.A { background:#FFEBEE; color:var(--bad); }
+.lane.B { background:#E8F5E9; color:var(--ok); }
+.lane.C { background:#FFF3E0; color:var(--warn); }
+.lane.D { background:#E3F2FD; color:var(--core0-line); }
+.lane.E { background:#F3E5F5; color:#6A1B9A; }
+.lane.F { background:#E0F7FA; color:#00838F; }
+.lane.G { background:#FCE4EC; color:#AD1457; }
+.lane.H { background:#FFF8E1; color:#F9A825; }
+.lane.I { background:#EDE7F6; color:#5E35B1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MyDazy P30 · FlowEngine 深度分析（功能架构 / 流程 / 互动扩展）</h1>
+  <div class="meta">v1.0 · 2026-05-13 · main/flow_engine.{h,cc} 556 行 · 4 状态机 · 3 ScriptItem 类型 · 28 项互动扩展候选</div>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>目录</h3>
+  <a href="#position">1. 模块定位</a>
+  <a href="#schema">2. 数据结构 / Schema</a>
+  <a href="#state">3. 状态机</a>
+  <a href="#flow">4. 数据流</a>
+  <a class="sub" href="#flow-load">  4.1 加载链路</a>
+  <a class="sub" href="#flow-play">  4.2 播放链路</a>
+  <a class="sub" href="#flow-suspend">  4.3 暂停/恢复</a>
+  <a href="#integration">5. 上下游集成</a>
+  <a href="#cap-now">6. 现有互动能力</a>
+  <a href="#cap-extend">7. 互动扩展空间</a>
+  <a class="sub" href="#ext-edu">  A 教育/陪伴</a>
+  <a class="sub" href="#ext-live">  B 互动直播</a>
+  <a class="sub" href="#ext-story">  C 故事/有声书</a>
+  <a class="sub" href="#ext-time">  D 时间编排</a>
+  <a class="sub" href="#ext-multi">  E 多模态</a>
+  <a class="sub" href="#ext-branch">  F 条件分支</a>
+  <a class="sub" href="#ext-data">  G 数据驱动</a>
+  <a class="sub" href="#ext-perf">  H 性能/可靠</a>
+  <a class="sub" href="#ext-debug">  I 调试运维</a>
+  <a href="#roadmap">8. 落地路线图</a>
+  <a href="#risks">9. 风险与边界</a>
+</nav>
+
+<main>
+
+<!-- =============== 1 模块定位 =============== -->
+<section id="position">
+<h2><span class="num">1</span> 模块定位</h2>
+
+<p class="sub">FlowEngine 是 P30 三个会话型 ActivityType 之一（kFlow）。承载"按脚本编排的多步骤交互"——区别于即时对话（kChat）与单一播放（kMusic）。命名沿革：LiveCompanion（直播伴侣） → 2026-04 抽象重命名为 FlowEngine（流程引擎），仍保留 <code>live_companion.start</code> 等远程命令字段向后兼容。</p>
+
+<h3>1.1 在 P30 三维心智模型的落位</h3>
+<table>
+<thead><tr><th>维度</th><th>取值</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>A · DeviceState</td><td>复用 12 态 · 不新增</td><td>播放时占 kSpeaking + kIdle 来回，等用户打断走 kListening</td></tr>
+<tr><td>B · ActivityType</td><td><code>kFlow</code></td><td>main/activity_type.h · 与 kChat/kMusic 并列</td></tr>
+<tr><td>C · SceneType</td><td>不绑定特定 Scene</td><td>UI 沿用 Emoji / Player / Clock · 不抽 FlowScene</td></tr>
+<tr><td>AudioSource</td><td><code>kTts</code></td><td>所有 item 走 TTS 通道 · 不占用 kMp3/kAlarmBell 等独立源</td></tr>
+</tbody>
+</table>
+
+<h3>1.2 模块边界（不做什么）</h3>
+<table>
+<tbody>
+<tr><td>✓ 做</td><td>脚本解析 / 状态机推进 / TTS-TTAI-SET 三类指令分发 / 用户交互打断与恢复 / 循环控制</td></tr>
+<tr><td>✗ 不做</td><td>TTS 合成本身（交 Application）· LVGL 渲染（交 UiDisplay）· 网络协议（交 Protocol）· 唤醒词检测（交 AudioService）</td></tr>
+<tr><td>⚠ 边界灰</td><td>HTTP 下载（自己起 task · 用 Board::GetNetwork）· DeviceState 监听（订阅 DeviceStateEventManager · 不主动改 state 但会 SetDeviceState(Idle) 兜底）</td></tr>
+</tbody>
+</table>
+
+<div class="callout info">
+<b>📐 抽象层级</b>：FlowEngine 是"会话型 Activity 的脚本驱动器"——它本身不是 ActivitySession 基类的实例（CLAUDE.md § 一.5.5 已明确"不抽 ActivitySession 基类"）。它通过 ActivityType::kFlow 在三维落位表登记，运行时由 Application 持有单一 unique_ptr 实例。
+</div>
+</section>
+
+<!-- =============== 2 数据结构 =============== -->
+<section id="schema">
+<h2><span class="num">2</span> 数据结构 / Schema</h2>
+
+<h3>2.1 FlowState 4 态</h3>
+<table>
+<thead><tr><th>枚举</th><th>含义</th><th>典型停留时长</th><th>可达后继</th></tr></thead>
+<tbody>
+<tr><td><code>kIdle</code></td><td>未运行 / 已停止</td><td>常驻</td><td>kPlaying（Start / StartWithScript）</td></tr>
+<tr><td><code>kPlaying</code></td><td>正在播某项，等 TTS 完成</td><td>2-20s/项</td><td>kDelay / kIdle / kSuspended</td></tr>
+<tr><td><code>kDelay</code></td><td>两项之间的延时窗口</td><td>0-30s</td><td>kPlaying / kIdle / kSuspended</td></tr>
+<tr><td><code>kSuspended</code></td><td>被用户交互打断</td><td>5s-∞</td><td>kPlaying（Resume） / kIdle（Stop）</td></tr>
+</tbody>
+</table>
+
+<h3>2.2 ScriptItem 3 类型</h3>
+<table>
+<thead><tr><th>type</th><th>载荷</th><th>下游 API</th><th>等待</th></tr></thead>
+<tbody>
+<tr><td><code>kTts</code></td><td>纯文本（≤ 设备 TTS 上限）</td><td>app_->SendTextToTts(text)</td><td>等 DeviceState Speaking→Idle</td></tr>
+<tr><td><code>kTtai</code></td><td>用户提示 prompt</td><td>app_->SendTextToAI(text)</td><td>等云端 LLM 返回 + TTS 播完</td></tr>
+<tr><td><code>kSet</code></td><td>JSON 对象（如 <code>{"tts_url":"DEFAULT{...}"}</code>）</td><td>app_->SendProtocolText("[SET]:[DEVICE_INFO]:" + json)</td><td><b>不等</b>，立即 PlayCurrentItem 推进</td></tr>
+</tbody>
+</table>
+
+<h3>2.3 脚本 JSON 完整 Schema（当前实现）</h3>
+<pre>{
+  "name": "唐诗课-第3讲",          // 可选 · 默认"未命名"
+  "loop": true,                    // 可选 · 默认 true
+  "default_volume": 70,            // 可选 · 全局音量 0-100 · -1 = 不设
+  "resume_delay_s": 5,             // 可选 · 用户打断后恢复延时 · 默认 5
+  "items": [                       // 必填 · 非空数组
+    {
+      "type": "tts",               // tts | ttai | set
+      "text": "小朋友们好，今天我们学《静夜思》",
+      "delay_ms": 2000,            // 可选 · 本项完成后停顿
+      "volume": 80                 // 可选 · 覆盖本项音量
+    },
+    {
+      "type": "ttai",
+      "text": "请用一句话介绍李白",
+      "delay_ms": 5000
+    },
+    {
+      "type": "set",
+      "text": { "tts_url": "DEFAULT{\"voice\":\"xiaomei\"}" }
+    }
+  ]
+}</pre>
+
+<h3>2.4 状态成员清单</h3>
+<table>
+<thead><tr><th>成员</th><th>类型</th><th>访问者</th><th>同步策略</th></tr></thead>
+<tbody>
+<tr><td>state_</td><td>atomic&lt;FlowState&gt;</td><td>所有线程</td><td>原子</td></tr>
+<tr><td>current_index_ / total_items_ / loop_count_</td><td>atomic&lt;int&gt;</td><td>所有线程</td><td>原子</td></tr>
+<tr><td>recap_pending_</td><td>atomic&lt;bool&gt;</td><td>所有线程</td><td>exchange/原子</td></tr>
+<tr><td>items_</td><td>vector&lt;ScriptItem&gt;</td><td>主线程 + load_task</td><td>script_mutex_</td></tr>
+<tr><td>loop_ / default_volume_ / resume_delay_ms_ / script_name_</td><td>POD</td><td>主线程</td><td>无锁（约定主线程）</td></tr>
+<tr><td>pending_url_ / last_script_json_</td><td>std::string</td><td>主线程 + load_task</td><td><b>当前无锁（F2 待修）</b></td></tr>
+<tr><td>delay_timer_</td><td>esp_timer_handle_t</td><td>主线程 / timer callback</td><td>esp_timer 内部锁</td></tr>
+<tr><td>load_task_handle_</td><td>TaskHandle_t</td><td>主线程 + load_task</td><td><b>当前无锁（F12 待修）</b></td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 3 状态机 =============== -->
+<section id="state">
+<h2><span class="num">3</span> 状态机</h2>
+
+<h3>3.1 4 态转换图</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 420" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="sArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+<text x="440" y="20" class="svg-title" text-anchor="middle">FlowState 4 态 · 11 条转换边</text>
+
+<!-- Idle -->
+<rect x="380" y="50" width="120" height="50" rx="6" fill="var(--idle)" stroke="var(--idle-line)" stroke-width="2"/>
+<text x="440" y="70" class="node-text" font-size="14" font-weight="600">kIdle</text>
+<text x="440" y="88" class="node-text sm">空闲 / 已停止</text>
+
+<!-- Playing -->
+<rect x="100" y="200" width="140" height="50" rx="6" fill="var(--playing)" stroke="var(--playing-line)" stroke-width="2"/>
+<text x="170" y="220" class="node-text" font-size="14" font-weight="600">kPlaying</text>
+<text x="170" y="238" class="node-text sm">播放中（等 TTS）</text>
+
+<!-- Delay -->
+<rect x="640" y="200" width="140" height="50" rx="6" fill="var(--delay)" stroke="var(--delay-line)" stroke-width="2"/>
+<text x="710" y="220" class="node-text" font-size="14" font-weight="600">kDelay</text>
+<text x="710" y="238" class="node-text sm">两项之间等待</text>
+
+<!-- Suspended -->
+<rect x="370" y="340" width="140" height="50" rx="6" fill="var(--suspended)" stroke="var(--suspended-line)" stroke-width="2"/>
+<text x="440" y="360" class="node-text" font-size="14" font-weight="600">kSuspended</text>
+<text x="440" y="378" class="node-text sm">被打断 · 等恢复</text>
+
+<!-- Idle → Playing -->
+<line x1="380" y1="80" x2="200" y2="200" stroke="#666" stroke-width="1.5" marker-end="url(#sArr)"/>
+<text x="245" y="135" class="node-text sm">Start / StartWithScript</text>
+<text x="245" y="148" class="node-text sm">载完 + ParseScript ok</text>
+
+<!-- Playing → Delay -->
+<path d="M 240 215 Q 440 175 640 215" stroke="#666" fill="none" stroke-width="1.5" marker-end="url(#sArr)"/>
+<text x="440" y="178" class="node-text sm">ScheduleNext · item.delay_ms &gt; 0</text>
+
+<!-- Delay → Playing -->
+<path d="M 640 235 Q 440 275 240 235" stroke="#666" fill="none" stroke-width="1.5" marker-end="url(#sArr)"/>
+<text x="440" y="270" class="node-text sm">delay_timer 到期</text>
+
+<!-- Playing → Idle -->
+<line x1="170" y1="200" x2="380" y2="100" stroke="#666" stroke-width="1.5" marker-end="url(#sArr)"/>
+<text x="195" y="155" class="node-text sm">Stop / 末项 (loop=false)</text>
+
+<!-- Delay → Idle -->
+<line x1="710" y1="200" x2="500" y2="100" stroke="#666" stroke-width="1.5" marker-end="url(#sArr)"/>
+<text x="640" y="155" class="node-text sm">Stop</text>
+
+<!-- Playing → Suspended -->
+<line x1="200" y1="250" x2="380" y2="345" stroke="#666" stroke-width="1.5" marker-end="url(#sArr)"/>
+<text x="240" y="305" class="node-text sm">Suspend</text>
+<text x="240" y="318" class="node-text sm">用户唤醒 / MCP 调用</text>
+
+<!-- Delay → Suspended -->
+<line x1="680" y1="250" x2="510" y2="345" stroke="#666" stroke-width="1.5" marker-end="url(#sArr)"/>
+<text x="630" y="305" class="node-text sm">Suspend</text>
+
+<!-- Suspended → Playing -->
+<line x1="420" y1="340" x2="220" y2="250" stroke="#666" stroke-width="1.5" marker-end="url(#sArr)"/>
+<text x="285" y="298" class="node-text sm">Resume</text>
+<text x="285" y="311" class="node-text sm">recap_delay 到期</text>
+
+<!-- Suspended → Idle -->
+<line x1="440" y1="340" x2="440" y2="100" stroke="#666" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#sArr)"/>
+<text x="465" y="220" class="node-text sm">Stop</text>
+
+<!-- Restart loop -->
+<path d="M 100 225 Q 50 160 130 200" stroke="#666" fill="none" stroke-width="1.2" stroke-dasharray="3,3" marker-end="url(#sArr)"/>
+<text x="65" y="195" class="node-text sm">Restart</text>
+</svg>
+</div>
+
+<h3>3.2 转换触发表</h3>
+<table>
+<thead><tr><th>From → To</th><th>触发</th><th>代码位置</th><th>不变量</th></tr></thead>
+<tbody>
+<tr><td>Idle → Playing</td><td>Start (HTTP 载完) / StartWithScript / Restart</td><td>flow_engine.cc:110 / 248 / 227</td><td>items_.size() &gt; 0 · current_index_ = 0</td></tr>
+<tr><td>Playing → Delay</td><td>ScheduleNext · item.delay_ms &gt; 0</td><td>:469-472</td><td>esp_timer_start_once 已启动</td></tr>
+<tr><td>Delay → Playing</td><td>DelayTimerCallback · 时间到</td><td>:541-555</td><td>下一项就绪</td></tr>
+<tr><td>Playing/Delay → Suspended</td><td>Suspend()</td><td>:168-183</td><td>delay_timer 已 stop</td></tr>
+<tr><td>Suspended → Playing</td><td>Resume() · 含 TTAI recap</td><td>:185-217</td><td>recap_pending_ = true（若有文本）</td></tr>
+<tr><td>* → Idle</td><td>Stop()</td><td>:136-166</td><td>items_.clear · ForceListeningMode(Auto)</td></tr>
+<tr><td>Playing → Idle (自然)</td><td>末项 + loop_=false</td><td>:414-422</td><td>DeviceState 强切 Idle</td></tr>
+</tbody>
+</table>
+
+<h3>3.3 隐式不变量（违反 = bug）</h3>
+<table>
+<tbody>
+<tr><td><b>I1</b></td><td>state_ != kIdle ⟹ items_ 非空</td></tr>
+<tr><td><b>I2</b></td><td>state_ == kDelay ⟹ delay_timer_ 已 start_once</td></tr>
+<tr><td><b>I3</b></td><td>state_ == kSuspended ⟹ ForceListeningMode(Auto) 已被恢复或保留 Manual（取决于场景）</td></tr>
+<tr><td><b>I4</b></td><td>recap_pending_ ⟹ state_ == kPlaying 且正在播 recap TTAI</td></tr>
+<tr><td><b>I5</b></td><td>load_task_handle_ != nullptr ⟹ state_ 即将被 task 切到 kPlaying（<b>F5 危险窗口</b>）</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 4 数据流 =============== -->
+<section id="flow">
+<h2><span class="num">4</span> 数据流</h2>
+
+<h3 id="flow-load">4.1 加载链路（双路）</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 280" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="lArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+<text x="440" y="20" class="svg-title" text-anchor="middle">两路加载：URL HTTP 拉取（异步） · WS 推送（同步）</text>
+
+<!-- Path 1: HTTP -->
+<rect x="40" y="50" width="120" height="40" fill="#FFEBEE" stroke="#C62828"/>
+<text x="100" y="65" class="node-text" font-size="11" font-weight="600">RemoteCmd.OnFlow</text>
+<text x="100" y="80" class="node-text sm">action=start, url=...</text>
+
+<line x1="160" y1="70" x2="240" y2="70" stroke="#666" marker-end="url(#lArr)"/>
+
+<rect x="240" y="50" width="120" height="40" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="300" y="65" class="node-text" font-size="11" font-weight="600">Start(url)</text>
+<text x="300" y="80" class="node-text sm">主线程 Schedule</text>
+
+<line x1="360" y1="70" x2="440" y2="70" stroke="#666" marker-end="url(#lArr)"/>
+
+<rect x="440" y="50" width="160" height="40" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+<text x="520" y="65" class="node-text" font-size="11" font-weight="600">flow_load task</text>
+<text x="520" y="80" class="node-text sm">INT 6KB · P1 · Core 0</text>
+
+<line x1="600" y1="70" x2="680" y2="70" stroke="#666" marker-end="url(#lArr)"/>
+
+<rect x="680" y="50" width="160" height="40" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="760" y="65" class="node-text" font-size="11" font-weight="600">LoadScript</text>
+<text x="760" y="80" class="node-text sm">3 次重试 · 指数退避</text>
+
+<!-- Path 2: WS push -->
+<rect x="40" y="130" width="120" height="40" fill="#FFEBEE" stroke="#C62828"/>
+<text x="100" y="145" class="node-text" font-size="11" font-weight="600">RemoteCmd.OnFlow</text>
+<text x="100" y="160" class="node-text sm">action=start, script={..}</text>
+
+<line x1="160" y1="150" x2="240" y2="150" stroke="#666" marker-end="url(#lArr)"/>
+
+<rect x="240" y="130" width="200" height="40" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="340" y="145" class="node-text" font-size="11" font-weight="600">StartWithScript(json_str)</text>
+<text x="340" y="160" class="node-text sm">主线程同步</text>
+
+<line x1="440" y1="150" x2="520" y2="150" stroke="#666" marker-end="url(#lArr)"/>
+
+<rect x="520" y="130" width="160" height="40" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="600" y="145" class="node-text" font-size="11" font-weight="600">ParseScript</text>
+<text x="600" y="160" class="node-text sm">同步 cJSON 解析</text>
+
+<!-- 汇合 -->
+<line x1="760" y1="90" x2="500" y2="200" stroke="#666" stroke-dasharray="3,3" marker-end="url(#lArr)"/>
+<line x1="680" y1="150" x2="500" y2="200" stroke="#666" stroke-dasharray="3,3" marker-end="url(#lArr)"/>
+
+<rect x="380" y="200" width="240" height="40" fill="#E3F2FD" stroke="#1976D2" stroke-width="2"/>
+<text x="500" y="215" class="node-text" font-size="12" font-weight="600">items_[] 就绪 + state_ = kPlaying</text>
+<text x="500" y="230" class="node-text sm">PlayCurrentItem 开始</text>
+
+<text x="500" y="265" class="node-text sm" text-anchor="middle">⚠ 当前两路状态机不一致：HTTP 路状态切换在 task；WS 路在主线程（F5/F10）</text>
+</svg>
+</div>
+
+<h3 id="flow-play">4.2 播放链路（一项的完整生命周期）</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 320" xmlns="http://www.w3.org/2000/svg">
+<text x="440" y="20" class="svg-title" text-anchor="middle">PlayCurrentItem 单项时序（kTtai 路径示例）</text>
+
+<line x1="80"  y1="40" x2="80"  y2="300" stroke="#bbb" stroke-dasharray="4,3"/>
+<line x1="280" y1="40" x2="280" y2="300" stroke="#bbb" stroke-dasharray="4,3"/>
+<line x1="480" y1="40" x2="480" y2="300" stroke="#bbb" stroke-dasharray="4,3"/>
+<line x1="680" y1="40" x2="680" y2="300" stroke="#bbb" stroke-dasharray="4,3"/>
+
+<text x="80"  y="50" class="node-text" font-weight="600">FlowEngine</text>
+<text x="280" y="50" class="node-text" font-weight="600">Application</text>
+<text x="480" y="50" class="node-text" font-weight="600">Protocol/LLM</text>
+<text x="680" y="50" class="node-text" font-weight="600">DeviceStateMgr</text>
+
+<rect x="40" y="80" width="80" height="22" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="80" y="95" class="node-text" font-size="11">PlayCurrentItem</text>
+
+<line x1="120" y1="91" x2="280" y2="91" stroke="#666" marker-end="url(#lArr)"/>
+<text x="200" y="85" class="node-text sm">SendTextToAI</text>
+
+<line x1="320" y1="91" x2="480" y2="91" stroke="#666" marker-end="url(#lArr)"/>
+<text x="400" y="85" class="node-text sm">WS tts.request</text>
+
+<rect x="440" y="115" width="80" height="22" fill="#FFEBEE" stroke="#C62828"/>
+<text x="480" y="130" class="node-text" font-size="11">LLM 推理</text>
+
+<line x1="480" y1="137" x2="280" y2="170" stroke="#666" marker-end="url(#lArr)"/>
+<text x="380" y="155" class="node-text sm">tts.start 帧</text>
+
+<rect x="240" y="170" width="80" height="22" fill="#E3F2FD" stroke="#1976D2"/>
+<text x="280" y="185" class="node-text" font-size="11">Speaking</text>
+
+<line x1="280" y1="192" x2="680" y2="225" stroke="#666" marker-end="url(#lArr)"/>
+<text x="480" y="208" class="node-text sm">SetDeviceState(Speaking)</text>
+
+<rect x="640" y="225" width="80" height="22" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="680" y="240" class="node-text" font-size="11">State→Speaking</text>
+
+<rect x="240" y="240" width="80" height="22" fill="#FFEBEE" stroke="#C62828"/>
+<text x="280" y="255" class="node-text" font-size="11">TTS 播完</text>
+
+<line x1="280" y1="262" x2="680" y2="275" stroke="#666" marker-end="url(#lArr)"/>
+<text x="480" y="270" class="node-text sm">SetDeviceState(Idle)</text>
+
+<line x1="640" y1="275" x2="80" y2="280" stroke="#C62828" marker-end="url(#lArr)"/>
+<text x="380" y="295" class="node-text sm">OnDeviceStateChanged(Speaking→Idle) · ScheduleNext</text>
+</svg>
+</div>
+
+<h3 id="flow-suspend">4.3 暂停/恢复机制（核心创新）</h3>
+<table>
+<thead><tr><th>步</th><th>动作</th><th>state_</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>用户唤醒说话（或外部 MCP 触发）</td><td>kPlaying / kDelay</td><td>—</td></tr>
+<tr><td>2</td><td>RemoteCmd.OnTts/OnTtai 或上层调 Suspend()</td><td>→ kSuspended</td><td>delay_timer stop · 不调 AbortSpeaking 避免递归</td></tr>
+<tr><td>3</td><td>用户对话进行中（Speaking）</td><td>kSuspended</td><td>OnDeviceStateChanged 不响应 Speaking</td></tr>
+<tr><td>4</td><td>用户对话结束（Speaking→Idle）</td><td>kSuspended</td><td>启动 esp_timer(resume_delay_ms=5s)</td></tr>
+<tr><td>5</td><td>定时器期间用户继续说话</td><td>kSuspended</td><td>Speaking 触发 → 取消恢复定时器</td></tr>
+<tr><td>6</td><td>定时器到期</td><td>→ kPlaying</td><td>Resume()</td></tr>
+<tr><td>7</td><td>Resume 内拼 recap prompt</td><td>kPlaying + recap_pending_</td><td>"刚才讲到 X，请用一句话回顾..."</td></tr>
+<tr><td>8</td><td>recap TTAI 播完</td><td>kPlaying</td><td>NotifyTtsFinished 检测 recap_pending → PlayCurrentItem 续播</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>✨ 设计亮点 · recap 回顾机制</b><br>
+直接续播被打断的项体验生硬（用户已经"出戏"）。FlowEngine 通过 <b>构造一句 TTAI 提示</b>（拼当前 item.text）让 AI 用自己的话先回顾再继续，无缝衔接。这是 LiveCompanion 时代积累的核心 UX 优化。
+</div>
+</section>
+
+<!-- =============== 5 上下游集成 =============== -->
+<section id="integration">
+<h2><span class="num">5</span> 上下游集成</h2>
+
+<h3>5.1 上游：谁调 FlowEngine</h3>
+<table>
+<thead><tr><th>调用方</th><th>方法</th><th>场景</th></tr></thead>
+<tbody>
+<tr><td>RemoteCmd.OnFlow</td><td>Start / StartWithScript / Stop / Restart / GetState 系列</td><td>云端 {"type":"flow",...} 命令</td></tr>
+<tr><td>RemoteCmd.OnTts / OnTtai</td><td>Suspend</td><td>用户接其他语音命令时打断脚本</td></tr>
+<tr><td>RemoteCmd.OnMusicPlay</td><td>Suspend</td><td>音乐播放打断（当前顺序有 R7 bug）</td></tr>
+<tr><td>Application（tts.stop 拦截）</td><td>NotifyTtsFinished</td><td>替代 OnDeviceStateChanged 的备用 TTS 完成信号</td></tr>
+<tr><td>Application（唤醒 / 摇一摇）</td><td>RestartLast</td><td>设备唤醒后恢复上次脚本</td></tr>
+</tbody>
+</table>
+
+<h3>5.2 下游：FlowEngine 调谁</h3>
+<table>
+<thead><tr><th>下游</th><th>API</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td>Application::Schedule</td><td>切回主线程</td><td>跨线程边界</td></tr>
+<tr><td>Application::Alert</td><td>显示加载/启动/完成提示</td><td>UI 反馈</td></tr>
+<tr><td>Application::SendTextToTts</td><td>kTts item</td><td>纯朗读</td></tr>
+<tr><td>Application::SendTextToAI</td><td>kTtai item + recap prompt</td><td>AI 互动</td></tr>
+<tr><td>Application::SendProtocolText</td><td>kSet item</td><td>下发 SET 配置</td></tr>
+<tr><td>Application::ForceListeningMode</td><td>Manual/Auto 切换</td><td>Manual = 不自动结束 Listening，让脚本控节奏</td></tr>
+<tr><td>Application::SetDeviceState</td><td>兜底切 Idle</td><td>避免脚本结束后卡在 Listening</td></tr>
+<tr><td>Board::GetAudioCodec → SetOutputVolume</td><td>per-item 音量</td><td>—</td></tr>
+<tr><td>Board::GetNetwork → CreateHttp</td><td>HTTP 拉脚本</td><td>WiFi / 4G 自动适配</td></tr>
+<tr><td>DeviceStateEventManager::RegisterStateChangeCallback</td><td>订阅状态变化</td><td>核心驱动 · 替代轮询</td></tr>
+<tr><td>esp_timer · delay_timer_</td><td>delay_ms / resume_delay_ms</td><td>非阻塞计时</td></tr>
+</tbody>
+</table>
+
+<h3>5.3 依赖图</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 280" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="dArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+<text x="440" y="20" class="svg-title" text-anchor="middle">FlowEngine 依赖图（核心 11 节点）</text>
+
+<rect x="370" y="115" width="140" height="50" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+<text x="440" y="135" class="node-text" font-size="13" font-weight="600">FlowEngine</text>
+<text x="440" y="152" class="node-text sm">main/flow_engine.cc</text>
+
+<!-- 上游 -->
+<rect x="60" y="60" width="120" height="32" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="120" y="78" class="node-text" font-size="11">RemoteCmd.OnFlow</text>
+
+<rect x="60" y="100" width="120" height="32" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="120" y="118" class="node-text" font-size="11">OnTts / OnTtai</text>
+
+<rect x="60" y="140" width="120" height="32" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="120" y="158" class="node-text" font-size="11">OnMusicPlay</text>
+
+<rect x="60" y="180" width="120" height="32" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="120" y="198" class="node-text" font-size="11">App.NotifyTtsFinished</text>
+
+<line x1="180" y1="76" x2="370" y2="130" stroke="#666" marker-end="url(#dArr)"/>
+<line x1="180" y1="116" x2="370" y2="135" stroke="#666" marker-end="url(#dArr)"/>
+<line x1="180" y1="156" x2="370" y2="140" stroke="#666" marker-end="url(#dArr)"/>
+<line x1="180" y1="196" x2="370" y2="145" stroke="#666" marker-end="url(#dArr)"/>
+
+<!-- 下游 -->
+<rect x="700" y="60" width="140" height="32" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="770" y="78" class="node-text" font-size="11">App.SendTextToTts</text>
+
+<rect x="700" y="100" width="140" height="32" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="770" y="118" class="node-text" font-size="11">App.SendTextToAI</text>
+
+<rect x="700" y="140" width="140" height="32" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="770" y="158" class="node-text" font-size="11">App.SendProtocolText</text>
+
+<rect x="700" y="180" width="140" height="32" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="770" y="198" class="node-text" font-size="11">Board.GetNetwork</text>
+
+<rect x="700" y="220" width="140" height="32" fill="#E8F5E9" stroke="#2E7D32"/>
+<text x="770" y="238" class="node-text" font-size="11">esp_timer</text>
+
+<line x1="510" y1="130" x2="700" y2="76" stroke="#666" marker-end="url(#dArr)"/>
+<line x1="510" y1="135" x2="700" y2="116" stroke="#666" marker-end="url(#dArr)"/>
+<line x1="510" y1="140" x2="700" y2="156" stroke="#666" marker-end="url(#dArr)"/>
+<line x1="510" y1="145" x2="700" y2="196" stroke="#666" marker-end="url(#dArr)"/>
+<line x1="510" y1="150" x2="700" y2="236" stroke="#666" marker-end="url(#dArr)"/>
+
+<!-- 旁路：DeviceStateEventManager 反向回调 -->
+<rect x="340" y="220" width="200" height="32" fill="#E3F2FD" stroke="#1976D2"/>
+<text x="440" y="238" class="node-text" font-size="11">DeviceStateEventManager 回调</text>
+<line x1="440" y1="220" x2="440" y2="165" stroke="#1976D2" marker-end="url(#dArr)"/>
+</svg>
+</div>
+</section>
+
+<!-- =============== 6 现有互动能力 =============== -->
+<section id="cap-now">
+<h2><span class="num">6</span> 现有互动能力盘点</h2>
+
+<p class="sub">基于当前 4 状态机 + 3 ScriptItem 类型 + 双路加载 + 暂停恢复机制，FlowEngine 已能支持以下 6 类互动。</p>
+
+<div class="cap-grid">
+<div class="cap-card has">
+<h4>① 顺序播报</h4>
+<div class="desc">直播伴侣最经典场景：脚本预编排 N 条 TTS 文案，按序播 + 等待 + 循环。延时可逐项配置。</div>
+</div>
+<div class="cap-card has">
+<h4>② AI 互动对话</h4>
+<div class="desc">kTtai item 让脚本写入 prompt 串，AI 自行生成回复 + TTS 播报。比如"用一句话夸夸今天的小听众"。</div>
+</div>
+<div class="cap-card has">
+<h4>③ 配置切换</h4>
+<div class="desc">kSet item 中途切音色 / 切渠道 / 切角色 prompt。SET 不等待，链式立即推进。</div>
+</div>
+<div class="cap-card has">
+<h4>④ 用户打断 + 自然恢复</h4>
+<div class="desc">用户随时唤醒说话 → Suspend → AI 对话 → 5s 静默后 recap 回顾上文 + 续播。体验无缝。</div>
+</div>
+<div class="cap-card has">
+<h4>⑤ 循环播放</h4>
+<div class="desc">loop=true 支持长直播守夜场景。loop_count_ 暴露轮次，便于云端监控。</div>
+</div>
+<div class="cap-card has">
+<h4>⑥ 跨场景脚本互换</h4>
+<div class="desc">URL 加载（运营更新）+ WS 推送（实时下发）两路并行，云端可针对设备状态动态切脚本。RestartLast 支持唤醒续。</div>
+</div>
+</div>
+
+<h3>6.1 当前能力 vs 三维心智模型</h3>
+<table>
+<thead><tr><th>能力</th><th>占用 DeviceState</th><th>占用 ActivityType</th><th>占用 AudioSource</th></tr></thead>
+<tbody>
+<tr><td>顺序 TTS 播报</td><td>Speaking↔Idle</td><td>kFlow</td><td>kTts</td></tr>
+<tr><td>TTAI 对话</td><td>Speaking↔Idle</td><td>kFlow</td><td>kTts（AI 回复也走 TTS）</td></tr>
+<tr><td>Suspend 用户打断</td><td>Listening / Speaking</td><td>kFlow</td><td>kTts</td></tr>
+<tr><td>SET 配置切换</td><td>无切换</td><td>kFlow</td><td>无</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 7 互动扩展空间 =============== -->
+<section id="cap-extend">
+<h2><span class="num">7</span> 互动扩展空间（28 项候选）</h2>
+
+<p class="sub">基于产品定位（儿童 AI 对话终端 + 直播伴侣场景 + 教育卡） + 已有硬件（屏 / 触摸 / 加速计 / GPS / 4G） + 现有 FlowEngine 4 态机的扩展能力，分 9 类共 28 项候选。每项标注实现难度 / 价值 / 推荐落地时机。</p>
+
+<h3 id="ext-edu">7.A <span class="lane A">A</span> 教育 / 陪伴（5 项 · 与教育卡 MCP 联动）</h3>
+<table>
+<thead><tr><th>编号</th><th>互动场景</th><th>实现要点</th><th>难度</th><th>价值</th><th>时机</th></tr></thead>
+<tbody>
+<tr><td>A1</td><td><b>古诗背诵带读</b>：脚本逐句 TTS → 等用户复述 → TTAI 评判鼓励</td><td>新增 ScriptItem.expect_user=true · 新增 kWaitUser 状态（或复用 Suspend）</td><td>中</td><td>★★★★★</td><td><span class="pill now">本季度</span></td></tr>
+<tr><td>A2</td><td><b>成语接龙</b>：TTS 出词 → 等用户回 → TTAI 判对错 + 给下一词</td><td>同 A1 · 配合 ScriptItem.user_timeout_s</td><td>中</td><td>★★★★</td><td><span class="pill now">本季度</span></td></tr>
+<tr><td>A3</td><td><b>看图识字</b>：脚本内嵌 MCP <code>show_stroke/show_card</code> 调用 → TTAI 引导</td><td>新增 kMcp item 类型 · 内嵌 mcp tool name + args</td><td>中</td><td>★★★★★</td><td><span class="pill now">本季度</span></td></tr>
+<tr><td>A4</td><td><b>英语跟读纠音</b>：TTS 英文句 → 录音上传 → 云端打分回 TTAI</td><td>复用 ScheduleNext · 等服务端 score 回执</td><td>高</td><td>★★★★</td><td><span class="pill next">量产后 1 月</span></td></tr>
+<tr><td>A5</td><td><b>每日早安例程</b>：起床场景 = 天气 TTAI + 今日古诗 TTS + 待办 TTAI</td><td>纯脚本能力 · 当前已可实现 · 缺触发器（Alarm 调用 Start）</td><td>低</td><td>★★★</td><td><span class="pill now">本季度</span></td></tr>
+</tbody>
+</table>
+
+<h3 id="ext-live">7.B <span class="lane B">B</span> 互动直播 / 商品讲解（3 项）</h3>
+<table>
+<thead><tr><th>编号</th><th>互动场景</th><th>实现要点</th><th>难度</th><th>价值</th><th>时机</th></tr></thead>
+<tbody>
+<tr><td>B1</td><td><b>商品轮播</b>：N 个商品 TTS 简介 + 自动循环 · 用户喊"详细介绍" → 切到 TTAI 长版</td><td>用户语音命中关键词 → Suspend + StartWithScript(子脚本)</td><td>中</td><td>★★★</td><td><span class="pill next">量产后 1 月</span></td></tr>
+<tr><td>B2</td><td><b>实时插播</b>：云端推 priority=high 的 ScriptItem → 当前项播完插队（不打断）</td><td>新增 inject_item(ScriptItem) API · 优先级队列</td><td>中</td><td>★★★</td><td><span class="pill next">量产后 1 月</span></td></tr>
+<tr><td>B3</td><td><b>声控导航</b>：用户喊"下一个 / 重复 / 暂停" → 直接控制流程</td><td>RemoteCmd 加 flow.next/prev/repeat action</td><td>低</td><td>★★★★</td><td><span class="pill now">本季度</span></td></tr>
+</tbody>
+</table>
+
+<h3 id="ext-story">7.C <span class="lane C">C</span> 故事 / 有声书（3 项）</h3>
+<table>
+<thead><tr><th>编号</th><th>互动场景</th><th>实现要点</th><th>难度</th><th>价值</th><th>时机</th></tr></thead>
+<tbody>
+<tr><td>C1</td><td><b>长篇分章节</b>：100+ items 分章 · 章节内 loop=false · 章末等用户"继续"</td><td>新增 ScriptItem.chapter_end=true · 等用户唤醒续</td><td>低</td><td>★★★★</td><td><span class="pill next">量产后 1 月</span></td></tr>
+<tr><td>C2</td><td><b>角色切换播音</b>：item 内 ai_role=旁白/小红/小明 → 自动切音色或 prompt</td><td>复用 kSet item · 在 PlayCurrentItem 前发 SET tts_voice</td><td>低</td><td>★★★</td><td><span class="pill now">本季度</span></td></tr>
+<tr><td>C3</td><td><b>书签持久化</b>：current_index_ 写 NVS · 重启续播</td><td>每完成 N 项写 NVS · Start 时读 NVS 提示"上次到 X，是否继续"</td><td>中</td><td>★★★</td><td><span class="pill next">量产后 1 月</span></td></tr>
+</tbody>
+</table>
+
+<h3 id="ext-time">7.D <span class="lane D">D</span> 时间编排（3 项 · 与 AudioSource 闹钟联动）</h3>
+<table>
+<thead><tr><th>编号</th><th>互动场景</th><th>实现要点</th><th>难度</th><th>价值</th><th>时机</th></tr></thead>
+<tbody>
+<tr><td>D1</td><td><b>番茄钟脚本</b>：work 25min + break 5min · 周期播提示 TTS</td><td>resume_delay_s 改为分钟级 · 已有 PomodoroBell 配合</td><td>低</td><td>★★★★★</td><td><span class="pill now">本季度</span></td></tr>
+<tr><td>D2</td><td><b>定时学习计划</b>：到点 Alarm 触发 Start("morning_routine.json") · 闹钟无缝转脚本</td><td>AlarmManager 加 on_trigger.flow_url 字段</td><td>低</td><td>★★★★</td><td><span class="pill now">本季度</span></td></tr>
+<tr><td>D3</td><td><b>睡眠引导</b>：30 min 白噪音 + 渐弱 TTAI + 自动停</td><td>需配合 MusicPlayer 并行 · 涉及双 ActivityType 协同（设计风险）</td><td>高</td><td>★★★</td><td><span class="pill later">长期</span></td></tr>
+</tbody>
+</table>
+
+<h3 id="ext-multi">7.E <span class="lane E">E</span> 多模态联动（4 项）</h3>
+<table>
+<thead><tr><th>编号</th><th>互动场景</th><th>实现要点</th><th>难度</th><th>价值</th><th>时机</th></tr></thead>
+<tbody>
+<tr><td>E1</td><td><b>item 内嵌 emotion</b>：每条 TTS 配 emoji（开心/严肃/惊讶）→ UiDisplay.SetEmotion 同步</td><td>ScriptItem 加 emotion 字段 · PlayCurrentItem 前调 UiDisplay</td><td>低</td><td>★★★★</td><td><span class="pill now">本季度</span></td></tr>
+<tr><td>E2</td><td><b>item 配视觉</b>：show_card / show_stroke 与 TTS 同步播</td><td>同 A3 · kMcp item 类型</td><td>中</td><td>★★★★</td><td><span class="pill now">本季度</span></td></tr>
+<tr><td>E3</td><td><b>LED 节奏指示</b>：播报时呼吸灯 · 等用户时常亮 · 评判对错闪绿/红</td><td>新增 led_pattern 字段 · 调 LedEvent</td><td>低</td><td>★★★</td><td><span class="pill next">量产后 1 月</span></td></tr>
+<tr><td>E4</td><td><b>振动反馈</b>：关键节点（章末 / 答对）短振</td><td>三板均无振动器（设计已砍 · P31 也无）</td><td>—</td><td>★</td><td><span class="pill dream">不做</span></td></tr>
+</tbody>
+</table>
+
+<h3 id="ext-branch">7.F <span class="lane F">F</span> 条件 / 分支（DAG 化 · 4 项）</h3>
+<table>
+<thead><tr><th>编号</th><th>互动场景</th><th>实现要点</th><th>难度</th><th>价值</th><th>时机</th></tr></thead>
+<tbody>
+<tr><td>F1</td><td><b>goto 跳转</b>：item 内 next_id 指定下一项 · 支持回环</td><td>items_ 改 vector → map&lt;id, item&gt; · current_id_ 替代 current_index_</td><td>高</td><td>★★★</td><td><span class="pill later">长期</span></td></tr>
+<tr><td>F2</td><td><b>用户选答分支</b>：TTAI 出选项 → 用户 STT 匹配 → 路由不同后续</td><td>kWaitUser + RemoteCmd 回写 user_answer · 服务端决定 next_id</td><td>高</td><td>★★★★</td><td><span class="pill later">长期</span></td></tr>
+<tr><td>F3</td><td><b>条件变量</b>：item 内 if=score&gt;80 · 服务端注入状态</td><td>需在 items_ 加 condition 表达式解释器（轻量）</td><td>高</td><td>★★</td><td><span class="pill dream">不做</span></td></tr>
+<tr><td>F4</td><td><b>子脚本调用</b>：item.type=call · 加载子脚本播完返回</td><td>嵌套栈 · 谨慎设计死循环防护</td><td>高</td><td>★★</td><td><span class="pill later">长期</span></td></tr>
+</tbody>
+</table>
+
+<h3 id="ext-data">7.G <span class="lane G">G</span> 数据驱动（3 项）</h3>
+<table>
+<thead><tr><th>编号</th><th>互动场景</th><th>实现要点</th><th>难度</th><th>价值</th><th>时机</th></tr></thead>
+<tbody>
+<tr><td>G1</td><td><b>变量模板</b>：text 含 <code>{weather} {time} {child_name}</code> · 播前替换</td><td>新增 ResolveVars(text) · 维护 var map（NVS + 运行时）</td><td>低</td><td>★★★★</td><td><span class="pill next">量产后 1 月</span></td></tr>
+<tr><td>G2</td><td><b>进度上报</b>：每完成 N 项 ACK 云端 · 用于学习统计</td><td>RemoteCmd 加 flow.progress 上行 · 类似 mcp-flows § 9 D 类</td><td>低</td><td>★★★★</td><td><span class="pill next">量产后 1 月</span></td></tr>
+<tr><td>G3</td><td><b>A/B 测试</b>：脚本 variant_id · 设备按 device_id 哈希落地</td><td>纯服务端选脚本即可 · FlowEngine 不动</td><td>—</td><td>★★</td><td><span class="pill later">长期</span></td></tr>
+</tbody>
+</table>
+
+<h3 id="ext-perf">7.H <span class="lane H">H</span> 性能 / 可靠（3 项）</h3>
+<table>
+<thead><tr><th>编号</th><th>互动场景</th><th>实现要点</th><th>难度</th><th>价值</th><th>时机</th></tr></thead>
+<tbody>
+<tr><td>H1</td><td><b>NVS 兜底脚本</b>：上次成功的脚本缓存到 NVS · 断网时仍可播</td><td>ParseScript 成功后写 NVS（≤ 4KB 限制）· Start 网失败时读 NVS</td><td>低</td><td>★★★★</td><td><span class="pill now">本季度</span></td></tr>
+<tr><td>H2</td><td><b>边播边下载</b>：超长脚本流式拉取（cursor 分页）</td><td>items_ 改 deque · 加 prefetch 后台任务</td><td>高</td><td>★★</td><td><span class="pill later">长期</span></td></tr>
+<tr><td>H3</td><td><b>优先级抢占</b>：高优脚本（告警 / 紧急通知）插队当前脚本</td><td>新增 priority 字段 · suspend_stack 设计</td><td>中</td><td>★★★</td><td><span class="pill next">量产后 1 月</span></td></tr>
+</tbody>
+</table>
+
+<h3 id="ext-debug">7.I <span class="lane I">I</span> 调试 / 运维（user-only · 3 项）</h3>
+<table>
+<thead><tr><th>编号</th><th>互动场景</th><th>实现要点</th><th>难度</th><th>价值</th><th>时机</th></tr></thead>
+<tbody>
+<tr><td>I1</td><td><b>flow.step</b>：单步执行 · 调试脚本</td><td>RemoteCmd 加 flow.step action · 内部 ManualAdvance</td><td>低</td><td>★★★</td><td><span class="pill next">量产后 1 月</span></td></tr>
+<tr><td>I2</td><td><b>flow.inspect</b>：dump 当前 items_ + state + current_idx</td><td>RemoteCmd 加 flow.inspect action · 返回 JSON</td><td>低</td><td>★★★</td><td><span class="pill next">量产后 1 月</span></td></tr>
+<tr><td>I3</td><td><b>flow.record</b>：录制实际执行（含用户打断点）用于回归</td><td>本地或上行日志</td><td>中</td><td>★★</td><td><span class="pill later">长期</span></td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 8 落地路线图 =============== -->
+<section id="roadmap">
+<h2><span class="num">8</span> 落地路线图</h2>
+
+<h3>8.1 本季度（量产前 · 高 ROI · 4-5 周）</h3>
+<div class="callout bad">
+<b>先决条件</b>：必须先完成 docs/p30-flow-review.html 批次 A 的 3 项 P0（F1+F5+R6 / R1），再做扩展。
+</div>
+<table>
+<thead><tr><th>项</th><th>类别</th><th>工作量</th><th>关联硬件/上游</th></tr></thead>
+<tbody>
+<tr><td><b>A1 古诗背诵带读</b></td><td>教育</td><td>1 周（含 kWaitUser 设计）</td><td>已有 STT + TTAI</td></tr>
+<tr><td><b>A3 看图识字脚本</b></td><td>教育</td><td>0.5 周（新增 kMcp item · 复用 show_stroke）</td><td>教育 MCP 已落地</td></tr>
+<tr><td><b>A5 早安例程</b></td><td>教育</td><td>2 天（纯脚本 + Alarm 触发器）</td><td>已有 AlarmManager</td></tr>
+<tr><td><b>B3 声控导航</b></td><td>直播</td><td>2 天（RemoteCmd next/prev/repeat）</td><td>纯协议层</td></tr>
+<tr><td><b>C2 角色切换</b></td><td>故事</td><td>2 天（复用 kSet）</td><td>SET tts_voice 已支持</td></tr>
+<tr><td><b>D1 番茄钟脚本</b></td><td>时间</td><td>3 天（resume_delay 改分钟）</td><td>PomodoroBell 已落地</td></tr>
+<tr><td><b>D2 定时学习计划</b></td><td>时间</td><td>3 天（AlarmManager + flow_url）</td><td>AlarmManager 已落地</td></tr>
+<tr><td><b>E1 emotion 同步</b></td><td>多模态</td><td>1 天</td><td>UiDisplay.SetEmotion 已支持</td></tr>
+<tr><td><b>E2 视觉同步（A3 包含）</b></td><td>多模态</td><td>0（A3 一并）</td><td>—</td></tr>
+<tr><td><b>H1 NVS 兜底脚本</b></td><td>可靠</td><td>3 天</td><td>无</td></tr>
+<tr><td><b>合计</b></td><td></td><td><b>~4 周</b></td><td></td></tr>
+</tbody>
+</table>
+
+<h3>8.2 量产后 1 月（中 ROI · ~3 周）</h3>
+<ul class="compact">
+<li>A2 成语接龙 · A4 英语跟读纠音</li>
+<li>B1 商品轮播 · B2 实时插播</li>
+<li>C1 长篇分章节 · C3 书签持久化</li>
+<li>E3 LED 节奏指示</li>
+<li>G1 变量模板 · G2 进度上报</li>
+<li>H3 优先级抢占</li>
+<li>I1 flow.step · I2 flow.inspect</li>
+</ul>
+
+<h3>8.3 长期 / 不做</h3>
+<table>
+<tbody>
+<tr><td><span class="pill later">长期</span></td><td>D3 睡眠引导（双 ActivityType 协同 · 设计风险）· F1/F2/F4 DAG 化（高复杂度需求未验证）· H2 流式拉取（量产无需）· I3 录制回放</td></tr>
+<tr><td><span class="pill dream">不做</span></td><td>E4 振动（硬件无支撑）· F3 表达式条件（产品定位儿童 · 复杂度溢出）· G3 A/B 测试（服务端做即可）</td></tr>
+</tbody>
+</table>
+
+<h3>8.4 关键依赖矩阵</h3>
+<table>
+<thead><tr><th>能力</th><th>依赖 FlowEngine 改造</th><th>依赖服务端</th><th>依赖硬件</th></tr></thead>
+<tbody>
+<tr><td>A1 古诗背诵</td><td>新增 kWaitUser item 类型</td><td>评判提示词模板</td><td>STT 已有</td></tr>
+<tr><td>A3 看图识字</td><td>新增 kMcp item 类型</td><td>脚本编写</td><td>show_stroke 已有</td></tr>
+<tr><td>D1 番茄钟</td><td>resume_delay 单位扩展 + 闹钟挂钩</td><td>无</td><td>PomodoroBell 已有</td></tr>
+<tr><td>H1 NVS 兜底</td><td>ParseScript 后 NVS 写入</td><td>无</td><td>NVS 已有</td></tr>
+<tr><td>E1 emotion 同步</td><td>ScriptItem 加字段</td><td>脚本携带</td><td>UiDisplay 已有</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 9 风险与边界 =============== -->
+<section id="risks">
+<h2><span class="num">9</span> 风险与边界</h2>
+
+<h3>9.1 不要扩展的方向</h3>
+<table>
+<thead><tr><th>方向</th><th>不做理由</th></tr></thead>
+<tbody>
+<tr><td><b>抽 ActivitySession 基类</b></td><td>CLAUDE.md § 一.5.5 已锁定。FlowEngine / MusicPlayer / AudioService 形状差异大，强行抽公共接口会违 SRP</td></tr>
+<tr><td><b>新增 DeviceState 枚举</b></td><td>CLAUDE.md 量产纪律 · 12 态封死。kWaitUser 应复用 kListening + state_=kSuspended 组合实现</td></tr>
+<tr><td><b>FlowEngine 内做 NLP / 模糊匹配</b></td><td>设备侧只做命中关键词；理解交云端 TTAI</td></tr>
+<tr><td><b>FlowEngine 并行多脚本</b></td><td>Application 仅持单 FlowEngine 实例。多脚本需求改服务端编排为单脚本</td></tr>
+</tbody>
+</table>
+
+<h3>9.2 ScriptItem 扩展的兼容策略</h3>
+<table>
+<thead><tr><th>新字段</th><th>兼容做法</th></tr></thead>
+<tbody>
+<tr><td>新增 type 枚举（kWaitUser / kMcp）</td><td>ParseScript 中未知 type → 当 kTts 兜底（不丢项）</td></tr>
+<tr><td>新增 emotion / led_pattern / chapter_end 等字段</td><td>缺字段 = 默认值 · 旧脚本无感</td></tr>
+<tr><td>新增 priority / next_id 等结构性字段</td><td>引入 schema_version · 服务端按设备 version 下不同结构</td></tr>
+</tbody>
+</table>
+
+<h3>9.3 关键内存 / 性能预算</h3>
+<table>
+<thead><tr><th>资源</th><th>当前</th><th>扩展后预算</th></tr></thead>
+<tbody>
+<tr><td>脚本最大字节</td><td>8 KB</td><td>不变（H2 流式拉取实现前不放宽）</td></tr>
+<tr><td>items_ 数组</td><td>vector · 无上限</td><td>建议加 256 上限 · 防 OOM</td></tr>
+<tr><td>last_script_json_</td><td>~8 KB 字符串</td><td>不变 · 加 H1 NVS 缓存后 NVS 占用 +4 KB</td></tr>
+<tr><td>flow_load 任务栈</td><td>INT 6 KB · static</td><td>不变（F1 修后 dynamic 也仍 6KB）</td></tr>
+<tr><td>delay_timer_</td><td>esp_timer · 1 个</td><td>不变（书签 / Pomodoro 新增 timer 独立）</td></tr>
+</tbody>
+</table>
+
+<h3>9.4 验证清单（每加一项互动 PR 自检）</h3>
+<ul class="compact">
+<li>新加的 ScriptItem 字段在 ParseScript 中有缺省值</li>
+<li>新 type 枚举在 ParseScript 中默认回退 kTts</li>
+<li>状态机 4 态转换图无新增边（如不可避免 → 文档评审）</li>
+<li>不新增 DeviceState 枚举</li>
+<li>FlowEngine 不直调 LVGL / cJSON 之外的第三方库</li>
+<li>新增 task 走 docs/p30-architecture.html § 四.1 落位表登记</li>
+<li>修改 ScriptItem 结构 → bump schema_version</li>
+<li>云端脚本可在 nvs 4 KB 装下（H1）</li>
+</ul>
+
+<div class="callout ok">
+<b>✅ 终极判据</b>：每个扩展项问自己——<b>能否仅通过修改服务端脚本 + 增加 ScriptItem 字段实现？</b> 如果能 → 优先做；如果必须改 FlowState 4 态机或拆 ActivitySession 基类 → 触发文档评审，宁可不做。
+</div>
+</section>
+
+</main>
+</div>
+
+</body>
+</html>

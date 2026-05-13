@@ -1,4 +1,6 @@
 #include "audio_service.h"
+#include "settings.h"
+
 #include <esp_log.h>
 #include <cstring>
 #include <cmath>
@@ -32,8 +34,6 @@
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
 #include "wake_words/afe_wake_word.h"
 #include "wake_words/custom_wake_word.h"
-#else
-#include "wake_words/esp_wake_word.h"
 #endif
 
 #define TAG "AudioService"
@@ -778,19 +778,21 @@ void AudioService::SetModelsList(srmodel_list_t* models_list) {
     models_list_ = models_list;
 
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
-    if (esp_srmodel_filter(models_list_, ESP_MN_PREFIX, NULL) != nullptr) {
+    std::string mode = Settings("wakeword", false).GetString("mode", "afe");
+    bool has_mn = esp_srmodel_filter(models_list_, ESP_MN_PREFIX, NULL) != nullptr;
+    bool has_wn = esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr;
+    if (mode == "custom" && has_mn) {
         wake_word_ = std::make_unique<CustomWakeWord>();
-    } else if (esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr) {
+    } else if (has_wn) {
         wake_word_ = std::make_unique<AfeWakeWord>();
     } else {
         wake_word_ = nullptr;
     }
+    ESP_LOGI(TAG, "wake_word: mode=%s → %s", mode.c_str(),
+             wake_word_ ? (mode == "custom" && has_mn ? "Custom" : "AFE") : "null");
 #else
-    if (esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr) {
-        wake_word_ = std::make_unique<EspWakeWord>();
-    } else {
-        wake_word_ = nullptr;
-    }
+    (void)models_list;
+    wake_word_ = nullptr;
 #endif
 
     if (wake_word_) {

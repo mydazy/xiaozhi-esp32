@@ -412,7 +412,7 @@ ul.compact li { margin: 2px 0; }
 <tr><td>失败追踪计数器</td><td>2 类 ×（counter + 时间戳）</td><td>audio_send_failures + control_send_failures · 各自独立断路器</td></tr>
 <tr><td>音频节流</td><td><b>20 ms pacing</b></td><td>过密帧静默 drop（&lt; 18 ms 间隔）· 与基类 60 ms 帧时长不一致</td></tr>
 <tr><td>快速重试</td><td>2 套阈值</td><td>音频 50 ms 内失败重试 1 次 · 控制 200 ms 内失败重试 1 次</td></tr>
-<tr><td>NVS 配置键</td><td>6 个</td><td>baidu.{server_sample_rate, server_frame_duration, break_delay_ms, idle_timeout, license_key, audiocodec}</td></tr>
+<tr><td>NVS 配置键</td><td>4 个</td><td>baidu.{break_delay_ms, idle_timeout, license_key, audiocodec} · server_sample_rate / server_frame_duration v2.2.13 改静态</td></tr>
 <tr><td>命令前缀</td><td>6 类</td><td>[E] 事件 · [Q] ASR · [A] LLM · [S] 状态 · [F] FunctionCall · [C] 自定义数据</td></tr>
 <tr><td>悬空指针保护</td><td><code>prevent_destroy_guard_</code></td><td>shared_ptr&lt;atomic&lt;bool&gt;&gt; · 析构置 false · timer/Schedule lambda 检查后跳过</td></tr>
 <tr><td>License key 默认</td><td>硬编码 fallback</td><td><code>"759877c9b68b4aa082cc05390be0cea9"</code>（NVS 未配置时使用）</td></tr>
@@ -434,23 +434,17 @@ ul.compact li { margin: 2px 0; }
 </tbody>
 </table>
 
-<h3>6.4 v2.2.12 上下行帧长协商（联调中）</h3>
+<h3>6.4 上下行音频流程（v2.2.13 静态固化）</h3>
 <table>
-<thead><tr><th>改动</th><th>位置</th></tr></thead>
+<thead><tr><th>方向</th><th>规格</th><th>实现</th></tr></thead>
 <tbody>
-<tr><td>NVS <code>server_frame_duration</code> 默认 20→60</td><td>cc:112</td></tr>
-<tr><td>SendInitialDeviceInfo 加 3 个候选字段（<code>audio_frame_duration_ms</code> / <code>tts_frame_duration_ms</code> / <code>frame_duration_ms</code> = 60）</td><td>cc:1213-1215</td></tr>
-<tr><td>HandleBinaryMessage 首帧 OPUS TOC 解析日志</td><td>cc:786-796</td></tr>
+<tr><td>上行</td><td>20 ms 16 kHz OPUS</td><td>audio_service 编码（client_frame_duration() = 20 仅声明意图）· 实际帧长由 OPUS_FRAME_DURATION_MS 决定</td></tr>
+<tr><td>下行</td><td>SILK WB 16 kHz 20 ms OPUS</td><td>esp_opus_dec 配置 sample_rate=24000 输出 → 内部重采样 16→24 kHz · audio_service 无需二次重采样</td></tr>
 </tbody>
 </table>
 
-<div class="callout bad">
-<b>联调判读</b>：<code>[BD][PROBE] first opus packet=N bytes · config=X</code>
-<ul style="margin:6px 0 0 18px">
-<li>N≈100 + config 0-11（SILK）= ✅ 60ms 协商成功</li>
-<li>N≈40 + config 16-23（CELT 20ms）= ⚠ 服务端未识别协商，仍发 20ms · <b>NVS 写 server_frame_duration=20 立即回滚</b></li>
-</ul>
-完整 4 种判读结果 + 回滚步骤 + 失败模式分析见 <a href="p30-protocol-baidu.html#frame">深度文档 § 8</a> + <a href="p30-protocol-baidu.html#tune">§ 15</a>。
+<div class="callout ok">
+<b>v2.2.13 精简</b>：v2.2.12 帧长协商方案（NVS 20→60 + 3 个 frame_duration_ms 协商字段 + PROBE 日志）已全部回滚 · 改静态常量 <code>server_sample_rate_=24000 / server_frame_duration_=20</code> · 流程固化 · NVS 不再读 · 净 -16 行。
 </div>
 
 <h3>6.5 已知风险（量产前必修）</h3>

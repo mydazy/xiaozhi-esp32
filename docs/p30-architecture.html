@@ -422,7 +422,7 @@ footer .src{display:inline-block;margin-top:4px;color:var(--ink-soft)}
       <tr style="background:#FFF3E0"><td>15</td><td>主屏时间</td><td style="background:#FFF3E0">🟡</td><td><code>UiDisplay</code> 已有 <code>is_clock_mode_</code> + 88px 时间</td><td>独立 Clock Scene · NTP 校时强化</td></tr>
       <tr style="background:#FFF3E0"><td>16</td><td>加速计运动唤醒</td><td style="background:#FFF3E0">🟡</td><td><code>sc7a20h</code> 三板实例化 · EXT1 GPIO INT1 → deep sleep 唤醒已配置</td><td>运动算法（跌落/抬起识别）· 业务挂接</td></tr>
       <tr style="background:#FFF3E0"><td>17</td><td>激活绑定（QR）</td><td style="background:#FFF3E0">🟡</td><td><code>application.cc</code> ShowActivationCode 已存在 · 6 位激活码全屏</td><td>QR 编码库（如 lv_qrcode）· 扫描端验证</td></tr>
-      <tr style="background:#FFF3E0"><td>18</td><td>番茄钟（计时+铃声）</td><td style="background:#FFF3E0">🟡</td><td>仅 esp_timer 基础设施</td><td>状态机（工作/短休/长休）· UI · 阶段铃声 · AudioSource::PomodoroBell</td></tr>
+      <tr style="background:#FFFDE7"><td>18</td><td>番茄钟（计时+UI+MCP）</td><td style="background:#FFF8E1">🟢</td><td><code>PomodoroManager</code> 单例 + <code>esp_timer</code> 1Hz · <code>SceneType::kPomodoro</code> UI（88px 倒计时 + 启停圆按钮）· 5 个 MCP 入口 <code>self.pomodoro.{start,pause,resume,stop,status}</code> · 触屏按钮 PRESS_LOCK + Schedule 主线程 · 计时中抑制休眠（<code>CanEnterSleepMode</code> 关口）· 完成时复用 <code>AlarmRinger</code> 报铃</td><td><code>AudioSource::PomodoroBell</code> 分流（当前复用 AlarmRinger） · 工作/短休/长休多阶段循环 · 启停图标 .bin（依赖 UiImageManager 子系统复活）</td></tr>
       <tr style="background:#FFF3E0"><td>19</td><td>闹钟（响铃）</td><td style="background:#FFF3E0">🟡</td><td><code>sleep_timer</code> 基础 · 无闹钟数据模型</td><td>AlarmManager + NVS 持久化 + UI · AudioSource::AlarmBell</td></tr>
       <tr style="background:#FFEBEE"><td>20</td><td>教育卡（多标签学习内容）</td><td style="background:#FFEBEE">❌</td><td>无相关代码</td><td><strong>从 0 起</strong>：单词/拼音/汉字/组词多标签结构化卡片 · 服务端 show_card JSON schema · L1 overlay · Assets 卡片资源 + GIF 笔画 LRU 缓存 · <strong>参考 xiaozhi-esp32-189 上游</strong>实现</td></tr>
       <tr style="background:#FFEBEE"><td>21</td><td>切换 AI 角色</td><td style="background:#FFEBEE">❌</td><td>无角色管理 / 无远程命令</td><td><strong>从 0 起</strong>：角色配置 NVS · RoleSwitcher Scene · 服务端协议</td></tr>
@@ -466,8 +466,8 @@ footer .src{display:inline-block;margin-top:4px;color:var(--ink-soft)}
     <thead><tr><th>类型</th><th>项数</th><th>典型项</th><th>开发投入估算</th></tr></thead>
     <tbody>
       <tr><td>✅ 完整实现 · 已能跑</td><td>8</td><td>Chat / 表情 / MP3 / 控制中心 / 配网 / 远程命令 / MCP / OTA</td><td>仅 UI 打磨 · 0.5-1 周/项</td></tr>
-      <tr><td>🟢 驱动就绪 · 加业务即可</td><td>6</td><td>Flow / GIF / GPS / iBeacon / CSI / NFC</td><td>1-2 周/项 · 主要工作在协议挂接 + UI</td></tr>
-      <tr><td>🟡 雏形 · 需扩展</td><td>5</td><td>主屏时间 / 运动唤醒 / 激活 QR / 番茄钟 / 闹钟</td><td>2-3 周/项 · 需补状态机 + UI + 算法</td></tr>
+      <tr><td>🟢 驱动就绪 · 加业务即可</td><td>7</td><td>Flow / GIF / GPS / iBeacon / CSI / NFC / 番茄钟</td><td>1-2 周/项 · 主要工作在协议挂接 + UI</td></tr>
+      <tr><td>🟡 雏形 · 需扩展</td><td>4</td><td>主屏时间 / 运动唤醒 / 激活 QR / 闹钟</td><td>2-3 周/项 · 需补状态机 + UI + 算法</td></tr>
       <tr><td>❌ 未实现 · 从 0 起</td><td>3</td><td>教育卡 / 角色切换 / 待办清单</td><td>4-6 周/项 · 完整新模块</td></tr>
     </tbody>
   </table>
@@ -1030,8 +1030,8 @@ extern "C" void app_main(void) {
       <tr><td>流程脚本（直播/教学/问答）</td><td>Speaking ⇄ Listening 循环</td><td><strong>Flow</strong>（类 <code>FlowEngine</code> · 已重命名 ✓）</td><td>Emoji 或专属 Scene</td><td>会话型</td><td>L0 + L1 可选</td><td>❌</td></tr>
       <tr><td>MP3 流式播放</td><td><strong>Idle</strong>（通道关）</td><td><strong>Music</strong></td><td>Player</td><td>会话型</td><td>L0 Player + L1 封面</td><td>❌</td></tr>
       <tr><td>主屏时间</td><td>Idle</td><td>None</td><td><strong>Clock</strong></td><td>—</td><td>L0</td><td>❌</td></tr>
-      <tr><td>番茄钟计时（25min 后台）</td><td>Idle</td><td>None（不占音频）</td><td><strong>Pomodoro</strong></td><td>后台服务型</td><td>L0 番茄钟 UI</td><td>❌</td></tr>
-      <tr><td>番茄钟阶段铃（5s）</td><td>Speaking（铃响时）</td><td>None · <code>AudioSource::PomodoroBell</code></td><td>当前 Scene 不变</td><td>事件型</td><td>L4 modal</td><td>❌</td></tr>
+      <tr><td>番茄钟计时（默认 25min · 1-99min · MCP+触屏双入口）</td><td>Idle</td><td>None（不占音频 · <code>CanEnterSleepMode</code> 返回 false 抑制休眠）</td><td><strong>Pomodoro</strong>（已实现）</td><td>后台服务型</td><td>L0 番茄钟 UI（88px 倒计时 + 启停按钮）</td><td>✅</td></tr>
+      <tr><td>番茄钟完成响铃</td><td>Speaking（铃响时）</td><td>当前复用 <code>AlarmRinger</code> · 未来 <code>AudioSource::PomodoroBell</code> 分流</td><td>切回 Clock</td><td>事件型</td><td>L4 modal（复用 AlarmRinger 5min 自动停）</td><td>🟢</td></tr>
       <tr><td>闹钟响铃（10s）</td><td>任意 → Speaking</td><td>None · <code>AudioSource::AlarmBell</code></td><td>当前 Scene + 弹 modal</td><td>事件型</td><td>L4 modal</td><td>❌</td></tr>
       <tr><td>控制中心（下拉手势）</td><td>任意</td><td>None</td><td><strong>ControlCenter</strong></td><td>—</td><td>L0 全屏</td><td>❌</td></tr>
       <tr><td>切换 AI 角色</td><td>任意</td><td>None</td><td><strong>RoleSwitcher</strong></td><td>—</td><td>L0 全屏</td><td>❌</td></tr>
@@ -1044,6 +1044,10 @@ extern "C" void app_main(void) {
 
   <div class="callout ok">
     <strong>关键观察</strong> · 16 项功能 0 个需要新增 DeviceState 枚举；只有 3 个会话型进 <code>ActivityType</code> enum（Chat / Flow / Music）；事件型用 <code>AudioSource</code> enum 标记不进 ActivityType；后台服务型只占 SceneType。<em>整个扩展空间用 3 个 enum 完全覆盖。</em>
+  </div>
+
+  <div class="callout ok">
+    <strong>验证案例 · 2026-05-13 番茄钟落地</strong> · 番茄钟是"后台服务型 + 事件型"组合：① <code>PomodoroManager</code> 单例 + <code>esp_timer</code> 1Hz 计时，<strong>0 新增 DeviceState、0 新增 ActivityType</strong>，仅复用预留的 <code>SceneType::kPomodoro</code>；② 计时中通过 <code>Application::CanEnterSleepMode</code> 返回 false 抑制 light/deep sleep（与 <code>MusicPlayer::IsPlaying()</code> 同一关口）；③ 完成时复用 <code>AlarmRinger</code> 报铃；④ MCP+触屏双入口，按钮走 <code>PRESS_LOCK + Schedule</code> 主线程（防 LVGL/timer 锁顺序倒置）。整次新增 ~6 个文件、~400 行代码，未动状态机也未抽基类——印证"3 个 enum 完全覆盖"。
   </div>
 
   <h3>§ 一.5.3 当前代码事实 → enum 收拢方案</h3>
@@ -1162,7 +1166,7 @@ namespace ActivityCoordinator {
 //   旧：OnWakeup / OnTts / OnTtai / OnLiveCompanion / OnMusicPlay / OnMusicStop
 //   新：OnActivitySwitch(json) → ActivityCoordinator::SwitchTo(target, args)
 // 系统操作类（OnReboot/OnOta/OnReconnect/OnSttUrl/OnSleep）和音频参数类
-// （OnVolume/OnGain/OnVadConfig）保持现状。</pre>
+// （OnVolume/OnGain）保持现状。</pre>
 
   <p style="font-size:13px;color:#666;margin-top:10px"><strong>实施步骤</strong>（量产期可落地，与功能开发并行）：</p>
   <ol style="font-size:13px;line-height:1.8;color:#444">

@@ -1,0 +1,1977 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyDazy P30 · BoxAudioCodec 单文件评审</title>
+<style>
+:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
+        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+        --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
+        --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       margin: 0; background: #F5F5F5; color: var(--text); line-height: 1.55; font-size: 14px; }
+header { background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+         color: white; padding: 24px 40px; }
+header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 600; }
+header .meta { opacity: .9; font-size: 12px; }
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav { width: 200px; flex-shrink: 0; background: white; padding: 18px 0;
+      border-right: 1px solid var(--border); position: sticky; top: 0;
+      align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+nav h3 { margin: 0 14px 8px; font-size: 11px; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: .5px; }
+nav a { display: block; padding: 5px 14px; color: var(--text); text-decoration: none;
+        font-size: 13px; border-left: 3px solid transparent; }
+nav a:hover { background: var(--brand-light); border-left-color: var(--brand); color: var(--brand-deep); }
+main { flex: 1; padding: 24px 36px; max-width: 980px; }
+section { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
+             border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
+section h2 .num { display: inline-block; background: var(--brand); color: white;
+                  padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
+section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section h4 { margin: 12px 0 4px 0; font-size: 13.5px; color: var(--text); }
+section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
+code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
+       font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px; color: #C2185B; }
+pre { background: #2F2F2F; color: #E8E8E8; padding: 12px 14px; border-radius: 6px;
+      font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px;
+      overflow-x: auto; line-height: 1.45; }
+pre code { background: transparent; color: inherit; padding: 0; }
+table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 13px; }
+th { background: #F5F5F5; padding: 6px 9px; text-align: left; border: 1px solid var(--border);
+     font-weight: 600; font-size: 12.5px; }
+td { padding: 5px 9px; border: 1px solid var(--border); vertical-align: top; font-size: 12.5px; }
+tr:nth-child(even) td { background: #FAFAFA; }
+.callout { padding: 10px 14px; border-radius: 6px; margin: 10px 0;
+           border-left: 4px solid var(--text-2); background: #FAFAFA; font-size: 13px; }
+.callout.ok    { border-left-color: var(--ok); background: #E8F5E9; }
+.callout.warn  { border-left-color: var(--warn); background: #FFF3E0; }
+.callout.bad   { border-left-color: var(--bad); background: #FFEBEE; }
+.svgwrap { background: var(--bg); padding: 10px; border-radius: 6px; margin: 10px 0; overflow-x: auto; }
+.svgwrap svg { display: block; max-width: 100%; height: auto; }
+text { font-family: -apple-system, "PingFang SC", sans-serif; }
+.svg-title { font-size: 13px; font-weight: 600; fill: var(--brand-deep); }
+.svg-axis { font-size: 11px; fill: var(--text-2); }
+.node-text { font-size: 12px; fill: var(--text); text-anchor: middle; dominant-baseline: middle; }
+.node-text.sm { font-size: 10.5px; fill: var(--text-2); }
+.node-text.white { fill: white; }
+ul.compact { padding-left: 18px; margin: 6px 0; }
+ul.compact li { margin: 2px 0; }
+.pill { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+.pill.p0 { background:#FFEBEE; color:var(--bad); }
+.pill.p1 { background:#FFF3E0; color:var(--warn); }
+.pill.p2 { background:#E3F2FD; color:var(--core0-line); }
+.pill.lean { background:#F3E5F5; color:#6A1B9A; }
+.pill.ok { background:#E8F5E9; color:var(--ok); }
+.pill.rest-p0 { background:#FCE4EC; color:#880E4F; }
+.pill.rest-p1 { background:#FFEBEE; color:var(--bad); }
+.pill.rest-p2 { background:#FFF3E0; color:var(--warn); }
+.legend-box { display:inline-block; width:14px; height:14px; vertical-align:middle; border-radius:2px; margin-right:4px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MyDazy P30 · BoxAudioCodec 单文件深度评审</h1>
+  <div class="meta">v1.1 · 2026-05-13 · 修复后基线 + 三轮再推演 · main/audio/codecs/box_audio_codec.cc · ES8311 DAC + ES7210 ADC + I2C worker</div>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>目录</h3>
+  <a href="#overview">1. 概览 + API</a>
+  <a href="#hw-topology">2. 硬件拓扑</a>
+  <a href="#review-a">3. 评审 A 硬件链路</a>
+  <a href="#review-b">4. 评审 B 并发资源</a>
+  <a href="#review-c">5. 评审 C 精简可读</a>
+  <a href="#calib-flow">6. CalibrateMicOnce 时序</a>
+  <a href="#decision-tree">7. MIC 校准决策树</a>
+  <a href="#lock-coverage">8. 锁覆盖范围图</a>
+  <a href="#summary">9. 汇总 + 排除清单</a>
+  <a href="#diff-audio-review">10. 与 audio-review 差异</a>
+  <a href="#deep">11. 驱动层深度推演</a>
+  <a href="#post-fix-review">12. 修复后三轮再推演</a>
+</nav>
+
+<main>
+
+<!-- =============== 1 概览 + API =============== -->
+<section id="overview">
+<h2><span class="num">1</span> 概览 + 公开 API</h2>
+
+<p class="sub">单文件 305 行 · 双 codec 设备型（ES8311 DAC + ES7210 ADC 4-ch TDM 双麦+回采） · 通过 esp_codec_dev + mydazy_codec_ctrl_i2c worker 串行化路由 · 含 CalibrateMicOnce 三档自动校准。</p>
+
+<h3>1.1 角色定位</h3>
+<table>
+<thead><tr><th>维度</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>文件</td><td><code>main/audio/codecs/box_audio_codec.cc</code>（305 行） + <code>box_audio_codec.h</code>（44 行）</td></tr>
+<tr><td>父类</td><td><code>AudioCodec</code>（<code>main/audio/audio_codec.h</code>）· Read/Write 纯虚 + SetXxx 可重写</td></tr>
+<tr><td>实例化点</td><td><code>boards/mydazy-p30-wifi/mydazy_p30_board.cc:962</code> · <code>boards/mydazy-p30-4g/mydazy_p30_board.cc:948</code></td></tr>
+<tr><td>触发点</td><td>① 构造：Board::GetAudioCodec() 懒加载 · ② CalibrateMicOnce：application.cc:178 首次开机 + remote_cmd.cc:216 远程</td></tr>
+<tr><td>SKU 矩阵</td><td>P30-WiFi / P30-4G · P31 待验证 · ⚠ 与 audio-flows.html § 7 "三板全部走 Es7111AudioCodec" 冲突</td></tr>
+</tbody>
+</table>
+
+<h3>1.2 公开 API 表（10 函数）</h3>
+<table>
+<thead><tr><th>函数</th><th>行号</th><th>持 data_if_mutex_</th><th>调用频率</th><th>调用方</th></tr></thead>
+<tbody>
+<tr><td>构造</td><td>:13-87</td><td>—（单线程构造）</td><td>1 次</td><td>Board::GetAudioCodec</td></tr>
+<tr><td>析构</td><td>:89-101</td><td>—（单例不调）</td><td>0 次</td><td>—</td></tr>
+<tr><td>CreateDuplexChannels（private）</td><td>:103-191</td><td>—</td><td>1 次</td><td>构造内</td></tr>
+<tr><td><code>Read</code>（override）</td><td>:257-263</td><td>✓（修复后加 lock_guard）</td><td>60ms / 帧</td><td>Core 1 audio_input</td></tr>
+<tr><td>Write</code>（override）</td><td>:265-271</td><td>✓（修复后加 lock_guard）</td><td>60ms / 帧</td><td>Core 0 audio_output</td></tr>
+<tr><td>SetOutputVolume</td><td>:193-198</td><td>✓</td><td>低频</td><td>UI / SettingsView</td></tr>
+<tr><td>SetInputGain</td><td>:200-209</td><td>✓</td><td>低频</td><td>RemoteCmd / 校准</td></tr>
+<tr><td>EnableInput</td><td>:211-233</td><td>✓（锁内 5-10ms I2C）</td><td>低频</td><td>AudioPowerTimer / 校准</td></tr>
+<tr><td>EnableOutput</td><td>:235-255</td><td>✓（上游纯净版 · open+vol 单段）</td><td>低频</td><td>同上</td></tr>
+<tr><td>CalibrateMicOnce</td><td>:277-341</td><td>局部 lock_guard + measure 子任务走底层跳锁</td><td>1 次 / 远程触发</td><td>app.cc:178 / remote_cmd.cc:212</td></tr>
+</tbody>
+</table>
+
+<h3>1.3 资源清单</h3>
+<table>
+<thead><tr><th>类别</th><th>资源</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td>I2S</td><td>I2S0 双工 · TX std mode（ES8311） · RX TDM 4-slot（ES7210）</td><td>CreateDuplexChannels</td></tr>
+<tr><td>I2C</td><td>2 个 codec ctrl_if 共享 1 个 i2c_worker（与 sensor/touch/NFC 共线）</td><td>:41, :72</td></tr>
+<tr><td>GPIO</td><td>mclk / bclk / ws / dout / din / pa_pin</td><td>构造参数</td></tr>
+<tr><td>DMA</td><td>6 desc × 240 frame × 4 ch × 2B ≈ 11.5 KB · INT RAM（i2s driver 自管）</td><td>:109-110</td></tr>
+<tr><td>锁</td><td><code>std::mutex data_if_mutex_</code> · 非递归</td><td>box_audio_codec.h:22</td></tr>
+<tr><td>堆（构造期）</td><td>esp_codec_dev_* 内部 calloc · 进程生命周期</td><td>:32, :41, :55, :63, :72, :78, :83</td></tr>
+<tr><td>堆（校准）</td><td>tone 16KB + rec 12.8KB <span class="pill lean">L-5 注释红线</span></td><td>:297, :309</td></tr>
+<tr><td>任务（校准）</td><td><code>calib</code> 4KB INT · P5 · <b style="color:var(--bad)">任意 Core ⚠ P0-1</b></td><td>:303</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- =============== 2 硬件拓扑 SVG =============== -->
+<section id="hw-topology">
+<h2><span class="num">2</span> 硬件拓扑 · ES8311 + ES7210 + PA + I2C 共线</h2>
+
+<p class="sub">两个 codec 共用 I2S0 + I2C bus_worker · ES8311 走 STD（DAC mono） · ES7210 走 TDM 4-slot（MIC×2 + REF + 空） · PA pin 由 ES8311 driver 内部控制。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg">
+  <!-- 标题 -->
+  <text x="450" y="22" class="svg-title" text-anchor="middle">BoxAudioCodec 硬件拓扑（ESP32-S3 ↔ ES8311 ↔ ES7210）</text>
+
+  <!-- ESP32-S3 框 -->
+  <rect x="40" y="50" width="220" height="380" rx="8" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+  <text x="150" y="72" class="node-text" font-weight="600" fill="#8E0F0F">ESP32-S3</text>
+  <text x="150" y="90" class="node-text sm">main core</text>
+
+  <!-- I2S0 模块 -->
+  <rect x="60" y="110" width="180" height="80" rx="4" fill="white" stroke="#C62828"/>
+  <text x="150" y="128" class="node-text" font-weight="600">I2S0 双工</text>
+  <text x="150" y="146" class="node-text sm">TX = STD（mono）</text>
+  <text x="150" y="162" class="node-text sm">RX = TDM 4-slot 16-bit</text>
+  <text x="150" y="178" class="node-text sm">DMA 11.5KB INT RAM</text>
+
+  <!-- I2C bus worker -->
+  <rect x="60" y="210" width="180" height="60" rx="4" fill="white" stroke="#1976D2"/>
+  <text x="150" y="228" class="node-text" font-weight="600">i2c_bus_worker</text>
+  <text x="150" y="246" class="node-text sm">单线程串行化</text>
+  <text x="150" y="262" class="node-text sm">codec / sensor / touch / NFC</text>
+
+  <!-- 时钟 -->
+  <rect x="60" y="290" width="180" height="50" rx="4" fill="white" stroke="#666"/>
+  <text x="150" y="308" class="node-text" font-weight="600">MCLK 4.096MHz</text>
+  <text x="150" y="324" class="node-text sm">= 256 × 16kHz</text>
+
+  <!-- PA pin -->
+  <rect x="60" y="360" width="180" height="50" rx="4" fill="white" stroke="var(--warn)"/>
+  <text x="150" y="378" class="node-text" font-weight="600">pa_pin (GPIO)</text>
+  <text x="150" y="394" class="node-text sm">ES8311 driver 内部控制</text>
+
+  <!-- 信号线 → ES8311 -->
+  <line x1="240" y1="135" x2="380" y2="135" stroke="#C62828" stroke-width="1.5" marker-end="url(#arrow-r)"/>
+  <text x="310" y="128" class="node-text sm" fill="#C62828">DOUT</text>
+  <line x1="240" y1="155" x2="380" y2="155" stroke="#666" stroke-width="1" stroke-dasharray="4,2" marker-end="url(#arrow-r)"/>
+  <text x="310" y="148" class="node-text sm">MCLK/BCLK/WS</text>
+
+  <!-- 信号线 → ES7210 -->
+  <line x1="240" y1="370" x2="380" y2="280" stroke="#1976D2" stroke-width="1.5" marker-end="url(#arrow-r)"/>
+  <text x="320" y="320" class="node-text sm" fill="#1976D2">DIN (TDM 4ch)</text>
+
+  <!-- I2C 线 -->
+  <line x1="240" y1="240" x2="380" y2="195" stroke="#1976D2" stroke-width="1.5" stroke-dasharray="3,2" marker-end="url(#arrow-r)"/>
+  <text x="305" y="208" class="node-text sm" fill="#1976D2">I2C addr 0x18 (ES8311)</text>
+  <line x1="240" y1="240" x2="380" y2="320" stroke="#1976D2" stroke-width="1.5" stroke-dasharray="3,2" marker-end="url(#arrow-r)"/>
+  <text x="305" y="270" class="node-text sm" fill="#1976D2">I2C addr 0x82 (ES7210)</text>
+
+  <!-- PA -->
+  <line x1="240" y1="385" x2="540" y2="385" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="3,2" marker-end="url(#arrow-r)"/>
+  <text x="380" y="378" class="node-text sm" fill="var(--warn)">PA enable</text>
+
+  <!-- ES8311 框 -->
+  <rect x="380" y="120" width="180" height="120" rx="8" fill="#E8F5E9" stroke="var(--ok)" stroke-width="2"/>
+  <text x="470" y="142" class="node-text" font-weight="600" fill="var(--ok)">ES8311 DAC</text>
+  <text x="470" y="160" class="node-text sm">codec_mode=DAC</text>
+  <text x="470" y="176" class="node-text sm">use_mclk=true</text>
+  <text x="470" y="192" class="node-text sm">pa_voltage=5.0 / dac=3.3V</text>
+  <text x="470" y="212" class="node-text sm">addr=0x18 · 100kHz</text>
+  <text x="470" y="228" class="node-text sm">SetVol → 0.95× 留余量</text>
+
+  <!-- ES7210 框 -->
+  <rect x="380" y="260" width="180" height="160" rx="8" fill="#E3F2FD" stroke="var(--core0-line)" stroke-width="2"/>
+  <text x="470" y="282" class="node-text" font-weight="600" fill="var(--core0-line)">ES7210 ADC × 4ch</text>
+  <text x="470" y="300" class="node-text sm">mic_selected = MIC1..4</text>
+  <text x="470" y="316" class="node-text sm">TDM 16-bit · 4 slot</text>
+  <text x="470" y="332" class="node-text sm">addr=0x82 · 100kHz</text>
+  <text x="470" y="350" class="node-text sm" fill="var(--warn)">SLOT0 MIC1（主，唯一设 gain）</text>
+  <text x="470" y="366" class="node-text sm" fill="var(--warn)">SLOT1 MIC2 / REF（按 input_reference）</text>
+  <text x="470" y="382" class="node-text sm" fill="var(--text-2)">SLOT2/3 未绑定，driver 默认</text>
+  <text x="470" y="402" class="node-text sm">bclk_div=8 <tspan fill="var(--bad)">待验证 V-1</tspan></text>
+
+  <!-- PA chip -->
+  <rect x="560" y="350" width="120" height="80" rx="8" fill="#FFF3E0" stroke="var(--warn)" stroke-width="2"/>
+  <text x="620" y="372" class="node-text" font-weight="600" fill="var(--warn)">外置 PA</text>
+  <text x="620" y="390" class="node-text sm">5V / class-D</text>
+  <text x="620" y="406" class="node-text sm">由 ES8311 PA pin 控</text>
+  <text x="620" y="422" class="node-text sm">close→PA 拉低（防 POP）</text>
+
+  <!-- ES8311 → PA → Speaker -->
+  <line x1="560" y1="200" x2="620" y2="350" stroke="var(--ok)" stroke-width="1.5"/>
+  <text x="585" y="280" class="node-text sm" fill="var(--ok)">analog L+R</text>
+
+  <line x1="680" y1="390" x2="820" y2="390" stroke="var(--ok)" stroke-width="2" marker-end="url(#arrow-r)"/>
+  <rect x="820" y="370" width="50" height="40" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="845" y="395" class="node-text" font-weight="600" fill="#8E0F0F">SPK</text>
+
+  <!-- MIC 物理 -->
+  <rect x="680" y="270" width="80" height="40" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="720" y="295" class="node-text" font-weight="600" fill="#8E0F0F">MIC1+MIC2</text>
+  <line x1="680" y1="290" x2="560" y2="305" stroke="var(--core0-line)" stroke-width="1.5" marker-end="url(#arrow-r)"/>
+
+  <!-- 回采 loopback -->
+  <line x1="620" y1="370" x2="620" y2="340" stroke="var(--warn)" stroke-width="1" stroke-dasharray="3,2"/>
+  <line x1="620" y1="340" x2="560" y2="340" stroke="var(--warn)" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrow-l)"/>
+  <text x="595" y="335" class="node-text sm" fill="var(--warn)">REF loop</text>
+
+  <!-- legend -->
+  <g transform="translate(40, 445)">
+    <rect width="14" height="14" fill="#FFEBEE" stroke="#C62828"/><text x="20" y="11" class="node-text sm">主控</text>
+    <rect x="60" width="14" height="14" fill="#E8F5E9" stroke="var(--ok)"/><text x="80" y="11" class="node-text sm">DAC</text>
+    <rect x="120" width="14" height="14" fill="#E3F2FD" stroke="var(--core0-line)"/><text x="140" y="11" class="node-text sm">ADC</text>
+    <rect x="180" width="14" height="14" fill="#FFF3E0" stroke="var(--warn)"/><text x="200" y="11" class="node-text sm">PA</text>
+    <line x1="240" y1="7" x2="270" y2="7" stroke="#1976D2" stroke-dasharray="3,2"/><text x="280" y="11" class="node-text sm">I2C 控制</text>
+    <line x1="350" y1="7" x2="380" y2="7" stroke="#C62828"/><text x="390" y="11" class="node-text sm">I2S 数据</text>
+  </g>
+
+  <defs>
+    <marker id="arrow-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+    <marker id="arrow-l" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M10,0 L0,5 L10,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+</svg>
+</div>
+
+<div class="callout">
+<b>关键观察</b>：① ES8311 / ES7210 两个 codec 走同一个 i2c_bus_worker · 4G RF 共线场景下不会产生协议层污染（mydazy_codec_ctrl_i2c.c 设计意图）。 ② PA pin 由 ES8311 driver close 时自动拉低 · POP 噪声防御依赖 EnableOutput 的 mute + 30ms 延迟。 ③ MIC1 是唯一显式设 gain 的通道，MIC2 / REF 走 driver 默认值（待验证 V-2）。
+</div>
+</section>
+
+<!-- =============== 3 评审 A 硬件链路 =============== -->
+<section id="review-a">
+<h2><span class="num">3</span> 评审 A · 硬件 / 驱动链路（板级正确性）</h2>
+
+<p class="sub">视角：把 305 行当作板级驱动看 · 验证 I2S 时序 / codec 寄存器配置 / GPIO 资源 / 错误处理是否符合 ESP-IDF 5.5 + ES8311/ES7210 datasheet。</p>
+
+<h3>3.1 I2S 时序速查</h3>
+<table>
+<thead><tr><th>参数</th><th>TX (STD → ES8311)</th><th>RX (TDM → ES7210)</th></tr></thead>
+<tbody>
+<tr><td>sample_rate</td><td>16000 Hz</td><td>16000 Hz</td></tr>
+<tr><td>mclk_multiple</td><td>256（= 4.096 MHz）</td><td>256</td></tr>
+<tr><td>data_bit_width / slot_bit_width</td><td>16 / AUTO</td><td>16 / AUTO</td></tr>
+<tr><td>slot_mode</td><td>STEREO（ES8311 镜像 L=R）</td><td>STEREO（TDM 4-slot）</td></tr>
+<tr><td>slot_mask</td><td>BOTH <span class="pill lean">L-1</span></td><td>SLOT0\|SLOT1\|SLOT2\|SLOT3</td></tr>
+<tr><td>ws_width</td><td>16</td><td>AUTO</td></tr>
+<tr><td>bit_shift / left_align</td><td>true / true (Philips)</td><td>true / false (TDM std)</td></tr>
+<tr><td>bclk_div</td><td>—（auto by std）</td><td>8 <span class="pill lean">L-3 待验证</span></td></tr>
+<tr><td>total_slot</td><td>—</td><td>AUTO（=4）</td></tr>
+<tr><td>dout / din</td><td>dout=GPIO · din=UNUSED</td><td>dout=UNUSED · din=GPIO</td></tr>
+</tbody>
+</table>
+
+<h3>3.2 ES8311 DAC 配置</h3>
+<ul class="compact">
+<li><code>codec_mode = ESP_CODEC_DEV_WORK_MODE_DAC</code>：关闭自带 ADC（MIC 走 ES7210） · 节省寄存器初始化</li>
+<li><code>pa_pin</code> 注入 driver · driver 在 open 时拉高 / close 时拉低 · 防 POP</li>
+<li><code>hw_gain = { pa_voltage=5.0, codec_dac_voltage=3.3 }</code>：用于 dB 换算</li>
+<li><code>use_mclk = true</code>：ES8311 从 MCLK 内部 PLL 派生 BCLK · 与 ESP32-S3 master 模式兼容</li>
+</ul>
+
+<h3>3.3 ES7210 ADC 配置</h3>
+<ul class="compact">
+<li><code>mic_selected = MIC1 \| MIC2 \| MIC3 \| MIC4</code>：4 路全开（关掉某路会影响 TDM slot 编号）</li>
+<li><b>未传 mic_gain 初值</b> · 依赖 driver 默认 + EnableInput 中 set_in_channel_gain（仅 ch0）</li>
+<li><b>仅 ch0 (MIC1) 设 gain</b> · ch1 (MIC2/REF) ch2/ch3 默认 → <span class="pill lean">A-4 待验证</span> board.cc 是否所有通道实际有效</li>
+<li><code>sample_rate</code> 由 EnableInput :217-221 fs 参数传入 · driver 内部写 ES7210 寄存器</li>
+</ul>
+
+<h3>3.4 EnableInput / EnableOutput 时序</h3>
+
+<table>
+<thead><tr><th>函数</th><th>时序</th><th>风险</th></tr></thead>
+<tbody>
+<tr><td>EnableOutput(true)</td><td>open → set_vol（上游纯净版 · 无 mute · 无 delay）</td><td>持锁 ~50ms（含 codec init）</td></tr>
+<tr><td>EnableOutput(false)</td><td>close</td><td>持锁 ~10ms · POP 处理下沉驱动层（fork esp_codec_dev 后修）</td></tr>
+<tr><td>EnableInput(true)</td><td>open（channel_mask 按 input_reference） → set_in_channel_gain(input_gain_)</td><td>无 mute · 依赖 ES7210 无瞬态 <span class="pill lean">L-4</span></td></tr>
+<tr><td>EnableInput(false)</td><td>close（修复后 Read 持同锁 · 与 close 串行）</td><td>OK</td></tr>
+</tbody>
+</table>
+
+<h3>3.5 评审 A 问题清单（5 项 lean + 3 待验证）</h3>
+<table>
+<thead><tr><th>#</th><th>级别</th><th>问题</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td>A-1</td><td><span class="pill lean">lean</span></td><td>TX slot_mask=BOTH 双声道但 ES8311 mono · 应加注释</td><td>:128</td></tr>
+<tr><td>A-2</td><td><span class="pill lean">lean</span></td><td>volume × 0.95 int cast 损 0.5 档 · 建议 (volume*19)/20</td><td>:195</td></tr>
+<tr><td>A-3</td><td><span class="pill lean">待验证</span></td><td>RX TDM bclk_div=8 与 BCLK=LRCK×64 推算疑似不符</td><td>:156</td></tr>
+<tr><td>A-4</td><td><span class="pill lean">待验证</span></td><td>input_reference=false 时只设 ch0 gain · 双麦第二路是否生效</td><td>:220-226</td></tr>
+<tr><td>A-5</td><td><span class="pill lean">待验证</span></td><td>board.cc 实例化 BoxAudioCodec 与 audio-flows.html § 7 表格冲突</td><td>board.cc:948 / :962</td></tr>
+<tr><td>A-6</td><td><span class="pill lean">lean</span></td><td>EnableInput 无 mute · 若 ES7210 上电瞬态有 DC 偏移可能首帧噪声</td><td>:211-233</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>评审 A 总结</b>：硬件链路总体正确 · 0 P0 / 0 P1 · 3 lean + 3 待验证。最值得抓波形验证的是 A-3（RX BCLK），其次 A-4（双麦第二路是否走 driver 默认增益）。
+</div>
+</section>
+
+<!-- =============== 4 评审 B 并发资源 =============== -->
+<section id="review-b">
+<h2><span class="num">4</span> 评审 B · 并发 / 锁 / 资源（FreeRTOS 与内存红线）</h2>
+
+<p class="sub">视角：把 305 行当作多核并发系统看 · 验证锁覆盖范围 / 任务红线 / atomic 多核共享 / 堆 budget 是否符合 esp32-memory.md / CLAUDE.md。</p>
+
+<h3>4.1 data_if_mutex_ 持锁矩阵</h3>
+<table>
+<thead><tr><th>函数</th><th>持锁范围</th><th>锁内阻塞调用</th><th>持锁时间</th></tr></thead>
+<tbody>
+<tr><td>SetOutputVolume</td><td>全函数</td><td>esp_codec_dev_set_out_vol（I2C）</td><td>~1ms</td></tr>
+<tr><td>SetInputGain</td><td>全函数</td><td>条件 set_in_channel_gain（I2C）</td><td>~1ms</td></tr>
+<tr><td>EnableInput</td><td>全函数</td><td>codec_dev_open / close（多次 I2C）</td><td>~5-10ms</td></tr>
+<tr><td>EnableOutput</td><td>全函数</td><td>open + set_vol（上游纯净版 · 无 delay）</td><td>~50ms（codec init）</td></tr>
+<tr><td>CalibrateMicOnce</td><td>局部 :282-286</td><td>set_out_vol + set_in_channel_gain</td><td>~2ms</td></tr>
+<tr><td>Read</td><td>全函数（修复后加锁）</td><td>esp_codec_dev_read（阻塞至 1 帧 DMA）</td><td>~60ms</td></tr>
+<tr><td>Write</td><td>全函数（修复后加锁）</td><td>esp_codec_dev_write（阻塞至 DMA queue）</td><td>~60ms</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<b>当前锁分布</b>：Read/Write/SetOutputVolume/SetInputGain/EnableInput/EnableOutput 全部走 <code>lock_guard&lt;mutex&gt;(data_if_mutex_)</code> 单段持锁 · 各 API 之间在 codec_dev / data_if 层串行 · 消除了 close vs read/write 竞态。CalibrateMicOnce 内 measure() 子任务和主线程 Read 走底层 <code>esp_codec_dev_*</code> 跳锁（外层 Stop audio_service 保证 codec 独占）。
+</div>
+
+<h3>4.2 CalibrateMicOnce 重入分析</h3>
+<table>
+<thead><tr><th>步骤</th><th>动作</th><th>锁状态</th></tr></thead>
+<tbody>
+<tr><td>:280</td><td>EnableInput(true)</td><td>↑ 进出 data_if_mutex_</td></tr>
+<tr><td>:281</td><td>EnableOutput(true)</td><td>↑ 进出（上游纯净版 · 无 vTaskDelay）</td></tr>
+<tr><td>:282-286</td><td>set_out_vol(76) + set_in_channel_gain(15)</td><td>↑ 局部锁</td></tr>
+<tr><td>:288-290</td><td>tone 生成（CPU only）</td><td>无锁</td></tr>
+<tr><td>:299-305</td><td><b>xTaskCreate calib · 子任务调底层 esp_codec_dev_write</b></td><td>跳锁（独占设计）</td></tr>
+<tr><td>:306-314</td><td>vTaskDelay + 底层 esp_codec_dev_read + 计算 RMS + vTaskDelay(400)</td><td>跳锁</td></tr>
+<tr><td>:330</td><td>SetInputGain（含 NVS + I2C）</td><td>↑ 进出</td></tr>
+<tr><td>:332</td><td>SetAecGain（仅 NVS）</td><td>无 data_if_mutex_</td></tr>
+<tr><td>:333</td><td>Settings.SetInt(mic_type)</td><td>无</td></tr>
+<tr><td>:337</td><td>第二轮 measure（同上）</td><td>跳锁</td></tr>
+</tbody>
+</table>
+
+
+<h3>4.3 calib 任务的 P0-1 红线违规</h3>
+
+<pre><code>// box_audio_codec.cc:303-307（当前）
+xTaskCreate([](void* a) {
+    auto* c = (Ctx*)a;
+    c->self-&gt;Write(c->tone-&gt;data(), c->tone-&gt;size());   // ~500ms
+    vTaskDelete(NULL);
+}, "calib", 4096, &amp;ctx, 5, NULL);
+vTaskDelay(pdMS_TO_TICKS(150));
+...
+vTaskDelay(pdMS_TO_TICKS(400));  // 等 calib 退出 · 仅 50ms 余量 ⚠
+</code></pre>
+
+<table>
+<thead><tr><th>违规点</th><th>风险</th></tr></thead>
+<tbody>
+<tr><td>1. xTaskCreate 不 PinToCore</td><td>违反 CLAUDE.md "main/ 下 0 裸 xTaskCreate" · 漂到 Core 0 与 codec_dev_write 同核 → 双写并发更严重</td></tr>
+<tr><td>2. ctx 栈对象 by-reference</td><td>主任务 vTaskDelay(150+400=550ms) 仅覆盖 Write 500ms · 50ms 余量极小 · 若 Write 拖到 580ms（PA 起音 + tick 抖动）→ ctx UAF</td></tr>
+<tr><td>3. TaskHandle 未保存</td><td>卡死无法 force_terminate</td></tr>
+<tr><td>4. 优先级 5 = LVGL P5 · 任意 Core</td><td>同优先级竞争 · UI 帧率抖动</td></tr>
+</tbody>
+</table>
+
+<h3>4.4 堆 budget</h3>
+<table>
+<thead><tr><th>分配</th><th>大小</th><th>位置</th><th>注释红线</th></tr></thead>
+<tbody>
+<tr><td>tone</td><td>16 KB INT</td><td>:297</td><td><span class="pill lean">B-5 缺注释</span></td></tr>
+<tr><td>rec（单麦）</td><td>6.4 KB INT</td><td>:309</td><td><span class="pill lean">B-5 缺注释</span></td></tr>
+<tr><td>rec（双麦回采）</td><td>12.8 KB INT</td><td>:309</td><td><span class="pill lean">B-5 缺注释</span></td></tr>
+<tr><td>校准峰值（同时存在 tone + rec）</td><td><b>~29 KB INT 堆</b></td><td>—</td><td>量产首开机一次 · 函数返回即释放</td></tr>
+</tbody>
+</table>
+
+<h3>4.5 多核共享变量 atomic 检查</h3>
+<table>
+<thead><tr><th>变量</th><th>位置</th><th>读写跨核</th><th>当前类型</th></tr></thead>
+<tbody>
+<tr><td>input_enabled_</td><td>audio_codec.h:51</td><td>Read(Core1) ↔ EnableInput(任意)</td><td><b style="color:var(--bad)">bool ⚠ B-6 / P1-3</b></td></tr>
+<tr><td>output_enabled_</td><td>audio_codec.h:52</td><td>Write(Core0) ↔ EnableOutput(任意)</td><td><b style="color:var(--bad)">bool ⚠ B-6 / P1-3</b></td></tr>
+<tr><td>input_gain_</td><td>audio_codec.h:58</td><td>仅持 mutex 路径写 + 持 mutex 读</td><td>float（OK · 锁保护）</td></tr>
+<tr><td>data_if_mutex_</td><td>box_audio_codec.h:22</td><td>—</td><td>std::mutex · RAII 合规 ✓</td></tr>
+</tbody>
+</table>
+
+<h3>4.6 评审 B 问题清单（修复后剩余 · 1 P0 + 2 P1 + 1 lean）</h3>
+<table>
+<thead><tr><th>#</th><th>级别</th><th>问题</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td>B-4</td><td><span class="pill p0">P0</span></td><td>calib 裸 xTaskCreate + 任意 Core + UAF + 无 TaskHandle</td><td>:299-305</td></tr>
+<tr><td>B-5</td><td><span class="pill lean">lean</span></td><td>tone 16KB + rec 12.8KB 缺 esp32-memory.md 红线注释</td><td>:288, :307</td></tr>
+<tr><td>B-6</td><td><span class="pill p1">P1</span></td><td>父类 input_enabled_ / output_enabled_ bool 非 atomic · 跨核读写</td><td>audio_codec.h:51-52</td></tr>
+<tr><td>B-7</td><td><span class="pill p1">P1</span></td><td>remote_cmd 触发 calib 阻塞主循环 ~1.6s · 应独立任务</td><td>remote_cmd.cc:212</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>评审 B 总结（修复后剩余）</b>：1 P0 + 2 P1 + 1 lean · P0-1 (B-4) 是 CLAUDE.md 量产红线必修；B-6/B-7 量产后小修。详见 § 12 修复后再推演。
+</div>
+</section>
+
+<!-- =============== 5 评审 C 精简可读 =============== -->
+<section id="review-c">
+<h2><span class="num">5</span> 评审 C · 精简 / 可读 / 量产可靠性</h2>
+
+<p class="sub">视角：把 305 行当作 code review 看 · 验证日志级别 / magic number / 错误处理 / 注释一致性 / 死代码。</p>
+
+<h3>5.1 日志级别异常（C-1 / C-10）</h3>
+<table>
+<thead><tr><th>行号</th><th>当前</th><th>建议</th><th>原因</th></tr></thead>
+<tbody>
+<tr><td>:287</td><td><code>ESP_LOGW "MIC校准开始 (vol=80 ...)"</code></td><td>LOGI · 文案改 vol=76</td><td>正常路径 + 文案与代码 vol=76 不符</td></tr>
+<tr><td>:328</td><td><code>ESP_LOGW "第一轮 RMS=..."</code></td><td>LOGI</td><td>正常中间结果</td></tr>
+<tr><td>:340</td><td><code>ESP_LOGW "第二轮 RMS=... %s"</code></td><td>diff&lt;20 → LOGI · ≥20 → LOGW</td><td>分级</td></tr>
+</tbody>
+</table>
+
+<h3>5.2 Magic Number 20+ 项（C-2）</h3>
+<div class="callout">
+<b>分类抽取建议（anonymous namespace constexpr）</b>：<br/>
+<code>kDefaultInputGainDb=15.0f</code> / <code>kCalibBaseVolume=76</code> / <code>kCalibBaseInputGain=15.0f</code> / <code>kCalibToneSamples=8000</code> / <code>kCalibToneAmplitude=24000</code> / <code>kCalibToneFreqHz=1000</code> / <code>kCalibSkipMs=150</code> / <code>kCalibRecSamples=3200</code> / <code>kCalibWaitTaskMs=400</code> / <code>kCalibTargetRms=5000</code> / <code>kInputMaxDb=36.0f</code> / <code>kQuantStepDb=3.0f</code> / <code>kInputBugLowerDb=31.5f</code> / <code>kInputBugSkipTo=36.0f</code> / <code>kMicTypeMin=22</code> / <code>kMicTypeMax=50</code> / <code>kMicTypeRefRms=1758</code> / <code>kMicTypeBaseDb=36.0f</code> / <code>kMicTypeStepDb=2</code> / <code>kAecLowTh=30</code> / <code>kAecHighTh=42</code> / <code>kAecGainLow=3.0f</code> / <code>kAecGainMid=6.0f</code> / <code>kAecGainHigh=9.0f</code> / <code>kCalibStabilizeMs=100</code> / <code>kCalibToleranceP=20</code>
+</div>
+
+<h3>5.3 ⚠ C-6 · input_gain 量化边界 31.5 → 33dB 驱动 bug（实质性 bug · P1）</h3>
+
+<pre><code>// 当前代码（:321-322）
+float input_gain = std::max(0.0f, std::min(36.0f,
+    (in_raw &lt;= 31.5f) ? std::round(in_raw / 3.0f) * 3.0f : 36.0f));
+</code></pre>
+
+<div class="callout bad">
+<b>触发分析</b>：边界 <code>in_raw = 31.5f</code>（包含）：<br/>
+<code>std::round(31.5 / 3) = std::round(10.5) = 11</code>（IEEE round half away from zero）<br/>
+<code>11 × 3 = 33</code> dB → <b>正好落到注释中说要避开的"33dB 驱动 bug"档</b>！<br/>
+注释 :285 自己声明 "&gt;31.5 跳 36 避 33 驱动 bug"，但代码用 <code>&lt;=31.5</code> 让 31.5 走进量化分支，量化后 = 33。<b>注释与代码自相矛盾</b>。
+</div>
+
+<h4>修复 patch（最简）</h4>
+
+<pre><code>- (in_raw &lt;= 31.5f) ? std::round(in_raw / 3.0f) * 3.0f : 36.0f
++ (in_raw &lt;= 30.0f) ? std::round(in_raw / 3.0f) * 3.0f : 36.0f
+</code></pre>
+
+<p>边界 30 时 <code>round(30/3)=10</code> → <code>30</code> dB ✓ · 30 ~ 36 之间一律跳到 36。或更严：<code>std::floor(in_raw / 3.0f) * 3.0f</code> 永远向下取（更保守）。</p>
+
+<h3>5.4 析构顺序 + 资源泄漏（C-8）</h3>
+<table>
+<thead><tr><th>步骤</th><th>当前</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>esp_codec_dev_close + delete output_dev_</td><td>✓</td></tr>
+<tr><td>2</td><td>esp_codec_dev_close + delete input_dev_</td><td>✓</td></tr>
+<tr><td>3</td><td>audio_codec_delete_codec_if × 2 + ctrl_if × 2 + gpio_if + data_if</td><td>✓</td></tr>
+<tr><td>4</td><td>—</td><td><b>缺：i2s_channel_disable + i2s_del_channel（tx/rx）</b></td></tr>
+</tbody>
+</table>
+
+<p>注：Board 单例不调析构（mydazy_p30_board.cc:957-958 注释明确）· P30 量产路径理论不会触发 · 但保持健壮性应补 i2s_del_channel。</p>
+
+<h3>5.5 评审 C 问题清单（1 P1 + 10 lean）</h3>
+<table>
+<thead><tr><th>#</th><th>级别</th><th>问题</th></tr></thead>
+<tbody>
+<tr><td>C-1</td><td><span class="pill lean">lean</span></td><td>LOGW 正常路径应改 LOGI</td></tr>
+<tr><td>C-2</td><td><span class="pill lean">lean</span></td><td>20+ magic number 集中常量化</td></tr>
+<tr><td>C-3</td><td><span class="pill lean">lean</span></td><td>measure lambda rec 两轮新建 12.8KB · 可复用</td></tr>
+<tr><td>C-4</td><td><span class="pill lean">lean</span></td><td>1758 魔数缺推导注释</td></tr>
+<tr><td>C-5</td><td><span class="pill lean">lean</span></td><td>Settings 一次校准 4 次 nvs_commit · 可批量</td></tr>
+<tr><td><b>C-6</b></td><td><b><span class="pill p1">P1</span></b></td><td><b>input_gain 量化 round(10.5)=11→33dB 触发 ES7210 驱动 bug</b></td></tr>
+<tr><td>C-7</td><td><span class="pill lean">lean</span></td><td>diff 20% 容忍度量产前抓数据校准</td></tr>
+<tr><td>C-8</td><td><span class="pill lean">lean</span></td><td>析构未释放 i2s_del_channel</td></tr>
+<tr><td>C-9</td><td><span class="pill lean">lean</span></td><td>assert + ESP_ERROR_CHECK 量产 Release 可能失效 / 无限重启</td></tr>
+<tr><td>C-10</td><td><span class="pill lean">lean</span></td><td>ESP_LOGW 文案 vol=80 与代码 vol=76 不符</td></tr>
+<tr><td>C-11</td><td><span class="pill lean">lean</span></td><td>SetRefGain 死代码注释应清理或加 TODO</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>评审 C 总结</b>：1 P1（C-6 量化 bug）+ 10 lean。C-6 是隐蔽但量产路径实质 bug · 1 min 修。其他 lean 集中半天可一并清理。
+</div>
+</section>
+
+<!-- =============== 6 CalibrateMicOnce 时序图 =============== -->
+<section id="calib-flow">
+<h2><span class="num">6</span> CalibrateMicOnce 时序图（Write 子任务 / Read 主任务 / 时间线）</h2>
+
+<p class="sub">两轮 measure 各 ~750ms · 总耗时 ~1.6s · 红色阴影标 calib 子任务运行区间 · 50ms UAF 余量极紧。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 900 460" xmlns="http://www.w3.org/2000/svg">
+  <!-- 标题 -->
+  <text x="450" y="22" class="svg-title" text-anchor="middle">CalibrateMicOnce 时序（红色 = calib 子任务 · 蓝色 = 主任务 vTaskDelay/Read）</text>
+
+  <!-- 时间轴 -->
+  <line x1="60" y1="50" x2="860" y2="50" stroke="#333" stroke-width="1"/>
+  <text x="60" y="42" class="node-text sm">0ms</text>
+  <text x="220" y="42" class="node-text sm">150</text>
+  <text x="320" y="42" class="node-text sm">350</text>
+  <text x="430" y="42" class="node-text sm">~550(R1)</text>
+  <text x="550" y="42" class="node-text sm">~700</text>
+  <text x="680" y="42" class="node-text sm">~850</text>
+  <text x="800" y="42" class="node-text sm">~1600(R2)</text>
+
+  <!-- 第一轮 measure -->
+  <text x="60" y="85" class="node-text" font-weight="600">主任务 (调用 CalibrateMicOnce)</text>
+  <rect x="60" y="100" width="160" height="22" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="140" y="115" class="node-text sm">vTaskDelay(150)</text>
+
+  <rect x="220" y="100" width="100" height="22" fill="#E3F2FD" stroke="#1976D2"/>
+  <text x="270" y="115" class="node-text sm">Read(rec 200ms)</text>
+
+  <rect x="320" y="100" width="140" height="22" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="390" y="115" class="node-text sm">vTaskDelay(400) ← UAF 50ms 余量</text>
+
+  <rect x="460" y="100" width="50" height="22" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="485" y="115" class="node-text sm">SetGain</text>
+
+  <rect x="510" y="100" width="40" height="22" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="530" y="115" class="node-text sm">D(100)</text>
+
+  <rect x="550" y="100" width="160" height="22" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="630" y="115" class="node-text sm">vTaskDelay(150) [R2]</text>
+
+  <rect x="710" y="100" width="100" height="22" fill="#E3F2FD" stroke="#1976D2"/>
+  <text x="760" y="115" class="node-text sm">Read(200ms)</text>
+
+  <rect x="810" y="100" width="40" height="22" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="830" y="115" class="node-text sm">D(400)</text>
+
+  <!-- calib 子任务 第一轮 -->
+  <text x="60" y="155" class="node-text" font-weight="600">calib 子任务（xTaskCreate）</text>
+  <rect x="60" y="170" width="500" height="22" fill="#C62828" opacity="0.7" stroke="#8E0F0F"/>
+  <text x="310" y="185" class="node-text white" font-weight="600">Write(tone[8000]) ≈ 500ms（DMA 阻塞）</text>
+
+  <!-- calib 子任务 第二轮 -->
+  <rect x="550" y="170" width="280" height="22" fill="#C62828" opacity="0.7" stroke="#8E0F0F"/>
+  <text x="690" y="185" class="node-text white" font-weight="600">Write 第二轮（calib_2）</text>
+
+  <!-- vTaskDelete 标注 -->
+  <line x1="560" y1="170" x2="560" y2="125" stroke="#8E0F0F" stroke-dasharray="2,2"/>
+  <text x="568" y="148" class="node-text sm" fill="#8E0F0F">vTaskDelete</text>
+
+  <!-- 物理输出 -->
+  <text x="60" y="225" class="node-text" font-weight="600">物理 PA / 喇叭</text>
+  <rect x="60" y="240" width="60" height="22" fill="#FAFAFA" stroke="#666"/>
+  <text x="90" y="255" class="node-text sm">PA 起音</text>
+  <rect x="120" y="240" width="440" height="22" fill="#FFF3E0" stroke="var(--warn)"/>
+  <text x="340" y="255" class="node-text sm">1kHz tone 输出 ≈ 500ms</text>
+  <rect x="560" y="240" width="270" height="22" fill="#FFF3E0" stroke="var(--warn)"/>
+  <text x="695" y="255" class="node-text sm">第二轮 tone 输出</text>
+
+  <!-- MIC 录音区 -->
+  <text x="60" y="295" class="node-text" font-weight="600">MIC 录音 (Read 取 200ms)</text>
+  <rect x="220" y="310" width="100" height="22" fill="#E3F2FD" stroke="var(--core0-line)"/>
+  <text x="270" y="325" class="node-text sm">rec_1 RMS</text>
+  <rect x="710" y="310" width="100" height="22" fill="#E3F2FD" stroke="var(--core0-line)"/>
+  <text x="760" y="325" class="node-text sm">rec_2 RMS_after</text>
+
+  <!-- 风险标注 -->
+  <line x1="555" y1="60" x2="555" y2="200" stroke="var(--bad)" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="555" y="380" class="node-text sm" fill="var(--bad)" text-anchor="middle">⚠ 第二轮 measure 启动 calib_2 时</text>
+  <text x="555" y="395" class="node-text sm" fill="var(--bad)" text-anchor="middle">如果 calib_1 还在跑（拖到 580ms）</text>
+  <text x="555" y="410" class="node-text sm" fill="var(--bad)" text-anchor="middle">→ 双写 output_dev_ 不可重入</text>
+  <text x="555" y="425" class="node-text sm" fill="var(--bad)" text-anchor="middle">→ I2S DMA 序列损坏 · P0-1</text>
+
+  <!-- 修复后时序 -->
+  <text x="60" y="430" class="node-text" font-weight="600" fill="var(--ok)">修复后：eTaskGetState 主动轮询等 calib_1 vTaskDelete · 100ms 安全余量 · 杜绝 UAF / 双写</text>
+</svg>
+</div>
+
+<table>
+<thead><tr><th>步骤</th><th>动作</th><th>行号</th><th>耗时</th></tr></thead>
+<tbody>
+<tr><td>① 准备</td><td>EnableInput/Output · 强制 vol=76 / input=15dB</td><td>:289-294</td><td>~30 ms</td></tr>
+<tr><td>② 探测音生成</td><td>1kHz amp=24000 · 8000 sample（500ms）</td><td>:297-299</td><td>&lt; 1 ms (CPU)</td></tr>
+<tr><td>③ 第一轮 measure</td><td>启 calib + vTaskDelay(150) + Read(200ms) + vTaskDelay(400)</td><td>:303-315</td><td>~750 ms</td></tr>
+<tr><td>④ 反算参数</td><td>input_gain / mic_type / aec_gain</td><td>:320-326</td><td>&lt; 1 ms</td></tr>
+<tr><td>⑤ 应用</td><td>SetInputGain · SetAecGain · NVS mic_type</td><td>:331-334</td><td>~20 ms</td></tr>
+<tr><td>⑥ 稳定</td><td>vTaskDelay(100)</td><td>:335</td><td>100 ms</td></tr>
+<tr><td>⑦ 第二轮 measure</td><td>同 ③ · 验证 rms_after vs rms_expected</td><td>:338</td><td>~750 ms</td></tr>
+<tr><td>⑧ 报告</td><td>diff &lt; 20% → ✅ 否则 ⚠</td><td>:339-341</td><td>—</td></tr>
+<tr><td><b>合计</b></td><td>—</td><td>—</td><td><b>~1.6 秒</b></td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>调用上下文</b>：① <code>application.cc:178</code> Initialize 期 audio_service 未 Start · 阻塞主任务可接受。② <code>remote_cmd.cc:212</code> 通过 Schedule 调度到主循环 · 阻塞主循环 1.6s · 期间 LVGL / UI 全停（B-7 量产后小修）。修复后已 Stop/Start audio_service 包裹 · 杜绝 codec_dev 双写。
+</div>
+</section>
+
+<!-- =============== 7 MIC 校准决策树 =============== -->
+<section id="decision-tree">
+<h2><span class="num">7</span> MIC 校准决策树（in_raw → input_gain / mic_type / aec_gain）</h2>
+
+<p class="sub">第一轮 RMS 推导一切 · 输出 3 个参数（input_gain dB · mic_type dBV · aec_gain dB） · 三档式映射保证物料 -26/-36/-42 dBV 全覆盖。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg">
+  <text x="450" y="22" class="svg-title" text-anchor="middle">决策树 · in_raw → (input_gain, mic_type, aec_gain)</text>
+
+  <!-- 起点 -->
+  <rect x="370" y="50" width="160" height="50" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+  <text x="450" y="72" class="node-text" font-weight="600">第一轮 RMS（rms）</text>
+  <text x="450" y="88" class="node-text sm">→ in_raw = 15 + 20·log10(5000/rms)</text>
+
+  <!-- input_gain 分支 -->
+  <line x1="370" y1="100" x2="220" y2="135" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="530" y1="100" x2="680" y2="135" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="280" y="120" class="node-text sm">in_raw ≤ 30.0 (修复后)</text>
+  <text x="610" y="120" class="node-text sm">in_raw &gt; 30.0</text>
+
+  <!-- 量化档 -->
+  <rect x="60" y="145" width="320" height="60" rx="6" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="220" y="165" class="node-text" font-weight="600" fill="var(--ok)">input_gain = round(in_raw/3)×3</text>
+  <text x="220" y="182" class="node-text sm">候选档：0 / 3 / 6 / 9 / 12 / 15 / 18 / 21 / 24 / 27 / 30 dB</text>
+  <text x="220" y="198" class="node-text sm" fill="var(--bad)">⚠ 当前代码 ≤31.5 → round(10.5)=11 → 33 (驱动 bug · C-6)</text>
+
+  <!-- 跳 36 -->
+  <rect x="540" y="145" width="280" height="60" rx="6" fill="#FFF3E0" stroke="var(--warn)"/>
+  <text x="680" y="165" class="node-text" font-weight="600" fill="var(--warn)">input_gain = 36 dB</text>
+  <text x="680" y="182" class="node-text sm">跳过 33dB 避 ES7210 驱动 bug</text>
+  <text x="680" y="198" class="node-text sm">clamp [0, 36]</text>
+
+  <!-- mic_type -->
+  <rect x="280" y="240" width="340" height="60" rx="6" fill="#E3F2FD" stroke="var(--core0-line)"/>
+  <text x="450" y="260" class="node-text" font-weight="600" fill="var(--core0-line)">mic_type = round((36 + 20·log10(1758/rms))/2) × 2</text>
+  <text x="450" y="278" class="node-text sm">clamp [22, 50] · 步进 2 · 单位 dBV（绝对值）</text>
+  <text x="450" y="294" class="node-text sm">物料档：-26 / -36 / -42 dBV（三档全覆盖）</text>
+
+  <line x1="220" y1="205" x2="380" y2="240" stroke="#666" stroke-width="1" stroke-dasharray="3,2"/>
+  <line x1="680" y1="205" x2="520" y2="240" stroke="#666" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- aec_gain 三段 -->
+  <line x1="350" y1="300" x2="180" y2="345" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="450" y1="300" x2="450" y2="345" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="550" y1="300" x2="720" y2="345" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="250" y="320" class="node-text sm">mic_type ≤ 30</text>
+  <text x="450" y="320" class="node-text sm" text-anchor="middle">32 ~ 40</text>
+  <text x="650" y="320" class="node-text sm">mic_type ≥ 42</text>
+
+  <rect x="60" y="355" width="240" height="70" rx="6" fill="#FFEBEE" stroke="var(--bad)"/>
+  <text x="180" y="375" class="node-text" font-weight="600" fill="var(--bad)">高灵敏 → aec_gain = 3 dB</text>
+  <text x="180" y="393" class="node-text sm">22/24/26/28/30 (5 档)</text>
+  <text x="180" y="409" class="node-text sm">减小避爆顶</text>
+  <text x="180" y="425" class="node-text sm">如台湾豪声 -26 dBV</text>
+
+  <rect x="330" y="355" width="240" height="70" rx="6" fill="#FFF3E0" stroke="var(--warn)"/>
+  <text x="450" y="375" class="node-text" font-weight="600" fill="var(--warn)">中等基线 → aec_gain = 6 dB</text>
+  <text x="450" y="393" class="node-text sm">32/34/36/38/40 (5 档)</text>
+  <text x="450" y="409" class="node-text sm">默认平衡档</text>
+  <text x="450" y="425" class="node-text sm">如常规 ECM -36 dBV</text>
+
+  <rect x="600" y="355" width="240" height="70" rx="6" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="720" y="375" class="node-text" font-weight="600" fill="var(--ok)">低灵敏 → aec_gain = 9 dB</text>
+  <text x="720" y="393" class="node-text sm">42/44/46/48/50 (5 档)</text>
+  <text x="720" y="409" class="node-text sm">补 ASR · 提供识别裕量</text>
+  <text x="720" y="425" class="node-text sm">如低成本 MEMS -42 dBV</text>
+
+  <!-- 应用 -->
+  <rect x="290" y="455" width="320" height="50" rx="6" fill="#F3E5F5" stroke="#6A1B9A" stroke-width="2"/>
+  <text x="450" y="475" class="node-text" font-weight="600" fill="#6A1B9A">SetInputGain / SetAecGain / NVS mic_type</text>
+  <text x="450" y="492" class="node-text sm">第二轮验证 |rms_after - expected| / expected &lt; 20% → ✅</text>
+
+  <line x1="180" y1="425" x2="370" y2="455" stroke="#666" stroke-width="1" stroke-dasharray="3,2"/>
+  <line x1="450" y1="425" x2="450" y2="455" stroke="#666" stroke-width="1" stroke-dasharray="3,2"/>
+  <line x1="720" y1="425" x2="530" y2="455" stroke="#666" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+    </marker>
+  </defs>
+</svg>
+</div>
+
+<div class="callout">
+<b>1758 的推导（C-4 缺注释项）</b>：mic_type=36 dBV、input_gain=15 dB 时校准后等响度 RMS=5000。设当前 input_gain=15 dB 实测 RMS=rms，则 mic_type(dBV) = 36 + 20·log10(1758/rms)，其中 1758 = 5000 / 10^((36-15)/20)。<b>本质</b>：1758 是"中间档基准 RMS"，用反推算出当前物料的实际 dBV 灵敏度。
+</div>
+</section>
+
+<!-- =============== 8 锁覆盖范围图 =============== -->
+<section id="lock-coverage">
+<h2><span class="num">8</span> data_if_mutex_ 锁覆盖范围（B-1/B-2/B-3 可视化）</h2>
+
+<p class="sub">绿色 = 持锁 · 红色 = 未持锁（风险）· 紫色 = 子任务（独立调度）· 灰色阴影 = vTaskDelay 锁内阻塞（B-1）。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 900 440" xmlns="http://www.w3.org/2000/svg">
+  <text x="450" y="22" class="svg-title" text-anchor="middle">data_if_mutex_ 持锁矩阵（10 个 API · 红色未持锁路径 = P1-2 风险）</text>
+
+  <!-- 表头 -->
+  <text x="50" y="55" class="node-text" font-weight="600">API</text>
+  <text x="260" y="55" class="node-text" font-weight="600">持锁范围</text>
+  <text x="540" y="55" class="node-text" font-weight="600">锁内阻塞</text>
+  <text x="800" y="55" class="node-text" font-weight="600">风险</text>
+  <line x1="40" y1="65" x2="860" y2="65" stroke="#333"/>
+
+  <!-- 每一行 -->
+  <!-- Read -->
+  <text x="50" y="92" class="node-text">Read（60ms/frame）</text>
+  <rect x="200" y="78" width="280" height="22" fill="#E8F5E9" stroke="var(--ok)" stroke-width="2"/>
+  <text x="340" y="93" class="node-text" fill="var(--ok)" font-weight="600">全函数（lock_guard）</text>
+  <text x="540" y="93" class="node-text sm">esp_codec_dev_read（DMA 阻塞 ~60ms）</text>
+  <rect x="780" y="78" width="80" height="22" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="820" y="93" class="node-text" fill="var(--ok)">OK</text>
+
+  <!-- Write -->
+  <text x="50" y="122" class="node-text">Write（60ms/frame）</text>
+  <rect x="200" y="108" width="280" height="22" fill="#E8F5E9" stroke="var(--ok)" stroke-width="2"/>
+  <text x="340" y="123" class="node-text" fill="var(--ok)" font-weight="600">全函数（lock_guard）</text>
+  <text x="540" y="123" class="node-text sm">esp_codec_dev_write（DMA queue ~60ms）</text>
+  <rect x="780" y="108" width="80" height="22" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="820" y="123" class="node-text" fill="var(--ok)">OK</text>
+
+  <!-- SetOutputVolume -->
+  <text x="50" y="152" class="node-text">SetOutputVolume</text>
+  <rect x="200" y="138" width="280" height="22" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="340" y="153" class="node-text" fill="var(--ok)">全函数</text>
+  <text x="540" y="153" class="node-text sm">esp_codec_dev_set_out_vol（I2C ~1ms）</text>
+  <rect x="780" y="138" width="80" height="22" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="820" y="153" class="node-text" fill="var(--ok)">OK</text>
+
+  <!-- SetInputGain -->
+  <text x="50" y="182" class="node-text">SetInputGain</text>
+  <rect x="200" y="168" width="280" height="22" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="340" y="183" class="node-text" fill="var(--ok)">全函数</text>
+  <text x="540" y="183" class="node-text sm">条件 set_in_channel_gain（I2C ~1ms）</text>
+  <rect x="780" y="168" width="80" height="22" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="820" y="183" class="node-text" fill="var(--ok)">OK</text>
+
+  <!-- EnableInput -->
+  <text x="50" y="212" class="node-text">EnableInput</text>
+  <rect x="200" y="198" width="280" height="22" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="340" y="213" class="node-text" fill="var(--ok)">全函数</text>
+  <text x="540" y="213" class="node-text sm">codec_dev_open/close ~5-10ms</text>
+  <rect x="780" y="198" width="80" height="22" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="820" y="213" class="node-text" fill="var(--ok)">OK</text>
+
+  <!-- EnableOutput -->
+  <text x="50" y="242" class="node-text">EnableOutput</text>
+  <rect x="200" y="228" width="280" height="22" fill="#E8F5E9" stroke="var(--ok)" stroke-width="2"/>
+  <text x="340" y="243" class="node-text" fill="var(--ok)" font-weight="600">全函数（上游纯净 · 无 delay）</text>
+  <text x="540" y="243" class="node-text sm">open + set_vol（无 mute / 无 vTaskDelay）</text>
+  <rect x="780" y="228" width="80" height="22" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="820" y="243" class="node-text" fill="var(--ok)">OK</text>
+
+  <!-- CalibrateMicOnce -->
+  <text x="50" y="272" class="node-text">CalibrateMicOnce</text>
+  <rect x="200" y="258" width="280" height="22" fill="#FFF3E0" stroke="var(--warn)" stroke-width="2"/>
+  <text x="340" y="273" class="node-text" fill="var(--warn)" font-weight="600">局部 :282-286 + Set* 重入</text>
+  <text x="540" y="273" class="node-text sm">非递归 mutex · 顺序拿放 · 不死锁</text>
+  <rect x="780" y="258" width="80" height="22" fill="#FFF3E0" stroke="var(--warn)"/>
+  <text x="820" y="273" class="node-text" fill="var(--warn)">B-7</text>
+
+  <!-- calib 子任务 -->
+  <text x="50" y="302" class="node-text" fill="#6A1B9A">↳ calib 子任务调底层 Write</text>
+  <rect x="200" y="288" width="280" height="22" fill="#F3E5F5" stroke="#6A1B9A" stroke-width="2"/>
+  <text x="340" y="303" class="node-text" fill="#6A1B9A" font-weight="600">跳锁（独占设计 · 外层 Stop）</text>
+  <text x="540" y="303" class="node-text sm">直接 esp_codec_dev_write · 避免 measure 串行</text>
+  <rect x="780" y="288" width="80" height="22" fill="#FFEBEE" stroke="var(--bad)"/>
+  <text x="820" y="303" class="node-text" fill="var(--bad)">P0-1</text>
+
+  <!-- 真正风险时序图 -->
+  <line x1="40" y1="325" x2="860" y2="325" stroke="#333"/>
+
+  <text x="50" y="350" class="node-text" font-weight="600" fill="var(--bad)">剩余风险（修复后）：</text>
+
+  <text x="50" y="375" class="node-text sm">1) calib 仍是裸 xTaskCreate · 任意 Core · 无 TaskHandle · ctx 栈 by-ref UAF 50ms 余量极小（P0-1 未修）</text>
+  <text x="50" y="392" class="node-text sm" fill="var(--bad)">   → 详见 § 9.3 patch + § 12.2 第 2 轮复盘</text>
+
+  <text x="50" y="415" class="node-text sm">2) audio_input bool 跨核可见性 + audio_service.Stop/Start 重入 · 详见 § 12.1 第 1 轮新风险</text>
+
+  <!-- legend -->
+  <g transform="translate(40, 425)">
+    <rect width="14" height="10" fill="#E8F5E9" stroke="var(--ok)"/><text x="20" y="9" class="node-text sm">持锁 OK</text>
+    <rect x="80" width="14" height="10" fill="#FFF3E0" stroke="var(--warn)"/><text x="100" y="9" class="node-text sm">持锁但有问题 (P1)</text>
+    <rect x="220" width="14" height="10" fill="#FFEBEE" stroke="var(--bad)"/><text x="240" y="9" class="node-text sm">未持锁 (P0/P1)</text>
+    <rect x="340" width="14" height="10" fill="#F3E5F5" stroke="#6A1B9A"/><text x="360" y="9" class="node-text sm">独立子任务</text>
+  </g>
+</svg>
+</div>
+</section>
+
+<!-- =============== 9 汇总 + 排除清单 =============== -->
+<section id="summary">
+<h2><span class="num">9</span> 汇总 · 排除清单 · 修复后剩余 P0 patch</h2>
+
+<h3>9.1 三篇评审统计（修复后剩余）</h3>
+<table>
+<thead><tr><th>评审</th><th>P0</th><th>P1</th><th>lean</th><th>待验证</th><th>核心关注</th></tr></thead>
+<tbody>
+<tr><td>A · 硬件链路</td><td>0</td><td>0</td><td>3</td><td>3</td><td>I2S TDM 时序 / channel_mask</td></tr>
+<tr><td>B · 并发资源</td><td>1</td><td>2</td><td>1</td><td>1</td><td>calib UAF 红线（P0-1）</td></tr>
+<tr><td>C · 精简可读</td><td>0</td><td>1（C-6 量化边界）</td><td>10</td><td>1</td><td>magic number / LOGW→LOGI / 量化边界</td></tr>
+<tr><td><b>合计</b></td><td><b>1</b></td><td><b>3</b></td><td><b>14</b></td><td><b>5</b></td><td>—</td></tr>
+</tbody>
+</table>
+
+<h3>9.2 量产前 P0 必修（剩余）</h3>
+<div class="callout bad">
+<b>批次 A · P0（量产前必修）</b>
+<ol class="compact" style="margin-top:6px;">
+<li><b>P0-1（B-4）</b> calib 改 xTaskCreatePinnedToCore（Core 1）+ TaskHandle + eTaskGetState 轮询等退出（10 min）</li>
+<li><b>P1-5（C-6）</b> input_gain 量化边界 31.5→30.0 · 避 ES7210 33-34.5 → GAIN_30DB 静默档跳（1 min · 强烈建议量产前一并修）</li>
+</ol>
+</div>
+
+<h3>9.3 P0-1 最小修复 patch</h3>
+<pre><code>--- a/main/audio/codecs/box_audio_codec.cc
++++ b/main/audio/codecs/box_audio_codec.cc
+@@ -297,16 +297,28 @@ void BoxAudioCodec::CalibrateMicOnce() {
++    // 16KB INT 堆 · 校准函数局部 · 函数返回即释放 · 量产首开机一次 / 远程触发
+     std::vector&lt;int16_t&gt; tone(8000);
+     for (size_t i = 0; i &lt; 8000; i++)
+         tone[i] = (int16_t)(24000 * std::sin(2.0 * M_PI * 1000 * i / 16000));
+     struct Ctx { BoxAudioCodec* self; std::vector&lt;int16_t&gt;* tone; } ctx{this, &amp;tone};
+
+     auto measure = [&amp;]() -&gt; int32_t {
+-        xTaskCreate([](void* a) {
++        TaskHandle_t calib_task = nullptr;
++        // Pin Core 1：避开 Core 0 codec_dev_write 同核 · 遵守 CLAUDE.md "main/ 下 0 裸 xTaskCreate" 红线
++        xTaskCreatePinnedToCore([](void* a) {
+             auto* c = (Ctx*)a;
+             c->self-&gt;Write(c->tone-&gt;data(), c->tone-&gt;size());
+             vTaskDelete(NULL);
+-        }, "calib", 4096, &amp;ctx, 5, NULL);
++        }, "calib", 4096, &amp;ctx, 5, &amp;calib_task, 1);
+         vTaskDelay(pdMS_TO_TICKS(150));
+-        std::vector&lt;int16_t&gt; rec(3200 * input_channels_);
++        // 12.8KB INT 堆 · 校准函数局部
++        std::vector&lt;int16_t&gt; rec(3200 * input_channels_);
+         Read(rec.data(), rec.size());
+         int64_t sum = 0;
+         for (size_t i = 0; i &lt; rec.size(); i += input_channels_)
+             sum += (int64_t)rec[i] * rec[i];
+-        vTaskDelay(pdMS_TO_TICKS(400));
++        // 等 calib 任务真正退出 · 防 ctx UAF + 防双写并发 · 最长 600ms（500 Write + 100 余量）
++        for (int i = 0; i &lt; 30 &amp;&amp; calib_task != nullptr
++             &amp;&amp; eTaskGetState(calib_task) != eDeleted; i++) {
++            vTaskDelay(pdMS_TO_TICKS(20));
++        }
+         return (int32_t)std::sqrt((double)sum / (rec.size() / input_channels_));
+     };
+</code></pre>
+
+<h3>9.4 P1-5（C-6）量化边界修复 patch</h3>
+<pre><code>--- a/main/audio/codecs/box_audio_codec.cc
++++ b/main/audio/codecs/box_audio_codec.cc
+@@ -319,8 +319,9 @@ void BoxAudioCodec::CalibrateMicOnce() {
+     int32_t rms = std::max(measure(), (int32_t)1);
+     float in_raw = 15.0f + 20.0f * std::log10(5000.0f / rms);
++    // ⚠ 边界 30.0（不是 31.5）：round(10.5)*3 = 33dB 触发 ES7210 驱动 bug · 严格小于 31.5 才量化
+     float input_gain = std::max(0.0f, std::min(36.0f,
+-        (in_raw &lt;= 31.5f) ? std::round(in_raw / 3.0f) * 3.0f : 36.0f));
++        (in_raw &lt;= 30.0f) ? std::round(in_raw / 3.0f) * 3.0f : 36.0f));
+</code></pre>
+
+<h3>9.5 排除问题清单（按落地难度升序 · lean → P0）</h3>
+<table>
+<thead><tr><th>#</th><th>级别</th><th>问题</th><th>位置</th><th>工作量</th><th>决策</th></tr></thead>
+<tbody>
+<tr><td>L-14</td><td><span class="pill lean">lean</span></td><td>LOGW 文案 vol=80 与代码 vol=76 不符</td><td>:287</td><td>1 min</td><td>可直接落</td></tr>
+<tr><td>L-6</td><td><span class="pill lean">lean</span></td><td>LOGW 正常路径改 LOGI</td><td>:287/:328/:340</td><td>2 min</td><td>可直接落</td></tr>
+<tr><td>L-15</td><td><span class="pill lean">lean</span></td><td>SetRefGain 死代码改 TODO</td><td>:332</td><td>1 min</td><td>可直接落</td></tr>
+<tr><td>L-5</td><td><span class="pill lean">lean</span></td><td>tone/rec 加红线注释</td><td>:297/:309</td><td>2 min</td><td>可直接落</td></tr>
+<tr><td>L-9</td><td><span class="pill lean">lean</span></td><td>1758 推导注释</td><td>:324</td><td>5 min</td><td>可直接落</td></tr>
+<tr><td>L-2</td><td><span class="pill lean">lean</span></td><td>volume×0.95 int cast → (vol*19)/20</td><td>:195</td><td>2 min</td><td>可直接落</td></tr>
+<tr><td>L-1</td><td><span class="pill lean">lean</span></td><td>TX slot_mask=BOTH 加注释</td><td>:128</td><td>1 min</td><td>可直接落</td></tr>
+<tr><td>L-7</td><td><span class="pill lean">lean</span></td><td>20+ magic number 常量化</td><td>全文</td><td>30 min</td><td>可直接落</td></tr>
+<tr><td>L-3</td><td><span class="pill lean">待验证</span></td><td>RX TDM bclk_div=8 抓波形或注释</td><td>:156</td><td>5/30 min</td><td>待 Jack 拍板</td></tr>
+<tr><td>L-8</td><td><span class="pill lean">lean</span></td><td>measure rec 两轮复用</td><td>:309</td><td>5 min</td><td>可直接落</td></tr>
+<tr><td>L-12</td><td><span class="pill lean">lean</span></td><td>析构补 i2s_del_channel</td><td>:89-101</td><td>3 min</td><td>可直接落</td></tr>
+<tr><td>L-11</td><td><span class="pill lean">待验证</span></td><td>diff 20% 容忍度数据收集</td><td>:341</td><td>数据测量</td><td>待 Jack 拍板</td></tr>
+<tr><td>L-13</td><td><span class="pill lean">待验证</span></td><td>assert + ESP_ERROR_CHECK 量产策略</td><td>全文</td><td>评估</td><td>待 Jack 拍板</td></tr>
+<tr><td>L-4</td><td><span class="pill lean">待验证</span></td><td>EnableInput 无 mute 首帧噪声</td><td>:211-233</td><td>5 min</td><td>待观察</td></tr>
+<tr><td>L-10</td><td><span class="pill lean">lean</span></td><td>Settings 批量 commit（跨文件）</td><td>跨文件</td><td>30-60 min</td><td>暂缓</td></tr>
+<tr><td><b>P1-5（C-6）</b></td><td><span class="pill p1">P1</span></td><td><b>input_gain 量化边界 31.5→33dB 驱动 bug</b></td><td>:322</td><td><b>1 min</b></td><td><b>可直接落</b></td></tr>
+<tr><td>P1-3（B-6）</td><td><span class="pill p1">P1</span></td><td>input/output_enabled_ 改 atomic</td><td>audio_codec.h:51-52</td><td>15 min</td><td>可直接落</td></tr>
+<tr><td>P1-4（B-7）</td><td><span class="pill p1">P1</span></td><td>remote_cmd calib 阻塞主循环 1.6s</td><td>remote_cmd.cc:212</td><td>20 min</td><td>待 Jack 拍板</td></tr>
+<tr><td><b>P0-1（B-4）</b></td><td><span class="pill p0">P0</span></td><td><b>calib 裸 xTaskCreate + UAF</b></td><td>:299-305</td><td><b>10 min</b></td><td><b>必修 · 可直接落</b></td></tr>
+</tbody>
+</table>
+
+<h3>9.6 量产前 P0 验收清单</h3>
+<div class="callout warn">
+<ul class="compact">
+<li>[ ] P0-1 calib 任务 PinToCore 1 + TaskHandle + eTaskGetState 轮询</li>
+<li>[ ] grep <code>xTaskCreate\b</code> 在 main/audio/codecs/box_audio_codec.cc 下 0 命中</li>
+<li>[ ] 烧 5 台净机首开机 · 全部走完 CalibrateMicOnce 不重启 · 校准日志正常</li>
+<li>[ ] 远程触发 mic_calibrate 100 次 · audio_service stop/start 干净 · 不漏唤醒不丢帧</li>
+<li>[ ] P1-5 量化边界 31.5→30.0 · 强烈建议量产前一并修</li>
+</ul>
+</div>
+
+<h3>9.7 修复历史（git blame 反查锚点）</h3>
+<div class="callout">
+<ul class="compact">
+<li>2026-05-13 · <code>box_audio_codec.cc:235-255</code> EnableOutput 回滚上游纯净版（删 mute + vTaskDelay · POP 下沉驱动层）</li>
+<li>2026-05-13 · <code>box_audio_codec.cc:257-271</code> Read/Write 加 lock_guard(data_if_mutex_)</li>
+<li>2026-05-13 · <code>box_audio_codec.cc:299-309</code> CalibrateMicOnce measure() 子任务 + 主线程 Read 改走底层 esp_codec_dev_write/read</li>
+<li>2026-05-13 · <code>remote_cmd.cc:212-222</code> OnMicCalibrate 触发前 audio_service_.Stop() · 校准完 Start()</li>
+<li>2026-05-13 · <code>box_audio_codec.cc:293-323</code> R2-1 · calib 改 xTaskCreatePinnedToCore Core 1 + P10 + TaskHandle + eTaskGetState 轮询（防 &ctx UAF · CLAUDE.md 红线）</li>
+<li>2026-05-13 · <code>audio_service.cc:188-221</code> R1-2 · Stop 末尾 join_task lambda · 等三 task 真退出 · 单 task 500ms 超时（防 Start 立刻重 create 引发新+旧 task 共存）</li>
+</ul>
+</div>
+</section>
+
+<!-- =============== 10 与 audio-flows.html 差异 =============== -->
+<section id="diff-audio-review">
+<h2><span class="num">10</span> 与现有 audio-flows.html 的差异 / 补充</h2>
+
+<div class="callout warn">
+<b>注</b>：仓库 <code>docs/</code> 下 <b>不存在 <code>p30-audio-review.md</code></b>（find 验证）·主链路评审现状只在 <code>p30-audio-flows.html § 8</code> 中。本节以 audio-flows.html 为对照。
+</div>
+
+<h3>10.1 重叠项（更细的细节）</h3>
+<table>
+<thead><tr><th>audio-flows.html § 8</th><th>本评审</th><th>补充内容</th></tr></thead>
+<tbody>
+<tr><td>§ 8.2 P0-1 calib 裸 xTaskCreate</td><td>P0-1 (B-4)</td><td>UAF 余量 50ms 推导 + eTaskGetState 而非固定 vTaskDelay + Core 1 选址理由</td></tr>
+<tr><td>§ 8.3 P1-4 BoxAudioCodec Read/Write 未持锁（已修）</td><td>—</td><td>修复路径见 § 9.7 修复历史</td></tr>
+</tbody>
+</table>
+
+<h3>10.2 新增（audio-flows.html 未覆盖）</h3>
+<table>
+<thead><tr><th>#</th><th>内容</th><th>严重度</th></tr></thead>
+<tbody>
+<tr><td>P1-5 (C-6)</td><td><b>input_gain 量化 round(10.5)=11→33dB（落 ES7210 33-34.5→GAIN_30DB 静默档跳）</b></td><td><span class="pill p1">P1 真实路径数据 bug</span></td></tr>
+<tr><td>P1-4 (B-7)</td><td>remote_cmd 路径阻塞主循环 1.6s · LVGL/UI 全停</td><td><span class="pill p1">P1 体验</span></td></tr>
+<tr><td>P1-3 (B-6)</td><td>input_enabled_ / output_enabled_ 父类 bool 非 atomic</td><td><span class="pill p1">P1 多核红线</span></td></tr>
+<tr><td>C-10</td><td>ESP_LOGW 日志 vol=80 与代码 vol=76 不符</td><td><span class="pill lean">lean 信息一致性</span></td></tr>
+<tr><td>V-1/V-2/V-3</td><td>RX TDM bclk_div 待验证 / channel_mask 双麦 / board.cc 与 flows.html 表格冲突</td><td><span class="pill lean">待验证</span></td></tr>
+</tbody>
+</table>
+
+<h3>10.3 规范冲突标注</h3>
+<table>
+<thead><tr><th>规范</th><th>本文件违规点</th></tr></thead>
+<tbody>
+<tr><td>CLAUDE.md "main/ 下 0 裸 xTaskCreate"</td><td>:303 calib · <span class="pill p0">P0-1</span></td></tr>
+<tr><td>esp32-memory.md "&gt; 4KB 堆分配必须注释"</td><td>:297 tone 16KB · :309 rec 12.8KB · <span class="pill lean">L-5</span></td></tr>
+<tr><td>esp32-memory.md "多核共享变量用 std::atomic"</td><td>父类 input/output_enabled_ bool · <span class="pill p1">P1-3</span></td></tr>
+<tr><td>esp32-memory.md "互斥锁有超时或 RAII"</td><td>✓ data_if_mutex_ 用 lock_guard 合规</td></tr>
+<tr><td>注释与代码自洽</td><td>:285 注释 "&gt;31.5 跳 36 避 33" vs 代码 :322 <code>&lt;=31.5</code> 让 31.5 落到 33 <span class="pill p1">C-6</span></td></tr>
+<tr><td>注释与代码自洽</td><td>:287 LOGW "vol=80" vs 代码 :293 vol=76 <span class="pill lean">C-10</span></td></tr>
+<tr><td>双源同步</td><td>audio-flows.html § 7 表格 "三 SKU 全用 Es7111AudioCodec" vs board.cc:962/:948 new BoxAudioCodec <span class="pill lean">V-3</span></td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>结论</b>：本评审在 audio-review.md 主链路评审之外，仍剩 1 个 P0（calib UAF · P0-1）+ 1 个 P1 实质数据 bug（量化边界 31.5）。其余 § 11 驱动层 hidden-p0/p1 + § 12 修复后再推演的 rest-p0/p1 见对应段落。
+</div>
+
+<h3>10.4 引用</h3>
+<ul class="compact">
+<li>权威源：<a href="p30-box-codec-review.md">docs/p30-box-codec-review.md</a></li>
+<li>本文件：<code>docs/p30-box-codec-flows.html</code>（视觉版）</li>
+<li>主链路视觉（唯一存在的双源主源）：<a href="p30-audio-flows.html">docs/p30-audio-flows.html</a> § 6.2 / § 8.2 链接本文件</li>
+<li>主链路 md（<b>不存在</b> · find 验证 · 待补）：<code>docs/p30-audio-review.md</code></li>
+<li>校准设计文档：<a href="mic-calibration.md">docs/mic-calibration.md</a></li>
+<li>项目根规则：<code>CLAUDE.md</code></li>
+<li>内存红线：<code>~/.claude/rules/esp32-memory.md</code></li>
+</ul>
+</section>
+
+<!-- =============== 11 驱动层深度推演（本轮新增） =============== -->
+<section id="deep">
+<h2><span class="num">11</span> 驱动层深度推演（三遍独立钻穿驱动栈）</h2>
+
+<p class="sub">本轮目标：钻到 esp_codec_dev / es8311 / es7210 / audio_codec_data_i2s / mydazy_codec_ctrl_i2c / i2c_bus_worker 源码层，找上一轮 § 3-§ 5 没挖到的新 bug。读源码后 <b>新增 hidden-p0 × 3</b> · <b>hidden-p1 × 5</b> · <b>hidden-p2 × 6</b> · 待验证 × 5。前置事实重核：<code>config.h:25-26</code> input/output 都是 <b>24000 Hz</b>（不是上一轮文档说的 16000）· MCLK = 24000 × 256 = <b>6.144 MHz</b>。</p>
+
+<div class="callout warn">
+<b>新增 pill 类</b>：<span class="pill" style="background:#FCE4EC;color:#880E4F">hidden-p0</span> = 驱动层隐藏 bug 量产 blocker · <span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span> = 量产中概率出现 · <span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span> = 极端边界 / 性能损耗 / 可观测性 · <span class="pill lean">待验证</span> = 代码看出 50% 把握 · 必须示波器 / dump_reg / 烧机复现确证。
+</div>
+
+<!-- ────────── 11.1 推演 1 ────────── -->
+<h3 id="deep-1">11.1 推演 1 · I2S/DMA/TDM 时钟和数据路径</h3>
+
+<p class="sub">前提核对：<code>config.h:25</code> AUDIO_INPUT_SAMPLE_RATE=24000 · <code>config.h:26</code> AUDIO_OUTPUT_SAMPLE_RATE=24000 · <code>box_audio_codec.cc:104</code> assert(input==output) 通过 · MCLK_MULTIPLE=256 → MCLK=6.144 MHz · TDM 4 slot × 16 bit × 24K = BCLK 1.536 MHz。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 470" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L9,5 L0,10 z" fill="#C62828"/>
+    </marker>
+  </defs>
+  <text x="440" y="22" class="svg-title" text-anchor="middle">推演 1 · 双工时钟链与 DMA 路径（24kHz · MCLK_MUL=256 · BCLK_DIV=8）</text>
+
+  <!-- 时钟源 -->
+  <rect x="30" y="50" width="160" height="60" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text x="110" y="72" class="node-text" font-weight="600">PLL_F160M / APB</text>
+  <text x="110" y="90" class="node-text sm">I2S_CLK_SRC_DEFAULT</text>
+
+  <!-- TX MCLK gen -->
+  <rect x="220" y="50" width="200" height="60" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="320" y="68" class="node-text" font-weight="600">TX std_cfg</text>
+  <text x="320" y="84" class="node-text sm">sample_rate=24000 (cfg)</text>
+  <text x="320" y="98" class="node-text sm">mclk_multi=256</text>
+
+  <!-- RX MCLK gen -->
+  <rect x="220" y="140" width="200" height="60" rx="6" fill="#FFF3E0" stroke="#F57F17"/>
+  <text x="320" y="158" class="node-text" font-weight="600">RX tdm_cfg</text>
+  <text x="320" y="174" class="node-text sm">sample_rate=24000 (cfg)</text>
+  <text x="320" y="188" class="node-text sm">mclk_multi=256 · bclk_div=8</text>
+
+  <!-- I2S0 控制器（共享 MCLK/BCLK/WS）-->
+  <rect x="460" y="80" width="180" height="100" rx="6" fill="white" stroke="#666" stroke-width="2"/>
+  <text x="550" y="100" class="node-text" font-weight="600">I2S0 controller</text>
+  <text x="550" y="118" class="node-text sm">实际 MCLK = 6.144 MHz</text>
+  <text x="550" y="134" class="node-text sm">实际 BCLK 由谁决定？</text>
+  <text x="550" y="150" class="node-text sm" fill="#C62828">init_std → init_tdm 后写</text>
+  <text x="550" y="166" class="node-text sm" fill="#C62828">→ TDM clk 覆盖 STD clk</text>
+
+  <line x1="190" y1="80" x2="220" y2="80" stroke="#1976D2" marker-end="url(#ar1)"/>
+  <line x1="190" y1="100" x2="220" y2="170" stroke="#1976D2" marker-end="url(#ar1)"/>
+  <line x1="420" y1="80" x2="460" y2="110" stroke="#C62828" marker-end="url(#ar1)"/>
+  <line x1="420" y1="170" x2="460" y2="150" stroke="#F57F17" marker-end="url(#ar1)"/>
+
+  <!-- 时钟下行 -->
+  <rect x="680" y="50" width="170" height="50" rx="6" fill="white" stroke="#666"/>
+  <text x="765" y="68" class="node-text" font-weight="600">ES8311 (DAC)</text>
+  <text x="765" y="86" class="node-text sm">slave · use_mclk</text>
+  <rect x="680" y="130" width="170" height="50" rx="6" fill="white" stroke="#666"/>
+  <text x="765" y="148" class="node-text" font-weight="600">ES7210 (ADC)</text>
+  <text x="765" y="166" class="node-text sm">slave (master_mode=false)</text>
+  <line x1="640" y1="110" x2="680" y2="75" stroke="#666" marker-end="url(#ar1)"/>
+  <line x1="640" y1="150" x2="680" y2="155" stroke="#666" marker-end="url(#ar1)"/>
+
+  <!-- DMA -->
+  <rect x="30" y="240" width="370" height="120" rx="6" fill="#FFF8E1" stroke="#E65100"/>
+  <text x="215" y="260" class="node-text" font-weight="600">DMA 描述符（INT RAM）</text>
+  <text x="215" y="280" class="node-text sm">dma_desc_num=6 · dma_frame_num=240</text>
+  <text x="215" y="298" class="node-text sm">TX：6 × 240 × 2(stereo) × 2(byte) = 5.76 KB</text>
+  <text x="215" y="316" class="node-text sm">RX：6 × 240 × 4(slot) × 2(byte) = 11.52 KB</text>
+  <text x="215" y="334" class="node-text sm">一份 buffer = 240 / 24000 = 10 ms</text>
+  <text x="215" y="350" class="node-text sm" fill="#C62828">6 份共 60 ms · audio_input 卡 60ms 就丢帧不报警</text>
+
+  <!-- 帧大小 -->
+  <rect x="420" y="240" width="430" height="120" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text x="635" y="260" class="node-text" font-weight="600">audio_input 单次读取 vs DMA 单 buffer</text>
+  <text x="635" y="280" class="node-text sm">audio_service ReadAudioData(samples=N)</text>
+  <text x="635" y="296" class="node-text sm">→ data.resize(N × 2 ch) · codec_dev_read(len = 2N × 2 = 4N bytes)</text>
+  <text x="635" y="312" class="node-text sm">假设 AFE 帧 30ms@16K=480 samples → 32 ms 重采样</text>
+  <text x="635" y="328" class="node-text sm" fill="#C62828">i2s_channel_read 阻塞拼接多 DMA buffer · 内部</text>
+  <text x="635" y="344" class="node-text sm" fill="#C62828">timeout=1000ms 已超 dma_total 60 ms · 隐藏吞噬</text>
+
+  <!-- 红色警示 -->
+  <rect x="30" y="385" width="820" height="70" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-dasharray="4,2"/>
+  <text x="440" y="403" class="node-text" font-weight="600" fill="#C62828">隐藏链路 #H1-A：duplex 共 BCLK/WS · TX init 先 / RX init 后 · RX TDM 配 ws_width=I2S_TDM_AUTO_WS_WIDTH</text>
+  <text x="440" y="421" class="node-text sm" fill="#C62828">→ esp_codec_dev_open(in) 时 set_drv_fs 又会 reconfig_tdm_slot/clock · 此时 TX 已 enable · 必须先 disable TX 才能改</text>
+  <text x="440" y="439" class="node-text sm" fill="#C62828">audio_codec_data_i2s.c:651-654 内部"disable internally" 但只 disable 本通道 · paired TX 仍跑 · RX set_fs 期间 TX 时钟脏？需波形验</text>
+</svg>
+</div>
+
+<h4>11.1.1 钻穿要点</h4>
+<table>
+<thead><tr><th>子项</th><th>钻穿位置</th><th>结论</th></tr></thead>
+<tbody>
+<tr><td>MCLK 频率推导</td><td><code>box_audio_codec.cc:122/155</code> mclk_multi=256 · sample=24K</td><td>MCLK=6.144MHz · 与上一轮文档"4.096MHz @ 16K"不符 · 本节为准</td></tr>
+<tr><td>BCLK 谁主导</td><td><code>audio_codec_data_i2s.c:421-428 set_fs</code></td><td>RX clock 在 duplex 下要回写 TX 时钟才生效 · 注释明说 "TX is master, set to RX not take effect need reconfig TX also" · 但只在 <code>paired->out_enable == false</code> 才走 · 我们 EnableOutput 先于 EnableInput 时进不去此分支 → <b>RX clock 实际是被 TX 6.144M 拉走的</b>，bclk_div=8 完全是 <b>死配置</b>（被 set_drv_fs 重写）</td></tr>
+<tr><td>bclk_div=8 上一轮"待验证"</td><td><code>box_audio_codec.cc:156</code></td><td>i2s_tdm_config_t 中 bclk_div 仅在 master 模式生效 · 我们是 I2S_ROLE_MASTER 但被 esp_codec_dev 在 open(in) 时调 <code>i2s_channel_reconfig_tdm_slot</code> + <code>reconfig_tdm_clock</code> 完全重写 · <b>bclk_div=8 是冗余配置</b> · 实际 BCLK = sample_rate × total_slot × slot_bits = 24K×4×16 = 1.536MHz（不是按 mclk/bclk_div=6.144M/8=768K）<span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td></tr>
+<tr><td>DMA buffer 大小</td><td><code>audio_codec.h:14-15</code> + <code>box_audio_codec.cc:109-110</code></td><td>TX：6×240×2×2=5.76KB INT · RX：6×240×4×2=<b>11.52 KB INT</b>（4 slot） · 60ms 总缓冲 · audio_input 单次读 480 sample / 32ms 时长内若不来取 → 第二次再读会丢前 1 个 buffer 静默</td></tr>
+<tr><td>DMA 在 INT RAM</td><td>IDF i2s_chan_config_t 默认 MALLOC_CAP_DMA</td><td>合规（PSRAM 不可 DMA）· 但 11.52KB 是 INT 大头 · 关机省内存可考虑改 dma_desc_num=4 减 3.84KB</td></tr>
+<tr><td>TDM slot mask 4 选 1</td><td><code>box_audio_codec.cc:162</code> SLOT0|1|2|3 = 4 bits · <code>:220</code> channel_mask = bit 0 only · <code>:225</code> +bit 1 if reference</td><td>i2s rx 物理拿 4 slot（0/1/2/3 全部 frame），<b>但</b> codec_dev sample_info.channel=4 而 channel_mask=0x01 / 0x03 只取 mask 中的 channel · 看 <code>audio_codec_data_i2s.c:374-378</code> TDM set_drv_fs：total_slot=fs->channel=4 · slot_mask=channel_mask=0x01/0x03 · ws_width=slot_bits × channel / 2 = 16×4/2=32 bit · ES7210 reg 12=TDM=0x02</td></tr>
+<tr><td>ES7210 master/slave</td><td><code>es7210.c:428-444</code> + <code>es7210_codec_cfg_t</code></td><td>box_audio_codec 没显式设 master_mode → 默认 false（slave）· ES7210 接 I2S slave · BCLK 来自 ESP32 TX 时钟 · MCLK 也是 ESP32 给 · ES7210 reg02 mclk_div MCLK_DEFAULT_DIV=256 → 6.144/256=24K ✓</td></tr>
+<tr><td>采样率冲突</td><td><code>box_audio_codec.cc:104</code> assert(input==output)</td><td>静态防护好 · 但若未来产品需求改 input=16K output=24K · assert 会 abort（量产期可接受）</td></tr>
+<tr><td>slot 顺序</td><td>std_cfg.left_align=true · tdm_cfg.left_align=false（但 data_if 会 force true at :381）</td><td>STD 与 TDM 左对齐一致 · 16-bit data 放在 32-bit slot 的高 16 位（msb_first）· ES7210/ES8311 接收正确</td></tr>
+<tr><td>首帧对齐</td><td><code>esp_codec_dev.c:147-211 _open</code></td><td>open 顺序：data_if->set_fmt → data_if->enable → codec->set_fs → codec->enable → <code>_update_codec_setting</code>。<b>但</b> codec->enable 内部 es7210_start 写一长串寄存器约 30-50ms · 期间 i2s_channel 已 enable · ADC 数字滤波 OSR=0x20 + HPF 启动 · 前 ~50ms DMA 收到的全是噪声/0 · audio_input Read 第一次返回时这些脏数据已进 buffer <span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td></tr>
+<tr><td>HPF 默认开</td><td><code>es7210.c:420-423</code> 写 HPF1/HPF2 reg22/23/20/21 = 0x2a/0x0a/0x0a/0x2a</td><td>ES7210 HPF 默认 ON · 截止频率 ~80Hz @ 16K · 24K 时按比例 ~120Hz · 对 AEC ref 信号低频损害较小 · 但对女声/儿童 200-300Hz 基频会有 -1dB · 量产可接受</td></tr>
+<tr><td>位深匹配</td><td>I2S_DATA_BIT_WIDTH_16BIT × I2S_SLOT_BIT_WIDTH_AUTO</td><td>AUTO 解析为 16bit（不会自动 padding 到 32bit）· 但 TDM 模式下 audio_codec_data_i2s.c 算 slot_bits = total_bits / out_channel · 在 1ch 输出场景 fs.channel=1 → 被 fs->channel=2 替换（_i2s_data_set_fmt:626）· ES8311 set_bits=16 · OK</td></tr>
+</tbody>
+</table>
+
+<h4>11.1.2 推演 1 · 新增 hidden bug</h4>
+<table>
+<thead><tr><th>#</th><th>级别</th><th>问题</th></tr></thead>
+<tbody>
+<tr><td>H1-A</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td><td><b>codec_dev_open 期间脏数据进 DMA</b> · 50ms 寄存器序列 + i2s channel 已 enable · audio_input task 首次 Read 取到的是 ADC 启动期噪声 · 影响：唤醒首字误识别 + AEC 前 1 秒收敛慢 · 修复：EnableInput 后 vTaskDelay 50ms 再让 audio_input 开始 read · 或 Read 前 i2s_channel_disable + flush + enable</td></tr>
+<tr><td>H1-B</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td><td><b>bclk_div=8 是死配置</b> · esp_codec_dev set_drv_fs 内部用 I2S_TDM_PHILIPS_SLOT_DEFAULT_CONFIG 覆盖全部 slot_cfg + reconfig_tdm_clock 完全重写 · 我们写的 .bclk_div=8 无效 · 应删除或改注释"仅用于 codec_dev_open 之前的占位"</td></tr>
+<tr><td>H1-C</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td><td><b>DMA buffer 11.52KB INT RAM 永驻</b> · CalculateInfo § 1.3 标 11.5KB 已知 · 但本轮发现 dma_frame_num=240 完全可改 160（96 sample/帧 不影响 30ms AFE 帧 480 sample = 5 buffer）· 净省 3.84KB INT · 量产期对话内部 RAM &gt; 60KB 红线可松 ~6% · 待评估</td></tr>
+<tr><td>H1-D</td><td><span class="pill lean">待验证</span></td><td><b>RX TDM ws_width 实际值</b> · 配置 I2S_TDM_AUTO_WS_WIDTH · data_if.c:386 重算 ws_width = slot_bits × channel / 2 = 16×4/2 = <b>32 bit</b> · ES7210 是否能正确解 32-bit WS（典型 BCLK/64）· 抓波形 1.024us 高 + 31×0.651us 低</td></tr>
+<tr><td>H1-E</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td><td><b>esp_codec_dev_close 不真关 codec</b> · <code>esp_codec_dev.c:503-527</code> close 调 codec->enable(codec, false) + data_if->enable(false) · 但 <b>ES8311 enable(false)</b> = es8311_suspend + PA_DISABLE + set_mute(true) · es7210_stop 写一堆 0xff/0xc0 进 power down · <b>但</b> data_if disable_pending 机制（<code>:573-583</code>）会"延迟" disable RX channel 等 TX 关 · 量产场景：EnableOutput(false) 时 RX 还在跑 → 走 "Pending out channel for in channel running" 分支 · <b>TX 实际没真 disable</b> · 下次 EnableOutput(true) 时 i2s_channel_enable 被 IDF 拒绝（已 enable）静默 fail · 影响：第二次激活 TX 时钟可能错乱 / 通话首字噼啪</td></tr>
+</tbody>
+</table>
+
+<!-- ────────── 11.2 推演 2 ────────── -->
+<h3 id="deep-2">11.2 推演 2 · 寄存器初始化序列与时序</h3>
+
+<p class="sub">钻穿点：<code>es8311.c es8311_open</code>（:539-624 · 80 行 register sequence）+ <code>es7210.c es7210_open</code>（:405-472 · 64 行 register sequence）+ PA pin 板级 vs codec_dev 双控冲突。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 520" xmlns="http://www.w3.org/2000/svg">
+  <text x="440" y="22" class="svg-title" text-anchor="middle">推演 2 · ES8311 + ES7210 init 序列与 PA pin 时序</text>
+
+  <!-- 时间轴 -->
+  <line x1="40" y1="450" x2="850" y2="450" stroke="#333" stroke-width="1"/>
+  <text x="40" y="470" class="svg-axis">t=0</text>
+  <text x="200" y="470" class="svg-axis">+10ms</text>
+  <text x="400" y="470" class="svg-axis">+50ms 构造完</text>
+  <text x="600" y="470" class="svg-axis">EnableOutput</text>
+  <text x="780" y="470" class="svg-axis">+100ms 解 mute</text>
+
+  <!-- Board::Init -->
+  <rect x="40" y="50" width="160" height="90" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="120" y="68" class="node-text" font-weight="600">board.cc:292</text>
+  <text x="120" y="84" class="node-text sm">gpio_set_dir(PA, OUT)</text>
+  <text x="120" y="100" class="node-text sm">gpio_set_level(PA, <b>1</b>)</text>
+  <text x="120" y="118" class="node-text sm" fill="#C62828">PA 上电立刻拉高</text>
+  <text x="120" y="134" class="node-text sm" fill="#C62828">无 ramp · DAC 未 init</text>
+
+  <!-- BoxAudioCodec ctor -->
+  <rect x="220" y="50" width="170" height="90" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
+  <text x="305" y="68" class="node-text" font-weight="600">BoxAudioCodec()</text>
+  <text x="305" y="84" class="node-text sm">CreateDuplexChannels</text>
+  <text x="305" y="100" class="node-text sm">i2s_channel_enable</text>
+  <text x="305" y="116" class="node-text sm" fill="#C62828">MCLK 6.144M 开始输出</text>
+  <text x="305" y="132" class="node-text sm">DOUT/DIN 数据 = 0</text>
+
+  <!-- ES8311 ctor → open(out) ES_PA_SETUP + DISABLE -->
+  <rect x="410" y="50" width="200" height="90" rx="6" fill="#FFF3E0" stroke="#F57F17"/>
+  <text x="510" y="68" class="node-text" font-weight="600">es8311_codec_new</text>
+  <text x="510" y="84" class="node-text sm">空构造（不写寄存器）</text>
+  <text x="510" y="100" class="node-text sm" fill="#C62828">PA 仍 = 1（board 设）</text>
+  <text x="510" y="116" class="node-text sm">直到 EnableOutput(true)</text>
+  <text x="510" y="132" class="node-text sm">才走 es8311_open</text>
+
+  <!-- EnableOutput -->
+  <rect x="630" y="50" width="220" height="90" rx="6" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="740" y="68" class="node-text" font-weight="600">EnableOutput(true)</text>
+  <text x="740" y="84" class="node-text sm">set_out_mute(true)</text>
+  <text x="740" y="100" class="node-text sm">codec_dev_open → es8311_open</text>
+  <text x="740" y="116" class="node-text sm">→ <b>ES_PA_SETUP|DISABLE</b></text>
+  <text x="740" y="132" class="node-text sm" fill="#C62828">PA 拉低 0（覆盖 board 1）</text>
+
+  <!-- es8311 init seq -->
+  <rect x="40" y="180" width="400" height="120" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text x="240" y="200" class="node-text" font-weight="600">ES8311 init 序列（70+ 寄存器写 · ~30ms）</text>
+  <text x="240" y="218" class="node-text sm">REG0D=0xFA · REG44=0x08(×2) · REG01-05 clk · REG0B/0C 系统</text>
+  <text x="240" y="234" class="node-text sm">REG00=0x80 reset → slave mode bit</text>
+  <text x="240" y="250" class="node-text sm">REG01=0x30 mclk select · REG06 sclk inv</text>
+  <text x="240" y="266" class="node-text sm">REG13/1B/1C ADC · REG44 internal ref ADCL+DACR</text>
+  <text x="240" y="282" class="node-text sm" fill="#C62828">→ es8311_open 不调 set_fs · 由 codec_dev._open 后调</text>
+
+  <!-- es7210 init seq -->
+  <rect x="460" y="180" width="390" height="120" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
+  <text x="655" y="200" class="node-text" font-weight="600">ES7210 init 序列（30+ 寄存器写 · ~20ms）</text>
+  <text x="655" y="218" class="node-text sm">RST=0xff → 0x41 · CLK_OFF=0x3f</text>
+  <text x="655" y="234" class="node-text sm">TC0/TC1=0x30 · HPF22/23=0x2a 启动 HPF</text>
+  <text x="655" y="250" class="node-text sm">MIC12/34 bias=0x70(2.87V) · OSR=0x20</text>
+  <text x="655" y="266" class="node-text sm">REG02=0xc1 mclk_div clear · mic_select 4 麦</text>
+  <text x="655" y="282" class="node-text sm" fill="#C62828">→ set_channel_gain(0xF, <b>30dB</b>) <span class="pill" style="background:#FCE4EC;color:#880E4F">hidden-p0</span></text>
+
+  <!-- Stop 序列 -->
+  <rect x="40" y="320" width="800" height="110" rx="6" fill="#FCE4EC" stroke="#880E4F"/>
+  <text x="440" y="340" class="node-text" font-weight="600" fill="#880E4F">关闭路径不对称 · POP 噪声风险点</text>
+  <text x="440" y="360" class="node-text sm" fill="#880E4F">EnableOutput(false)：mute(true) → vTaskDelay 20ms → codec_dev_close → es8311_close → set_mute(true)（已 mute · no-op）+ PA_DISABLE（已 0 · no-op）+ suspend</text>
+  <text x="440" y="376" class="node-text sm" fill="#880E4F">但 PA pin 板级初值 = 1 · 第一次 EnableOutput 前 PA=1 但 DAC 静音 · 浮地噪声 / 板载 RF 串扰可能耦合到喇叭</text>
+  <text x="440" y="394" class="node-text sm" fill="#880E4F">PA 拉低顺序：codec_dev_close → es8311_close → set_mute → suspend → 最后 PA_DISABLE · 此时 DAC 仍输出 LSB · PA "嗒" 一声</text>
+  <text x="440" y="412" class="node-text sm" fill="#880E4F">应该：set_mute(true) → wait 20ms → PA_DISABLE → 再 suspend</text>
+</svg>
+</div>
+
+<h4>11.2.1 钻穿要点</h4>
+<table>
+<thead><tr><th>子项</th><th>钻穿位置</th><th>结论</th></tr></thead>
+<tbody>
+<tr><td>PA pin 双控冲突</td><td><code>board.cc:292-294</code> vs <code>es8311.c:553/670/676</code></td><td><b>开机时序：</b> board.cc:292 → PA=1（DAC 未 init · 喇叭浮地）→ BoxAudioCodec 构造完 PA 仍=1 → 第一次 EnableOutput(true) → es8311_open → ES_PA_SETUP（gpio_config 重写） + ES_PA_DISABLE → PA=0 → ES_PA_ENABLE + 解 mute → PA=1 · 过程 PA 经历 1→0→1，喇叭"嗒嗒" <span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td></tr>
+<tr><td>开机 PA=1 浮空时长</td><td><code>main.cc/application.cc</code> 启动序列</td><td>从 board::Init() 拉高 → 应用代码 → GetAudioCodec → CalibrateMicOnce / audio_service.Start → 第一次 EnableOutput 期间 PA 浮空 <b>数百毫秒到 1 秒</b> · 数字电流变化耦合到模拟域 → 喇叭可闻底噪</td></tr>
+<tr><td>es8311 双写 REG44</td><td><code>es8311.c:561-563</code></td><td>注释 "Due to occasional failures during the first I2C write with the ES8311 chip, a second write is performed" · <b>说明 ES8311 上电首次 I2C 不稳定</b> · 这意味着如果我们在 worker 排队下首次写时机抖动，仍可能丢字节 · 上游 retry 2 次 · OK</td></tr>
+<tr><td>es7210 启动 default gain</td><td><code>es7210.c:457</code> _es7210_set_channel_gain(codec, 0xF, <b>30.0</b>)</td><td><b>开机即 30dB</b>！· box_audio_codec 后续 SetInputGain(input_gain_=15) 才覆盖（构造日志 "MIC=15.0dB"） · 但 <b>codec_dev_open(input) 之前不能 set_in_gain</b>（_verify_codec_setting → WRONG_STATE）· <b>所以 ES7210 在 EnableInput 之前 gain 一直是 30dB</b> · 如果 CalibrateMicOnce 调用前 input 没有真正 enable，第一次 measure() 读的是 <b>30dB gain</b> 的 RMS · 校准公式 in_raw = 15 + 20log10(5000/RMS) 假设是 15dB 基准 → <b>反推 input_gain 偏低 15dB</b> · <span class="pill" style="background:#FCE4EC;color:#880E4F">hidden-p0</span></td></tr>
+<tr><td>验证：<code>CalibrateMicOnce :289</code></td><td><code>if (!input_enabled_) EnableInput(true)</code></td><td>幸运的是 EnableInput(true) 先调用 · EnableInput 内部调 set_in_channel_gain(input_dev_, mask, input_gain_=15.0) · 写 ES7210 reg43=gain·gain=GAIN_15DB（idx=5）· <b>但</b> es7210_set_channel_gain 内部 get_db(15.0 + 0.5 = 15.5)·15.5/3=5·返回 GAIN_15DB · OK · <b>注意：set_in_channel_gain 只设 mic1（mask=0x01）· mic2/3/4 仍是 init 时的 30dB</b> · 如果 AEC 用 mic2 做 ref，REF 路通道是 30dB · 与 input_gain_ 不一致 <span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td></tr>
+<tr><td>ES7210 get_db 量化档</td><td><code>es7210.c:328-345</code></td><td><b>关键源码：</b><pre><code>if (db &lt; 33) {
+  int idx = db &lt; 3 ? 0 : db / 3;
+  return GAIN_0DB + idx;  // 每 3dB 一档
+}
+if (db &lt; 34.5) return GAIN_30DB;  // 33-34.5 → 30dB
+if (db &lt; 36)   return GAIN_34_5DB;
+if (db &lt; 37)   return GAIN_36DB;
+return GAIN_37_5DB;</code></pre>上一轮 P1-5 标"33dB 触发 bug" → <b>实际不是 driver bug</b> · 是档位 [33, 34.5) → GAIN_30DB 这个区间 · 写 input_gain=33 实际生效 30dB · 与"驱动 bug"描述不符 · 但仍是非单调跳跃 <span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span> 修正上一轮判断</td></tr>
+<tr><td>db+=0.5 半档偏置</td><td><code>es7210.c:330</code></td><td>get_db(15.0) → 15.5 → idx=5 → GAIN_15DB · get_db(14.0) → 14.5/3=4 → GAIN_12DB · <b>用户写 15dB 实际生效 15dB · 用户写 14dB 实际生效 12dB</b> · 量化误差最大 1.5dB · 上一轮已知 · OK</td></tr>
+<tr><td>es8311 reg44 internal ref</td><td><code>es8311.c:614-618</code> no_dac_ref==false（默认）</td><td>REG44 = 0x58 = 启用 "ADCL + DACR" 内部参考信号 · 把 DAC 输出回灌进 ADC 做硬件回采 · <b>但</b> 我们用 ES7210 4ch TDM · DAC 回采路径不接到 ES7210 · REG44=0x58 在我们场景 <b>无作用但浪费</b> · 可视情况关</td></tr>
+<tr><td>codec init 占用 i2c_worker</td><td>构造期 ~50-100ms 总 worker</td><td>worker 单线程 · 期间 touch poll（30ms 周期 · 6 字节 IIC）排队 · 开机首 100ms 触屏卡顿 / 触摸晚抬手 · 已知</td></tr>
+<tr><td>MCLK GPIO drive strength</td><td>默认 5mA · 6.144MHz</td><td>5mA @ 50pF 估上升时间 ~5ns · 24MHz BCLK 都不出错 · 6MHz 完全够 · OK</td></tr>
+<tr><td>codec_dev_open 重入</td><td><code>esp_codec_dev.c:153-155</code></td><td><b>幂等：</b>已 opened 直接返回 OK 不重做 init · <b>但</b> 此时 fs 参数被丢弃 · 如果第一次 open(fs=fs1) · 后续 open(fs=fs2) · fs2 静默丢失 <span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td></tr>
+<tr><td>codec_dev_close 真关</td><td><code>esp_codec_dev.c:503-527</code></td><td>调 codec_if->enable(false) + data_if->enable(false)（带 pending 机制 H1-E）· dev->output_opened = false · 下次 open 走完整 init · ES8311 寄存器全重写 · OK 但费 i2c_worker 100ms</td></tr>
+</tbody>
+</table>
+
+<h4>11.2.2 推演 2 · 新增 hidden bug</h4>
+<table>
+<thead><tr><th>#</th><th>级别</th><th>问题</th></tr></thead>
+<tbody>
+<tr><td>H2-A</td><td><span class="pill" style="background:#FCE4EC;color:#880E4F">hidden-p0</span></td><td><b>CalibrateMicOnce 先 EnableInput 才校准 · 但 input_gain_=15 只设 mic1 · ES7210 其它通道默认 30dB</b> · 校准用 mic1 RMS 反推公式 OK · <b>但</b> 量产场景 audio_service.cc:212 InputData → 读 4ch TDM · 实际 AFE 拿到的是 <b>mic1=15dB · mic2/3/4=30dB</b> 的混合数据 · AEC 把 mic2 当 ref 时差 15dB · 修复：构造或 EnableInput 内对 all-mics-mask=0xF 一起 set_channel_gain(input_gain_)</td></tr>
+<tr><td>H2-B</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td><td><b>PA POP 三段时序</b>：board PA=1 → 100ms 浮空 → ES_PA_SETUP+DISABLE 拉低 → es8311_open 全 init → ES_PA_ENABLE 拉高 + 解 mute · PA 经历 1→0→1 各跳一次 · 喇叭"嗒-嗒"两声 · 修复：board.cc:294 改 gpio_set_level(PA, 0) 起始低电平 / 或不要在 board.cc 设 PA · 把全权交给 es8311_pa_power</td></tr>
+<tr><td>H2-C</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td><td><b>EnableOutput(true) vTaskDelay(30) 不够覆盖 codec init</b> · es8311_start 调用 + PA_ENABLE + set_mute(false) 一共耗 ~20-30ms · 上一轮 P1-1 标"延迟拆出锁外" · 本轮发现 30ms 这个值 <b>不够</b> · 应该 50ms 才稳 · 但只是 POP 残留 · 量产可接受</td></tr>
+<tr><td>H2-D</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td><td><b>REG44=0x58 内部回参考浪费</b> · 我们用外部 ES7210 4ch · es8311 内部 ADCL+DACR 参考路径无用 · 上电时占电流 ~2mA · 量产可考虑改 es8311_cfg.no_dac_ref=true 让 REG44=0x08</td></tr>
+<tr><td>H2-E</td><td><span class="pill lean">待验证</span></td><td><b>ES7210 GAIN_30DB（archive 33-34.5dB 区间映射）</b> · 上一轮 P1-5 标 31.5→33dB 修复 patch 实际反而落 GAIN_30DB · 没"驱动 bug"但有静默档跳 · 必须 dump_reg ES7210 reg43-46 验证档位映射</td></tr>
+<tr><td>H2-F</td><td><span class="pill lean">待验证</span></td><td><b>ES7210 init 时机：</b> es7210_codec_new 只把 codec 结构 alloc 好 · 真正写寄存器在 es7210_open（由 codec_dev_open 调用）· <b>但</b> ES7210 没接 ESP32 上电就有时钟（来自 MCLK GPIO 输出后）· 如果 MCLK 输出过早 + ES7210 上电延迟 < MCLK 稳定 → 首次 RST 可能 fail · 静默 ESP_LOGE 后续依然返回 OK · 必须示波器验上电 MCLK 启动到首次 I2C 写的时间差</td></tr>
+</tbody>
+</table>
+
+<!-- ────────── 11.3 推演 3 ────────── -->
+<h3 id="deep-3">11.3 推演 3 · 跨 task/core/锁竞态边界</h3>
+
+<p class="sub">钻穿点：父类 vs 派生虚函数链 · cache 一致性 · esp_codec_dev 内部 mutex vs data_if_mutex_ · audio_input/output 双核读写共享 codec_dev 句柄。</p>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 530" xmlns="http://www.w3.org/2000/svg">
+  <text x="440" y="22" class="svg-title" text-anchor="middle">推演 3 · 双核 4 锁交织（audio_input Core 1 / audio_output Core 0 / calib Core ? / setting Core 0）</text>
+
+  <!-- Core 1 column -->
+  <rect x="30" y="45" width="380" height="430" rx="8" fill="var(--core1)" stroke="var(--core1-line)" stroke-width="1"/>
+  <text x="220" y="65" class="node-text" font-weight="600" fill="var(--core1-line)">Core 1（音频实时）</text>
+
+  <rect x="50" y="80" width="340" height="60" rx="4" fill="white" stroke="var(--core1-line)"/>
+  <text x="220" y="98" class="node-text" font-weight="600">audio_input task · P10</text>
+  <text x="220" y="116" class="node-text sm">while: codec_->InputData → BoxAudioCodec::Read</text>
+  <text x="220" y="132" class="node-text sm">→ esp_codec_dev_read（不持 data_if_mutex_）</text>
+
+  <rect x="50" y="160" width="340" height="80" rx="4" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="220" y="180" class="node-text" font-weight="600" fill="#C62828">未持锁但 codec_dev 内部检 input_opened</text>
+  <text x="220" y="198" class="node-text sm" fill="#C62828">esp_codec_dev.c:258 if (input_opened==false) return WRONG_STATE</text>
+  <text x="220" y="214" class="node-text sm" fill="#C62828">→ EnableInput(false) 在另一核翻 input_opened</text>
+  <text x="220" y="230" class="node-text sm" fill="#C62828">→ Core 1 这边可能拿到 WRONG_STATE</text>
+
+  <rect x="50" y="260" width="340" height="60" rx="4" fill="white" stroke="var(--core1-line)"/>
+  <text x="220" y="278" class="node-text" font-weight="600">audio_codec_data_i2s 内部锁</text>
+  <text x="220" y="296" class="node-text sm">_i2s_data_enable/set_fmt 持 esp_codec_dev_mutex</text>
+  <text x="220" y="312" class="node-text sm">read/write 不持锁（直接 i2s_channel_read）</text>
+
+  <rect x="50" y="340" width="340" height="120" rx="4" fill="#FFF8E1" stroke="#E65100"/>
+  <text x="220" y="360" class="node-text" font-weight="600" fill="#E65100">真死锁场景 H3-A</text>
+  <text x="220" y="378" class="node-text sm" fill="#E65100">Core 1 audio_input 在 i2s_channel_read 阻塞 1000ms</text>
+  <text x="220" y="394" class="node-text sm" fill="#E65100">Core 0 EnableInput(false) → 持 data_if_mutex_</text>
+  <text x="220" y="410" class="node-text sm" fill="#E65100">→ codec_dev_close → data_if->enable(false)</text>
+  <text x="220" y="426" class="node-text sm" fill="#E65100">→ _i2s_data_enable 拿 esp_codec_dev_mutex（OK）</text>
+  <text x="220" y="442" class="node-text sm" fill="#E65100">→ i2s_channel_disable · 但 Core 1 read 仍排队 read_event</text>
+
+  <!-- Core 0 column -->
+  <rect x="430" y="45" width="430" height="430" rx="8" fill="var(--core0)" stroke="var(--core0-line)" stroke-width="1"/>
+  <text x="645" y="65" class="node-text" font-weight="600" fill="var(--core0-line)">Core 0（main_loop / 主循环 / audio_output）</text>
+
+  <rect x="450" y="80" width="390" height="60" rx="4" fill="white" stroke="var(--core0-line)"/>
+  <text x="645" y="98" class="node-text" font-weight="600">audio_output task · P10</text>
+  <text x="645" y="116" class="node-text sm">while: codec_->OutputData → BoxAudioCodec::Write</text>
+  <text x="645" y="132" class="node-text sm">→ esp_codec_dev_write（不持 data_if_mutex_）</text>
+
+  <rect x="450" y="160" width="390" height="60" rx="4" fill="white" stroke="var(--core0-line)"/>
+  <text x="645" y="178" class="node-text" font-weight="600">main_app task · P10 (main_loop)</text>
+  <text x="645" y="196" class="node-text sm">EnableInput/Output/SetVolume/SetInputGain</text>
+  <text x="645" y="212" class="node-text sm">持 data_if_mutex_ · 调 esp_codec_dev_* 内部锁</text>
+
+  <rect x="450" y="240" width="390" height="100" rx="4" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="645" y="260" class="node-text" font-weight="600" fill="#C62828">H3-B input_enabled_ 父类成员非 atomic</text>
+  <text x="645" y="278" class="node-text sm" fill="#C62828">Core 0 EnableInput(true) 写 input_enabled_=true</text>
+  <text x="645" y="294" class="node-text sm" fill="#C62828">Core 1 audio_input Read 读 input_enabled_</text>
+  <text x="645" y="310" class="node-text sm" fill="#C62828">→ bool 4-byte 理论原子 但 cache 失效延迟可见</text>
+  <text x="645" y="326" class="node-text sm" fill="#C62828">→ Core 1 多读 1-2 帧"还以为 enabled" 实际已 close</text>
+
+  <rect x="450" y="360" width="390" height="100" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+  <text x="645" y="380" class="node-text" font-weight="600" fill="#F57F17">H3-C calib 任意 Core 锁 LRU 竞争</text>
+  <text x="645" y="398" class="node-text sm" fill="#F57F17">calib P5 子任务（Core ? · IDF 默认 affinity）</text>
+  <text x="645" y="414" class="node-text sm" fill="#F57F17">在主任务持 data_if_mutex_ 释放窗口 vTaskDelay(150)</text>
+  <text x="645" y="430" class="node-text sm" fill="#F57F17">期间 audio_output(Core 0) / audio_input(Core 1) 可重新拿锁</text>
+  <text x="645" y="446" class="node-text sm" fill="#F57F17">→ Write 子任务可能与 audio_output 抢 codec_dev_write</text>
+</svg>
+</div>
+
+<h4>11.3.1 钻穿要点</h4>
+<table>
+<thead><tr><th>子项</th><th>钻穿位置</th><th>结论</th></tr></thead>
+<tbody>
+<tr><td>父类 EnableInput 是否回调虚函数</td><td><code>audio_codec.cc:70-76</code></td><td>父类只设 input_enabled_=enable + LOG · <b>不回调虚函数</b> · 无递归 · OK</td></tr>
+<tr><td>派生类 EnableInput 调父类</td><td><code>box_audio_codec.cc:232</code> <code>AudioCodec::EnableInput(enable)</code></td><td>派生类先 esp_codec_dev_open · 再调父类 set input_enabled_=true · <b>顺序倒了</b>：先 open 物理设备 → 再让 audio_input 可见 input_enabled_ 标志 · 期间 audio_input task 看 input_enabled_=false 不会 Read · OK</td></tr>
+<tr><td>SetOutputVolume 死锁链</td><td><code>box_audio_codec.cc:193-198</code></td><td>派生 持 data_if_mutex_ → 调 esp_codec_dev_set_out_vol → 内部 _verify_codec_setting + _get_vol_db + sw_vol->set_vol · <b>没有重入派生类虚函数</b> · OK</td></tr>
+<tr><td>CalibrateMicOnce 锁释放窗口</td><td><code>:289-295 + lambda :302-316</code></td><td><b>关键路径：</b><br/>① <code>EnableInput(true)</code> 持锁 ~10ms · 释放 <br/>② <code>EnableOutput(true)</code> 持锁 ~50ms（含 30ms delay）· 释放 <br/>③ <code>lock_guard lk(:292)</code> 持锁 set_vol/set_gain ~10ms · 释放 <br/>④ <code>measure() 内 Write 子任务 + 主 Read</code> 都 <b>不持锁</b> · vTaskDelay 150/400 期间锁完全空闲 <br/>⑤ 期间 audio_output/audio_input task 可自由拿锁（但它们不持锁 :268-280 也是空 lock）<br/><b>真正的并发：</b>主 Read 走 input_dev_ · 子任务 Write 走 output_dev_ · 不同 dev 不同 codec_if · 但 <b>共享 i2s data_if_ + 共享 i2c_worker</b></td></tr>
+<tr><td>子任务 Core affinity</td><td><code>:303</code> xTaskCreate(任意 Core)</td><td>上一轮 P0-1 建议 Pin Core 1 · 本轮深挖：如果 calib 任务跑 Core 1 · 与 audio_input 同核 · 但 audio_input 已被 calib 上游"逻辑停止"（实际还在跑因为没 .Stop()）· <b>P5 子任务 vs P10 audio_input 抢核：</b>P5 永远拿不到 CPU 直到 audio_input vTaskDelay · 但 Write 不会让出 CPU（i2s_channel_write 阻塞但事件唤醒后立即用满 P10 slot）· <b>Core 1 上 P5 calib Write 可能饥饿到永远不完成 → ctx UAF</b> <span class="pill" style="background:#FCE4EC;color:#880E4F">hidden-p0</span></td></tr>
+<tr><td>多核 input_enabled_ 可见性</td><td><code>audio_codec.h:51-52</code> bool 非 atomic</td><td>Core 0 写 · Core 1 读 · ESP32-S3 dual Xtensa 共 L1 cache · 但 read-write barrier 缺失 · CPU pipeline 可重排 · 上一轮 P1-3 标 atomic · 本轮坐实：<b>真正会丢的是 Core 0 EnableInput(false) 后 Core 1 audio_input 可能还多读 1 帧</b> · 这 1 帧从 DMA 读 i2s_channel_read 返回 OK · 但此时 ES7210 已 stop · 数据全是噪声 · 进 AFE 触发误唤醒 <span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td></tr>
+<tr><td>data_if_ 内部锁</td><td><code>audio_codec_data_i2s.c:565/612</code> _i2s_lock</td><td>esp_codec_dev_mutex_lock 超时 1000ms · <b>关键：</b>这把 mutex 是 <b>per-port</b>（I2S_NUM_0 共享）· 不是 per-dev · <b>所以 input_dev 和 output_dev 的 data_if_enable/set_fmt 互斥</b> · BoxAudioCodec::EnableInput 持 data_if_mutex_（包 esp_codec_dev_open）期间，另一线程的 EnableOutput 持自己的 data_if_mutex_（同一把）· 我们已经串行了 · OK · <b>但</b> Read/Write 不走这把 mutex（看 :693-744）· 跨核 read/write 并发安全</td></tr>
+<tr><td>i2c_worker 锁层</td><td><code>i2c_bus_worker.h:42</code> queue_depth=32</td><td>worker 内部串行 · 但 caller 可能 queue 满阻塞 · codec init 期写 ~100 个 reg · 远没满 32 · OK</td></tr>
+<tr><td>assert 在量产</td><td><code>:33/:42/:45/:56/:64/:73/:79/:84/:104</code></td><td>ESP-IDF 默认 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=ENABLE · NDEBUG <b>未定义</b> · assert 保留 abort · 量产里 BoxAudioCodec 构造失败 → 设备死循环 reboot · 上一轮 L-13 标待验证 · 本轮坐实：<b>必修</b> 改 ESP_RETURN_ON_FALSE / 或直接放过（构造失败概率极低）<span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td></tr>
+<tr><td>deep sleep MCLK</td><td>boards 是否有 deep sleep？</td><td>P30 没用 deep sleep（只有 LightSleep · MCLK 暂停但不丢配置）· OK</td></tr>
+<tr><td>DMA overflow 静默</td><td>i2s_channel_read 返回 ESP_OK 但 bytes_read &lt; size</td><td>audio_codec_data_i2s.c:717 ret == 0 ? OK : DRV_ERR · 但 bytes_read 没回传给 BoxAudioCodec::Read · Read 函数 :270 ESP_ERROR_CHECK_WITHOUT_ABORT 忽略 · audio_input 拿到的 data.size() 是 resize 前的 · 如果 ADC 没给够数据，data 后段是上一帧/零 · AFE 误判 VAD <span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td></tr>
+<tr><td>double-stop EnableOutput</td><td><code>:237-239 if (enable==output_enabled_) return</code></td><td>幂等 · OK</td></tr>
+<tr><td>codec_dev close 引用计数</td><td><code>esp_codec_dev.c:509-511</code></td><td>已 closed 直接返回 OK · 但 i2s data_if->enable(false) 还是会被调 · 多次 EnableOutput(false) 重复调用 i2s_channel_disable · IDF 返回 ESP_ERR_INVALID_STATE · 静默 ESP_LOGE 后返 OK <span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td></tr>
+<tr><td>input_gain_ 类型撕裂</td><td><code>audio_codec.h:58</code> float · 4 字节</td><td>Xtensa 4-byte 对齐写理论原子 · 但 LX7 cache line 32-byte 跨核同步靠 store-load barrier · 极端场景 Core 0 写 15.0 Core 1 读到 旧值/新值不会撕裂 · OK</td></tr>
+</tbody>
+</table>
+
+<h4>11.3.2 推演 3 · 新增 hidden bug</h4>
+<table>
+<thead><tr><th>#</th><th>级别</th><th>问题</th></tr></thead>
+<tbody>
+<tr><td>H3-A</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td><td><b>EnableInput(false) 期间 audio_input 仍在 i2s_channel_read 阻塞 1000ms</b> · data_if_mutex_ 的覆盖只在 EnableInput · esp_codec_dev_close 内部 _i2s_data_enable 拿 esp_codec_dev_mutex · 而 Core 1 audio_input 的 read 不走这把锁直接 i2s_channel_read · i2s_channel_disable 会让 read 提前返回 ESP_FAIL · BoxAudioCodec::Read 没检查返回 · audio_input 拿到 0 字节数据 · 进 AFE 计算 → 浪费一帧周期</td></tr>
+<tr><td>H3-B</td><td><span class="pill" style="background:#FCE4EC;color:#880E4F">hidden-p0</span></td><td><b>calib Write 子任务（任意 Core · P5）+ audio_output 任务（Core 0 · P10）双写 output_dev_</b> · 上一轮 P0-2 只标了 remote_cmd 路径 · 本轮发现 <b>application.cc:178 首开机路径也有</b>！时序：① audio_service.Start()（174 行之后）启动 audio_output(P10 Core 0) ... 但 application.cc:182 audio_service_.Start() 在 178 之后 · <b>所以首开机 OK</b>（Calibrate 时 audio_service 尚未 Start）· <b>但是</b> remote_cmd 路径在运行期触发 · audio_service 已 Start · calib 子任务 Write 与 audio_output 真的双写。<br/><b>额外发现：</b> P5 calib 子任务 + audio_output P10 Core 0 抢占 → P10 总赢 → P5 calib Write 永远在调度队列尾部 → measure() 主线程 vTaskDelay(150) 后 Write 可能 <b>还没开始</b> → 第一帧 Read 拿到的是 audio_output 当前输出（不是 1kHz tone）→ 校准结果错乱 + 5min 后 P5 calib 终于跑完 时 ctx 已 UAF</td></tr>
+<tr><td>H3-C</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td><td><b>SetInputGain(任意 Core) 持 data_if_mutex_ + 写 ES7210 reg43</b> · 但只对 channel 0 · channel 1-3 仍 30dB（构造初值）· <b>每次 SetInputGain 都不会同步其他通道</b> · 远程 mic_calibrate 多次后 mic1/2/3/4 增益分歧 · AEC 输出失真</td></tr>
+<tr><td>H3-D</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td><td><b>EnableInput 错误处理：esp_codec_dev_open 返回非 OK 时 ESP_ERROR_CHECK abort</b> · :227 直接重启 · 量产期 ES7210 chip 故障 = 设备砖 · 应改 ESP_ERROR_CHECK_WITHOUT_ABORT + 状态机回退</td></tr>
+<tr><td>H3-E</td><td><span class="pill lean">待验证</span></td><td><b>cache 同步：Core 0 写 PSRAM 缓冲 vs Core 1 DMA 读 INT 缓冲</b> · DMA 全部在 INT RAM · 不涉及 PSRAM · 但 i2s_channel_read 返回后 dest 缓冲的写入是否被 Core 0 看到？<code>std::vector&lt;int16_t&gt;</code> 数据在 stack（Core 1 task stack）· Core 0 不直接读 · audio_input 自己消费 · OK · 列待验证只是因为 ESP-IDF 5.5 在 IDF 内部 cache sync 与 audio_codec_data_i2s 是否对接需要看 IDF 源</td></tr>
+<tr><td>H3-F</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td><td><b>音量 SW vol 软件衰减在 codec_dev_write 内做</b> · <code>esp_codec_dev.c:280-282 dev->sw_vol->process</code> · ES8311 有硬件 set_vol（reg 32）· 优先用硬件 · 但 <code>esp_codec_dev.c:198-204</code> 看：codec->set_vol 不为 NULL 时不分配 sw_vol · ES8311 提供 set_vol → 走硬件 · OK · <b>但是</b> :323 set_out_vol 优先 sw_vol → 实际 sw_vol 是 NULL（没分配）→ 走 codec->set_vol → es8311_set_vol → 硬件 reg32 · OK · 调用栈正确</td></tr>
+</tbody>
+</table>
+
+<!-- ────────── 11.4 隐藏 bug 汇总 ────────── -->
+<h3 id="deep-summary">11.4 隐藏 bug 汇总（三遍合并 · 钻到驱动哪一层）</h3>
+
+<table>
+<thead><tr><th>#</th><th>级别</th><th>问题</th><th>驱动层</th><th>触发条件</th><th>影响</th><th>验证方案</th></tr></thead>
+<tbody>
+<tr>
+<td>H2-A</td><td><span class="pill" style="background:#FCE4EC;color:#880E4F">hidden-p0</span></td>
+<td>ES7210 mic2/3/4 永远 30dB · SetInputGain 只设 mic1</td>
+<td>es7210_codec / box_audio_codec</td>
+<td>构造后 audio_input 走 4ch TDM 拿数据 · AEC 用 mic2 当 ref</td>
+<td>AEC 失真 · 远场识别率下降 5-10% · MIC 校准公式假设全通道一致 → 估算偏</td>
+<td>dump_reg ES7210 0x43/0x44/0x45/0x46 应全等 · 修：构造完一次性 set_channel_gain(0xF, input_gain_)</td>
+</tr>
+<tr>
+<td>H3-B</td><td><span class="pill" style="background:#FCE4EC;color:#880E4F">hidden-p0</span></td>
+<td>remote_cmd 路径 calib Write 子任务 (任意 Core P5) vs audio_output (Core 0 P10) 双写 + P5 饥饿 ctx UAF</td>
+<td>box_audio_codec / FreeRTOS scheduler</td>
+<td>运行期 remote_cmd `{"type":"mic_calibrate"}` · audio_service 已 Start · audio_output 持续吃 Core 0</td>
+<td>校准失败 + ctx 栈对象 UAF + 双 codec_dev_write 撕裂 PCM 帧</td>
+<td>烧一台机 audio_service.Start() 后下 mic_calibrate 100 次 · grep "calib" task 完成日志 vs 主任务返回时差 · 必修：calib 任务 Pin Core 1 P11（必须 ≥ P10 才能抢占 audio_output）+ Stop audio_service · 上一轮 P0-1/P0-2 联合</td>
+</tr>
+<tr>
+<td>H1-E</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td>
+<td>esp_codec_dev_close 之 disable_pending 延迟使 TX 未真关 · 下次 EnableOutput 时钟错乱</td>
+<td>esp_codec_dev / audio_codec_data_i2s</td>
+<td>EnableOutput(false) 时 input 仍在 enabled（duplex 常态）· data_if 走 :573 "Pending out channel for in channel running" 分支</td>
+<td>下次 EnableOutput(true) 走 i2s_channel_enable 但 IDF 因 pending 未 disable 返回 INVALID_STATE 静默</td>
+<td>EnableOutput(false) 后立刻 dump_reg ES8311 + i2s_channel_get_info(tx) 看 state · 修：EnableOutput(false) 前先 EnableInput(false) 解 pending 或显式调用 i2s_channel_disable(tx)</td>
+</tr>
+<tr>
+<td>H1-A</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td>
+<td>codec_dev_open 期间 ~50ms 寄存器序列 + i2s channel 已 enable · DMA 收到 ADC 启动噪声</td>
+<td>esp_codec_dev / es7210_codec</td>
+<td>EnableInput(true) 后 audio_input task 立刻 Read</td>
+<td>唤醒首字误识别 / AEC 收敛慢 / 首字漏字</td>
+<td>烧机首次 EnableInput 后立刻 Read 1 帧 · dump 数据 RMS 应 &gt; 1000 · 修：EnableInput 内 esp_codec_dev_open 后 vTaskDelay 50ms</td>
+</tr>
+<tr>
+<td>H2-B</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td>
+<td>PA POP 三段 1→0→1 跳跃</td>
+<td>板级 GPIO / es8311_codec</td>
+<td>开机首次 EnableOutput</td>
+<td>喇叭"嗒-嗒"两声 · 量产观感</td>
+<td>示波器探 PA pin 时序 + 麦克风录音听 · 修：board.cc:294 PA 初值改 0 / 把 PA 控制全交给 es8311</td>
+</tr>
+<tr>
+<td>H2-E</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td>
+<td>纠正上一轮 P1-5：ES7210 driver 30dB 区间映射 (33-34.5dB → GAIN_30DB)</td>
+<td>es7210_codec</td>
+<td>校准结果 in_raw ∈ [33, 34.5]</td>
+<td>用户写 33dB 实际 30dB · 上一轮以为是 driver bug 实为档位映射 · 但仍非单调跳跃</td>
+<td>set_channel_gain(0x0F, 33.0) + dump_reg 0x43 应是 GAIN_30DB (idx=10)· 修：上一轮 patch 30.0 仍正确（避免 33-34.5 异常区间）</td>
+</tr>
+<tr>
+<td>H3-A</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td>
+<td>EnableInput(false) 后 audio_input 仍在 i2s_channel_read 阻塞 · 拿 0 字节</td>
+<td>audio_codec_data_i2s / i2s_tdm</td>
+<td>AudioPowerTimer 触发 EnableInput(false)</td>
+<td>audio_input 1 帧周期空转 · 偶发 ESP_LOGE "Read fail" · 无声音延迟</td>
+<td>EnableInput(false) 后下一次 BoxAudioCodec::Read 加日志看返回值 · 修：Read 函数检查返回值 失败时 memset(dest, 0, ...)</td>
+</tr>
+<tr>
+<td>H3-B(2)</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td>
+<td>input_enabled_ bool 跨核可见性延迟 · 多读 1 帧噪声</td>
+<td>audio_codec base class</td>
+<td>Core 0 EnableInput(false) 后 Core 1 audio_input 在 cache flush 前再读 1 次</td>
+<td>1 帧 30ms 噪声进 AFE · 偶发误唤醒</td>
+<td>烧机长时间运行统计 误唤醒率 · 修：bool → std::atomic&lt;bool&gt;（上一轮 P1-3 已标）</td>
+</tr>
+<tr>
+<td>H3-C</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td>
+<td>SetInputGain 多次调用后 mic1-4 增益分歧</td>
+<td>es7210_codec / box_audio_codec</td>
+<td>调过 SetInputGain ≥ 1 次（构造、校准、远程）</td>
+<td>多麦阵列增益不一致 · AEC 求差时引入 channel-mismatch 失真</td>
+<td>dump_reg 0x43-0x46 · 修：SetInputGain 内 channel_mask 改 0x0F</td>
+</tr>
+<tr>
+<td>H1-B</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td>
+<td>bclk_div=8 是死配置（被 set_drv_fs 覆盖）</td>
+<td>i2s_tdm / esp_codec_dev</td>
+<td>构造期</td>
+<td>无实际行为 · 但代码自相矛盾（上一轮 L-3 待验证已落 → 本轮坐实）</td>
+<td>i2s_channel_get_info(rx) 后 i2s_dump_clock · 修：删 bclk_div 改注释</td>
+</tr>
+<tr>
+<td>H1-C</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td>
+<td>DMA buffer 11.52KB INT RAM 可省一半</td>
+<td>i2s_tdm / DMA</td>
+<td>持续</td>
+<td>内部 RAM 红线 60KB 中 11.5KB 浪费 · 量产期对话期空闲 InternalRAM 可视</td>
+<td>heap_caps_get_largest_free_block · 修：dma_frame_num=240 → 160 · 净省 3.84KB</td>
+</tr>
+<tr>
+<td>H2-C</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td>
+<td>EnableOutput vTaskDelay(30) 不够覆盖 codec init</td>
+<td>box_audio_codec / es8311_codec</td>
+<td>EnableOutput(true) 路径</td>
+<td>POP 噪声残留</td>
+<td>录音听 · 修：30 → 50ms</td>
+</tr>
+<tr>
+<td>H2-D</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td>
+<td>ES8311 REG44=0x58 内部回参考无用</td>
+<td>es8311_codec</td>
+<td>构造</td>
+<td>电流 +2mA · 量产可省</td>
+<td>es8311_cfg.no_dac_ref=true 测电流</td>
+</tr>
+<tr>
+<td>H3-D</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td>
+<td>esp_codec_dev_open 失败 ESP_ERROR_CHECK abort</td>
+<td>box_audio_codec</td>
+<td>I2C 通信故障 / chip 死</td>
+<td>设备砖 · 不可恢复</td>
+<td>故意拔 ES7210 I2C 线 · 修：ESP_ERROR_CHECK_WITHOUT_ABORT</td>
+</tr>
+<tr>
+<td>H3-F</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td>
+<td>多次 EnableOutput(false) 重复 i2s_channel_disable 返 INVALID_STATE 静默</td>
+<td>i2s_tdm / esp_codec_dev</td>
+<td>幂等保护（:237 if enable==output_enabled_ return）已挡 · 实际不会触发</td>
+<td>无</td>
+<td>OK（已挡）</td>
+</tr>
+<tr>
+<td>H1-D</td><td><span class="pill lean">待验证</span></td>
+<td>RX TDM ws_width=32 是否被 ES7210 正确解码</td>
+<td>i2s_tdm / es7210</td>
+<td>持续</td>
+<td>解错则数据丢帧（但目前看着没炸 → 大概率 OK）</td>
+<td>逻辑分析仪抓 WS 高低比 1:31 + 1 个 frame 长度</td>
+</tr>
+<tr>
+<td>H2-F</td><td><span class="pill lean">待验证</span></td>
+<td>ES7210 RST/init 时 MCLK 是否已稳定</td>
+<td>es7210_codec / i2s_tdm</td>
+<td>开机首次 codec_dev_open(input)</td>
+<td>首次 RST 可能失败 静默 OK 后续运行正常（已观察生产中无报）</td>
+<td>示波器同步抓 MCLK 输出 + I2C RST 字节时间差 · 应 ≥ 1ms</td>
+</tr>
+</tbody>
+</table>
+
+<!-- ────────── 11.5 验证清单 ────────── -->
+<h3 id="deep-verify">11.5 验证清单（代码看出 vs 必须硬件验证）</h3>
+
+<div class="callout warn">
+<b>关键原则：</b>"量产纪律 保守 &gt; 激进" · 没硬件复测的 bug 只能标"待验证" · 不能直接进 P0 修复 patch。
+</div>
+
+<table>
+<thead><tr><th>分类</th><th>bug</th><th>必须硬件验证</th></tr></thead>
+<tbody>
+<tr><td><b>代码层即可证</b>（直接修）</td>
+<td>H2-A mic2/3/4 永远 30dB · H3-B(2) bool atomic · H3-C SetInputGain 单通道 · H1-C DMA buffer 大小 · H3-D ESP_ERROR_CHECK abort · H2-C delay 30→50 · H1-B bclk_div 删 · H2-D no_dac_ref</td>
+<td>否 · 代码 diff + 编译验证即可</td></tr>
+<tr><td><b>必须烧机日志验证</b></td>
+<td>H1-A codec_dev_open 后首帧噪声 · H3-A EnableInput(false) Read 返回值 · H1-E disable_pending 是否真发生</td>
+<td>是 · 加 ESP_LOGI 打印 + 烧机观察</td></tr>
+<tr><td><b>必须示波器 / 逻辑分析仪</b></td>
+<td>H2-B PA POP 时序波形 · H2-F MCLK vs I2C RST 时序 · H1-D ws_width 比例 · H2-E ES7210 reg43 dump 验档位</td>
+<td>是 · 量产工厂 ICT 工站可顺带抓</td></tr>
+<tr><td><b>必须长时间烧机</b></td>
+<td>H3-B remote_cmd 100 次 mic_calibrate UAF · H3-B(2) cross-core 误唤醒率</td>
+<td>是 · 24h 烧机自动化</td></tr>
+</tbody>
+</table>
+
+<h4>11.5.1 量产前最小验证集合（4 小时内能跑完）</h4>
+<ol class="compact">
+<li><b>烧 5 台净机</b>，主动远程触发 mic_calibrate 30 次 · grep "calib" task 完成日志 + 看 ctx UAF 是否触发（H3-B）</li>
+<li><b>烧 1 台机</b> 跑 24 小时 audio_service · 统计误唤醒率（H1-A · H3-B(2) · H1-E）</li>
+<li><b>示波器探 PA pin</b> 一次开机时序（H2-B）+ MCLK/I2C RST 时序（H2-F）</li>
+<li><b>逻辑分析仪抓 WS</b> 验 ws_width 实际值（H1-D）</li>
+<li><b>dump_reg ES7210 0x43-0x46</b> 在 SetInputGain 前后（H2-A · H3-C · H2-E）</li>
+</ol>
+
+<!-- ────────── 11.6 与上一轮关系 ────────── -->
+<h3 id="deep-diff">11.6 与上一轮（§ 8 三视角评审）的关系</h3>
+
+<h4>11.6.1 升级项（上一轮"待验证" → 本轮坐实）</h4>
+<table>
+<thead><tr><th>上一轮 ID</th><th>状态</th><th>本轮证据</th></tr></thead>
+<tbody>
+<tr><td>L-3 bclk_div=8 待验证</td><td>→ <span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2 H1-B</span></td><td>读 esp_codec_dev set_drv_fs 源码确认被覆盖 · 死配置</td></tr>
+<tr><td>L-4 EnableInput 无 mute 首帧噪声</td><td>→ <span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1 H1-A</span></td><td>esp_codec_dev_open 期间寄存器序列 ~50ms · 期间 i2s 已 enable · DMA 真的吃到噪声</td></tr>
+<tr><td>L-13 assert 量产策略</td><td>→ <span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2 H3-D</span></td><td>ESP-IDF NDEBUG 默认未定义 · assert 保留</td></tr>
+<tr><td>P1-5 量化边界 31.5→33dB driver bug</td><td>→ <span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1 H2-E（更正）</span></td><td>非 driver bug · 是 get_db 33-34.5 → GAIN_30DB 区间映射 · 但仍非单调跳变 · 上一轮 patch 改 30.0 边界仍正确</td></tr>
+<tr><td>P1-3 input_enabled_ atomic</td><td>→ <span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1 H3-B(2)</span></td><td>本轮量化具体影响："多读 1 帧噪声进 AFE 触发误唤醒"</td></tr>
+</tbody>
+</table>
+
+<h4>11.6.2 全新发现（上一轮 § 3-§ 5 未覆盖）</h4>
+<table>
+<thead><tr><th>本轮 ID</th><th>级别</th><th>核心结论</th></tr></thead>
+<tbody>
+<tr><td>H2-A</td><td><span class="pill" style="background:#FCE4EC;color:#880E4F">hidden-p0</span></td><td><b>ES7210 mic2/3/4 一直 30dB</b> · SetInputGain 只设 mic1 · 跨 4 麦增益分歧</td></tr>
+<tr><td>H3-B</td><td><span class="pill" style="background:#FCE4EC;color:#880E4F">hidden-p0</span></td><td><b>calib P5 任务被 audio_output P10 饥饿</b> · 上一轮 P0-1 修 Pin Core 1 不够 · 还得 P11 + Stop audio_service</td></tr>
+<tr><td>H1-E</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td><td>esp_codec_dev disable_pending 机制使 duplex 场景 EnableOutput(false) 不真关 TX</td></tr>
+<tr><td>H2-B</td><td><span class="pill" style="background:#FFF8E1;color:#E65100">hidden-p1</span></td><td>board.cc PA pin 初值 1 + es8311_open PA_DISABLE 拉低 → 三段 POP</td></tr>
+<tr><td>H1-C / H2-C / H2-D / H3-D / H3-F</td><td><span class="pill" style="background:#E1F5FE;color:#01579B">hidden-p2</span></td><td>DMA 浪费 / delay 短 / no_dac_ref / abort / 重复 disable</td></tr>
+</tbody>
+</table>
+
+<h4>11.6.3 修复优先级（合并三轮）</h4>
+<div class="callout bad">
+<b>批次 B · 本轮新增 hidden-p0（量产前必修）</b>
+<ol class="compact" style="margin-top:6px;">
+<li><b>H2-A</b> EnableInput 内对所有麦 mask=0x0F 一起 set_channel_gain(input_gain_)（5 min）</li>
+<li><b>H3-B</b> 升级上一轮 P0-1：calib Pin Core 1 + 优先级 P11（必须 ≥ audio_output P10 抢占） + 强制 audio_service.Stop()（15 min）</li>
+<li><b>H3-C</b> SetInputGain channel_mask 0x01→0x0F（1 行修改 · 5 min）</li>
+</ol>
+</div>
+
+<div class="callout warn">
+<b>批次 C · 本轮新增 hidden-p1（量产后第一版小修）</b>
+<ol class="compact" style="margin-top:6px;">
+<li>H1-A EnableInput 后 vTaskDelay 50ms（防首帧脏数据）</li>
+<li>H1-E EnableOutput(false) 前先 EnableInput(false) 解 disable_pending（或显式 i2s_channel_disable(tx)）</li>
+<li>H2-B board.cc PA 初值 1→0 / 或删除 board PA 设置 全交 es8311</li>
+<li>H3-A BoxAudioCodec::Read 检查 esp_codec_dev_read 返回 失败时 memset</li>
+</ol>
+</div>
+
+<h4>11.6.4 整体钻穿统计</h4>
+<table>
+<thead><tr><th>遍</th><th>关注</th><th>hidden-p0</th><th>hidden-p1</th><th>hidden-p2</th><th>待验证</th></tr></thead>
+<tbody>
+<tr><td>1 · I2S/DMA/时钟</td><td>BCLK 谁主导 / DMA 大小 / 首帧</td><td>0</td><td>2（H1-A H1-E）</td><td>2（H1-B H1-C）</td><td>1（H1-D）</td></tr>
+<tr><td>2 · 寄存器/PA</td><td>init 序列 / PA 双控 / 量化档</td><td>1（H2-A）</td><td>2（H2-B H2-E）</td><td>2（H2-C H2-D）</td><td>2（H2-F · H2-E 部分）</td></tr>
+<tr><td>3 · 跨锁/核</td><td>虚函数链 / cache / data_if 锁</td><td>1（H3-B）</td><td>3（H3-A H3-B(2) H3-C）</td><td>2（H3-D H3-F）</td><td>1（H3-E）</td></tr>
+<tr><td><b>合计</b></td><td>—</td><td><b>2</b></td><td><b>7</b></td><td><b>6</b></td><td><b>4</b></td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>结论：</b>本轮深挖驱动栈共发现 <b>2 个 hidden-p0 + 7 个 hidden-p1 + 6 个 hidden-p2 + 4 项待验证</b>。最危险的 2 个 p0：① <b>ES7210 mic2/3/4 永远 30dB</b>（破坏 AEC + 校准公式）② <b>calib 子任务 P5 被 audio_output P10 饥饿</b>（remote_cmd 路径 ctx UAF 升级）。上一轮 5 项升级证据钻到驱动源码层。<b>必须示波器</b>验证 4 项（PA POP / MCLK 时序 / WS 比例 / reg dump）· <b>必须烧机</b>验证 3 项（首帧噪声 / disable_pending / cross-core 误唤醒）。其余 9 项代码层可直接修。
+</div>
+</section>
+
+<!-- =============== 12 修复后三轮再推演 =============== -->
+<section id="post-fix-review">
+<h2><span class="num">12</span> 修复后三轮再推演 · 剩余严重风险</h2>
+
+<p class="sub">基于修复后基线（<code>box_audio_codec.cc:194-271</code> 全 API 加 lock_guard · EnableOutput 回滚上游 · measure 走底层 · remote_cmd Stop/Start 包裹），独立三轮推演：① 修复本身引入的新风险 ② 旧风险复盘（patch 仍有效）③ 攻击面外延盲区。新标签：<span class="pill rest-p0">rest-p0</span> 量产 blocker · <span class="pill rest-p1">rest-p1</span> 量产后 1-2 版本必修 · <span class="pill rest-p2">rest-p2</span> 优化项。与 § 11 hidden-p0/p1/p2 不重叠。</p>
+
+<!-- ────────── 12.1 第 1 轮 · 新风险 ────────── -->
+<h3 id="post-fix-1">12.1 第 1 轮 · 修复本身引入的新风险</h3>
+
+<div class="svgwrap">
+<svg viewBox="0 0 880 360" xmlns="http://www.w3.org/2000/svg">
+  <text x="440" y="22" class="svg-title" text-anchor="middle">audio_service.Stop/Start 期间 codec / task 状态切换（calib 路径 · 1.6s）</text>
+
+  <!-- 时间轴 -->
+  <line x1="40" y1="60" x2="850" y2="60" stroke="#333"/>
+  <text x="40" y="50" class="svg-axis">t=0 (OnMicCalibrate)</text>
+  <text x="200" y="50" class="svg-axis">Stop</text>
+  <text x="320" y="50" class="svg-axis">Calibrate 开始</text>
+  <text x="640" y="50" class="svg-axis">Calibrate 完</text>
+  <text x="780" y="50" class="svg-axis">Start</text>
+
+  <!-- 主任务线 -->
+  <rect x="40" y="80" width="150" height="22" fill="#E8F5E9" stroke="var(--ok)"/>
+  <text x="115" y="95" class="node-text sm">main_loop 调度 lambda</text>
+  <rect x="190" y="80" width="130" height="22" fill="#FFF3E0" stroke="var(--warn)"/>
+  <text x="255" y="95" class="node-text sm">audio.Stop() set flag</text>
+  <rect x="320" y="80" width="320" height="22" fill="#FFEBEE" stroke="#C62828"/>
+  <text x="480" y="95" class="node-text sm" fill="white">CalibrateMicOnce 阻塞 1.6s</text>
+  <rect x="640" y="80" width="140" height="22" fill="#FFF3E0" stroke="var(--warn)"/>
+  <text x="710" y="95" class="node-text sm">audio.Start() 重启 3 task</text>
+
+  <!-- audio_input task -->
+  <rect x="40" y="120" width="150" height="22" fill="#E3F2FD" stroke="#1976D2"/>
+  <text x="115" y="135" class="node-text sm" fill="#1976D2">audio_input P10 Core 1 跑</text>
+  <rect x="190" y="120" width="280" height="22" fill="#FFF8E1" stroke="#E65100"/>
+  <text x="330" y="135" class="node-text sm" fill="#E65100">还在 i2s_channel_read 阻塞中（未 join）</text>
+  <line x1="470" y1="120" x2="470" y2="142" stroke="#E65100" stroke-dasharray="2,2"/>
+  <text x="475" y="135" class="node-text sm" fill="#E65100">EventGroup wait → break + vTaskDelete</text>
+  <rect x="640" y="120" width="40" height="22" fill="#FAFAFA" stroke="#666"/>
+  <text x="660" y="135" class="node-text sm">已删</text>
+  <rect x="680" y="120" width="160" height="22" fill="#E3F2FD" stroke="#1976D2"/>
+  <text x="760" y="135" class="node-text sm" fill="#1976D2">新 audio_input task</text>
+
+  <!-- audio_output task -->
+  <rect x="40" y="160" width="150" height="22" fill="#E3F2FD" stroke="#1976D2"/>
+  <text x="115" y="175" class="node-text sm" fill="#1976D2">audio_output P10 Core 0 跑</text>
+  <rect x="190" y="160" width="280" height="22" fill="#FFF8E1" stroke="#E65100"/>
+  <text x="330" y="175" class="node-text sm" fill="#E65100">同上 · Stop 不 join</text>
+  <rect x="680" y="160" width="160" height="22" fill="#E3F2FD" stroke="#1976D2"/>
+  <text x="760" y="175" class="node-text sm" fill="#1976D2">新 audio_output task</text>
+
+  <!-- codec 状态 -->
+  <rect x="40" y="200" width="800" height="60" rx="4" fill="#F3E5F5" stroke="#6A1B9A"/>
+  <text x="440" y="220" class="node-text" font-weight="600" fill="#6A1B9A">codec 状态 · input_enabled_ = output_enabled_ = true 全程不变</text>
+  <text x="440" y="238" class="node-text sm" fill="#6A1B9A">Stop 只 set service_stopped_ + clear queue · 不动 codec · 不 join task · 不 vTaskDelete</text>
+  <text x="440" y="254" class="node-text sm" fill="#6A1B9A">Start 重 create 三个 task · 旧 task 可能还活着 1-2 帧（i2s_channel_read timeout=1000ms 默认）</text>
+
+  <!-- 风险标注 · 已修 -->
+  <rect x="40" y="280" width="800" height="70" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-dasharray="4,2"/>
+  <text x="440" y="300" class="node-text" font-weight="600" fill="#2E7D32">✅ R1-2 已修 2026-05-13 · Stop 末尾 join_task lambda 轮询 eTaskGetState(eDeleted)</text>
+  <text x="440" y="318" class="node-text sm" fill="#2E7D32">单 task 500ms 超时 · 总最坏 1.5s · 超时不 force kill（防 task 持锁）仅日志告警</text>
+  <text x="440" y="335" class="node-text sm" fill="#2E7D32">audio_service.cc:188-221 · join_task 三 handle 串行等退出 · Start 重 create 时 handle 已 nullptr · 旧+新 共存窗口 → 0</text>
+</svg>
+</div>
+
+<h4>12.1.1 新风险逐项</h4>
+<table>
+<thead><tr><th>#</th><th>级别</th><th>风险 + 触发 / 为什么之前没炸</th><th>位置</th></tr></thead>
+<tbody>
+<tr>
+<td>R1-1</td><td><span class="pill rest-p1">rest-p1</span></td>
+<td><b>Read/Write 与 EnableXxx 持锁链 60+50ms 长尾</b> · audio_input P10 Core 1 等 EnableInput 完毕最坏 ~110ms · DMA 6×10ms 一溢出就丢前帧。触发：AudioPowerTimer 切 EnableInput + main_loop SetInputGain 同时。之前没炸：SetXxx 走 Schedule 进主循环单线程 · 并发概率 &lt;1%</td>
+<td><code>box_audio_codec.cc:257-271 / :211-233</code></td>
+</tr>
+<tr style="background:#E8F5E9">
+<td>R1-2</td><td><span class="pill" style="background:#E8F5E9;color:var(--ok)">✅ 已修</span></td>
+<td><b>audio_service.Stop 不 join · Start 立刻重 create → 旧+新 task 共存 ≤1s 窗口</b> · Stop 仅 set <code>service_stopped_</code> + clear queue · 旧 task 退出依赖 EventGroup wake + i2s_channel_read 1000ms timeout · task handle 被新值覆盖（audio_input_task_handle_）· 触发：每次 OnMicCalibrate（audio_service 已 Start 状态）。之前没炸：① calib 阻塞 1.6s &gt; i2s read 60ms · 旧 task 大概率退尽 ② calib 走底层跳锁 · 即使旧 audio_output 抢锁仍能跑 codec 物理。<b>但仍是 1s 窗口未定义行为</b> · 量产 100 次必触一次 handle 覆盖</td>
+<td><code>audio_service.cc:144-201</code> + <code>remote_cmd.cc:217-220</code></td>
+</tr>
+<tr>
+<td>R1-3</td><td><span class="pill rest-p1">rest-p1</span></td>
+<td><b>measure 子任务跳锁走底层 esp_codec_dev_write</b> · 子任务读 dev->output_opened（bool 非 atomic · 同 H3-B(2)）· 触发：calib 进入路径。之前没炸：持锁段 ~10ms + 子任务 vTaskDelay(150) 期间锁早空闲 · output_opened 在 EnableOutput(true) set_drv_fs 后置 true · 子任务读时已可见 · cache 偏差 &lt;1μs</td>
+<td><code>box_audio_codec.cc:280-309</code></td>
+</tr>
+<tr>
+<td>R1-4</td><td><span class="pill rest-p2">rest-p2</span></td>
+<td><b>EnableOutput 回滚上游后无应用层 mute · Power Timer 15s 边界 toggle 触发 ~50ms codec init</b> · 应用层失去 mute ramp 控制。触发：14-15s 边界说话。之前没炸：上游跑了 1 年 · es8311_close 内部 set_mute → PA_DISABLE 顺序部分挡住 · 真 POP 是 PA pin 物理瞬变（见 H2-B）</td>
+<td><code>box_audio_codec.cc:235-255</code></td>
+</tr>
+<tr>
+<td>R1-5</td><td><span class="pill rest-p1">rest-p1</span></td>
+<td><b>父类 input/output_enabled_ bool 非 atomic</b> · ReadAudioData 调用 codec_->input_enabled() 在 codec mutex 之外（<code>audio_service.cc:204</code>）· 跨核读 stale bool · 触发：AudioPowerTimer 切 EnableInput 跨核。之前没炸：bool 4-byte 写理论原子 + S3 cache 一致性 + AFE 容忍 1-2 帧延迟</td>
+<td><code>audio_codec.h:51-52</code> + <code>audio_service.cc:204</code></td>
+</tr>
+</tbody>
+</table>
+
+<h4>12.1.2 第 1 轮 · 自我反驳清单</h4>
+<ul class="compact">
+<li>"calib 持锁 + 子任务跳锁 = 死锁"→ 子任务走底层不进 data_if_mutex_ · 持锁段仅 ~10ms · <b>R1-3 降 rest-p1（cache 一致性而非死锁）</b></li>
+<li>"Stop/Start handle 覆盖必崩溃"→ 旧 task 自删（vTaskDelete(NULL)）不是被删 · <b>R1-2 保 rest-p0 但触发改为"残留数据进 codec"</b></li>
+<li>"EnableOutput 无 mute 必 POP"→ 上游跑 1 年 + es8311_close 内部部分挡住 · <b>R1-4 降 rest-p2</b></li>
+<li>"R1-1 锁链 110ms 必丢帧"→ SetXxx 由 Schedule 进主循环单线程 · 并发概率 &lt;1% · <b>R1-1 保 rest-p1（偶发）</b></li>
+</ul>
+
+<!-- ────────── 12.2 第 2 轮 · 旧风险复盘 ────────── -->
+<h3 id="post-fix-2">12.2 第 2 轮 · 修复后仍存在的旧风险（含 patch）</h3>
+
+<table>
+<thead><tr><th>#</th><th>级别</th><th>问题 + 触发 / 为什么之前没炸</th><th>位置</th></tr></thead>
+<tbody>
+<tr style="background:#E8F5E9">
+<td>R2-1（P0-1）</td><td><span class="pill" style="background:#E8F5E9;color:var(--ok)">✅ 已修</span></td>
+<td><b>calib 改 xTaskCreatePinnedToCore Core 1 + P10 + TaskHandle + eTaskGetState(eDeleted) 轮询 + 1000ms force kill 兜底</b> · 2026-05-13 落地 <code>box_audio_codec.cc:293-323</code></td>
+<td><code>box_audio_codec.cc:293-323</code></td>
+</tr>
+<tr>
+<td>R2-2（P1-5 / C-6）</td><td><span class="pill rest-p1">rest-p1</span></td>
+<td><b>input_gain 量化边界 31.5 → ES7210 GAIN_30DB 静默档跳</b> · § 11.6 H2-E 澄清非 driver bug · 是 33-34.5 → GAIN_30DB 区间映射。触发：calib in_raw ∈ [31.5, 34.5] · -42 dBV 物料概率触发。之前没炸：偏 3dB AEC 系数可容忍</td>
+<td><code>box_audio_codec.cc:321</code></td>
+</tr>
+<tr style="background:#FFF3E0">
+<td>R2-3（H2-A）</td><td><span class="pill rest-p1">不修</span></td>
+<td><b>ES7210 mic2/3/4 永远 30dB</b> · 用户 2026-05-13 决策不处理 · 等 fork esp_codec_dev 后在 device/es7210/ 内统一 mask=0x0F · 已知接受远场识别率 5-10% 下降</td>
+<td><code>box_audio_codec.cc:205, :228</code></td>
+</tr>
+<tr>
+<td>R2-4</td><td><span class="pill rest-p1">rest-p1</span></td>
+<td><b>calib 后 audio_power_timer last_input_time_ 是 1.6s 前旧值</b> · 距 15s 阈值仅 13.4s · 提前 EnableInput(false) 概率高。触发：calib 后 13s 内无对话。之前没炸：用户校准后通常立刻说话验证</td>
+<td><code>audio_service.cc:188-247</code></td>
+</tr>
+</tbody>
+</table>
+
+<h4>12.2.1 R2-1 已修复 · 落地代码（2026-05-13）</h4>
+<p class="sub">代码已落地在 <code>box_audio_codec.cc:293-323</code>。要点：Pin Core 1 + P10 + TaskHandle + eTaskGetState(eDeleted) 主动轮询 + 1000ms force kill 兜底（旧固定 vTaskDelay(400) 删除）。create 失败返 1 避免上层 log10(5000/0) 除零。</p>
+
+<h4>12.2.2 R2-2 (P1-5 / C-6) 量化边界 patch · 1 行修</h4>
+<pre><code>-    float input_gain = std::max(0.0f, std::min(36.0f,
+-        (in_raw &lt;= 31.5f) ? std::round(in_raw / 3.0f) * 3.0f : 36.0f));
++    // ⚠ ES7210 driver get_db: 33-34.5dB → GAIN_30DB · 上限改 30 保单调
++    float input_gain = std::max(0.0f, std::min(36.0f,
++        (in_raw &lt;= 30.0f) ? std::round(in_raw / 3.0f) * 3.0f : 36.0f));</code></pre>
+
+<h4>12.2.3 R2-3 (H2-A) 应急绕路（不 fork driver）</h4>
+<pre><code>// EnableInput / SetInputGain 内一次性设 4 通道
+- ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_,
+-     ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
++ // 4 通道全设同一增益 · mic2/3/4 不再走 driver 初值 30dB
++ for (int ch = 0; ch &lt; 4; ch++) {
++     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_set_in_channel_gain(
++         input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(ch), input_gain_));
++ }</code></pre>
+<p class="sub">注：esp_codec_dev API 接受 mask 多 channel 但 ES7210 driver 内部仍按 channel 循环写 · for 循环 4 次 · 增 ~4ms I2C · 量产可接受。后续 fork driver 时再合并成 mask=0x0F 单次写。</p>
+
+<h4>12.2.4 第 2 轮 · 自我反驳清单</h4>
+<ul class="compact">
+<li>"R2-4 提前 disable 必丢字"→ 下一帧 Read 自动 EnableInput(true) (audio_service.cc:207) · 首字慢 50ms · <b>保 rest-p1（用户感知边缘）</b></li>
+<li>"R2-2 偏 3dB 必影响识别率"→ webrtc-aec3 容忍 ±3dB · ASR 不敏感 · <b>保 rest-p1（1 行修成本 1min）</b></li>
+</ul>
+
+<!-- ────────── 12.3 第 3 轮 · 攻击面外延 ────────── -->
+<h3 id="post-fix-3">12.3 第 3 轮 · 修复路径之外的盲区（攻击面外延）</h3>
+
+<table>
+<thead><tr><th>#</th><th>级别</th><th>问题 + 触发 / 为什么之前没炸</th><th>位置</th></tr></thead>
+<tbody>
+<tr>
+<td>R3-1</td><td><span class="pill rest-p1">rest-p1</span></td>
+<td><b>SetAecGain 父类无锁 · aec_gain_db_ + aec_gain_linear_ 双字段写非原子</b> · powf 计算后赋值 · 两字段间 ~3μs 窗口 · audio_input 读 linear × 帧。触发：远程 gain 命令 + audio_input 同时跑。之前没炸：单帧 480 sample 命中概率 ~0.01% + webrtc-aec3 NLP 帧级过滤</td>
+<td><code>audio_codec.cc:61-68</code></td>
+</tr>
+<tr>
+<td>R3-2</td><td><span class="pill rest-p1">rest-p1</span></td>
+<td><b>AudioCodec::Start() 无人调用 · NVS aec_gain 永远不读 → 永远初始 9.0/×2.0</b> · grep 无任何调用方 · 父类 Start 不在构造里。触发：每次开机。之前没炸：CalibrateMicOnce 内 SetAecGain 覆盖一次（首开机 / 远程触发）· 非校准路径走默认 · 但 NVS 持久化值确实丢</td>
+<td><code>audio_codec.cc:30-43</code></td>
+</tr>
+<tr>
+<td>R3-3</td><td><span class="pill rest-p1">rest-p1</span></td>
+<td><b>calib 完写 NVS mic_type · 但 grep 无任何读取者</b> · :333 死代码 · input_gain 路径父类 SetFloat 写 NVS ✓ · mic_type 白存。触发：每次 calib。之前没炸：mic_type 设计预留 · 未实现 · 不影响 input_gain 主路径</td>
+<td><code>box_audio_codec.cc:333</code></td>
+</tr>
+<tr>
+<td>R3-4</td><td><span class="pill rest-p2">rest-p2</span></td>
+<td><b>~BoxAudioCodec 未 disable + del i2s_channel</b>（C-8 已知）· Board 单例永远不析构 → 量产路径不触发。OTA 重启走 esp_restart 不走 dtor · OK</td>
+<td><code>box_audio_codec.cc:89-101</code></td>
+</tr>
+<tr>
+<td>R3-5</td><td><span class="pill rest-p2">rest-p2</span></td>
+<td><b>input_reference=true 时 ES7210 4 通道全跑但只取 2 channel · 浪费 50% RX DMA 带宽 + ~2mA ADC 功耗</b> · DMA INT RAM 已固定分配 · 带宽未饱和。设 mic_selected=MIC1|MIC2 节流但牵涉 driver 改动</td>
+<td><code>box_audio_codec.cc:77, :217-226</code></td>
+</tr>
+</tbody>
+</table>
+
+<h4>12.3.1 第 3 轮 · 自我反驳清单</h4>
+<ul class="compact">
+<li>"R3-2 NVS output_volume 也丢"→ application.cc Init 期手动 GetInt + SetOutputVolume · 兜底了 · <b>R3-2 限定到 aec_gain_db_/linear</b></li>
+<li>"R3-5 必修"→ DMA INT RAM 已分配 · 用 2/4 channel 同样占用 · <b>R3-5 保 rest-p2（优化非阻塞）</b></li>
+<li>"R3-6 SetInputGain 双写覆盖 = bug"→ 派生写一次 + 父类调到再写一次 + NVS · 写同值两次无竞态 · <b>R3-6 移除</b></li>
+</ul>
+
+<!-- ────────── 12.4 严重风险结论清单 ────────── -->
+<h3 id="post-fix-conclusion">12.4 修复后剩余严重风险 · 量产决策清单</h3>
+
+<table>
+<thead><tr><th>#</th><th>级别</th><th>问题</th><th>位置</th><th>修复路径</th><th>工作量</th><th>量产前必修?</th></tr></thead>
+<tbody>
+<tr style="background:#FFF3E0">
+<td><b>R2-3</b></td>
+<td><span class="pill rest-p1">不修</span></td>
+<td>ES7210 mic2/3/4 永远 30dB · 4 麦增益分歧 · AEC 用 mic2 当 ref 失真</td>
+<td><code>box_audio_codec.cc:205, :228</code></td>
+<td>2026-05-13 决策：本轮不处理 · 等 fork esp_codec_dev 后在 driver 层统一改 mask=0x0F</td>
+<td>—</td>
+<td>NO · 用户明确不修</td>
+</tr>
+<tr style="background:#E8F5E9">
+<td><b>R2-1</b></td>
+<td><span class="pill" style="background:#E8F5E9;color:var(--ok)">✅ 已修</span></td>
+<td>calib 裸 xTaskCreate · UAF + 任意 Core</td>
+<td><code>box_audio_codec.cc:293-323</code></td>
+<td>2026-05-13 落地：xTaskCreatePinnedToCore Core 1 + P10 + TaskHandle + eTaskGetState(eDeleted) 轮询 + 1000ms 超时 force kill 兜底</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr style="background:#E8F5E9">
+<td><b>R1-2</b></td>
+<td><span class="pill" style="background:#E8F5E9;color:var(--ok)">✅ 已修</span></td>
+<td>audio_service.Stop 不 join task · Start 立刻重 create · 旧+新 task 共存窗口</td>
+<td><code>audio_service.cc:188-221</code></td>
+<td>2026-05-13 落地：Stop 末尾 join_task lambda · eTaskGetState(eDeleted) 轮询 3 个 handle · 单 task 500ms 超时（总最坏 1.5s）· 超时不 force kill（task 可能持锁）仅日志告警</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>R1-1</td>
+<td><span class="pill rest-p1">rest-p1</span></td>
+<td>Read/Write/EnableXxx 持锁链 60+50ms · 偶发丢帧</td>
+<td><code>box_audio_codec.cc:194-271</code></td>
+<td>EnableInput/Output 拆细持锁 · 或保持现状监控丢帧率</td>
+<td>2 h</td>
+<td>NO · 偶发 · 量产后第 1 版</td>
+</tr>
+<tr>
+<td>R1-3</td>
+<td><span class="pill rest-p1">rest-p1</span></td>
+<td>calib measure 子任务跳锁读 codec_dev 内部 bool 非原子</td>
+<td><code>box_audio_codec.cc:299-309</code></td>
+<td>合并到 R2-1 patch 时同步检查 codec_dev 内部 output_opened 可见性</td>
+<td>15 min（合并）</td>
+<td>NO · 命中概率低</td>
+</tr>
+<tr>
+<td>R1-5</td>
+<td><span class="pill rest-p1">rest-p1</span></td>
+<td>input/output_enabled_ bool 仍非 atomic · 跨核 stale</td>
+<td><code>audio_codec.h:51-52</code></td>
+<td>改 std::atomic&lt;bool&gt;（合并 P1-3）</td>
+<td>15 min</td>
+<td>NO · 量产后第 1 版（合并 P1-3 / H3-B(2)）</td>
+</tr>
+<tr>
+<td>R2-2</td>
+<td><span class="pill rest-p1">rest-p1</span></td>
+<td>input_gain 量化边界 31.5 → ES7210 GAIN_30DB 静默档跳</td>
+<td><code>box_audio_codec.cc:321</code></td>
+<td>§ 12.2.2 patch · 1 行 31.5→30.0</td>
+<td>1 min</td>
+<td><b>建议</b> · 强烈建议量产前合并修</td>
+</tr>
+<tr>
+<td>R2-4</td>
+<td><span class="pill rest-p1">rest-p1</span></td>
+<td>audio_power_timer_ calib 后 13s 内提前触发 EnableInput(false)</td>
+<td><code>audio_service.cc:200/247</code></td>
+<td>Start 内 last_input_time_ = now()</td>
+<td>5 min</td>
+<td>NO · 用户感知边缘</td>
+</tr>
+<tr>
+<td>R3-1</td>
+<td><span class="pill rest-p1">rest-p1</span></td>
+<td>SetAecGain 双字段写无锁 · ~3μs 窗口</td>
+<td><code>audio_codec.cc:61-68</code></td>
+<td>加 atomic 或锁 · 命中概率极低</td>
+<td>15 min</td>
+<td>NO · 概率 0.01%</td>
+</tr>
+<tr>
+<td>R3-2</td>
+<td><span class="pill rest-p1">rest-p1</span></td>
+<td>AudioCodec::Start 无人调 · NVS aec_gain 不读</td>
+<td><code>audio_codec.cc:30-43</code> + 调用方</td>
+<td>application.cc Init 期补一次 GetAudioCodec()->Start() · 或删 Start 函数</td>
+<td>10 min</td>
+<td>NO · 校准路径覆盖</td>
+</tr>
+<tr>
+<td>R3-3</td>
+<td><span class="pill rest-p2">rest-p2</span></td>
+<td>NVS mic_type 写但无读取者 · 死代码</td>
+<td><code>box_audio_codec.cc:333</code></td>
+<td>删除或加 TODO 注释</td>
+<td>1 min</td>
+<td>NO · 不影响功能</td>
+</tr>
+<tr>
+<td>R1-4</td>
+<td><span class="pill rest-p2">rest-p2</span></td>
+<td>EnableOutput 无 mute · Power Timer 边界 toggle 可能 POP</td>
+<td><code>box_audio_codec.cc:235-255</code></td>
+<td>fork driver 修 mute ramp · 或加大 Power Timer 阈值</td>
+<td>1 天（fork）</td>
+<td>NO · 上游兼容</td>
+</tr>
+<tr>
+<td>R3-4</td>
+<td><span class="pill rest-p2">rest-p2</span></td>
+<td>~BoxAudioCodec 析构未 disable i2s channel</td>
+<td><code>box_audio_codec.cc:89-101</code></td>
+<td>补 i2s_channel_disable + i2s_del_channel</td>
+<td>3 min</td>
+<td>NO · 单例不析构</td>
+</tr>
+<tr>
+<td>R3-5</td>
+<td><span class="pill rest-p2">rest-p2</span></td>
+<td>ES7210 4 通道全跑 但 channel_mask 只取 2 · DMA + ADC 浪费</td>
+<td><code>box_audio_codec.cc:77</code></td>
+<td>mic_selected=MIC1|MIC2 · 牵涉 TDM slot 映射</td>
+<td>30 min（含验证）</td>
+<td>NO · 功耗优化</td>
+</tr>
+</tbody>
+</table>
+
+<div class="callout bad">
+<b>量产前必修（rest-p0 · 本周内）：</b><br/>
+✅ <s style="opacity:.6"><b>R2-1</b> calib Pin Core 1 + P10 + TaskHandle 轮询</s> · 2026-05-13 已修 <code>box_audio_codec.cc:293-323</code><br/>
+✅ <s style="opacity:.6"><b>R1-2</b> audio_service.Stop 等 task exit 再返回</s> · 2026-05-13 已修 <code>audio_service.cc:188-221</code> · join_task 单 task 500ms 超时<br/>
+⚪ <b>R2-3</b> ES7210 mic2/3/4 30dB · 用户明确不修 · 等 fork driver 后在 device/es7210/ 修 mask=0x0F<br/>
+<b>建议合并修</b>：R2-2 量化边界 31.5→30.0（1 min · 同一文件 · 强烈建议下次改 box_audio_codec.cc 时顺手）<br/>
+<b>合计工作量</b>：~1.5 小时落代码 + 半天烧机验证<br/>
+<b>是否还有严重风险需要修复</b>：<b>NO（量产可放行）</b><br/>
+- R2-1 / R1-2 已修 2026-05-13<br/>
+- R2-3 用户决策不处理（等 fork driver）· 影响远场识别率 5-10% 已知接受<br/>
+- 仅 R2-2（1 min · 量化边界）建议下次同文件改动时合并 · 不阻塞量产
+</div>
+
+<div class="callout warn">
+<b>量产后第 1 版（rest-p1 · 1-2 周内）：</b><br/>
+R1-1 锁链长尾监控 · R1-3 子任务 codec_dev 内部 bool · R1-5 父类 enabled bool atomic（合并 P1-3） · R2-4 audio_power_timer last_input_time · R3-1 SetAecGain atomic · R3-2 AudioCodec::Start 调用补齐
+</div>
+
+<div class="callout">
+<b>持续优化（rest-p2 · 排期看 priority）：</b><br/>
+R1-4 EnableOutput mute ramp fork driver · R3-3 NVS mic_type 死代码清理 · R3-4 析构 i2s_channel_disable · R3-5 ES7210 通道节流
+</div>
+
+<h4>12.4.1 评级矩阵小结</h4>
+<table>
+<thead><tr><th>轮次</th><th>rest-p0</th><th>rest-p1</th><th>rest-p2</th><th>自反驳剔除</th></tr></thead>
+<tbody>
+<tr><td>第 1 轮 · 新风险</td><td>0（R1-2 ✅ 已修）</td><td>3（R1-1 R1-3 R1-5）</td><td>1（R1-4）</td><td>R1-3 降级 / R1-4 降级</td></tr>
+<tr><td>第 2 轮 · 旧风险</td><td>0（R2-1 ✅ 已修 · R2-3 用户决策不修）</td><td>3（R2-2 R2-3 不修 + R2-4）</td><td>0</td><td>—</td></tr>
+<tr><td>第 3 轮 · 攻击面外延</td><td>0</td><td>3（R3-1 R3-2 R3-3）</td><td>3（R3-4 R3-5 R1-4 复算）</td><td>R3-2 限定 / R3-5 降级 / R3-6 移除</td></tr>
+<tr style="background:#E8F5E9"><td><b>合计（2026-05-13 修复后）</b></td><td><b style="color:var(--ok)">0</b></td><td><b>9</b></td><td><b>4</b></td><td><b>5 项自反驳 + 2 项已修 + 1 项决策不修</b></td></tr>
+</tbody>
+</table>
+</section>
+
+</main>
+</div>
+
+</body>
+</html>
