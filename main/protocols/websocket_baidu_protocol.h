@@ -31,6 +31,50 @@
  * - 发送: OPUS 16kHz 20ms 帧 (规范建议最佳帧时长)
  * - 接收: OPUS 24kHz 60ms 帧
  */
+/**
+ * AEC 模式联动配置 · 集中 P30 量产纪律 § 一.5.2 (避免散落判断)
+ *
+ * 一处定义, 5 处消费:
+ *   1. SendInitialDeviceInfo → DeviceInfo 字段
+ *   2. SendAudio → TTS 期间是否上传
+ *   3. HandleEvent [VOICE_COMING] → 云端打断响应
+ *   4. SendAbortSpeaking → 打断方式
+ *   5. 启动日志 → 调试可视化
+ */
+struct BaiduAecConfig {
+    bool full_duplex;            // → DeviceInfo.dfda · 服务端允许 TTS 期间持续上行
+    bool cloud_auto_int;         // → !DeviceInfo.disable_voice_auto_int · 云端 VAD 自动打断
+    int  tts_end_delay_ms;       // → DeviceInfo.tts_end_delay_ms · TTS 末尾延迟
+    bool send_audio_while_tts;   // → SendAudio TTS 期间是否上传 (false 则屏蔽防回声)
+    bool handle_voice_coming;    // → 是否响应 [VOICE_COMING] 打断 (云端 VAD 检测人声时)
+    const char* mode_name;       // 日志标签
+};
+
+// AEC ON (NVS aecMode.aec=1): 全双工 + 云端 VAD 打断 + 50ms 末尾延迟 (官方推荐最低)
+static constexpr BaiduAecConfig kBaiduAecOn = {
+    /* full_duplex          */ true,
+    /* cloud_auto_int       */ true,
+    /* tts_end_delay_ms     */ 50,
+    /* send_audio_while_tts */ true,
+    /* handle_voice_coming  */ true,
+    /* mode_name            */ "AEC-ON (full-duplex, cloud-VAD interrupt)"
+};
+
+// AEC OFF (NVS aecMode.aec=0 · P30 当前默认): 半双工 + 唤醒词打断 + 150ms 末尾延迟
+static constexpr BaiduAecConfig kBaiduAecOff = {
+    /* full_duplex          */ false,
+    /* cloud_auto_int       */ false,
+    /* tts_end_delay_ms     */ 150,
+    /* send_audio_while_tts */ false,
+    /* handle_voice_coming  */ false,
+    /* mode_name            */ "AEC-OFF (half-duplex, wakeword interrupt)"
+};
+
+// 共享参数 (与 AEC 模式无关 · 弱网/防御性配置)
+static constexpr float kBaiduTtsFastSendRatio   = 2.0f;  // fast send 加速倍数
+static constexpr int   kBaiduTtsFastSendSeconds = 2;     // fast send 启动前 N 秒
+static constexpr int   kBaiduWakeWordBreakMs    = 3000;  // 唤醒词打断丢弃音频毫秒数 (备份 break_delay_ms)
+
 class WebsocketBaiduProtocol : public Protocol {
 public:
     WebsocketBaiduProtocol();
@@ -40,10 +84,7 @@ public:
     bool Start() override;
     bool SendAudio(std::unique_ptr<AudioStreamPacket> packet) override;
 
-    // 帧时长与其他协议统一：60 ms（项目硬编码 OPUS_FRAME_DURATION_MS=60，整链路按 60 ms 编/解码 + queue 上限）
-    // 历史曾标 20 ms（百度规范建议）但 client_frame_duration() 无消费者 + audio_service 不支持动态切换 → 死代码
-    // 实测项目以 60 ms 帧发给百度 BRTC，服务端可接收。如未来支持动态帧长再考虑改回 20 ms。
-    int client_frame_duration() const override { return 60; }
+    int client_frame_duration() const override { return 20; }
     bool OpenAudioChannel() override;
     // 签名对齐基类（编译错误修复）· send_goodbye 在百度协议下不发送（WS 保活复用），仅 (void) 消费
     void CloseAudioChannel(bool send_goodbye = true) override;
@@ -92,6 +133,7 @@ private:
     bool greeting_sent_ = false;
     bool lic_active_pending_ = false;
     bool has_local_aec_ = false;
+    const BaiduAecConfig* aec_cfg_ = &kBaiduAecOff;
     ListeningMode current_mode_ = kListeningModeRealtime;
 
     // ========== 发送失败追踪（音频/控制分离，避免音频丢帧污染控制面）==========

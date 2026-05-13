@@ -108,11 +108,20 @@ WebsocketBaiduProtocol::WebsocketBaiduProtocol() {
 
     // 集中读取 NVS 配置（避免运行时反复读 NVS）
     Settings baidu_settings("baidu", false);
-    server_sample_rate_ = baidu_settings.GetInt("server_sample_rate", 24000);
-    server_frame_duration_ = baidu_settings.GetInt("server_frame_duration", 60);
+    server_sample_rate_ = 24000;     // 下行 PCM 采样率 = codec output（避免 audio_service 二次重采样）
+    server_frame_duration_ = 20;     // 百度固定 20ms 帧
     break_delay_ms_ = baidu_settings.GetInt("break_delay_ms", 500);
     idle_timeout_seconds_ = baidu_settings.GetInt("idle_timeout", 300);
     license_key_ = baidu_settings.GetString("license_key", "759877c9b68b4aa082cc05390be0cea9");
+
+    Settings aec_settings("aecMode", false);
+    has_local_aec_ = (aec_settings.GetInt("aec", 0) == 1);
+    aec_cfg_ = has_local_aec_ ? &kBaiduAecOn : &kBaiduAecOff;
+    ESP_LOGI(TAG, "===== %s =====", aec_cfg_->mode_name);
+    ESP_LOGI(TAG, "  dfda=%d  cloud_auto_int=%d  tts_end_delay=%dms",
+             aec_cfg_->full_duplex, aec_cfg_->cloud_auto_int, aec_cfg_->tts_end_delay_ms);
+    ESP_LOGI(TAG, "  send_audio_while_tts=%d  voice_coming_handled=%d",
+             aec_cfg_->send_audio_while_tts, aec_cfg_->handle_voice_coming);
 
     // 初始 ASR 模式：默认实时模式（兼容既有行为）
     // 实际模式会在 SendStartListening() 中根据 ListeningMode 动态切换
@@ -212,10 +221,8 @@ bool WebsocketBaiduProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet
         return false;
     }
 
-    // TTS 期间音频发送策略：
-    // - 有设备 AEC: 继续发送 → 本地 AFE 消除回声后的干净音频上传，云端检测人声打断
-    // - 无 AEC:     不发送 → 扬声器音频会回馈到麦克风，由本地唤醒词打断
-    if (is_speaking_ && !has_local_aec_) {
+    // TTS 期间音频发送策略 (来自 AEC 模式联动 § aec_cfg_)：
+    if (is_speaking_ && !aec_cfg_->send_audio_while_tts) {
         return false;
     }
 
@@ -780,17 +787,6 @@ void WebsocketBaiduProtocol::HandleBinaryMessage(const char* data, size_t len) {
     // 百度协议文档无最小帧限制，OPUS RFC 6716 允许 1 字节 DTX 静音帧（仅 TOC byte）
     // 丢弃有效小帧会导致 TTS 播放断断续续（dfda=false 时服务器下发静音填充）
     if (on_incoming_audio_ && len > 0) {
-        if (audio_rx_frames_ == 0 && len >= 4) {
-            uint8_t toc = (uint8_t)data[0];
-            uint8_t config = toc >> 3;
-            const char* frame_hint = (config >= 24) ? "60ms?" :
-                                     (config >= 16) ? "20ms?" :
-                                     (config >= 14) ? "10ms?" : "5ms or smaller?";
-            ESP_LOGI(TAG, "[BD][PROBE] first opus packet=%d bytes · TOC=0x%02X · config=%d · %s "
-                          "(expecting %d ms per NVS)",
-                     (int)len, toc, (int)config, frame_hint, server_frame_duration_);
-        }
-
         auto packet = std::make_unique<AudioStreamPacket>();
         packet->sample_rate = server_sample_rate_;
         packet->frame_duration = server_frame_duration_;
@@ -951,13 +947,16 @@ void WebsocketBaiduProtocol::HandleEvent(const std::string& event) {
         NotifyTtsState("stop", nullptr);
     }
     else if (event.find("[VOICE_COMING]") != std::string::npos) {
-        if (has_local_aec_ && is_speaking_) {
-            // AEC 开：云端检测到人声，触发打断 TTS
-            ESP_LOGI(TAG, "<< VOICE_COMING → interrupt TTS (AEC mode)");
+        // 来自 AEC 模式联动 § aec_cfg_->handle_voice_coming
+        // AEC ON: 响应云端 VAD 检测到的人声 → 打断 TTS (AEC ON 模式独有, 因为只有它发了 disable_voice_auto_int=false)
+        // AEC OFF: 忽略 (云端 VAD 已通过 disable_voice_auto_int=true 关闭, 不会发此事件; 防御性 ignore)
+        if (aec_cfg_->handle_voice_coming && is_speaking_) {
+            ESP_LOGI(TAG, "<< VOICE_COMING → interrupt TTS (cloud VAD)");
             is_speaking_ = false;
             NotifyTtsState("stop", nullptr);
         } else {
-            ESP_LOGD(TAG, "<< VOICE_COMING (ignored, aec=%d speaking=%d)", has_local_aec_, is_speaking_.load());
+            ESP_LOGD(TAG, "<< VOICE_COMING ignored (handle=%d speaking=%d)",
+                     aec_cfg_->handle_voice_coming, is_speaking_.load());
         }
     }
     else if (event.find("[MEDIA]:[READY]:") != std::string::npos ||
@@ -1171,43 +1170,38 @@ void WebsocketBaiduProtocol::ScheduleLicRetry() {
 }
 
 void WebsocketBaiduProtocol::SendInitialDeviceInfo() {
-    // ========== AEC 模式检测（仅开/关两种状态）==========
-    Settings aec_settings("aecMode", false);
-    int aec_mode = aec_settings.GetInt("aec", 0);
-    has_local_aec_ = (aec_mode == 1);
-    ESP_LOGI(TAG, "AEC: %s", has_local_aec_ ? "ON (device AFE)" : "OFF");
-
+    // AEC 模式由构造时确定 (aec_cfg_), 此处不再读 NVS — 避免与 SendAudio/[VOICE_COMING] 等消费点状态不一致
     cJSON* json = cJSON_CreateObject();
+
+    // ===== 设备标识 (官方 DeviceInfo 规范, 见 doc/RTC/s/sm9qgxvfq) =====
     cJSON_AddStringToObject(json, "model", BOARD_TYPE);
-
-    // ========== 根据 AEC 开关自动设定参数 ==========
-    if (has_local_aec_) {
-        // AEC 开：全双工 + 允许云端自动打断
-        // 设备端 AFE 消除回声后持续上传干净音频，云端 ASR 实时处理，检测人声自动打断 TTS
-        cJSON_AddBoolToObject(json, "dfda", true);
-        cJSON_AddBoolToObject(json, "disable_voice_auto_int", false);
-        cJSON_AddNumberToObject(json, "tts_end_delay_ms", 100);
-    } else {
-        // AEC 关：半双工 + 关闭云端自动打断
-        // TTS 期间不上传音频（扬声器回声会污染麦克风），由本地唤醒词打断
-        cJSON_AddBoolToObject(json, "dfda", false);
-        cJSON_AddBoolToObject(json, "disable_voice_auto_int", true);
-        cJSON_AddNumberToObject(json, "tts_end_delay_ms", 300);
+    cJSON_AddStringToObject(json, "os", "esp-idf");
+    cJSON_AddStringToObject(json, "soc", "esp32s3");
+    if (!user_id_.empty()) {
+        cJSON_AddStringToObject(json, "user_id", user_id_.c_str());
     }
 
-    if (has_local_aec_) {
-        // AEC 开：TTS 加速下发（弱网优化）
-        cJSON_AddBoolToObject(json, "tts_enable_fast_send", true);
-        cJSON_AddNumberToObject(json, "tts_fast_send_second", 2);
-        cJSON_AddNumberToObject(json, "tts_fast_send_ratio", 2.0f);
-    }
+    // ===== AEC 联动配置 (统一从 aec_cfg_ 派生, 避免散落 if/else) =====
+    cJSON_AddBoolToObject(json, "dfda", aec_cfg_->full_duplex);
+    cJSON_AddBoolToObject(json, "disable_voice_auto_int", !aec_cfg_->cloud_auto_int);
+    cJSON_AddNumberToObject(json, "tts_end_delay_ms", aec_cfg_->tts_end_delay_ms);
 
-    cJSON_AddNumberToObject(json, "audio_frame_duration_ms", 60);
-    cJSON_AddNumberToObject(json, "tts_frame_duration_ms", 60);
-    cJSON_AddNumberToObject(json, "frame_duration_ms", 60);
+    // ===== TTS 弱网加速 (与 AEC 模式无关, 二者都开) =====
+    cJSON_AddBoolToObject(json, "tts_enable_fast_send", true);
+    cJSON_AddNumberToObject(json, "tts_fast_send_second", kBaiduTtsFastSendSeconds);
+    cJSON_AddNumberToObject(json, "tts_fast_send_ratio", kBaiduTtsFastSendRatio);
+
+    // ===== 防御性显式关闭云端 3A =====
+    cJSON* cloud_3a = cJSON_CreateObject();
+    for (const char* algo : { "AEC", "ANS", "AGC" }) {
+        cJSON* obj = cJSON_CreateObject();
+        cJSON_AddBoolToObject(obj, "enable", false);
+        cJSON_AddItemToObject(cloud_3a, algo, obj);
+    }
+    cJSON_AddItemToObject(json, "cloud_3A_url", cloud_3a);
 
     char* str = cJSON_PrintUnformatted(json);
-    ESP_LOGI(TAG, "DeviceInfo: %s", str);
+    ESP_LOGI(TAG, ">> DeviceInfo (%s): %s", aec_cfg_->mode_name, str);
     SendText(std::string(CMD_DEVICE_INFO) + str);
     cJSON_free(str);
     cJSON_Delete(json);
@@ -1230,9 +1224,6 @@ bool WebsocketBaiduProtocol::SendTextToTts(const std::string& text) {
     return SendText(std::string(INPUT_TEXT_TO_TTS) + text);
 }
 
-// 教育卡 P0：动态切换 system prompt（参考 BRTC SDK update_vision_prompt 协议）
-//   model_type=0 聊天 / 2 视觉理解；prompt 空串=云端清空恢复默认
-//   服务端会回执 [E]:[SYSTEM_PROMPT_UPDATED]:{...}（HandleEvent 处理）
 bool WebsocketBaiduProtocol::UpdateSystemPrompt(int model_type, const std::string& prompt) {
     if (!websocket_ || !websocket_->IsConnected()) {
         ESP_LOGW(TAG, "UpdateSystemPrompt: ws not connected");
@@ -1266,10 +1257,6 @@ bool WebsocketBaiduProtocol::SendRemoteMusicControl(const std::string& action) {
     return false;
 }
 
-// 云端 → 设备 远程音乐控制（HandleEvent 中 CMD:REMOTE_PLAYER:xxx 调用）
-// 顶级原则：协议层只负责"翻译事件"，业务态决策放主线程：
-//   1. 同步本地状态 is_playing_music_（影响 SendStartListening 等分支）
-//   2. Schedule 到主线程操作 MusicPlayer（与 LVGL/AFE 同核，避免跨线程竞争）
 void WebsocketBaiduProtocol::HandleRemoteMusicCommand(const char* action) {
     if (!action) return;
     ESP_LOGI(TAG, "<< REMOTE_PLAYER:%s", action);
