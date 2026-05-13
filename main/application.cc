@@ -150,10 +150,7 @@ void Application::Initialize() {
     auto& board = Board::GetInstance();
     SetDeviceState(kDeviceStateStarting);
 
-    // P0：时区基准必须最早设（在任何 localtime_r / 时钟显示之前）
     // CST-8 == UTC+8（中国标准时间）· POSIX TZ 符号反向所以是 -8
-    // 已校时设备重启时：RTC 已是 UTC，TZ 让 localtime_r 显示北京时间
-    // 未校时设备：tm_year < 2020 触发"--:--"占位，TZ 仍提前就绪
     setenv("TZ", "CST-8", 1);
     tzset();
 
@@ -162,8 +159,6 @@ void Application::Initialize() {
     display->SetupUI();
 
     // 等 LVGL 任务完成首帧黑底刷新（避免 GRAM 默认白色透出），再点亮背光。
-    // 80ms 经验值：覆盖 LVGL 任务调度 + DMA flush 一帧（284x240 RGB565 < 30ms）。
-    // 同时 logo fade_in 在 SetupUI 已启动，背光与 logo 渐显同步，开机过渡平顺。
     vTaskDelay(pdMS_TO_TICKS(80));
     if (auto* backlight = board.GetBacklight()) {
         backlight->RestoreBrightness();
@@ -177,7 +172,6 @@ void Application::Initialize() {
     audio_service_.Initialize(codec);
 
     // 首次开机：MIC 灵敏度校准（NVS mic_type=0 表示未校准 · 必须在 audio_service.Start 之前做，
-    // 否则会与 audio_input task 抢 input_dev_ 导致死锁）
     if (Settings("audio", false).GetInt("mic_type", 0) == 0) {
         if (auto* box = dynamic_cast<BoxAudioCodec*>(codec)) {
             ESP_LOGW(TAG, "首次开机 MIC 校准开始（约 1 秒，会发出短促 1kHz 提示音）");
@@ -209,7 +203,6 @@ void Application::Initialize() {
         DeviceStateEventManager::GetInstance().PostStateChangeEvent(old_state, new_state);
 
         // A1 · 开机自动对话：首次进 Idle 时触发 ToggleChat
-        // board WelcomeTask 在播欢迎音前调 RequestAutoChatOnIdle() · 此处响应
         if (new_state == kDeviceStateIdle && auto_chat_pending_.exchange(false)) {
             ESP_LOGI(TAG, "开机自动对话：state→Idle 触发 ToggleChat");
             Schedule([this]() { ToggleChatState(); });
@@ -441,15 +434,12 @@ void Application::HandleActivationDoneEvent() {
     has_server_time_ = ota_->HasServerTime();
     if (has_server_time_) {
         // P0：闹钟时区基准 · 不 setenv("TZ") 会让 localtime_r 退化为 UTC（显示比真实少 8h）
-        // ⇒ 用户设"早 7:00"实际北京 15:00 才响 · CST-8 == UTC+8（中国标准时间）
-        // ⚠️ 必须与 ota.cc 协同：settimeofday 接 UTC 毫秒（已修），TZ 由此 setenv 决定本地偏移
         setenv("TZ", "CST-8", 1);
         tzset();
         AlarmManager::MarkTimeSynced();   // 校时成功 · 启用闹钟检查
     }
 
     auto display = Board::GetInstance().GetDisplay();
-    // 隐藏激活期间的绑定 QR + "请绑定设备" 提示（之前有遗漏 → QR 一直停留在屏幕上）
     display->HideQrCode();
     std::string message = std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
     display->ShowNotification(message.c_str());
@@ -630,8 +620,6 @@ void Application::InitializeProtocol() {
     if (ota_->HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
     } else if (ota_->HasWebsocketConfig()) {
-        // WebSocket 分发：Baidu (bcelive 域名) → JoyAI (joyinside) → 普通 WS 兜底
-        // bcelive = Baidu Cloud Engine Live · 百度 RTC 服务统一域名 wss://*.bcelive.com
         Settings ws_settings("websocket", false);
         std::string ws_url = ws_settings.GetString("url", "");
         if (ws_url.find("bcelive") != std::string::npos) {
@@ -725,7 +713,6 @@ void Application::InitializeProtocol() {
                 Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
                     // 触发：服务器 stt 文本回包 = 用户语音已被服务器收到+识别
-                    // 跳过：① stt_popup_enabled_=false ② ManualStop 模式（FlowEngine 流程） ③ 唤醒词首条 STT
                     if (stt_popup_enabled_ &&
                         listening_mode_ != kListeningModeManualStop &&
                         !skip_next_stt_popup_.exchange(false)) {
@@ -778,7 +765,10 @@ void Application::InitializeProtocol() {
             ESP_LOGW(TAG, "Unknown message type: %s", type->valuestring);
         }
     });
-    
+
+    // 按 protocol 切 OPUS 帧长（百度 20 / 其它 60）
+    audio_service_.SetFrameDuration(protocol_->client_frame_duration());
+
     protocol_->Start();
 }
 
@@ -809,7 +799,6 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
     std::string bind_url = "https://mydazy.cn/ota/code?code=" + code;
     display->ShowQrCode(bind_url.c_str(), code.c_str(), "请绑定设备", "微信扫码绑定");       // bottom
     display->SetChatMessage("system", message.c_str());
-
 
 
     display->SetStatus(Lang::Strings::ACTIVATION);
@@ -1083,27 +1072,13 @@ void Application::HandleStateChangedEvent() {
             if (lcd) lcd->SwitchToChatMode();    // 对话开始，表情/消息可见
             break;
         case kDeviceStateListening:
-            display->SetStatus("#FF3030 ●#");
+            display->SetStatus(""); //#FF3030 ●#
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
-            // 🔴 兜底切场景：修复"时钟主屏卡死，换新后无表情"
-            //   触发路径：用户对话结束 → channel 复用未关闭 → 再次按键/唤醒
-            //   → HandleToggleChat / HandleStartListening / HandleWakeWord 内
-            //     channel opened 分支直接 SetListeningMode(mode) → SetDeviceState(Listening)
-            //   → 跳过 Connecting case · SwitchToChatMode 永不调用
-            //   → active_scene_ 卡在 kClock · 表情/字幕不显示
-            //   SwitchToChatMode 早退守护 `if (active_scene_ != kClock) return` 保证幂等：
-            //     - 正常 Connecting→Listening：active_scene_=kChat → 早退（保留 EduCard/FontGif）
-            //     - Speaking→Listening 同轮继续问：早退（符合"Listening 不清场"设计）
-            //     - Idle 直跳 Listening（channel 已开）：active_scene_=kClock → 切 Chat ✅
             if (lcd) lcd->SwitchToChatMode();
-            // Listening 不清场：保留上一轮的教育卡 / FontGIF，让孩子能看着画面继续问
-            // 清场在 Speaking 进入时执行（真正的下一轮对话）
 
             // Make sure the audio processor is running
             if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {
-                // For auto mode, wait for playback queue to be empty before enabling voice processing
-                // This prevents audio truncation when STOP arrives late due to network jitter
                 if (listening_mode_ == kListeningModeAutoStop) {
                     audio_service_.WaitForPlaybackQueueEmpty();
                 }
@@ -1129,8 +1104,6 @@ void Application::HandleStateChangedEvent() {
             break;
         case kDeviceStateSpeaking:
             display->SetStatus("");
-            // 下一轮对话开始：清掉上一轮的教育卡 + 笔画 GIF · 让新一轮 LLM 触发新显示
-            // 单卡架构（严格音画同步）· 无队列无 timer 需要清
             if (lcd) {
                 lcd->HideEduCard();
                 lcd->HideFontGif();
@@ -1180,10 +1153,6 @@ void Application::CloseAudioChannel() {
 }
 
 // 远程 / 本地触发的 TTS 朗读：自动唤醒 + 抢占当前 TTS
-//   Idle      → 切 Connecting，让 UI 从 clock 进 chat（与 WakeWordInvoke 同款过渡）
-//   Speaking  → 先 Abort 当前 TTS（远程新指令优先级更高）
-//   Listening → 不动（让录音继续，TTS 平行通道）
-// 返回 false：text 空 / protocol 未就绪 / OpenAudioChannel 失败 / 协议层未实现 tts 通道
 bool Application::SendTextToTts(const std::string& text) {
     if (text.empty() || !protocol_) return false;
 
@@ -1191,7 +1160,6 @@ bool Application::SendTextToTts(const std::string& text) {
     if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
     } else if (state == kDeviceStateIdle) {
-        // 切 Connecting：状态机会联动 UI SwitchToChatMode（与 WakeWordInvoke 一致）
         SetDeviceState(kDeviceStateConnecting);
     }
 
@@ -1390,7 +1358,6 @@ bool Application::CanEnterSleepMode() {
         return false;
     }
 
-    // P0 修复：MP3 播放（含暂停态）期间禁止 deep sleep，避免 5 分钟自动关机杀掉播放
     if (MusicPlayer::GetInstance().IsPlaying()) {
         return false;
     }
