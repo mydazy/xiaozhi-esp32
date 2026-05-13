@@ -20,6 +20,7 @@
 #include "lvgl_theme.h"
 #include "lvgl_display.h"
 #include "audio/music_player.h"
+#include "power_manager.h"  // PowerManager::IsChargingGlobal · self.power.get_sleep_mode 用
 
 #define TAG "MCP"
 
@@ -114,6 +115,45 @@ void McpServer::AddCommonTools() {
             auto codec = board.GetAudioCodec();
             codec->SetOutputVolume(properties["volume"].value<int>());
             return true;
+        });
+
+    // ============================================================
+    // 自动休眠开关（语音可控 · 持久化 NVS · 立即生效）
+    //   关闭 → PowerSaveTimer 停止 · 永不进软省电（LCD 不降亮）也永不进深睡
+    //   开启 → 60s 后软省电（LCD 降亮 + 状态上报）· 300s 后深睡（充电中跳过）
+    // 充电场景：即使 sleep_mode=ON · OnShutdownRequest 内已加 IsChargingGlobal 跳过
+    AddTool("self.power.set_sleep_mode",
+        "Enable or disable automatic sleep (power saving + deep sleep). "
+        "Default: enabled. Persists to NVS across reboots. "
+        "Side effects when disabled: screen stays at user-set brightness forever (NOT auto-dim after 60s), "
+        "device never enters deep sleep. Use when user says: 关闭自动休眠 / 不要休眠 / 一直亮 / keep awake. "
+        "When charging, deep sleep is automatically skipped regardless of this setting (soft power saving still applies).",
+        PropertyList({
+            Property("enabled", kPropertyTypeBoolean)
+        }),
+        [&board](const PropertyList& properties) -> ReturnValue {
+            bool enabled = properties["enabled"].value<bool>();
+            board.EnableAutoSleep(enabled);
+            return std::string("{\"success\":true,\"sleep_mode\":") + (enabled ? "true" : "false") + "}";
+        });
+
+    AddTool("self.power.get_sleep_mode",
+        "Query current auto sleep state and whether charging is overriding deep sleep. "
+        "Returns JSON {\"enabled\":bool,\"charging\":bool,\"deep_sleep_skipped\":bool}. "
+        "If charging=true and enabled=true, deep_sleep_skipped will be true (charging always blocks deep sleep).",
+        PropertyList(),
+        [&board](const PropertyList&) -> ReturnValue {
+            bool enabled = board.IsAutoSleepEnabled();
+            bool charging = PowerManager::IsChargingGlobal();
+            bool deep_sleep_skipped = enabled && charging;
+            std::string r = "{\"enabled\":";
+            r += enabled ? "true" : "false";
+            r += ",\"charging\":";
+            r += charging ? "true" : "false";
+            r += ",\"deep_sleep_skipped\":";
+            r += deep_sleep_skipped ? "true" : "false";
+            r += "}";
+            return r;
         });
 
     // MP3 流式播放 — 云端识别到 MP3 URL 后通过此 tool 让设备播放
@@ -393,7 +433,7 @@ void McpServer::AddUserOnlyTools() {
                 }
 
                 // P0-2：HTTP 下载在后台任务跑 · 下载完成 Schedule 回主线程做 LVGL SetPreviewImage
-                struct PreviewCtx { std::string url; Display* display; };
+                struct PreviewCtx { std::string url; LvglDisplay* display; };
                 auto* ctx = new PreviewCtx{url, display};
                 BaseType_t r = xTaskCreatePinnedToCore([](void* arg) {
                     auto* c = static_cast<PreviewCtx*>(arg);
@@ -424,7 +464,7 @@ void McpServer::AddUserOnlyTools() {
                     if (ok && data) {
                         char* data_owned = data;
                         size_t len = content_length;
-                        Display* d = c->display;
+                        LvglDisplay* d = c->display;
                         Application::GetInstance().Schedule([d, data_owned, len]() {
                             auto image = std::make_unique<LvglAllocatedImage>(data_owned, len);
                             d->SetPreviewImage(std::move(image));

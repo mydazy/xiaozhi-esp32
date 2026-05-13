@@ -491,6 +491,11 @@ private:
             GetBacklight()->RestoreBrightness();
         });
         power_save_timer_->OnShutdownRequest([this, deep_sleep_enabled]() {
+            // 充电中跳过深睡 · 软省电（OnEnterSleepMode 降亮）仍生效防发烫
+            if (PowerManager::IsChargingGlobal()) {
+                ESP_LOGI(TAG, "充电中，跳过深度睡眠 · LCD 保持降亮状态");
+                return;
+            }
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
                 ShutdownOrSleep("休眠中", "拿起唤醒", "", 1500, true);

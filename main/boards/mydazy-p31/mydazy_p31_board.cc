@@ -458,6 +458,12 @@ private:
         });
 
         power_save_timer_->OnShutdownRequest([this]() {
+            // 充电中跳过深睡 · 软省电（OnEnterSleepMode 降亮）仍生效防发烫
+            // 2026-05-12 落地"充电不休眠"
+            if (PowerManager::IsChargingGlobal()) {
+                ESP_LOGI(TAG, "充电中，跳过深度睡眠 · LCD 保持降亮状态");
+                return;
+            }
             Settings settings("status", false);
             int deep_sleep_enabled = settings.GetInt("deepSleep", 1);
             if (deep_sleep_enabled) {

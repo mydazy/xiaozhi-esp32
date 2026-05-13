@@ -502,6 +502,11 @@ private:
             GetBacklight()->RestoreBrightness();
         });
         power_save_timer_->OnShutdownRequest([this, deep_sleep_enabled]() {
+            // 充电中：跳过深睡 · 保持时钟可见 + 唤醒词常开（桌钟/夜间充电场景）
+            if (PowerManager::IsChargingGlobal()) {
+                ESP_LOGI(TAG, "充电中，跳过深度睡眠 · LCD 保持降亮状态");
+                return;
+            }
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
                 // 自动休眠：仅屏幕提示 + 陀螺仪可唤醒（拿起即醒）

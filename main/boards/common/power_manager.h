@@ -283,6 +283,11 @@ public:
         return instance_ ? instance_->do_calibration1_chan0_ : false;
     }
 
+    // 全局充电状态查询
+    static bool IsChargingGlobal() {
+        return instance_ && instance_->is_charging_;
+    }
+
     bool IsCharging() {
         // // 如果电量已经满了，则不再显示充电中
         // if (battery_level_ == 100) {
