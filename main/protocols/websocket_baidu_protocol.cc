@@ -635,8 +635,19 @@ bool WebsocketBaiduProtocol::OpenAudioChannel() {
         if (was_ready && on_audio_channel_closed_) on_audio_channel_closed_();
     });
 
+    // 2026-05-13 WiFi PSM 预热: 避开"刚进 MIN_MODEM 立刻 TLS 握手"竞态
+    Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+    vTaskDelay(pdMS_TO_TICKS(300));
+
     ESP_LOGI(TAG, "[1] Connect: %s", url_.c_str());
-    if (!websocket_->Connect(url_.c_str())) {
+    bool connected = websocket_->Connect(url_.c_str());
+    if (!connected) {
+        // 第一次失败常见于 WiFi/4G modem 切换瞬间, 静默重试 1 次再判定失败
+        ESP_LOGW(TAG, "First connect failed, retrying after 500ms ...");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        connected = websocket_->Connect(url_.c_str());
+    }
+    if (!connected) {
         SetError(Lang::Strings::SERVER_NOT_CONNECTED);
         return false;
     }
