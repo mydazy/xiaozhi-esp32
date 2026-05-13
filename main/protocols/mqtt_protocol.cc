@@ -155,8 +155,15 @@ bool MqttProtocol::SendText(const std::string& text) {
     if (publish_topic_.empty()) {
         return false;
     }
+    if (mqtt_ == nullptr || !mqtt_->IsConnected()) {
+        ESP_LOGW(TAG, "SendText: MQTT not connected (text %u B), dropping",
+                 (unsigned)text.size());
+        return false;
+    }
     if (!mqtt_->Publish(publish_topic_, text)) {
-        ESP_LOGE(TAG, "Failed to publish message: %s", text.c_str());
+        ESP_LOGE(TAG, "Failed to publish message (%u B): %.128s%s",
+                 (unsigned)text.size(), text.c_str(),
+                 text.size() > 128 ? "..." : "");
         SetError(Lang::Strings::SERVER_ERROR);
         return false;
     }

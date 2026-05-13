@@ -696,6 +696,19 @@ private:
                 ESP_LOGI(TAG, "按键打断 MP3 → 唤醒对话");
                 StopMp3AndExitPlayerUi();
             }
+            // Connecting：按键打断握手 → 关 channel + 兜底切回 idle（防卡死在"连接中"）
+            if (status == kDeviceStateConnecting) {
+                ESP_LOGI(TAG, "按键打断 Connecting → 退出");
+                app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
+                app.CloseAudioChannel();   // channel 真打开 → OnAudioChannelClosed 回调切 idle
+                app.Schedule([]() {
+                    auto& a = Application::GetInstance();
+                    if (a.GetDeviceState() == kDeviceStateConnecting) {
+                        a.SetDeviceState(kDeviceStateIdle);  // 兜底：channel 未真打开时回调不触发
+                    }
+                });
+                return;
+            }
             if (status != kDeviceStateIdle && status != kDeviceStateListening && status != kDeviceStateSpeaking) return;
             if (status == kDeviceStateIdle) {
                 app.PlaySound(Lang::Sounds::OGG_WAKEUP);

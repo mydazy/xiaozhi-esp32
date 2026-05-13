@@ -965,6 +965,23 @@ void WebsocketBaiduProtocol::HandleEvent(const std::string& event) {
         ScheduleLicRetry();
         if (is_playing_music_) SendText(CMD_MUSIC_RESUME);
         NotifyTtsState("stop", "neutral");
+
+        // 2026-05-13 v2.2.14: 告别 TTS 完整播放结束 → 立刻关通道, 而非等 idle_dc 12s 兜底
+        //   优化路径: 实际 TTS 4-6s 播完即关, 用户体验更紧凑
+        //   12s 兜底 timer 仍保留 (idle_goodbye_sent_ 仍为 true), 防 LLM 不响应永远不关
+        if (idle_goodbye_sent_) {
+            ESP_LOGI(TAG, "Goodbye TTS finished → close channel now (fast path)");
+            auto guard = prevent_destroy_guard_;
+            Application::GetInstance().Schedule([this, guard]() {
+                if (!guard->load() || !idle_goodbye_sent_) return;
+                Application::GetInstance().GetAudioService().ResetDecoder();
+                media_ready_ = false;
+                is_speaking_ = false;
+                StopIdleTimer();
+                if (on_audio_channel_closed_) on_audio_channel_closed_();
+                ESP_LOGI(TAG, "Idle goodbye complete → audio channel closed");
+            });
+        }
     }
     else if (event.find("[REMOTE_PLAYER_BEGIN]") != std::string::npos) {
         is_playing_music_ = true;
@@ -1461,6 +1478,12 @@ void WebsocketBaiduProtocol::StopIdleTimer() {
 void WebsocketBaiduProtocol::CheckIdleTimeout() {
     if (!IsAudioChannelOpened()) return;
 
+    auto cur_state = Application::GetInstance().GetDeviceState();
+    if (cur_state != kDeviceStateIdle || is_speaking_) {
+        UpdateActivityTime();
+        return;
+    }
+
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - last_activity_time_).count();
 
@@ -1472,14 +1495,18 @@ void WebsocketBaiduProtocol::CheckIdleTimeout() {
         if (!guard->load() || !idle_goodbye_sent_) return;
         SendTextToAI("我要先去忙了，你跟我说再见吧");
 
-        // 3s 后关闭音频通道但保留 WS 连接（用于接收服务器推送命令）
-        auto t = xTimerCreate("idle_dc", pdMS_TO_TICKS(3000), pdFALSE, this,
+        auto t = xTimerCreate("idle_dc", pdMS_TO_TICKS(12000), pdFALSE, this,
             [](TimerHandle_t timer) {
                 auto* self = static_cast<WebsocketBaiduProtocol*>(pvTimerGetTimerID(timer));
                 if (self) {
                     auto g = self->prevent_destroy_guard_;
                     Application::GetInstance().Schedule([self, g]() {
                         if (!g->load()) return;
+                        // 用户在 12s 内唤醒过 → idle_goodbye_sent_ 已被 OpenAudioChannel 清, 跳过关闭
+                        if (!self->idle_goodbye_sent_) {
+                            ESP_LOGI(TAG, "Idle dc cancelled (user resumed during goodbye)");
+                            return;
+                        }
                         // 清空残留音频，防止进入待命后扬声器噗噗响
                         Application::GetInstance().GetAudioService().ResetDecoder();
                         // 只关闭音频通道，不断开 WS（保留推送能力）

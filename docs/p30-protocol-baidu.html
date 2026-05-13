@@ -461,7 +461,7 @@ FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 Pref
 <table>
 <thead><tr><th>Timer</th><th>类型</th><th>周期</th><th>触发条件</th><th>回调动作</th><th>停止时机</th></tr></thead>
 <tbody>
-<tr><td><code>idle_timer</code></td><td>周期</td><td>30 s 检查</td><td>StartIdleTimer (OpenAudio 后)</td><td>CheckIdleTimeout · <code>idle_timeout_seconds_</code>（NVS <code>baidu.idle_timeout</code> 默认 300s）无活动 → SendTextToAI("再见") + 3 s 后关音频通道</td><td>StopIdleTimer / CloseAudioChannel</td></tr>
+<tr><td><code>idle_timer</code></td><td>周期</td><td>30 s 检查</td><td>StartIdleTimer (OpenAudio 后)</td><td>CheckIdleTimeout · <code>idle_timeout_seconds_</code>（NVS <code>baidu.idle_timeout</code> 默认 300s）无活动 → SendTextToAI("再见") + <b>12 s 兜底</b>后关音频通道（TTS_END fast-path 可提前）<br><span class="fixed-tag">✅ v2.2.14：</span>入口加 <code>state != kDeviceStateIdle || is_speaking_</code> 状态守门 · 用户对话中 → UpdateActivityTime 重置不发 goodbye（cc:1461）</td><td>StopIdleTimer / CloseAudioChannel</td></tr>
 <tr><td><code>lic_retry_timer</code></td><td>一次性</td><td><b>5 s</b>（cc:144）</td><td>ScheduleLicRetry (LIC_MUST 收到时)</td><td>Schedule → TryFlushPendingLicActive · 在 main_app 主线程发送</td><td>FAILED / 成功 PASS</td></tr>
 <tr><td><code>listening_timer</code></td><td>一次性</td><td>30 s</td><td>StartListeningTimer (SendStartListening 等)</td><td>Schedule → 警告 "Listening timeout" + CloseAudioChannel</td><td>收到 ASR 结果 / StopListeningTimer</td></tr>
 </tbody>
@@ -474,11 +474,13 @@ FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 Pref
 <table>
 <thead><tr><th>步骤</th><th>动作</th><th>含义</th></tr></thead>
 <tbody>
+<tr><td>0 <span class="fixed-tag">✅ v2.2.14</span></td><td>检查 <code>GetDeviceState() != kDeviceStateIdle || is_speaking_</code></td><td>用户在对话中 → UpdateActivityTime 重置 · 直接 return 不发 goodbye</td></tr>
 <tr><td>1</td><td>idle &gt; 5 min · idle_goodbye_sent_=false</td><td>判定空闲</td></tr>
 <tr><td>2</td><td>idle_goodbye_sent_=true · Schedule lambda</td><td>派发到主线程</td></tr>
 <tr><td>3</td><td>SendTextToAI("我要先去忙了，你跟我说再见吧")</td><td>云端 TTS 道别</td></tr>
-<tr><td>4</td><td>嵌套创建 idle_dc timer 3 s</td><td>等 TTS 播放</td></tr>
-<tr><td>5</td><td>3 s 后 ResetDecoder + media_ready_=false + on_audio_channel_closed_</td><td>关音频通道 · WS 不动</td></tr>
+<tr><td>4 <span class="fixed-tag">✅ v2.2.14</span></td><td>嵌套创建 idle_dc timer <b>12 s</b>（旧 3 s）</td><td>兜底窗口 · 覆盖 LLM 回复 + TTS 完整播放</td></tr>
+<tr><td>4b <span class="fixed-tag">✅ v2.2.14</span></td><td>TTS_END_SPEAKING 时若 <code>idle_goodbye_sent_</code> 已置 → Schedule 立即 <code>media_ready_=false + on_audio_channel_closed_</code>（cc:961 fast-path）</td><td>告别 TTS 播完即关 · 不等 12 s 兜底</td></tr>
+<tr><td>5</td><td>12 s 兜底（或 fast-path）后 ResetDecoder + media_ready_=false + on_audio_channel_closed_</td><td>关音频通道 · WS 不动</td></tr>
 <tr><td>6</td><td>xTimerDelete(idle_dc)</td><td>清理嵌套 timer</td></tr>
 </tbody>
 </table>
@@ -818,7 +820,7 @@ FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 Pref
 <section id="tune">
 <h2><span class="num">15</span> 优化手册（量产前 + 量产后）</h2>
 
-<h3>15.1 量产前必修（P0 · v2.2.14 实测后新增 3 项 → 详见 <a href="#stability">§ 16</a>）</h3>
+<h3>15.1 量产前必修（P0 · v2.2.14 实测后新增 4 项 → 详见 <a href="#stability">§ 16</a>）</h3>
 <table>
 <thead><tr><th>项</th><th>动作</th><th>影响</th></tr></thead>
 <tbody>
@@ -827,17 +829,20 @@ FetchSessionToken 调用 <code>http->Open + Read</code> 都是同步 · 在 Pref
 <tr style="background:#E8F5E9"><td><b>bd_autoconn 与主循环 OpenAudioChannel 并发竞争</b>（<a href="#stability">§ 16.1</a>）<br><span class="fixed-tag">✅ v2.2.14 已修</span></td><td><s>加 mutex 串行化</s> → 实改：OpenAudioChannel 入口 <code>opening_</code> atomic CAS 守门 + RAII 释放 (cc:510) · Close-before-reset (cc:609)</td><td><b>已修首连失败 + Unknown opcode 错乱</b></td></tr>
 <tr style="background:#E8F5E9"><td><b>bd_autoconn 裸 xTaskCreate</b>（<a href="#stability">§ 16.2</a>）<br><span class="fixed-tag">✅ v2.2.14 已修</span></td><td>已改 <code>xTaskCreatePinnedToCore(.., 8192, .., 1, .., 0)</code> Core 0 · 栈 6K→8K · 加 <code>autoconn_task_alive_</code> CAS 防同名任务堆积 (cc:478)</td><td>符合量产纪律 · 0 裸 xTaskCreate</td></tr>
 <tr style="background:#E8F5E9"><td><b>PSM warmup 300ms 偏短 + 阻塞 Schedule 线程</b>（<a href="#stability">§ 16.3</a>）<br><span class="fixed-tag">✅ v2.2.14 已修</span></td><td>warmup 已提到 <b>500ms</b> (cc:658) · warmup 在 bd_autoconn task 内 · 不再卡主循环</td><td>4G CSQ 差时 TLS 握手覆盖 MIN_MODEM 窗口</td></tr>
+<tr style="background:#E8F5E9"><td><b>Idle goodbye 与用户对话竞态</b>（<a href="#stability">§ 16.8</a>）<br><span class="fixed-tag">✅ v2.2.14 已修</span></td><td>CheckIdleTimeout 入口加 <code>state != kDeviceStateIdle || is_speaking_</code> 状态守门 (cc:1461) · idle_dc 3s → <b>12s 兜底</b> · TTS_END_SPEAKING fast-path 立即关通道 (cc:961)</td><td><b>已修</b> idle 道别期间用户唤醒被强关 + 4 秒丢 200 帧音频</td></tr>
 </tbody>
 </table>
 
 <div class="fix-note">
-<b>✅ v2.2.14 修复一览</b>（共 5 处实改 · cc/.h 已落盘）：
+<b>✅ v2.2.14 修复一览</b>（共 7 处实改 · cc/.h 已落盘）：
 <ol style="margin:4px 0 0 18px;padding:0">
 <li><code>.h</code> 新增 <code>std::atomic&lt;bool&gt; opening_</code> + <code>std::atomic&lt;bool&gt; autoconn_task_alive_</code> 两个守门标记</li>
 <li><code>cc:510</code> OpenAudioChannel 入口 CAS 守门 + RAII OpeningGuard 释放</li>
 <li><code>cc:609</code> CreateWebSocket 前先 <code>websocket_-&gt;Close()</code> + <code>vTaskDelay(100)</code> + reset · 避免 UAF</li>
 <li><code>cc:478</code> bd_autoconn 改 PinnedToCore(Core 0) + 8K 栈 + autoconn_task_alive_ CAS</li>
 <li><code>cc:658</code> PSM warmup 300ms → 500ms</li>
+<li><code>cc:1461</code> CheckIdleTimeout 加 state != kDeviceStateIdle / is_speaking_ 守门 · idle_dc 3s → 12s 兜底</li>
+<li><code>cc:961</code> HandleEvent [TTS_END_SPEAKING] 加 idle_goodbye fast-path · 告别 TTS 播完立即关通道</li>
 </ol>
 </div>
 
@@ -1034,8 +1039,70 @@ websocket_ = network-&gt;CreateWebSocket(1);</pre>
 </table>
 
 <div class="callout ok">
-<b>✅ v2.2.14 量产前 P0 全部修复完毕</b>：§ 16.1（opening_ CAS）+ § 16.2（PinnedToCore Core 0 / 8K / autoconn_task_alive_）+ § 16.3（warmup 500ms）+ § 16.6（Close-before-reset）· 5 处实改 · 首连 7-12s 达标 · Unknown opcode 链路根除。<br>
-<b>剩余量产后优化</b>：PSM 事件化（替代 500ms 定时 sleep · 进一步压到 5-8s）· OnDisconnected 用 Schedule 入队 · License 续期机制。
+<b>✅ v2.2.14 量产前 P0 全部修复完毕</b>：§ 16.1（opening_ CAS）+ § 16.2（PinnedToCore Core 0 / 8K / autoconn_task_alive_）+ § 16.3（warmup 500ms）+ § 16.6（Close-before-reset）+ § 16.8（idle goodbye 状态守门 + 12s 兜底 + TTS_END fast-path）· 7 处实改 · 首连 7-12s 达标 · Unknown opcode 链路根除 · idle 道别期间用户唤醒不再被强关。<br>
+<b>剩余量产后优化</b>：PSM 事件化（替代 500ms 定时 sleep · 进一步压到 5-8s）· OnDisconnected 用 Schedule 入队 · License 续期机制 · idle_dc 嵌套 timer 改成员变量（详见 § 15.2）。
+</div>
+
+<h3>16.8 P0 · Idle goodbye 与用户对话竞态 <span class="fixed-tag">✅ v2.2.14 已修</span></h3>
+<p class="sub">现场日志（341681 → 348661 · 约 7 秒卡死感）：设备 idle 5 分钟触发 SendTextToAI 道别，但用户在道别 TTS 播放期间唤醒，<b>idle_dc 3s 兜底先到</b> → 强关音频通道 → 后续 LLM 回复 "拜拜咯..." 的 200+ 音频帧全部被 <code>media_ready_=false</code> 丢弃 → 用户感知"设备卡死 4 秒"。</p>
+
+<h4>用户实测日志</h4>
+<pre style="background:#FAFAFA;padding:8px;border-radius:4px;font-size:11.5px;line-height:1.5">341681 [T]:我要先去忙了, 你跟我说再见吧    ← idle 触发的 SendTextToAI
+344681 State: connecting → idle           ← idle_dc 3s 后强关 (用户已经唤醒进 connecting!)
+344681 Idle timeout: audio channel closed
+344721 [A] 拜拜咯...                       ← LLM 回复比 3s 晚
+344721 Audio frame dropped: media_ready=false (total=1)
+... 4 秒内丢 200 帧 ...
+348661 State: speaking → listening        ← 用户感知"卡死"</pre>
+
+<h4>双重根因</h4>
+<div class="callout bad">
+<b>根因 1（cc:1461 旧 CheckIdleTimeout 不检查 state）</b>：周期回调进来只看 elapsed 时间，不看 <code>Application::GetDeviceState()</code> · 用户在 connecting/listening/speaking 期间也会触发 SendTextToAI("再见") 把通话流打断。<br>
+<b>根因 2（idle_dc 3s 太短）</b>：3s 兜底基于"TTS 一句话约 2-3s"经验值估算 · 实测网络往返 + LLM 流式生成 + TTS 完整播放需要 5-8s · 3s 兜底必然先于 TTS_END 到达。
+</div>
+
+<h4>双重修复</h4>
+<table>
+<thead><tr><th>修复点</th><th>位置</th><th>动作</th></tr></thead>
+<tbody>
+<tr><td><b>① 状态守门</b></td><td>cc:1461 <code>CheckIdleTimeout</code> 入口</td><td>读 <code>Application::GetInstance().GetDeviceState()</code> · 若 <code>!= kDeviceStateIdle || is_speaking_</code> → 调 <code>UpdateActivityTime()</code> 重置活动计时 · return · 不发 goodbye</td></tr>
+<tr><td><b>② 12s 兜底</b></td><td>cc:1461 idle_dc <code>xTimerCreate</code></td><td>周期 3000ms → <b>12000ms</b> · 覆盖 LLM 流式 + TTS 完整播放最坏路径</td></tr>
+<tr><td><b>③ TTS_END fast-path</b></td><td>cc:961 <code>HandleEvent [TTS_END_SPEAKING]</code></td><td>新增 <code>if (idle_goodbye_sent_)</code> 分支 · Schedule 立即 <code>media_ready_=false + on_audio_channel_closed_()</code> · 不等 12s 兜底</td></tr>
+</tbody>
+</table>
+
+<h4>时序对比（用户唤醒打断道别 TTS）</h4>
+<table>
+<thead><tr><th>时刻 (ms)</th><th>旧行为（v2.2.13）</th><th>新行为（v2.2.14）</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>idle_timer 触发 → SendTextToAI("再见") · idle_dc 3s 启动</td><td>idle_timer 触发 → SendTextToAI("再见") · idle_dc <b>12s</b> 启动</td></tr>
+<tr><td>+500</td><td>用户按键唤醒 → State: idle → connecting</td><td>同（CheckIdleTimeout 此后被新一轮触发时会查 state 直接 return）</td></tr>
+<tr><td>+3000</td><td><b>⚠ idle_dc 3s 到</b> → media_ready_=false + on_audio_channel_closed_</td><td>idle_dc 未到 · 等 TTS_END 或 12s 兜底</td></tr>
+<tr><td>+3040</td><td>LLM "拜拜咯..." 首帧到 → <b>Audio frame dropped</b>（200+ 帧丢）</td><td>LLM 首帧正常播放</td></tr>
+<tr><td>+5000</td><td>TTS 应播完但通道已关 · 用户感知卡死</td><td>TTS_END_SPEAKING 到 → fast-path Schedule 关通道（idle_goodbye_sent_=true 触发）</td></tr>
+<tr><td>+5040</td><td>State: speaking → listening（4s 后才回正常）</td><td>立刻进入新一轮 listening · 用户无感知</td></tr>
+<tr><td>+12000</td><td>—</td><td>12s 兜底作为保险（TTS_END 漏掉时才触发）</td></tr>
+</tbody>
+</table>
+
+<div class="fix-note">
+<b>✅ v2.2.14 修复</b>（cc:1461 + cc:961）：
+<pre style="margin:6px 0;font-size:11.5px;background:#FFF;padding:6px;border-radius:3px">// cc:1461 CheckIdleTimeout 入口
+auto cur_state = Application::GetInstance().GetDeviceState();
+if (cur_state != kDeviceStateIdle || is_speaking_) {
+    UpdateActivityTime();
+    return;
+}
+// ... idle_dc 3000 → 12000 ...
+
+// cc:961 HandleEvent [TTS_END_SPEAKING]
+if (idle_goodbye_sent_) {
+    Schedule([this]() {
+        media_ready_ = false;
+        on_audio_channel_closed_();
+    });
+}</pre>
+状态守门 + 兜底放宽 + fast-path 三层防护 · 任何一层生效都不会再丢音频帧。
 </div>
 </section>
 

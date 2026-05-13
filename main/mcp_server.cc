@@ -57,17 +57,15 @@ void McpServer::AddCommonTools() {
     // Custom tools must be added in the board's InitializeTools function.
     // 获取MAC地址工具
     AddTool("self.get_mac_address",
-        "Get the device MAC address.",
+        "获取设备 MAC 地址。",
         PropertyList(),
         [&board](const PropertyList& properties) -> ReturnValue {
             return SystemInfo::GetMacAddress();
         });
 
     AddTool("self.get_device_status",
-        "Provides the real-time information of the device, including the current status of the audio speaker, screen, battery, network, etc.\n"
-        "Use this tool for: \n"
-        "1. Answering questions about current condition (e.g. what is the current volume of the audio speaker?)\n"
-        "2. As the first step to control the device (e.g. turn up / down the volume of the audio speaker, etc.)",
+        "查询设备当前状态：音量、屏幕、电池、网络等。"
+        "用户问『现在音量多少 / 电量 / 屏幕亮度』或要改这些之前先调用。",
         PropertyList(),
         [&board](const PropertyList& properties) -> ReturnValue {
             return board.GetDeviceStatusJson();
@@ -75,7 +73,7 @@ void McpServer::AddCommonTools() {
 
     // AEC控制工具
     AddTool("self.audio.set_aec",
-        "Set AEC mode: 'off' '关闭自然交流' (关闭打断), 'device' '开启自然交流' (开启任意打断)",
+        "设置说话打断模式：mode='off' 关闭打断，mode='device' 开启任意打断（自然交流）。",
         PropertyList({Property("mode", kPropertyTypeString)}),
         [&board](const PropertyList& properties) -> ReturnValue {
             auto& app = Application::GetInstance();
@@ -87,9 +85,8 @@ void McpServer::AddCommonTools() {
 
     // 说话结束提示音开关（确认服务器已收到+识别用户语音 · 持久化 audio.stt_popup · 默认开启）
     AddTool("self.audio.set_stt_popup",
-        "Enable or disable the 'pop' sound that plays after server recognizes user speech (STT confirmation). "
-        "Default enabled. Persists across reboots. "
-        "Use when user says: 关闭说话结束提示音/打开说话结束提示音/不要那个咚的声音.",
+        "开关『识别完那一声咚』的提示音。"
+        "用户说『关掉提示音 / 别咚了 / 打开提示音』时调用。重启后保留。",
         PropertyList({
             Property("enabled", kPropertyTypeBoolean)
         }),
@@ -100,7 +97,7 @@ void McpServer::AddCommonTools() {
         });
 
     AddTool("self.audio.get_stt_popup",
-        "Get current STT confirmation popup sound state. Returns JSON {\"enabled\":bool}.",
+        "查识别提示音是开还是关。",
         PropertyList(),
         [](const PropertyList& properties) -> ReturnValue {
             bool enabled = Application::GetInstance().IsSttPopupEnabled();
@@ -109,7 +106,7 @@ void McpServer::AddCommonTools() {
 
     // 唤醒词配置 · mode=afe 回归默认 · mode=custom + text 启用自定义（须在 MultiNet 词表内 · 重启生效）
     AddTool("self.audio.set_wakeword",
-        "Set wake word: mode='afe' resets to default; mode='custom' enables a custom wake word (text required, must be in preloaded MultiNet command list). Reboot required to apply.",
+        "改唤醒词。mode='afe' 恢复默认；mode='custom' 启用自定义（text 必填，须在词表里）。重启生效。",
         PropertyList({
             Property("mode", kPropertyTypeString),
             Property("text", kPropertyTypeString, "")
@@ -127,7 +124,7 @@ void McpServer::AddCommonTools() {
         });
 
     AddTool("self.audio.get_wakeword",
-        "Get current wake word config. Returns JSON {\"mode\":\"afe|custom\",\"text\":\"...\"}.",
+        "查当前唤醒词配置。",
         PropertyList(),
         [](const PropertyList&) -> ReturnValue {
             Settings s("wakeword", false);
@@ -136,7 +133,7 @@ void McpServer::AddCommonTools() {
         });
 
     AddTool("self.audio_speaker.set_volume",
-        "Set the volume of the audio speaker. If the current volume is unknown, you must call `self.get_device_status` tool first and then call this tool.",
+        "设置喇叭音量 0-100。如果不知道当前音量，先调 self.get_device_status 查。",
         PropertyList({
             Property("volume", kPropertyTypeInteger, 0, 100)
         }),
@@ -152,11 +149,8 @@ void McpServer::AddCommonTools() {
     //   开启 → 60s 后软省电（LCD 降亮 + 状态上报）· 300s 后深睡（充电中跳过）
     // 充电场景：即使 sleep_mode=ON · OnShutdownRequest 内已加 IsChargingGlobal 跳过
     AddTool("self.power.set_sleep_mode",
-        "Enable or disable automatic sleep (power saving + deep sleep). "
-        "Default: enabled. Persists to NVS across reboots. "
-        "Side effects when disabled: screen stays at user-set brightness forever (NOT auto-dim after 60s), "
-        "device never enters deep sleep. Use when user says: 关闭自动休眠 / 不要休眠 / 一直亮 / keep awake. "
-        "When charging, deep sleep is automatically skipped regardless of this setting (soft power saving still applies).",
+        "开关自动休眠。关掉后屏幕一直亮不变暗，也不进深度睡眠。"
+        "用户说『关闭休眠 / 别睡 / 一直亮着』时调用。充电时本来就不会深睡。重启后保留。",
         PropertyList({
             Property("enabled", kPropertyTypeBoolean)
         }),
@@ -167,9 +161,7 @@ void McpServer::AddCommonTools() {
         });
 
     AddTool("self.power.get_sleep_mode",
-        "Query current auto sleep state and whether charging is overriding deep sleep. "
-        "Returns JSON {\"enabled\":bool,\"charging\":bool,\"deep_sleep_skipped\":bool}. "
-        "If charging=true and enabled=true, deep_sleep_skipped will be true (charging always blocks deep sleep).",
+        "查自动休眠开关和是否在充电（充电时深睡会被跳过）。",
         PropertyList(),
         [&board](const PropertyList&) -> ReturnValue {
             bool enabled = board.IsAutoSleepEnabled();
@@ -187,18 +179,9 @@ void McpServer::AddCommonTools() {
 
     // MP3 流式播放 — 云端识别到 MP3 URL 后通过此 tool 让设备播放
     AddTool("self.music.play",
-        "Play an MP3 audio stream from an HTTP(S) URL.\n"
-        "Use when the user asks to play music, a song, or any MP3 audio.\n"
-        "'title' is optional and displayed/logged as current track name.\n"
-        "\n"
-        "## Side effects (IMPORTANT — tell user before calling if asked):\n"
-        "- Stops any ongoing TTS and previous music automatically.\n"
-        "- **Pauses voice listening (AFE off) during playback** — user CANNOT call AI by voice while music plays.\n"
-        "- User must press a button or wake word (after music ends) to resume voice.\n"
-        "- UI switches to Player mode (track title + pause/play affordance).\n"
-        "\n"
-        "## Returns JSON {\"success\":bool,\"playing\":bool,\"error\":string} — check 'success' before telling user.\n"
-        "Failure surfaces via screen Alert (HTTP/decode errors).",
+        "播放 MP3 音乐（HTTP/HTTPS 链接）。"
+        "用户说『放首歌 / 来点音乐 / 播放 XXX』时调用。"
+        "注意：播放期间设备听不到语音，要按按键或等播完才能再唤醒。",
         PropertyList({
             Property("url", kPropertyTypeString),
             Property("title", kPropertyTypeString, std::string(""))
@@ -248,8 +231,7 @@ void McpServer::AddCommonTools() {
         });
 
     AddTool("self.music.stop",
-        "Stop the currently playing MP3 music. Use when user says stop/pause/quiet. "
-        "Returns JSON {\"was_playing\":bool}.",
+        "停止音乐。用户说『停 / 别放了 / 安静 / 关音乐』时调用。",
         PropertyList(),
         [](const PropertyList& properties) -> ReturnValue {
             bool was_playing = MusicPlayer::GetInstance().IsPlaying();
@@ -265,7 +247,7 @@ void McpServer::AddCommonTools() {
     auto backlight = board.GetBacklight();
     if (backlight) {
         AddTool("self.screen.set_brightness",
-            "Set the brightness of the screen.",
+            "设置屏幕亮度 0-100。",
             PropertyList({
                 Property("brightness", kPropertyTypeInteger, 0, 100)
             }),
@@ -280,7 +262,7 @@ void McpServer::AddCommonTools() {
     auto display = board.GetDisplay();
     if (display && display->GetTheme() != nullptr) {
         AddTool("self.screen.set_theme",
-            "Set the theme of the screen. The theme can be `light` or `dark`.",
+            "设置屏幕主题：light 浅色 / dark 深色。",
             PropertyList({
                 Property("theme", kPropertyTypeString)
             }),
@@ -296,28 +278,6 @@ void McpServer::AddCommonTools() {
             });
     }
 
-    auto camera = board.GetCamera();
-    if (camera) {
-        AddTool("self.camera.take_photo",
-            "Always remember you have a camera. If the user asks you to see something, use this tool to take a photo and then explain it.\n"
-            "Args:\n"
-            "  `question`: The question that you want to ask about the photo.\n"
-            "Return:\n"
-            "  A JSON object that provides the photo information.",
-            PropertyList({
-                Property("question", kPropertyTypeString)
-            }),
-            [camera](const PropertyList& properties) -> ReturnValue {
-                // Lower the priority to do the camera capture
-                TaskPriorityReset priority_reset(1);
-
-                if (!camera->Capture()) {
-                    throw std::runtime_error("Failed to capture photo");
-                }
-                auto question = properties["question"].value<std::string>();
-                return camera->Explain(question);
-            });
-    }
 #endif
 
     // Restore the original tools list to the end of the tools list
@@ -330,14 +290,14 @@ void McpServer::AddCommonTools() {
 void McpServer::AddUserOnlyTools() {
     // System tools
     AddUserOnlyTool("self.get_system_info",
-        "Get the system information",
+        "查系统信息。",
         PropertyList(),
         [this](const PropertyList& properties) -> ReturnValue {
             auto& board = Board::GetInstance();
             return board.GetSystemInfoJson();
         });
 
-    AddUserOnlyTool("self.reboot", "Reboot the system",
+    AddUserOnlyTool("self.reboot", "重启设备。",
         PropertyList(),
         [this](const PropertyList& properties) -> ReturnValue {
             auto& app = Application::GetInstance();
@@ -350,31 +310,12 @@ void McpServer::AddUserOnlyTools() {
             return true;
         });
 
-    // Firmware upgrade
-    AddUserOnlyTool("self.upgrade_firmware", "Upgrade firmware from a specific URL. This will download and install the firmware, then reboot the device.",
-        PropertyList({
-            Property("url", kPropertyTypeString, "The URL of the firmware binary file to download and install")
-        }),
-        [this](const PropertyList& properties) -> ReturnValue {
-            auto url = properties["url"].value<std::string>();
-            ESP_LOGI(TAG, "User requested firmware upgrade from URL: %s", url.c_str());
-            
-            auto& app = Application::GetInstance();
-            app.Schedule([url, &app]() {
-                bool success = app.UpgradeFirmware(url);
-                if (!success) {
-                    ESP_LOGE(TAG, "Firmware upgrade failed");
-                }
-            });
-            
-            return true;
-        });
 
     // Display control
 #ifdef HAVE_LVGL
     auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
     if (display) {
-        AddUserOnlyTool("self.screen.get_info", "Information about the screen, including width, height, etc.",
+        AddUserOnlyTool("self.screen.get_info", "查屏幕宽高、是否单色。",
             PropertyList(),
             [display](const PropertyList& properties) -> ReturnValue {
                 cJSON *json = cJSON_CreateObject();
@@ -387,151 +328,8 @@ void McpServer::AddUserOnlyTools() {
                 }
                 return json;
             });
-
-#if CONFIG_LV_USE_SNAPSHOT
-        AddUserOnlyTool("self.screen.snapshot", "Snapshot the screen and upload it to a specific URL",
-            PropertyList({
-                Property("url", kPropertyTypeString),
-                Property("quality", kPropertyTypeInteger, 80, 1, 100)
-            }),
-            [display](const PropertyList& properties) -> ReturnValue {
-                auto url = properties["url"].value<std::string>();
-                auto quality = properties["quality"].value<int>();
-
-                // ① 主线程同步截图（LVGL 必须在 main_loop）
-                auto jpeg = std::make_shared<std::string>();
-                if (!display->SnapshotToJpeg(*jpeg, quality)) {
-                    throw std::runtime_error("Failed to snapshot screen");
-                }
-                ESP_LOGI(TAG, "Snapshot %u bytes, scheduling upload to %s", (unsigned)jpeg->size(), url.c_str());
-
-                // ② 后台任务异步上传（弱网 30s+ 不再阻塞 main_loop）
-                struct UploadCtx { std::shared_ptr<std::string> jpeg; std::string url; };
-                auto* ctx = new UploadCtx{jpeg, url};
-                BaseType_t r = xTaskCreatePinnedToCore([](void* arg) {
-                    auto* c = static_cast<UploadCtx*>(arg);
-                    const std::string boundary = "----ESP32_SCREEN_SNAPSHOT_BOUNDARY";
-                    auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
-                    http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-                    bool ok = false;
-                    if (http->Open("POST", c->url)) {
-                        std::string head = "--" + boundary + "\r\n"
-                            "Content-Disposition: form-data; name=\"file\"; filename=\"screenshot.jpg\"\r\n"
-                            "Content-Type: image/jpeg\r\n\r\n";
-                        http->Write(head.c_str(), head.size());
-                        http->Write(c->jpeg->data(), c->jpeg->size());
-                        std::string foot = "\r\n--" + boundary + "--\r\n";
-                        http->Write(foot.c_str(), foot.size());
-                        http->Write("", 0);
-                        ok = (http->GetStatusCode() == 200);
-                        if (ok) {
-                            std::string result = http->ReadAll();
-                            ESP_LOGI(TAG, "Snapshot upload result: %s", result.c_str());
-                        } else {
-                            ESP_LOGW(TAG, "Snapshot upload failed: status=%d url=%s",
-                                     http->GetStatusCode(), c->url.c_str());
-                        }
-                        http->Close();
-                    } else {
-                        ESP_LOGW(TAG, "Snapshot HTTP open failed: %s", c->url.c_str());
-                    }
-                    delete c;
-                    vTaskDelete(NULL);
-                }, "snap_upload", 4096, ctx, 3 /* P3 后台 IO · 低于 main P10 */, nullptr, 0 /* Core 0 · 网络 */);
-                if (r != pdPASS) {
-                    delete ctx;
-                    throw std::runtime_error("Failed to spawn snapshot upload task");
-                }
-                return std::string("OK: snapshot uploading async");
-            });
-
-        AddUserOnlyTool("self.screen.preview_image", "Preview an image on the screen",
-            PropertyList({
-                Property("url", kPropertyTypeString)
-            }),
-            [display](const PropertyList& properties) -> ReturnValue {
-                auto url = properties["url"].value<std::string>();
-
-                // N2 修复 2026-05-12：限并发 · 防连发 5 次吃满 ~2.5MB SPIRAM
-                // 阈值 2：① 满足"前一张未完成 → 立即换新图"体验 ② 不允许 3+ 并发预下载
-                int cur = g_preview_inflight_.fetch_add(1, std::memory_order_acq_rel);
-                if (cur >= kPreviewMaxInflight) {
-                    g_preview_inflight_.fetch_sub(1, std::memory_order_acq_rel);
-                    ESP_LOGW(TAG, "preview_image: in_flight=%d ≥ %d · 拒绝", cur, kPreviewMaxInflight);
-                    throw std::runtime_error("preview_image busy, please retry in a moment");
-                }
-
-                // P0-2：HTTP 下载在后台任务跑 · 下载完成 Schedule 回主线程做 LVGL SetPreviewImage
-                struct PreviewCtx { std::string url; LvglDisplay* display; };
-                auto* ctx = new PreviewCtx{url, display};
-                BaseType_t r = xTaskCreatePinnedToCore([](void* arg) {
-                    auto* c = static_cast<PreviewCtx*>(arg);
-                    auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
-                    char* data = nullptr;
-                    size_t content_length = 0;
-                    bool ok = false;
-                    if (http->Open("GET", c->url) && http->GetStatusCode() == 200) {
-                        content_length = http->GetBodyLength();
-                        if (content_length > 0 && content_length <= 512 * 1024 /* 512KB 上限防 OOM */) {
-                            data = (char*)heap_caps_malloc(content_length, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-                            if (data) {
-                                size_t total = 0;
-                                while (total < content_length) {
-                                    int n = http->Read(data + total, content_length - total);
-                                    if (n <= 0) break;
-                                    total += n;
-                                }
-                                ok = (total == content_length);
-                                if (!ok) { heap_caps_free(data); data = nullptr; }
-                            }
-                        } else {
-                            ESP_LOGW(TAG, "preview_image: bad content_length=%u", (unsigned)content_length);
-                        }
-                    }
-                    http->Close();
-
-                    if (ok && data) {
-                        char* data_owned = data;
-                        size_t len = content_length;
-                        LvglDisplay* d = c->display;
-                        Application::GetInstance().Schedule([d, data_owned, len]() {
-                            auto image = std::make_unique<LvglAllocatedImage>(data_owned, len);
-                            d->SetPreviewImage(std::move(image));
-                        });
-                    } else if (data) {
-                        heap_caps_free(data);
-                    } else {
-                        ESP_LOGW(TAG, "preview_image: download failed: %s", c->url.c_str());
-                    }
-                    delete c;
-                    g_preview_inflight_.fetch_sub(1, std::memory_order_acq_rel);  // N2 释放槽位
-                    vTaskDelete(NULL);
-                }, "preview_dl", 4096, ctx, 3, nullptr, 0 /* Core 0 · 网络 */);
-                if (r != pdPASS) {
-                    delete ctx;
-                    g_preview_inflight_.fetch_sub(1, std::memory_order_acq_rel);  // N2 spawn 失败也释放
-                    throw std::runtime_error("Failed to spawn preview download task");
-                }
-                return std::string("OK: preview loading async");
-            });
-#endif // CONFIG_LV_USE_SNAPSHOT
     }
 #endif // HAVE_LVGL
-
-    // Assets download url
-    auto& assets = Assets::GetInstance();
-    if (assets.partition_valid()) {
-        AddUserOnlyTool("self.assets.set_download_url", "Set the download url for the assets",
-            PropertyList({
-                Property("url", kPropertyTypeString)
-            }),
-            [](const PropertyList& properties) -> ReturnValue {
-                auto url = properties["url"].value<std::string>();
-                Settings settings("assets", true);
-                settings.SetString("download_url", url);
-                return true;
-            });
-    }
 }
 
 void McpServer::AddTool(McpTool* tool) {
@@ -741,7 +539,12 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
     } else {
         json += "],\"nextCursor\":\"" + next_cursor + "\"}";
     }
-    
+
+    // 实测 payload 字节数 + 是否触发分页（便于量产前审计 · 对齐 mcp-flows § 8.2 N1）
+    ESP_LOGI(TAG, "tools/list: id=%d, payload=%u B, paged=%s, cursor=%s",
+             id, (unsigned)json.size(), next_cursor.empty() ? "no" : "YES",
+             cursor.empty() ? "(first)" : cursor.c_str());
+
     ReplyResult(id, json);
 }
 

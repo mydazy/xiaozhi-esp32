@@ -19,10 +19,6 @@
 
 #define TAG "EducationMcp"
 
-// N3 修复 2026-05-12：show_stroke 同字 URL in-flight 去重
-//   场景：t1 下载中孩子又说同字 → t2 触发 → t1 完成时 req_id 过期被 free · 浪费流量
-//   方案：file-static 状态记录正在下载的 URL hash + req_id · 5s in-flight 窗口内同 URL 立即返回旧 req_id
-//   原子三元组：URL hash · 启动时戳 · req_id · 失效条件：hash=0 表示无 in-flight
 static std::atomic<uint32_t> g_inflight_url_hash_{0};
 static std::atomic<int64_t>  g_inflight_start_us_{0};
 static std::atomic<uint32_t> g_inflight_req_id_{0};
@@ -36,37 +32,16 @@ static uint32_t HashUrl(const char* s) {
 }
 
 // 设计决策：show_stroke GIF 不缓存。
-//   理由：① GIF buffer 与 LVGL GIF decoder 异步渲染绑定，缓存 buffer 跨 LvglRawImage 实例生命周期复杂
-//        ② PSRAM 占用收益不对等（缓存 1MB vs 重下 200-2000ms · 量产期优先稳定性）
-//        ③ 单字 GIF 服务器侧可能更新笔顺修正，每次下载保证最新
-//   每次调用都走完整 HTTP 下载 + 校验路径。
-
 void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_stroke) {
     if (!ui) return;  // 仅 UiDisplay 支持 GIF 动态注入（emoji_collection + LvglGif 路径）
 
     if (include_stroke) {
     mcp.AddTool("self.education.show_stroke",
-        "[识字核心 · 高优先级] 屏幕播放单个汉字笔顺 GIF,孩子看动画学写字。\n"
-        "\n"
-        "## 必调场景(任一即触发,不要先问):\n"
-        "- 问写法: 怎么写 / X怎么写 / 写法 / 笔顺 / 笔画 / 先写哪笔\n"
-        "- 求教学: 教我写 / 教我X / 教写字 / 学写字 / 学X字 / 陪我练字\n"
-        "- 表困惑: 不会写 / X我不会 / 帮我写 / 怎么写呀\n"
-        "- 求示范: 示范 / 演示 / 给我看 / 写给我看 / 一起写X\n"
-        "- 间接说: 想看X字 / 我们写X / X字长什么样 / 学习X字\n"
-        "\n"
-        "## 禁调场景(改用其他):\n"
-        "- '怎么读 / 读音 / 拼音' → 不调,用 [X_pīnyīn] 卡\n"
-        "- '是什么字 / 这是啥' → 不调,用 [X_pīnyīn] 识字\n"
-        "- '什么意思' → 不调,口语解释 + [X_pīnyīn]\n"
-        "- 算式/古诗/闲聊 → 不涉及\n"
-        "\n"
-        "## character 取字:\n"
-        "- 严格单字 · U+4E00~U+9FFF\n"
-        "- 多字句取核心字('不会写花字' → '花')\n"
-        "- 字不明确 → 先反问'想学哪个字',别瞎调\n"
-        "\n"
-        "调用后立即口播'好,画给你看',加载期间有反馈,出图后再讲笔顺。回复 ≤3 句,每句 ≤30 字。",
+        "教孩子写汉字 · 屏幕播单字笔顺动画。"
+        "用户说『X 怎么写 / 教我写 X / 不会写 X / 学写 X / 写给我看』时调用。"
+        "禁用：『怎么读 / 拼音 / 什么意思 / 这是啥』→ 改用 show_card。"
+        "character 严传单个汉字（U+4E00~U+9FFF），多字取核心字。"
+        "调用后立即口播『好，画给你看』，出图再讲笔顺，≤3 句每句 ≤30 字。",
         PropertyList({Property("character", kPropertyTypeString)}),
         [ui](const PropertyList& properties) -> ReturnValue {
             std::string character = properties["character"].value<std::string>();
@@ -116,9 +91,6 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
                      encoded_char.c_str(), unicode_hex);
 
             // ============ 4G/WiFi 网络判定 · 4G 模式降级为静态字体 ============
-            // 决策（2026-05-12）：show_stroke GIF 30-80KB · 4G 下载 1-3s 流量贵且慢
-            //   双网板（P30-4G/P31）跑在 ML307 模式时跳过下载，仅显示字体 + 提示用户切 WiFi
-            //   WifiBoard（P30-WiFi）dynamic_cast 失败 → is_4g=false → 正常下载
             auto* dual = dynamic_cast<DualNetworkBoard*>(&Board::GetInstance());
             bool is_4g = (dual && dual->GetNetworkType() == NetworkType::ML307);
             if (is_4g) {
@@ -141,7 +113,6 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
             }
 
             // ============ WiFi 路径：原 GIF 下载链路 ============
-            // N3 去重：同 URL 5s 内 in-flight 直接复用现有 req_id · 不重发 HTTP
             uint32_t url_hash = HashUrl(url_buf);
             int64_t now_us = esp_timer_get_time();
             uint32_t prev_hash = g_inflight_url_hash_.load(std::memory_order_acquire);
@@ -190,10 +161,6 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
                     : 0;
 
                 // GIF 完整性校验（防 LVGL 解码崩溃 / 服务器返回 HTML 错误页 / 截断数据）：
-                //   ① 下载成功 ok
-                //   ② size 至少 1KB（笔画 GIF 实测 ≥30KB · 1KB 兜底拒绝空响应/4xx 错误页）
-                //   ③ 头 6 字节 GIF89a/GIF87a magic
-                //   ④ 末字节 0x3B = GIF Trailer（保证下载完整，未被中途截断）
                 constexpr size_t kMinValidGifSize = 1024;
                 bool valid = ok && gsz >= kMinValidGifSize &&
                     (memcmp(gif, "GIF89a", 6) == 0 || memcmp(gif, "GIF87a", 6) == 0) &&
@@ -244,14 +211,9 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
     }  // include_stroke
 
     // 教育卡渲染（极简 · 两行布局 · 不分类）
-    //   main 自动判定 CJK/英文 · 字号 56 默认 / 48 EN 兜底
-    //   top  顶部辅助：汉字配拼音 / 英文配中文释义
-    //   优先级 < TTS 内联 [main_top]：本工具作"主动调用兜底"，常规场景应直接在 TTS 嵌入标记
     mcp.AddTool("self.education.show_card",
-        "[兜底用 · 优先用 TTS 内联 [main_top]] 显示教育卡片(两行布局)。\n"
-        "汉字组词: main=\"书包\" top=\"shū bāo\" (汉字 <=4 字, 拼音必带声调 ǎēīǒūǚ)\n"
-        "英文单词: main=\"apple\" top=\"苹果\" (英文 <=12 字符)\n"
-        "返回 ERR: ... 时表示参数超限,LLM 应改用更短的词重试。",
+        "屏幕显示教育卡（两行）。汉字配拼音：main=书包 top=shū bāo（汉字≤4 字，拼音带声调）。"
+        "英文配中文：main=apple top=苹果（英文≤12 字符）。返回 ERR 即超长，换更短重试。",
         PropertyList({
             Property("main", kPropertyTypeString),
             Property("top",  kPropertyTypeString, std::string("")),

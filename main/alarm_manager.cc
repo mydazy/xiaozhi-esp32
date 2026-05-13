@@ -393,10 +393,8 @@ void AlarmManager::RegisterMcpTools() {
     auto& mcp = McpServer::GetInstance();
 
     mcp.AddTool("self.alarm.add",
-        "设置闹钟。**必须先问清用户要提醒什么**才能调用本工具，不能用'闹钟'/'提醒'/'起床'等通用词敷衍。"
-        "如果用户没明确说，先问『要提醒您什么呢？』再调用。"
-        "参数：message=具体提醒内容(必填，不能为空), hour=0-23, minute=0-59, "
-        "repeat_days=0(一次)/0x7F(每天)/0x3E(工作日)/0x41(周末)。",
+        "设闹钟。必须先问清提醒内容，别拿『闹钟/提醒/起床』敷衍。"
+        "message 必填具体事；repeat_days：0=一次，0x7F=每天，0x3E=工作日，0x41=周末。",
         PropertyList({
             Property("message", kPropertyTypeString),
             Property("hour", kPropertyTypeInteger, 0, 23),
@@ -428,7 +426,7 @@ void AlarmManager::RegisterMcpTools() {
         });
 
     mcp.AddTool("self.alarm.remove",
-        "删除闹钟。id=闹钟ID(0-7)",
+        "删闹钟，id=0-7。",
         PropertyList({ Property("id", kPropertyTypeInteger, 0, 7) }),
         [this](const PropertyList& props) -> ReturnValue {
             return DeleteAlarm(props["id"].value<int>())
@@ -436,9 +434,7 @@ void AlarmManager::RegisterMcpTools() {
         });
 
     mcp.AddTool("self.alarm.list",
-        "查询闹钟列表。返回 alarms 数组（每条含 id/time/message/repeat_days）"
-        "+ count + next_alarm_in（距下次响铃倒计时）。"
-        "用户问『有什么闹钟』『下一个闹钟几点』时调用。",
+        "查闹钟列表。用户问『有什么闹钟 / 下一个几点响』时调用。",
         PropertyList(),
         [this](const PropertyList&) -> ReturnValue {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -446,10 +442,8 @@ void AlarmManager::RegisterMcpTools() {
         });
 
     mcp.AddTool("self.alarm.dismiss",
-        "**关闭正在响的闹钟**。响铃过程中用户说出下列任意意图时立即调用："
-        "『停止 / 关掉 / 关闭闹钟 / 知道了 / 别响了 / 不响了 / 收到 / 起来了 / OK』。"
-        "若返回 no_alarm_ringing 说明此刻无响铃，按正常对话处理。"
-        "**用户说『再睡 N 分钟』时：先调本工具关掉当前响铃，再调 self.alarm.add 设 N 分钟后一次性闹钟。**",
+        "关掉正在响的闹钟。用户说『停 / 关掉 / 别响了 / 知道了 / 起来了 / OK』时调用。"
+        "用户说『再睡 N 分钟』：先调本工具，再 self.alarm.add 设 N 分钟一次性闹钟。",
         PropertyList(),
         [](const PropertyList&) -> ReturnValue {
             if (!AlarmRinger::GetInstance().IsRinging()) {

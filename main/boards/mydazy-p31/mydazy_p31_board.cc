@@ -1274,8 +1274,7 @@ private:
 
         // 开启 GPS
         mcp.AddTool("self.gps.start",
-            "Turn on GPS/BDS positioning. Call this before asking for coordinates. "
-            "Returns whether GPS is now running. Requires 4G modem to be ready.",
+            "开启 GPS 定位。查位置前先调。需 4G 模块就绪。",
             PropertyList(),
             [this](const PropertyList&) -> ReturnValue {
                 gnss_user_disabled_ = false;
@@ -1292,8 +1291,7 @@ private:
 
         // 关闭 GPS
         mcp.AddTool("self.gps.stop",
-            "Turn off GPS/BDS positioning to save power. Device will stop reporting location "
-            "until self.gps.start is called again.",
+            "关 GPS 省电。再次开启需调 self.gps.start。",
             PropertyList(),
             [this](const PropertyList&) -> ReturnValue {
                 StopGnss();
@@ -1305,8 +1303,7 @@ private:
 
         // 查询定位
         mcp.AddTool("self.gps.get_location",
-            "Get the current GPS/BDS location. Returns latitude, longitude, satellite count, "
-            "HDOP, UTC time and fix status. If GPS is not running, call self.gps.start first.",
+            "查 GPS 经纬度。若 GPS 未开，先调 self.gps.start。",
             PropertyList(),
             [this](const PropertyList&) -> ReturnValue {
                 cJSON* json = cJSON_CreateObject();

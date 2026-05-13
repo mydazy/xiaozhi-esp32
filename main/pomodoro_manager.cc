@@ -165,16 +165,15 @@ void PomodoroManager::RegisterMcpTools() {
 
     auto& mcp = McpServer::GetInstance();
 
+    // P1 修（N7 教训）：description 从 ~430B 瘦身到 ~150B
+    //   触发词：番茄钟/倒计时/专注 X 分钟/学习 X 分钟 → 立即调（不反问）
+    //   时长抽取：『半』=30 · 『一刻钟』=15 · X 范围 1-99 · 超 99 截 99
+    //   duration_min 不传 = 默认 25 · 运行中再调 = 重启
     mcp.AddTool("self.pomodoro.start",
-        "启动番茄钟倒计时（默认 25 分钟，最长 99 分钟）。"
-        "**触发话术（任一即调用，不要反问）**："
-        "『番茄钟 / 打开番茄钟 / 开始番茄钟 / 来个番茄钟』→ 默认 25 分钟（duration_min 不传）；"
-        "『倒计时 X 分钟 / 设置 X 分钟倒计时 / X 分钟番茄钟 / 专注 X 分钟 / 学习 X 分钟 / 帮我计时 X 分钟』"
-        "→ 从话术抽出整数 X 传给 duration_min（X 范围 1-99 · 小数四舍五入 · 超 99 截到 99 · 含『半』如『半小时』视为 30 · 含『一刻钟』视为 15）。"
-        "**调用前不要确认，直接调用让设备显示倒计时**。"
-        "运行中再次调用 = 重启计时（覆盖当前进度）。"
-        "参数：duration_min=0-99（0 或不传 = 默认 25）。"
-        "返回 JSON {state, total_sec, remain_sec}。",
+        "番茄钟/倒计时/专注/学习 X 分钟 → 立即调用不反问。"
+        "X 抽数字（半=30/一刻钟=15/超 99 截 99）。"
+        "不传 duration_min = 默认 25。运行中再调 = 重启。"
+        "返回 {state, total_sec, remain_sec}。",
         PropertyList({
             Property("duration_min", kPropertyTypeInteger, 0, (int)kMaxDurationMin)
         }),
@@ -185,13 +184,13 @@ void PomodoroManager::RegisterMcpTools() {
 
             char buf[96];
             snprintf(buf, sizeof(buf),
-                     "{\"success\":true,\"state\":\"running\",\"total_sec\":%u,\"remain_sec\":%u}",
-                     total_sec_, remain_sec_.load());
+                     "{\"success\":true,\"state\":\"running\",\"total_sec\":%lu,\"remain_sec\":%lu}",
+                     (unsigned long)total_sec_, (unsigned long)remain_sec_.load());
             return std::string(buf);
         });
 
     mcp.AddTool("self.pomodoro.pause",
-        "暂停番茄钟。用户说『暂停 / 先停一下 / 等等』时调用。",
+        "暂停番茄钟。用户说『暂停 / 停一下』时调。",
         PropertyList(),
         [this](const PropertyList&) -> ReturnValue {
             return std::string(Pause() ? "{\"success\":true,\"state\":\"paused\"}"
@@ -199,7 +198,7 @@ void PomodoroManager::RegisterMcpTools() {
         });
 
     mcp.AddTool("self.pomodoro.resume",
-        "恢复番茄钟。用户说『继续 / 接着来』时调用。",
+        "继续番茄钟。用户说『继续 / 接着来』时调。",
         PropertyList(),
         [this](const PropertyList&) -> ReturnValue {
             return std::string(Resume() ? "{\"success\":true,\"state\":\"running\"}"
@@ -207,7 +206,7 @@ void PomodoroManager::RegisterMcpTools() {
         });
 
     mcp.AddTool("self.pomodoro.stop",
-        "取消番茄钟（不算完成）。用户说『停止 / 取消 / 不做了』时调用。",
+        "取消番茄钟。用户说『停止 / 取消 / 不做了』时调。",
         PropertyList(),
         [this](const PropertyList&) -> ReturnValue {
             return std::string(Stop() ? "{\"success\":true,\"state\":\"idle\"}"
@@ -215,15 +214,14 @@ void PomodoroManager::RegisterMcpTools() {
         });
 
     mcp.AddTool("self.pomodoro.status",
-        "查询番茄钟状态。返回 {state: idle/running/paused, remain_sec, total_sec}。"
-        "用户问『还剩多久 / 番茄钟到了吗』时调用。",
+        "查番茄钟状态。用户问『还剩多久 / 番茄钟到了吗』时调。",
         PropertyList(),
         [this](const PropertyList&) -> ReturnValue {
             char buf[128];
             snprintf(buf, sizeof(buf),
-                     "{\"state\":\"%s\",\"remain_sec\":%u,\"total_sec\":%u}",
+                     "{\"state\":\"%s\",\"remain_sec\":%lu,\"total_sec\":%lu}",
                      PomodoroStateToString(GetState()),
-                     remain_sec_.load(), total_sec_);
+                     (unsigned long)remain_sec_.load(), (unsigned long)total_sec_);
             return std::string(buf);
         });
 
