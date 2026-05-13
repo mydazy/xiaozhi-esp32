@@ -405,7 +405,7 @@ void UiDisplay::SwitchToChatMode() {
 }
 
 // ============================================================
-// 开机动画（Logo 渐入 → 持续显示 → Idle 时由状态机触发渐出 → 切时钟）
+// 开机 Logo（静态显示 · 无动画 · Idle 时由状态机触发渐出 → 切时钟）
 // ============================================================
 
 static void boot_opa_cb(void* obj, int32_t v) {
@@ -414,36 +414,16 @@ static void boot_opa_cb(void* obj, int32_t v) {
 
 void UiDisplay::StartBootAnimation() {
     if (!emoji_box_) return;
-
-    lv_anim_t fade_in;
-    lv_anim_init(&fade_in);
-    lv_anim_set_var(&fade_in, emoji_box_);
-    lv_anim_set_values(&fade_in, LV_OPA_TRANSP, LV_OPA_COVER);
-    lv_anim_set_time(&fade_in, 800);
-    lv_anim_set_exec_cb(&fade_in, boot_opa_cb);
-    lv_anim_start(&fade_in);
-
-    if (status_bar_) {
-        lv_obj_set_style_opa(status_bar_, LV_OPA_TRANSP, 0);
-        lv_anim_t status_in;
-        lv_anim_init(&status_in);
-        lv_anim_set_var(&status_in, status_bar_);
-        lv_anim_set_values(&status_in, LV_OPA_TRANSP, LV_OPA_COVER);
-        lv_anim_set_time(&status_in, 800);
-        lv_anim_set_delay(&status_in, 200);
-        lv_anim_set_exec_cb(&status_in, boot_opa_cb);
-        lv_anim_start(&status_in);
-    }
+    lv_obj_set_style_opa(emoji_box_, LV_OPA_COVER, 0);
+    if (status_bar_) lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);
 }
 
 void UiDisplay::FinishBootAndShowClock() {
     DisplayLockGuard lock(this);
     if (active_scene_ == SceneType::kClock) return;   // 幂等：已切时钟，重复 Idle 事件忽略
     if (!setup_ui_called_) return;
-    // 同 SwitchToClockMode：Player 模式下不切回时钟（OnMusicPlay 路径会触发 Idle 状态事件）
     if (active_scene_ == SceneType::kPlayer) return;
 
-    // 清理可能残留的开机引导覆盖层（激活码 / 配网 QR），避免切到时钟后仍被 overlay 遮挡。
     HideQrCode();
 
     if (!emoji_box_) {
@@ -1070,9 +1050,9 @@ void UiDisplay::CreatePomodoroPage() {
         lv_obj_set_style_text_font(pomodoro_time_label_, &g_text_font, 0);
     }
 
-    // 启停圆按钮（屏幕底部偏上 · 与 Player 同款 64×64）
+    // 启停圆按钮（屏幕底部偏上 · 64×64 · 上移 20px 给底部呼吸空间）
     constexpr int BTN_SIZE = 64;
-    constexpr int BTN_CENTER_Y = 188;   // 距屏底 ~52px · 88px 数字之下留呼吸
+    constexpr int BTN_CENTER_Y = 168;   // 距屏底 ~72px · 原 188 上移 20px
     pomodoro_btn_ = lv_button_create(pomodoro_container_);
     lv_obj_set_size(pomodoro_btn_, BTN_SIZE, BTN_SIZE);
     lv_obj_set_pos(pomodoro_btn_, kScreenWidth / 2 - BTN_SIZE / 2, BTN_CENTER_Y - BTN_SIZE / 2);
