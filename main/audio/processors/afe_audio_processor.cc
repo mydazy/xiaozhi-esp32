@@ -53,9 +53,9 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         afe_config->ns_init = false;
     }
 
-    afe_config->afe_linear_gain = 5.0f;     // 3.0 → 5.0 (≈ +4.4 dB) · 取值范围 [0.1, 10.0] · 嘈杂环境若底噪明显可回退 4.0
+    afe_config->afe_linear_gain = 3.0f;
     afe_config->agc_init = true;
-    afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;  // WAKENET → WEBRTC · WAKENET 只在唤醒瞬间激进, 持续对话需 WebRTC AGC
+    afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
 
 #ifdef CONFIG_USE_DEVICE_AEC
@@ -102,20 +102,6 @@ void AfeAudioProcessor::Feed(std::vector<int16_t>&& data) {
     }
     input_buffer_.insert(input_buffer_.end(), data.begin(), data.end());
     size_t chunk_size = afe_iface_->get_feed_chunksize(afe_data_) * codec_->input_channels();
-    if (chunk_size == 0) {
-        ESP_LOGW(TAG, "Feed: chunk_size=0 (AFE not ready?), drop %u samples",
-                 (unsigned)input_buffer_.size());
-        input_buffer_.clear();
-        return;
-    }
-    constexpr size_t kInputBufferMaxSamples = 16000;  // 1s @ 16k, 正常应 <= 1024
-    if (input_buffer_.size() > kInputBufferMaxSamples) {
-        ESP_LOGE(TAG, "Feed: input_buffer overflow (%u samples, chunk=%u), reset",
-                 (unsigned)input_buffer_.size(), (unsigned)chunk_size);
-        input_buffer_.clear();
-        return;
-    }
-
     while (input_buffer_.size() >= chunk_size) {
         afe_iface_->feed(afe_data_, input_buffer_.data());
         input_buffer_.erase(input_buffer_.begin(), input_buffer_.begin() + chunk_size);

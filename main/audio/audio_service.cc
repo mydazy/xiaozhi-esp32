@@ -538,9 +538,6 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
         timestamp_queue_.pop_front();
     }
 
-    //   ① 帧独立性：opus 编码在下游 opus_codec 任务，此处仅入队 PCM，跳帧不破坏 codec 状态
-    //   ② 实时音频丢一帧（60ms）远好于 AFE pipeline 6s 雪崩
-    //   ③ 任何下游网络抖动（不止 GIF 场景）都能优雅降级
     if (!audio_queue_cv_.wait_for(lock, std::chrono::milliseconds(200),
             [this]() { return audio_encode_queue_.size() < MAX_ENCODE_TASKS_IN_QUEUE; })) {
         ESP_LOGW(TAG, "Encode queue backpressure (200ms), dropping PCM frame");
