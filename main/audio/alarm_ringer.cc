@@ -72,7 +72,7 @@ void AlarmRinger::Start(const std::string& message, Kind kind) {
 
     start_us_ = esp_timer_get_time();
     saved_volume_ = codec ? codec->output_volume() : -1;
-    ring_count_ = 0;
+    ring_count_ = (kind == Kind::kReminder) ? 1 : 0;   // kReminder 视为"将立即响第 1 次"
     last_ai_prompt_sec_ = 0;
 
     ESP_LOGI(TAG, "Start · kind=%s · message=%s · saved_volume=%d",
@@ -82,17 +82,12 @@ void AlarmRinger::Start(const std::string& message, Kind kind) {
     // 抑制自动休眠 · 响铃期间禁止 PowerSaveTimer 进深睡
     board.EnableAutoSleep(false);
 
-    // 第 1 次响铃 · 音量起点按模式分流
-    if (codec) {
-        if (kind == Kind::kReminder) {
-            codec->SetOutputVolume(reminder_mode::kVolStep1);             // 绝对 60
-        } else if (saved_volume_ > 0) {
-            codec->SetOutputVolume(saved_volume_ * alarm_mode::kVolStage0Pct / 100);  // saved×60%
-        }
-    }
+    // 第 1 次响铃 · 音量起点：kReminder 绝对 60 / kAlarm saved×60%
+    const int first_vol = (kind == Kind::kReminder)
+        ? reminder_mode::kVolStep1
+        : (saved_volume_ > 0 ? saved_volume_ * alarm_mode::kVolStage0Pct / 100 : -1);
+    if (codec && first_vol >= 0) codec->SetOutputVolume(first_vol);
     app.PlaySound(Lang::Sounds::OGG_VIBRATION);
-    if (kind == Kind::kReminder) ring_count_ = 1;  // kReminder：已响 1 次
-
     DispatchWakeWord(0);
 
     // 创建周期 tick timer（5s）· 共用
@@ -119,10 +114,8 @@ void AlarmRinger::Start(const std::string& message, Kind kind) {
         };
         esp_timer_create(&args, &timeout_timer_);
     }
-    const int64_t timeout_us = (kind == Kind::kReminder)
-                                 ? reminder_mode::kAutoStopUs
-                                 : alarm_mode::kAutoStopUs;
-    esp_timer_start_once(timeout_timer_, timeout_us);
+    esp_timer_start_once(timeout_timer_,
+        (kind == Kind::kReminder) ? reminder_mode::kAutoStopUs : alarm_mode::kAutoStopUs);
 }
 
 void AlarmRinger::OnTickStatic(void* arg) {
@@ -152,13 +145,12 @@ void AlarmRinger::OnTick() {
         return;
     }
 
-    // ===== kAlarm 闹铃模式 · 5min 循环 + 渐入 + 20s 重念 =====
+    // ===== kAlarm 闹铃模式 · 5min 循环 + 渐入（60→80→100%）+ 20s 重念 =====
     if (codec && saved_volume_ > 0) {
-        int vol_pct;
-        if      (elapsed_s < alarm_mode::kStage1Sec) vol_pct = alarm_mode::kVolStage0Pct;  // 60%
-        else if (elapsed_s < alarm_mode::kStage2Sec) vol_pct = alarm_mode::kVolStage1Pct;  // 80%
-        else                                          vol_pct = alarm_mode::kVolStage2Pct;  // 100%
-        codec->SetOutputVolume(saved_volume_ * vol_pct / 100);
+        const int pct = (elapsed_s < alarm_mode::kStage1Sec) ? alarm_mode::kVolStage0Pct
+                      : (elapsed_s < alarm_mode::kStage2Sec) ? alarm_mode::kVolStage1Pct
+                      :                                         alarm_mode::kVolStage2Pct;
+        codec->SetOutputVolume(saved_volume_ * pct / 100);
     }
     app.PlaySound(Lang::Sounds::OGG_VIBRATION);
 
