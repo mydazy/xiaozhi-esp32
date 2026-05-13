@@ -67,7 +67,6 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "gain") == 0) OnGain(msg);
     else if (strcmp(type, "mic_calibrate") == 0) OnMicCalibrate();
     else if (strcmp(type, "download") == 0) OnDownload(msg);
-    else if (strcmp(type, "vad_config") == 0) OnVadConfig(msg);
     else if (strcmp(type, "flow") == 0) OnFlow(msg);
     else if (strcmp(type, "stt_url") == 0) OnSttUrl(msg);
     else if (strcmp(type, "music_play") == 0) OnMusicPlay(msg);
@@ -234,49 +233,6 @@ void RemoteCmd::OnDownload(const cJSON* msg) {
             Board::GetInstance().GetDisplay()->SetEmotion(emotion.c_str());
         }
         cJSON_Delete(files_copy);
-    });
-}
-
-void RemoteCmd::OnVadConfig(const cJSON* msg) {
-    auto speech = cJSON_GetObjectItem(msg, "min_speech");
-    auto noise = cJSON_GetObjectItem(msg, "min_noise");
-    auto delay = cJSON_GetObjectItem(msg, "delay");
-    auto agc = cJSON_GetObjectItem(msg, "agc");
-
-    bool has_speech = cJSON_IsNumber(speech);
-    bool has_noise = cJSON_IsNumber(noise);
-    bool has_delay = cJSON_IsNumber(delay);
-    bool has_agc = cJSON_IsNumber(agc);
-
-    int v_speech = has_speech ? speech->valueint : 0;
-    int v_noise = has_noise ? noise->valueint : 0;
-    int v_delay = has_delay ? delay->valueint : 0;
-    int v_agc = has_agc ? agc->valueint : 0;
-
-    ESP_LOGI(TAG, "vad: speech=%d noise=%d delay=%d agc=%d", v_speech, v_noise, v_delay, v_agc);
-
-    app_->Schedule([this, has_speech, has_noise, has_delay, has_agc,
-                    v_speech, v_noise, v_delay, v_agc]() {
-        Settings s("audio_afe", true);
-        std::string info;
-        char buf[48];
-        bool changed = false;
-
-        if (has_speech) { s.SetInt("vad_min_speech_ms", v_speech); snprintf(buf, sizeof(buf), "语音: %dms\n", v_speech); info += buf; changed = true; }
-        if (has_noise) { s.SetInt("vad_min_noise_ms", v_noise); snprintf(buf, sizeof(buf), "静音: %dms\n", v_noise); info += buf; changed = true; }
-        if (has_delay) { s.SetInt("vad_delay_ms", v_delay); snprintf(buf, sizeof(buf), "延迟: %dms\n", v_delay); info += buf; changed = true; }
-        if (has_agc) { s.SetInt("agc_init", v_agc); snprintf(buf, sizeof(buf), "AGC: %s\n", v_agc ? "开" : "关"); info += buf; changed = true; }
-
-        if (changed) {
-            info += "(重启生效)";
-        } else {
-            Settings r("audio_afe", false);
-            snprintf(buf, sizeof(buf), "语音:%d 静音:%d 延迟:%d AGC:%s",
-                     (int)r.GetInt("vad_min_speech_ms", 128), (int)r.GetInt("vad_min_noise_ms", 500),
-                     (int)r.GetInt("vad_delay_ms", 300), r.GetInt("agc_init", 0) ? "开" : "关");
-            info = buf;
-        }
-        app_->Alert("VAD配置", info.c_str(), "", changed ? Lang::Sounds::OGG_VIBRATION : "");
     });
 }
 
