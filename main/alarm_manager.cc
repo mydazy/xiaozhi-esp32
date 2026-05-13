@@ -434,7 +434,9 @@ void AlarmManager::RegisterMcpTools() {
         });
 
     mcp.AddTool("self.alarm.list",
-        "查闹钟列表。用户问『有什么闹钟 / 下一个几点响』时调用。",
+        "查闹钟列表。返回 alarms[] + count + next_alarm_in + **last_triggered**（最近触发闹钟的 time/message）。"
+        "**必调时机**：① 用户问『有什么闹钟 / 下一个几点响』；"
+        "② 收到唤醒词『闹钟响了』或『闹钟还在响』，从 last_triggered.message 取真正提醒事项再播报。",
         PropertyList(),
         [this](const PropertyList&) -> ReturnValue {
             std::lock_guard<std::mutex> lock(mutex_);

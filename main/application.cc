@@ -302,11 +302,12 @@ void Application::Initialize() {
                 else                      ui->UpdatePomodoro(remain, running);
             });
         });
-    // 计时结束 → 单次 AI 唤醒提醒休息（不响铃、不渐入、不重念 · 与闹钟区分开）
+    // 计时结束 → vibration.ogg 短促提示 + 单次 AI 唤醒（≤10 字 · 详情走 self.pomodoro.status 反查）
     PomodoroManager::GetInstance().SetFinishCallback([]() {
         Application::GetInstance().Schedule([]() {
-            Application::GetInstance().WakeWordInvoke(
-                "番茄钟时间到鼓励一下");
+            auto& app = Application::GetInstance();
+            app.PlaySound(Lang::Sounds::OGG_VIBRATION);     // 与闹铃同款短促提示
+            app.WakeWordInvoke("番茄钟到了鼓励一下");        // 9 字
             if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
                 ui->SwitchOutPomodoroMode();
             }

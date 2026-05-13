@@ -214,7 +214,9 @@ void PomodoroManager::RegisterMcpTools() {
         });
 
     mcp.AddTool("self.pomodoro.status",
-        "查番茄钟状态。用户问『还剩多久 / 番茄钟到了吗』时调。",
+        "查番茄钟状态。返回 {state: idle/running/paused, remain_sec, total_sec}。"
+        "**必调时机**：① 用户问『还剩多久 / 番茄钟到了吗』；"
+        "② 收到唤醒词『番茄钟到了鼓励一下』，从 total_sec 算出『刚专注 X 分钟』，温柔夸奖孩子并提醒休息眼睛。",
         PropertyList(),
         [this](const PropertyList&) -> ReturnValue {
             char buf[128];
