@@ -209,12 +209,15 @@ void RemoteCmd::OnGain(const cJSON* msg) {
 
 // 远程触发 MIC 校准（调试 / 售后重校 / 强制覆盖）
 // 协议: {"type":"custom","payload":{"type":"mic_calibrate"}}
-// 直接调 CalibrateMicOnce，不停 audio_service（用户负责确保设备空闲）
 void RemoteCmd::OnMicCalibrate() {
     ESP_LOGI(TAG, "mic_calibrate: 触发");
-    app_->Schedule([]() {
+    app_->Schedule([this]() {
         auto* box = dynamic_cast<BoxAudioCodec*>(Board::GetInstance().GetAudioCodec());
-        if (box) box->CalibrateMicOnce();
+        if (!box) return;
+        auto& audio = app_->GetAudioService();
+        audio.Stop();
+        box->CalibrateMicOnce();
+        audio.Start();
     });
 }
 
