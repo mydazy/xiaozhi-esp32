@@ -62,10 +62,7 @@
 #include <sys/time.h>
 RTC_DATA_ATTR static uint64_t s_last_sleep_us = 0;
 static constexpr uint64_t kDeadHoldWindowUs = 500 * 1000;
-
-// 主动关机标志：EXT0 唤醒时阻塞等松手，防"关机后按住又开机"
-RTC_DATA_ATTR static bool s_manual_shutdown = false;
-static constexpr int kReleaseWaitMaxMs = 30000;
+static constexpr int kShutdownReleaseWaitMaxMs = 30000;  // 关机前等松手兜底上限
 static inline uint64_t NowRtcUs() {
     struct timeval tv;
     gettimeofday(&tv, nullptr);
@@ -215,31 +212,6 @@ private:
         switch (wakeup_reason) {
             case ESP_SLEEP_WAKEUP_EXT0:
                 ESP_LOGI(TAG, "从开机键唤醒");
-                // 主动关机后未松手 → 阻塞等松手再 sleep
-                if (s_manual_shutdown) {
-                    gpio_config_t io_conf = {
-                        .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
-                        .mode = GPIO_MODE_INPUT,
-                        .pull_up_en = GPIO_PULLUP_ENABLE,
-                        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-                        .intr_type = GPIO_INTR_DISABLE,
-                    };
-                    gpio_config(&io_conf);
-                    if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
-                        ESP_LOGW(TAG, "主动关机后未松手 · 阻塞等松手");
-                        int waited = 0;
-                        while (gpio_get_level(BOOT_BUTTON_GPIO) == 0 && waited < kReleaseWaitMaxMs) {
-                            vTaskDelay(pdMS_TO_TICKS(50));
-                            waited += 50;
-                        }
-                        ESP_LOGI(TAG, "用户已松手 (waited=%dms) · 清标志后回 sleep", waited);
-                    }
-                    s_manual_shutdown = false;
-                    s_last_sleep_us = NowRtcUs();
-                    esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0);
-                    rtc_gpio_pullup_en(BOOT_BUTTON_GPIO);
-                    esp_deep_sleep_start();  // 不会返回
-                }
                 // 死按延续兜底：距上次 sleep < 500ms + GPIO 低 → 短路 sleep
                 if (s_last_sleep_us > 0) {
                     uint64_t since_us = NowRtcUs() - s_last_sleep_us;
@@ -649,7 +621,25 @@ private:
 
         ResetAllGpiosForSleep();
 
-        s_manual_shutdown = !enable_gyro_wakeup;
+        // 主动关机：sleep 前先等用户松手，确保 GPIO 高电平 sleep
+        // 否则 esp_deep_sleep_start 后 EXT0 会被用户仍按着的手指立即触发 → 循环唤醒
+        if (!enable_gyro_wakeup) {
+            gpio_config_t boot_in = {
+                .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
+                .mode = GPIO_MODE_INPUT,
+                .pull_up_en = GPIO_PULLUP_ENABLE,
+                .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                .intr_type = GPIO_INTR_DISABLE,
+            };
+            gpio_config(&boot_in);
+            int waited = 0;
+            while (gpio_get_level(BOOT_BUTTON_GPIO) == 0 && waited < kShutdownReleaseWaitMaxMs) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+                waited += 50;
+            }
+            if (waited > 0) ESP_LOGI(TAG, "关机前等松手 %dms", waited);
+        }
+
         s_last_sleep_us = NowRtcUs();
         esp_deep_sleep_start();
     }
@@ -820,8 +810,9 @@ private:
                 return;
             }
             if (shutdown_armed_.exchange(true)) return;
-            ESP_LOGI(TAG, "长按 3 秒 → 直接关机");
-            // ShutdownOrSleep 含 2.5s vTaskDelay · 派发到 main_app
+            ESP_LOGI(TAG, "长按 3 秒 → 立即播再见音（提示音=松手信号）→ 关机");
+            // 立即播提示音作为"已确认"反馈，用户听到自然松手
+            // EnterDeepSleep 内部兜底等松手 → 保证 sleep 前 GPIO 已 HIGH
             Application::GetInstance().Schedule([this]() {
                 ShutdownOrSleep("再见", "", Lang::Sounds::OGG_REBOOT, 2500, false);
             });
