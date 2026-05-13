@@ -50,6 +50,7 @@ set(SOURCES "audio/audio_codec.cc"
             "device_state_event.cc"
             "flow_engine.cc"
             "alarm_manager.cc"
+            "pomodoro_manager.cc"
             "audio/alarm_ringer.cc"
             "remote_cmd.cc"
             "edu_scene_pool.cc"
@@ -58,8 +59,6 @@ set(SOURCES "audio/audio_codec.cc"
             )
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg"
-    # [量产稳定期] display/ui 子目录暂从 INCLUDE_DIRS 移除（ui_display 已切断对 ui/ 的依赖）
-    # "display/ui" "display/ui/core" "display/ui/theme" "display/ui/resources" "display/ui/widgets"
     "audio" "audio/demuxer" "protocols" "blufi" "wifi")
 
 # Add board common files
@@ -153,9 +152,8 @@ endif()
 if(CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32P4)
     list(APPEND SOURCES "audio/wake_words/afe_wake_word.cc")
     list(APPEND SOURCES "audio/wake_words/custom_wake_word.cc")
-else()
-    list(APPEND SOURCES "audio/wake_words/esp_wake_word.cc")
 endif()
+# 非 S3/P4 不编入唤醒词实现（USE_ESP_WAKE_WORD 已 2026-05-13 精简删除）
 
 # Select language directory according to Kconfig
 if(CONFIG_LANGUAGE_ZH_CN)

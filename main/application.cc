@@ -19,6 +19,7 @@
 #include "audio/music_player.h"
 #include "alarm_manager.h"
 #include "audio/alarm_ringer.h"
+#include "pomodoro_manager.h"
 
 #include <cstring>
 #include <cstdlib>   // setenv / tzset (P0：闹钟时区基准)
@@ -280,6 +281,37 @@ void Application::Initialize() {
     });
     // MCP 工具注册（self.alarm.add / list / delete / set_enabled）
     AlarmManager::GetInstance().RegisterMcpTools();
+
+    // ===== 番茄钟（self.pomodoro.start/pause/resume/stop/status · MCP+触屏双入口）=====
+    // 触屏按钮 → 主线程调 TogglePaused（同 Player 套路 · 已在 UiDisplay 内 Schedule 一次）
+    if (auto* ui = dynamic_cast<UiDisplay*>(display)) {
+        ui->OnPomodoroToggle([]() {
+            PomodoroManager::GetInstance().TogglePaused();
+        });
+    }
+    // tick 在 esp_timer 任务上下文 → Schedule 到主线程 + DisplayLock 内更新 UI
+    PomodoroManager::GetInstance().SetTickCallback(
+        [](PomodoroManager::State state, uint32_t remain, uint32_t /*total*/) {
+            bool running = (state == PomodoroManager::State::kRunning);
+            bool active  = (state != PomodoroManager::State::kIdle);
+            Application::GetInstance().Schedule([remain, running, active]() {
+                auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
+                if (!ui) return;
+                if (!active) { ui->SwitchOutPomodoroMode(); return; }
+                if (!ui->IsPomodoroMode()) ui->SwitchToPomodoroMode(remain, running);
+                else                      ui->UpdatePomodoro(remain, running);
+            });
+        });
+    // 计时结束 → 复用 AlarmRinger（5min 自动停 · 摇晃/按键/触摸/语音可停）+ 切回时钟
+    PomodoroManager::GetInstance().SetFinishCallback([]() {
+        Application::GetInstance().Schedule([]() {
+            AlarmRinger::GetInstance().Start("番茄钟时间到，可以休息一下啦");
+            if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+                ui->SwitchOutPomodoroMode();
+            }
+        });
+    });
+    PomodoroManager::GetInstance().RegisterMcpTools();
 
     // Start network asynchronously
     board.StartNetwork();
@@ -1388,6 +1420,11 @@ bool Application::CanEnterSleepMode() {
     }
 
     if (MusicPlayer::GetInstance().IsPlaying()) {
+        return false;
+    }
+
+    // 番茄钟运行/暂停期间禁止休眠（孩子专注 25min 中途黑屏会打断 · LCD 持亮 + 1Hz tick 维持）
+    if (PomodoroManager::GetInstance().IsActive()) {
         return false;
     }
 

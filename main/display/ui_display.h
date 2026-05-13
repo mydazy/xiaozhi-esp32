@@ -62,14 +62,19 @@ public:
     void OnPlayerPauseToggle(PlayerPauseToggleCb cb) { on_player_pause_toggle_ = std::move(cb); }
     bool IsPlayerMode() const { return active_scene_ == SceneType::kPlayer; }
 
+    // ===== 番茄钟页（参考时钟：88px 倒计时 + 64×64 启停圆按钮）=====
+    using PomodoroToggleCb = std::function<void()>;
+    void SwitchToPomodoroMode(uint32_t remain_sec, bool running);
+    void SwitchOutPomodoroMode();
+    void UpdatePomodoro(uint32_t remain_sec, bool running);
+    void OnPomodoroToggle(PomodoroToggleCb cb) { on_pomodoro_toggle_ = std::move(cb); }
+    bool IsPomodoroMode() const { return active_scene_ == SceneType::kPomodoro; }
+
     SceneType GetCurrentScene() const { return active_scene_; }
 
     void FinishBootAndShowClock();
 
     // 显示笔画 GIF 动画（写字识字）——把 PSRAM buffer 装入 emoji_collection "font" 槽位
-    // gif_buffer 由 heap_caps_malloc(MALLOC_CAP_SPIRAM) 分配，所有权转移给 EmojiCollection
-    // request_id 用于并发去重：调用 BeginFontPending 拿到的 token，stale token 会丢弃 buffer
-    // 传 0 表示无 token（兼容旧路径 / 旁路触发）
     void FontGif(uint8_t* gif_buffer, size_t size, uint32_t request_id = 0);
 
     // 退出笔画 GIF 模式（与 FontGif 对称）——切回 neutral 表情、恢复 bottom_bar
@@ -77,9 +82,6 @@ public:
     void HideFontGif();
 
     // 申请一次"笔画 GIF 装载"许可：
-    //   - 立即翻转 font_pending_ 守护位（block ShowEduCard 闪屏）
-    //   - 返回 request_id（递增 token）；FontGif 调用时回传，stale 请求自动丢弃
-    //   - 调用方下载失败时必须配对 CancelFontPending(id) 释放守护位
     uint32_t BeginFontPending();
     void CancelFontPending(uint32_t request_id);
 
@@ -158,6 +160,14 @@ private:
     bool is_player_paused_       = false;
     PlayerPauseToggleCb on_player_pause_toggle_;
 
+    // 番茄钟页（懒加载，首次 SwitchToPomodoroMode 时构建）
+    lv_obj_t* pomodoro_container_  = nullptr;
+    lv_obj_t* pomodoro_time_label_ = nullptr;   // 88px 倒计时 "MM:SS"
+    lv_obj_t* pomodoro_btn_        = nullptr;   // 64×64 启停圆按钮
+    lv_obj_t* pomodoro_btn_icon_   = nullptr;   // FONT_AWESOME_PAUSE / PLAY
+    bool      pomodoro_is_running_ = false;
+    PomodoroToggleCb on_pomodoro_toggle_;
+
     const lv_font_t* fallback_text_font_ = nullptr;
 
     SceneType active_scene_ = SceneType::kChat;
@@ -182,6 +192,11 @@ private:
     static void OnPlayerPlayPauseClicked(lv_event_t* e);
     static void PlayerTickCb(lv_timer_t* t);
     static void FormatTime(int ms, char* buf, size_t buf_size);
+
+    // 番茄钟页内部方法
+    void CreatePomodoroPage();
+    static void OnPomodoroBtnClicked(lv_event_t* e);
+    static void FormatPomodoroTime(uint32_t remain_sec, char* buf, size_t buf_size);
 
     void StartBootAnimation();
 

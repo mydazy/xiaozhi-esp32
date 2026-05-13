@@ -339,6 +339,7 @@ void UiDisplay::SwitchToClockMode() {
     if (active_scene_ == SceneType::kClock) return;
     if (!setup_ui_called_) return;
     if (active_scene_ == SceneType::kPlayer) return;
+    if (active_scene_ == SceneType::kPomodoro) return;
 
     HideEduCard();   // 状态切换清场，防止教育卡遮挡时钟主屏
     HideFontGif();   // 同步清 font 状态，防止 GIF 笔画残留
@@ -348,6 +349,7 @@ void UiDisplay::SwitchToClockMode() {
     if (content_)     lv_obj_add_flag(content_, LV_OBJ_FLAG_HIDDEN);
     if (container_)   lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
     if (emoji_box_)   lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    if (pomodoro_container_) lv_obj_add_flag(pomodoro_container_, LV_OBJ_FLAG_HIDDEN);
 
     if (clock_container_) {
         lv_obj_remove_flag(clock_container_, LV_OBJ_FLAG_HIDDEN);
@@ -966,6 +968,7 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
     if (container_)       lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
     // status_bar_ 永久不隐藏（产品决策）：Player 模式也显示顶部状态栏
     if (emoji_box_)       lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    if (pomodoro_container_) lv_obj_add_flag(pomodoro_container_, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_remove_flag(player_container_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(player_container_);
@@ -1023,6 +1026,152 @@ void UiDisplay::SetPlayerPaused(bool paused) {
     if (is_player_paused_ == paused) return;
     is_player_paused_ = paused;
     lv_label_set_text(player_play_icon_, paused ? FONT_AWESOME_PLAY : FONT_AWESOME_PAUSE);
+}
+
+// ============================================================
+// 番茄钟页（参考时钟：88px 倒计时 + 启停圆按钮 · MCP+触屏双入口）
+//   - 88px 倒计时 → 复用 clock_big_font_（font_maru_88_4 · 已为时钟主屏加载）
+//   - 启停按钮   → 与 Player 同款（64×64 圆 · FONT_AWESOME_PLAY/PAUSE · PRESS_LOCK 防假触）
+//   - 触屏点击   → Schedule 到主线程调 PomodoroManager（防 LVGL/timer 锁顺序倒置）
+//   - MCP 控制   → PomodoroManager tick 回调 Schedule 到主线程 → UpdatePomodoro
+// ============================================================
+
+void UiDisplay::FormatPomodoroTime(uint32_t remain_sec, char* buf, size_t buf_size) {
+    uint32_t min = remain_sec / 60;
+    uint32_t sec = remain_sec % 60;
+    snprintf(buf, buf_size, "%02u:%02u", (unsigned)min, (unsigned)sec);
+}
+
+void UiDisplay::CreatePomodoroPage() {
+    if (pomodoro_container_) return;
+    auto* screen = lv_screen_active();
+    if (!screen) return;
+
+    pomodoro_container_ = lv_obj_create(screen);
+    lv_obj_set_size(pomodoro_container_, kScreenWidth, kScreenHeight);
+    lv_obj_align(pomodoro_container_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_remove_flag(pomodoro_container_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(pomodoro_container_, lv_color_hex(kColorBgPrimary), 0);
+    lv_obj_set_style_bg_opa(pomodoro_container_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(pomodoro_container_, 0, 0);
+    lv_obj_set_style_radius(pomodoro_container_, kScreenRadius, 0);
+    lv_obj_set_style_pad_all(pomodoro_container_, 0, 0);
+
+    // 88px 倒计时（与时钟主屏完全同款布局：y=-26）
+    pomodoro_time_label_ = lv_label_create(pomodoro_container_);
+    lv_obj_set_style_text_color(pomodoro_time_label_, lv_color_hex(kColorTextPrimary), 0);
+    lv_label_set_text(pomodoro_time_label_, "25:00");
+    lv_obj_align(pomodoro_time_label_, LV_ALIGN_CENTER, kClockOffsetX, kClockTimeOffsetY);
+
+    EnsureDisplayFonts();
+    if (clock_big_font_) {
+        lv_obj_set_style_text_font(pomodoro_time_label_, clock_big_font_, 0);
+    } else {
+        lv_obj_set_style_text_font(pomodoro_time_label_, &g_text_font, 0);
+    }
+
+    // 启停圆按钮（屏幕底部偏上 · 与 Player 同款 64×64）
+    constexpr int BTN_SIZE = 64;
+    constexpr int BTN_CENTER_Y = 188;   // 距屏底 ~52px · 88px 数字之下留呼吸
+    pomodoro_btn_ = lv_button_create(pomodoro_container_);
+    lv_obj_set_size(pomodoro_btn_, BTN_SIZE, BTN_SIZE);
+    lv_obj_set_pos(pomodoro_btn_, kScreenWidth / 2 - BTN_SIZE / 2, BTN_CENTER_Y - BTN_SIZE / 2);
+    // 番茄色（ui_config.h ACCENT_ORANGE=0xFB8C00）
+    lv_obj_set_style_bg_color(pomodoro_btn_, lv_color_hex(0xFB8C00), 0);
+    lv_obj_set_style_bg_opa(pomodoro_btn_, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(pomodoro_btn_, BTN_SIZE / 2, 0);
+    lv_obj_set_style_border_width(pomodoro_btn_, 0, 0);
+    lv_obj_set_style_shadow_width(pomodoro_btn_, 0, 0);
+    lv_obj_set_style_bg_opa(pomodoro_btn_, LV_OPA_70, LV_STATE_PRESSED);
+
+    pomodoro_btn_icon_ = lv_label_create(pomodoro_btn_);
+    lv_label_set_text(pomodoro_btn_icon_, FONT_AWESOME_PAUSE);  // 默认 running → ⏸
+    lv_obj_set_style_text_font(pomodoro_btn_icon_, &BUILTIN_ICON_FONT, 0);
+    lv_obj_set_style_text_color(pomodoro_btn_icon_, lv_color_hex(kColorTextPrimary), 0);
+    lv_obj_center(pomodoro_btn_icon_);
+
+    // PRESS_LOCK 防 swipe 假触（同 Player）
+    lv_obj_add_flag(pomodoro_btn_, LV_OBJ_FLAG_PRESS_LOCK);
+    lv_obj_add_event_cb(pomodoro_btn_, OnPomodoroBtnClicked, LV_EVENT_CLICKED, this);
+
+    lv_obj_add_flag(pomodoro_container_, LV_OBJ_FLAG_HIDDEN);  // 默认隐藏
+}
+
+void UiDisplay::OnPomodoroBtnClicked(lv_event_t* e) {
+    auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
+    if (!self || !self->on_pomodoro_toggle_) return;
+    // 同 Player：LVGL 锁 + esp_timer 锁可能顺序倒置 → Schedule 到主线程
+    auto cb = self->on_pomodoro_toggle_;
+    Application::GetInstance().Schedule([cb]() {
+        if (cb) cb();
+    });
+}
+
+void UiDisplay::SwitchToPomodoroMode(uint32_t remain_sec, bool running) {
+    DisplayLockGuard lock(this);
+    if (!setup_ui_called_) return;
+    if (!pomodoro_container_) CreatePomodoroPage();
+    if (!pomodoro_container_) return;
+
+    HideEduCard();
+    HideFontGif();
+
+    // 同步显示
+    char buf[8];
+    FormatPomodoroTime(remain_sec, buf, sizeof(buf));
+    if (pomodoro_time_label_) lv_label_set_text(pomodoro_time_label_, buf);
+    pomodoro_is_running_ = running;
+    if (pomodoro_btn_icon_) {
+        lv_label_set_text(pomodoro_btn_icon_, running ? FONT_AWESOME_PAUSE : FONT_AWESOME_PLAY);
+    }
+
+    // 隐藏其他模式
+    if (clock_container_)  lv_obj_add_flag(clock_container_, LV_OBJ_FLAG_HIDDEN);
+    if (player_container_) lv_obj_add_flag(player_container_, LV_OBJ_FLAG_HIDDEN);
+    if (content_)          lv_obj_add_flag(content_, LV_OBJ_FLAG_HIDDEN);
+    if (container_)        lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
+    if (emoji_box_)        lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_remove_flag(pomodoro_container_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(pomodoro_container_);
+
+    // top_bar / status_bar 提顶（与 Player 同套路）
+    if (top_bar_) {
+        lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(top_bar_);
+    }
+    SetTopBarIconsVisible(true);
+    RaiseStatusBar();
+    if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
+
+    active_scene_ = SceneType::kPomodoro;
+    ESP_LOGI(TAG, "Switched to pomodoro mode: %s remain=%u", running ? "running" : "paused", (unsigned)remain_sec);
+}
+
+void UiDisplay::SwitchOutPomodoroMode() {
+    DisplayLockGuard lock(this);
+    if (active_scene_ != SceneType::kPomodoro) return;
+    if (pomodoro_container_) lv_obj_add_flag(pomodoro_container_, LV_OBJ_FLAG_HIDDEN);
+    // 先脱离 Pomodoro 场景，让 SwitchToClockMode 的 kPomodoro 互斥判定通过
+    active_scene_ = SceneType::kChat;
+    SwitchToClockMode();
+    ESP_LOGI(TAG, "Switched out pomodoro mode");
+}
+
+void UiDisplay::UpdatePomodoro(uint32_t remain_sec, bool running) {
+    DisplayLockGuard lock(this);
+    if (active_scene_ != SceneType::kPomodoro) return;
+    if (pomodoro_time_label_) {
+        char buf[8];
+        FormatPomodoroTime(remain_sec, buf, sizeof(buf));
+        lv_label_set_text(pomodoro_time_label_, buf);
+    }
+    if (pomodoro_is_running_ != running) {
+        pomodoro_is_running_ = running;
+        if (pomodoro_btn_icon_) {
+            lv_label_set_text(pomodoro_btn_icon_, running ? FONT_AWESOME_PAUSE : FONT_AWESOME_PLAY);
+        }
+    }
 }
 
 // ============================================================
