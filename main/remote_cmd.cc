@@ -103,7 +103,7 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "mic_calibrate") == 0) OnMicCalibrate();
     else if (strcmp(type, "download") == 0) OnDownload(msg);
     else if (strcmp(type, "reload") == 0) OnReload();
-    else if (strcmp(type, "flow") == 0) OnFlow(msg);
+    else if (strcmp(type, "live_companion") == 0) OnFlow(msg);
     else if (strcmp(type, "stt_url") == 0) OnSttUrl(msg);
     else if (strcmp(type, "music_play") == 0) OnMusicPlay(msg);
     else if (strcmp(type, "music_stop") == 0) OnMusicStop();

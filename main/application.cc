@@ -302,10 +302,11 @@ void Application::Initialize() {
                 else                      ui->UpdatePomodoro(remain, running);
             });
         });
-    // 计时结束 → 复用 AlarmRinger（5min 自动停 · 摇晃/按键/触摸/语音可停）+ 切回时钟
+    // 计时结束 → 单次 AI 唤醒提醒休息（不响铃、不渐入、不重念 · 与闹钟区分开）
     PomodoroManager::GetInstance().SetFinishCallback([]() {
         Application::GetInstance().Schedule([]() {
-            AlarmRinger::GetInstance().Start("番茄钟时间到，可以休息一下啦");
+            Application::GetInstance().WakeWordInvoke(
+                "番茄钟时间到了，提醒休息一下");
             if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
                 ui->SwitchOutPomodoroMode();
             }
