@@ -20,7 +20,7 @@ static constexpr int kVolStage0Pct = 60;
 static constexpr int kVolStage1Pct = 80;
 static constexpr int kVolStage2Pct = 100;
 
-// 响铃 tick 周期 · 每次再放 1 次 OGG_WAKEUP + 更新音量档位
+// 响铃 tick 周期 · 每次再放 1 次 OGG_CLOCK + 更新音量档位
 static constexpr int64_t kTickIntervalUs = 5 * 1000 * 1000;  // 5s
 
 // AI 重复念叨周期 · 每隔 N 秒让 AI 重新提醒一次（覆盖"用户耳朵记住提醒事项"）
@@ -82,7 +82,7 @@ void AlarmRinger::Start(const std::string& message) {
     if (codec && saved_volume_ > 0) {
         codec->SetOutputVolume(saved_volume_ * kVolStage0Pct / 100);
     }
-    app.PlaySound(Lang::Sounds::OGG_WAKEUP);
+    app.PlaySound(Lang::Sounds::OGG_CLOCK);   // clock.ogg · 闹铃 / 番茄钟到点共用
 
     // 首次唤醒词：模拟"被主人喊醒"让 AI 接管对话（含 listening 等待用户响应）
     // OnTick 每 20s 会再 wake 一次直到关停
@@ -139,7 +139,7 @@ void AlarmRinger::OnTick() {
     }
 
     // 每 5s 响一次铃 · ESP_TIMER_TASK 不阻塞（PlaySound 内部异步 dispatch）
-    app.PlaySound(Lang::Sounds::OGG_WAKEUP);
+    app.PlaySound(Lang::Sounds::OGG_CLOCK);   // clock.ogg · 闹铃 / 番茄钟到点共用
 
     // 周期重唤醒：每 kAiRepromptSec(20s) 再调一次 WakeWordInvoke
     // 用户没响应就反复"喊" AI 来提醒（AI Speaking 中会先 Abort 再起）

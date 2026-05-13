@@ -13,6 +13,7 @@
 #include "i2c_bus_worker.h"
 #include "application.h"
 #include "audio/music_player.h"
+#include "pomodoro_manager.h"
 #include "button.h"
 #include "config.h"
 #include "settings.h"
@@ -692,6 +693,12 @@ private:
             auto status = app.GetDeviceState();
             ESP_LOGI(TAG, "单击 button 状态: %u", status);
             waiting_factory_reset_confirm_.store(false);
+            if (PomodoroManager::GetInstance().IsActive()) {
+                ESP_LOGI(TAG, "按键 → Stop 番茄钟");
+                app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
+                PomodoroManager::GetInstance().Stop();
+                return;
+            }
             if (MusicPlayer::GetInstance().IsPlaying()) {
                 ESP_LOGI(TAG, "按键打断 MP3 → 唤醒对话");
                 StopMp3AndExitPlayerUi();
