@@ -192,12 +192,32 @@ void AudioService::Stop() {
         AS_EVENT_WAKE_WORD_RUNNING |
         AS_EVENT_AUDIO_PROCESSOR_RUNNING);
 
-    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-    audio_encode_queue_.clear();
-    audio_decode_queue_.clear();
-    audio_playback_queue_.clear();
-    audio_testing_queue_.clear();
-    audio_queue_cv_.notify_all();
+    {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        audio_encode_queue_.clear();
+        audio_decode_queue_.clear();
+        audio_playback_queue_.clear();
+        audio_testing_queue_.clear();
+        audio_queue_cv_.notify_all();
+    }
+
+    // 等三个 task 真的退出 · 防 Start 立刻重 create 引发新+旧 task 共存窗口
+    // 每个 task 超时 500ms · 总最坏 1.5s · 超时不 force kill（task 可能持锁）
+    auto join_task = [](TaskHandle_t& h, const char* name) {
+        if (!h) return;
+        TickType_t start = xTaskGetTickCount();
+        while (eTaskGetState(h) != eDeleted) {
+            if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(500)) {
+                ESP_LOGE(TAG, "Stop: %s task exit timeout · handle leaked", name);
+                return;  // 不置 nullptr · Start 会重 create 新 handle · 旧 handle 由 RTOS idle 回收
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        h = nullptr;
+    };
+    join_task(audio_input_task_handle_,  "audio_input");
+    join_task(audio_output_task_handle_, "audio_output");
+    join_task(opus_codec_task_handle_,   "opus_codec");
 }
 
 bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
