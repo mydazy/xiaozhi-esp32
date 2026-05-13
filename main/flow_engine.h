@@ -95,6 +95,7 @@ private:
     std::atomic<int> total_items_{0};
     std::atomic<int> loop_count_{0};
     std::atomic<bool> recap_pending_{false};
+    std::atomic<bool> loading_{false};
 
     // 脚本数据
     std::mutex script_mutex_;

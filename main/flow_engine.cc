@@ -56,20 +56,31 @@ void FlowEngine::Start(const std::string& url) {
         return;
     }
 
+    // F1+F5 修（P0）：原子 CAS 拒重入 + 标记加载中
+    bool expected = false;
+    if (!loading_.compare_exchange_strong(expected, true)) {
+        ESP_LOGW(TAG, "Start: 上次 load_task 未结束，拒绝重入");
+        return;
+    }
+
     // 先停止当前播放
     if (state_ != FlowState::kIdle) {
         Stop();
+        // Stop 会清 loading_ → 这里重新置位（保留拒重入语义）
+        loading_ = true;
     }
 
     pending_url_ = url;
 
     app_->Schedule([this]() {
+        // 二次检查：Schedule 入队到 main_loop 执行的间隙可能被 Stop
+        if (!loading_.load()) {
+            ESP_LOGW(TAG, "Start: 入队 main_loop 后被 Stop 取消");
+            return;
+        }
         app_->Alert("直播伴侣", "加载脚本中...", "", "");
 
         // 在后台任务中下载脚本（TLS 需要内部 RAM 栈）
-        // P0c 修：静态栈（xTaskCreateStatic）减堆碎片
-        // P1 修：Pin Core 0（HTTP 与 Application 主循环同核）
-        // 重入保护：调用方已通过 state_ != FlowState::kIdle 时 Stop() · LoadScriptTask 末尾置 load_task_handle_ = nullptr
         constexpr uint32_t kFlowLoadStackSize = 6144;
         static StackType_t s_flow_load_stack[kFlowLoadStackSize / sizeof(StackType_t)];
         static StaticTask_t s_flow_load_tcb;
@@ -77,6 +88,7 @@ void FlowEngine::Start(const std::string& url) {
             LoadScriptTask, "flow_load", kFlowLoadStackSize / sizeof(StackType_t),
             this, 1, s_flow_load_stack, &s_flow_load_tcb, 0);
         if (load_task_handle_ == nullptr) {
+            loading_ = false;  // F1+F5 修：创建失败清标记
             app_->Alert("直播伴侣", "启动失败: 任务创建失败", "", "");
             ESP_LOGE(TAG, "Failed to create load task");
         }
@@ -134,8 +146,9 @@ void FlowEngine::NotifyTtsFinished() {
 }
 
 void FlowEngine::Stop() {
+    bool was_loading = loading_.exchange(false);
     FlowState prev = state_.exchange(FlowState::kIdle);
-    if (prev == FlowState::kIdle) return;
+    if (prev == FlowState::kIdle && !was_loading) return;
 
     esp_timer_stop(delay_timer_);
 
@@ -162,7 +175,8 @@ void FlowEngine::Stop() {
     }
 
     ESP_LOGI(TAG, "========== 直播伴侣停止 ==========");
-    ESP_LOGI(TAG, "已播放 %d 轮, 当前第 %d 项", loops, played_items);
+    ESP_LOGI(TAG, "已播放 %d 轮, 当前第 %d 项%s",
+             loops, played_items, was_loading ? " (中断加载中)" : "");
 }
 
 void FlowEngine::Suspend() {
@@ -243,8 +257,12 @@ void FlowEngine::LoadScriptTask(void* arg) {
 
     bool success = lc->LoadScript(lc->pending_url_);
 
-    if (success) {
+    if (success && lc->loading_.load()) {
         Application::GetInstance().Schedule([lc]() {
+            if (!lc->loading_.exchange(false)) {
+                ESP_LOGW(TAG, "LoadScriptTask: 入队 main_loop 后被 Stop 取消");
+                return;
+            }
             lc->state_ = FlowState::kPlaying;
             // 设置 ManualStop 模式，确保 TTS 完成后回到 Idle
             Application::GetInstance().ForceListeningMode(kListeningModeManualStop);
@@ -257,6 +275,8 @@ void FlowEngine::LoadScriptTask(void* arg) {
             ESP_LOGI(TAG, "Script started: %d items, loop=%d",
                      lc->total_items_.load(), lc->loop_);
         });
+    } else {
+        lc->loading_ = false;
     }
 
     lc->load_task_handle_ = nullptr;
@@ -492,6 +512,7 @@ void FlowEngine::ScheduleResumeAfterDelay(int delay_ms) {
 // ============================================================================
 
 void FlowEngine::OnDeviceStateChanged(DeviceState prev, DeviceState curr) {
+    if (loading_.load()) return;
     if (!IsRunning()) return;
 
     // 暂停状态下有新的 TTS 开始播放 → 用户仍在互动中，取消恢复定时器
