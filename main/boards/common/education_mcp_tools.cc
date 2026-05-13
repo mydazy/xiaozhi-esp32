@@ -38,10 +38,10 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
     if (include_stroke) {
     mcp.AddTool("self.education.show_stroke",
         "教孩子写汉字 · 屏幕播单字笔顺动画。"
-        "用户说『X 怎么写 / 教我写 X / 不会写 X / 学写 X / 写给我看』时调用。"
-        "禁用：『怎么读 / 拼音 / 什么意思 / 这是啥』→ 改用 show_card。"
-        "character 严传单个汉字（U+4E00~U+9FFF），多字取核心字。"
-        "调用后立即口播『好，画给你看』，出图再讲笔顺，≤3 句每句 ≤30 字。",
+        "触发：『X 怎么写 / 教我写 X / 不会写 X / 学写 X / X 这个字怎么写 / 写给我看 X』。"
+        "禁用：『怎么读/拼音/组词/什么意思/翻译/英文/英语/单词/念什么』→ 改用 show_card。"
+        "character 严传单个汉字（U+4E00~U+9FFF）。同音消歧：用户说『X 的 Y』格式（如『中国的国』『苹果的苹』）取被强调的字 Y。"
+        "调用后立即口播『看屏幕，跟着学笔顺』，动画出来再讲笔顺要点，≤3 句每句 ≤30 字。",
         PropertyList({Property("character", kPropertyTypeString)}),
         [ui](const PropertyList& properties) -> ReturnValue {
             std::string character = properties["character"].value<std::string>();
@@ -212,8 +212,13 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
 
     // 教育卡渲染（极简 · 两行布局 · 不分类）
     mcp.AddTool("self.education.show_card",
-        "屏幕显示教育卡（两行）。汉字配拼音：main=书包 top=shū bāo（汉字≤4 字，拼音带声调）。"
-        "英文配中文：main=apple top=苹果（英文≤12 字符）。返回 ERR 即超长，换更短重试。",
+        "教育卡（屏显两行）· 拼音/组词/单词/翻译/释义时主动调用，与口播同步。"
+        "① 拼音『怎么读/拼音是什么/念什么/读什么』→ main=汉字 top=带声调拼音(shū bāo)。"
+        "② 组词『怎么组词/组什么词/组个词/造词』→ main=词 top=拼音。"
+        "③ 单词/翻译『英语怎么说/英语是什么/单词/翻译/英文』→ main=英文 top=中文。"
+        "④ 释义『什么意思/啥意思/解释』→ main=词 top=≤8 字释义。"
+        "同音消歧：『X 的 Y』格式（如『中国的国』）按 Y 字处理。"
+        "main ≤4 汉字或 12 字符，top ≤8 汉字或 20 字符；超长返 ERR。",
         PropertyList({
             Property("main", kPropertyTypeString),
             Property("top",  kPropertyTypeString, std::string("")),

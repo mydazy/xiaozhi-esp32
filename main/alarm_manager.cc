@@ -394,7 +394,9 @@ void AlarmManager::RegisterMcpTools() {
 
     mcp.AddTool("self.alarm.add",
         "设闹钟。必须先问清提醒内容，别拿『闹钟/提醒/起床』敷衍。"
-        "message 必填具体事；repeat_days：0=一次，0x7F=每天，0x3E=工作日，0x41=周末。",
+        "**message 长度硬上限 ≤8 汉字**（设备端唤醒词总长 ≤10 字 · 留 2 字给『闹钟』前缀）。"
+        "用户说的事项若超 8 字，**主动精简成 ≤8 字关键词后再调本工具**（如『下午三点参加产品评审会』→『产品评审会』）。"
+        "repeat_days：0=一次，0x7F=每天，0x3E=工作日，0x41=周末。",
         PropertyList({
             Property("message", kPropertyTypeString),
             Property("hour", kPropertyTypeInteger, 0, 23),
@@ -408,6 +410,11 @@ void AlarmManager::RegisterMcpTools() {
             if (first == std::string::npos) {
                 return std::string("missing_message: 需要先询问主人要提醒什么具体事情才能设闹钟。"
                                    "请先问『要提醒您什么呢？』拿到答复后再调用本工具。");
+            }
+            // 硬限制：message ≤8 汉字（24 UTF-8 字节）· 防唤醒词超过 10 字红线
+            if (msg.size() > 24) {
+                return std::string("message_too_long: 提醒事项最多 8 个汉字，请精简成关键词再调用本工具。"
+                                   "例：『下午三点参加产品评审会』→『产品评审会』。");
             }
 
             int id = AddAlarmAuto(
@@ -434,9 +441,10 @@ void AlarmManager::RegisterMcpTools() {
         });
 
     mcp.AddTool("self.alarm.list",
-        "查闹钟列表。返回 alarms[] + count + next_alarm_in + **last_triggered**（最近触发闹钟的 time/message）。"
-        "**必调时机**：① 用户问『有什么闹钟 / 下一个几点响』；"
-        "② 收到唤醒词『闹钟响了』或『闹钟还在响』，从 last_triggered.message 取真正提醒事项再播报。",
+        "查闹钟列表。返回 alarms[] + count + next_alarm_in + last_triggered（最近触发的 time/message）。"
+        "**调用时机**：① 用户问『有什么闹钟 / 下一个几点响』；"
+        "② 唤醒词为『闹钟响了』或『再次提醒』（深睡兜底无 message）时 · 取 last_triggered 补充播报。"
+        "（唤醒词形如『闹钟+事项』时事项完整，无需调本工具）",
         PropertyList(),
         [this](const PropertyList&) -> ReturnValue {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -444,8 +452,10 @@ void AlarmManager::RegisterMcpTools() {
         });
 
     mcp.AddTool("self.alarm.dismiss",
-        "关掉正在响的闹钟。用户说『停 / 关掉 / 别响了 / 知道了 / 起来了 / OK』时调用。"
-        "用户说『再睡 N 分钟』：先调本工具，再 self.alarm.add 设 N 分钟一次性闹钟。",
+        "关掉正在响的闹钟。**响铃时**用户说『知道了 / 关掉 / 别响了 / 起来了 』等"
+        "表示已收到提醒的话术时立即调用。"
+        "用户说『再睡 N 分钟』：先调本工具，再 self.alarm.add 设 N 分钟一次性闹钟。"
+        "返回 no_alarm_ringing 说明此刻没响铃，按正常对话处理。",
         PropertyList(),
         [](const PropertyList&) -> ReturnValue {
             if (!AlarmRinger::GetInstance().IsRinging()) {

@@ -64,7 +64,11 @@
 // 用 gettimeofday（POSIX 标准 · ESP-IDF 内部基于 RTC · 跨 deep sleep 持续 · 无组件依赖）
 #include <sys/time.h>
 RTC_DATA_ATTR static uint64_t s_last_sleep_us = 0;
-static constexpr uint64_t kDeadHoldWindowUs = 500 * 1000;  // 500ms
+static constexpr uint64_t kDeadHoldWindowUs = 500 * 1000;
+
+// 主动关机标志：EXT0 唤醒时阻塞等松手，防"关机后按住又开机"
+RTC_DATA_ATTR static bool s_manual_shutdown = false;
+static constexpr int kReleaseWaitMaxMs = 30000;
 static inline uint64_t NowRtcUs() {
     struct timeval tv;
     gettimeofday(&tv, nullptr);
@@ -154,7 +158,6 @@ private:
     bool first_boot_ = false;
 
     std::atomic<bool> shutdown_armed_{false};
-    esp_timer_handle_t shutdown_delay_timer_ = nullptr;
 
     // 开机长按 grace 期：注册按键时若 GPIO 仍按下，置 true；首次 PressUp 自动清。
     std::atomic<bool> boot_hold_grace_active_{false};
@@ -209,15 +212,38 @@ private:
         switch (wakeup_reason) {
             case ESP_SLEEP_WAKEUP_EXT0:
                 ESP_LOGI(TAG, "从开机键唤醒");
-                // 距上次 sleep < 500ms + GPIO 低 = 死按延续（硬件极速被 EXT0 触发）
-                // 直接重 arm + sleep · 永不"误判开机播欢迎音"· 用户死按多久都安全
+                // 主动关机后未松手 → 阻塞等松手再 sleep
+                if (s_manual_shutdown) {
+                    gpio_config_t io_conf = {
+                        .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
+                        .mode = GPIO_MODE_INPUT,
+                        .pull_up_en = GPIO_PULLUP_ENABLE,
+                        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                        .intr_type = GPIO_INTR_DISABLE,
+                    };
+                    gpio_config(&io_conf);
+                    if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+                        ESP_LOGW(TAG, "主动关机后未松手 · 阻塞等松手");
+                        int waited = 0;
+                        while (gpio_get_level(BOOT_BUTTON_GPIO) == 0 && waited < kReleaseWaitMaxMs) {
+                            vTaskDelay(pdMS_TO_TICKS(50));
+                            waited += 50;
+                        }
+                        ESP_LOGI(TAG, "用户已松手 (waited=%dms) · 清标志后回 sleep", waited);
+                    }
+                    s_manual_shutdown = false;
+                    gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
+                    rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
+                    s_last_sleep_us = NowRtcUs();
+                    esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0);
+                    rtc_gpio_pullup_en(BOOT_BUTTON_GPIO);
+                    esp_deep_sleep_start();  // 不会返回
+                }
+                // 死按延续兜底：距上次 sleep < 500ms + GPIO 低 → 短路 sleep
                 if (s_last_sleep_us > 0) {
                     uint64_t since_us = NowRtcUs() - s_last_sleep_us;
                     if (since_us < kDeadHoldWindowUs && gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
                         ESP_LOGW(TAG, "距 sleep %llu ms · 用户未松手 · 短路 sleep", since_us / 1000);
-                        // 防御性断 LDO + hold（B1 修复）· 与 EnterDeepSleep 路径对称
-                        // 硬件 R47=100K 已下拉 GPIO9 到 GND，sleep 失驱时自动断电；本两行作 belt-and-suspenders
-                        // 防 R47 虚焊 / 缺件，并让 sleep 期 GPIO9 立即 LOW 不依赖 RC 放电
                         gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
                         rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
                         s_last_sleep_us = NowRtcUs();
@@ -620,7 +646,7 @@ private:
 
         ResetAllGpiosForSleep();
 
-        // 每次进 sleep 都记 RTC 时戳 · 唤醒后比较 < 500ms 即死按延续 · 直接短路 sleep
+        s_manual_shutdown = !enable_gyro_wakeup;
         s_last_sleep_us = NowRtcUs();
         esp_deep_sleep_start();
     }
@@ -662,21 +688,10 @@ private:
     }
 
     void InitializeButtons() {
-        // 开机长按 grace 入口
+        // 开机时 GPIO 仍按下 → 置 grace · OnLongPress 跳过 3s 关机 · OnPressUp 自动清
         if (first_boot_ && gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
             boot_hold_grace_active_.store(true);
-            const int kReleaseWaitMaxMs = 5000;
-            const int kStepMs = 50;
-            int waited = 0;
-            while (gpio_get_level(BOOT_BUTTON_GPIO) == 0 && waited < kReleaseWaitMaxMs) {
-                vTaskDelay(pdMS_TO_TICKS(kStepMs));
-                waited += kStepMs;
-            }
-            if (gpio_get_level(BOOT_BUTTON_GPIO) != 0) {
-                boot_hold_grace_active_.store(false);
-            }
-            ESP_LOGI(TAG, "InitializeButtons: 开机长按等松手 %d ms (grace=%d)",
-                     waited, boot_hold_grace_active_.load());
+            ESP_LOGI(TAG, "开机长按 grace 已置位");
         }
 
         boot_button_.OnClick([this]() {
@@ -797,46 +812,19 @@ private:
 
         boot_button_.OnLongPress([this]() {
             if (boot_hold_grace_active_.load()) {
-                ESP_LOGI(TAG, "开机长按 grace 期：忽略 3s 关机");
+                ESP_LOGI(TAG, "grace 期：忽略 3s 关机");
                 return;
             }
-            if (shutdown_armed_.exchange(true)) return;  // 防重入
-            ESP_LOGI(TAG, "长按 3 秒：800ms 后关机（中途松开取消）");
-            Application::GetInstance().Alert("关机中", "", "logo", Lang::Sounds::OGG_REBOOT);
-
-            // lazy 创建 timer · 整个生命周期复用（无内存泄漏）
-            if (!shutdown_delay_timer_) {
-                esp_timer_create_args_t args = {
-                    .callback = [](void* arg) {
-                        // ESP_TIMER_TASK 高优先级共享任务，禁止阻塞（ShutdownOrSleep 含 2-3s vTaskDelay）
-                        // → 用 Schedule 派发到 main_app 任务执行，timer 回调立刻返回
-                        auto* self = static_cast<MyDazyP30_4GBoard*>(arg);
-                        if (self->shutdown_armed_.exchange(false)) {
-                            ESP_LOGI(TAG, "800ms 缓冲到 · 派发关机到 main_app");
-                            Application::GetInstance().Schedule([self]() {
-                                self->ShutdownOrSleep("再见", "", "", 1500, false);
-                            });
-                        }
-                    },
-                    .arg = this,
-                    .dispatch_method = ESP_TIMER_TASK,
-                    .name = "shutdown_delay",
-                    .skip_unhandled_events = true,
-                };
-                esp_timer_create(&args, &shutdown_delay_timer_);
-            }
-            esp_timer_stop(shutdown_delay_timer_);
-            esp_timer_start_once(shutdown_delay_timer_, 800 * 1000);  // 800ms
+            if (shutdown_armed_.exchange(true)) return;
+            ESP_LOGI(TAG, "长按 3 秒 → 直接关机");
+            Application::GetInstance().Schedule([this]() {
+                ShutdownOrSleep("再见", "", Lang::Sounds::OGG_SHUTDOWN, 2500, false);
+            });
         }, 3000);
 
         boot_button_.OnPressUp([this]() {
-            // 首次 PressUp 自动清 grace（用户终于松手 → 后续按键回归正常语义）
             if (boot_hold_grace_active_.exchange(false)) {
-                ESP_LOGI(TAG, "开机长按 grace 期已结束（用户松手）");
-            }
-            if (shutdown_armed_.exchange(false)) {
-                if (shutdown_delay_timer_) esp_timer_stop(shutdown_delay_timer_);
-                ESP_LOGI(TAG, "关机取消（用户在 800ms 缓冲内松开）");
+                ESP_LOGI(TAG, "grace 已清");
             }
         });
 

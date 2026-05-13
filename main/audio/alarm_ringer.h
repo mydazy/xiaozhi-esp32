@@ -5,12 +5,7 @@
 #include <string>
 #include <esp_timer.h>
 
-// AlarmRinger · 闹钟持续响铃 + 渐入音量 + 多种关停
-//
-// 设计意图（详见 docs/p30-alarm-flows.html § 10.3）：
-//   闹钟 ≠ 一声通知 · 必须循环响 + 渐入 + 强制关停（摇晃/按键/触摸/语音/超时）
-//
-// 状态：Idle / Ringing · 单例 · 闹钟到点触发 Start · 5 种关停均调 Stop
+// AlarmRinger · 双模响铃（闹铃 / 提醒）+ 多种关停 · 单例
 class AlarmRinger {
 public:
     static AlarmRinger& GetInstance();
@@ -18,9 +13,15 @@ public:
     AlarmRinger(const AlarmRinger&) = delete;
     AlarmRinger& operator=(const AlarmRinger&) = delete;
 
-    // 闹钟到点调用 · 启动循环响铃 + 渐入音量 + AI 语音播报
-    // 幂等：重复 Start 当前 message 覆盖 · 不会启动多个响铃
-    void Start(const std::string& message);
+    // 响铃模式 · 两套策略走同一 ringer 单例
+    enum class Kind : uint8_t {
+        kAlarm    = 0,
+        kReminder = 1,
+    };
+
+    // 到点触发 · 启动响铃 + AI 语音播报
+    // 幂等：重复 Start 当前 message/kind 覆盖 · 不会启动多个响铃
+    void Start(const std::string& message, Kind kind = Kind::kAlarm);
 
     // 任一关停事件调用 · reason 仅用于 LOG
     // 幂等：未在响铃中调用 Stop 是 no-op
@@ -40,12 +41,17 @@ private:
     // esp_timer 回调 · 5 分钟一次（自动停防扰民）
     static void OnTimeoutStatic(void* arg);
 
+    // 投递 WakeWordInvoke 到主线程（去重 Start / OnTick 三处 Schedule lambda）
+    void DispatchWakeWord(int elapsed_s);
+
     std::atomic<bool> ringing_{false};
-    esp_timer_handle_t ring_timer_ = nullptr;     // 周期 5s · 三次响铃推进
-    esp_timer_handle_t timeout_timer_ = nullptr;  // 一次性兜底自停（防 ring_timer 异常）
-    int64_t start_us_ = 0;                        // Start 时戳（仅 LOG elapsed 用）
+    esp_timer_handle_t ring_timer_ = nullptr;     // 周期 5s · 推进
+    esp_timer_handle_t timeout_timer_ = nullptr;  // 一次性兜底自停
+    int64_t start_us_ = 0;                        // Start 时戳（kAlarm 算 elapsed 渐入档位 · kReminder 仅 LOG）
     int saved_volume_ = -1;                       // 原音量 · Stop 时恢复
-    int ring_count_ = 0;                          // 已响铃次数（1/2/3 · 第 3 次后自停）
+    int ring_count_ = 0;                          // kReminder：已响铃次数（1/2/3 · 第 3 次后自停）
+    int last_ai_prompt_sec_ = 0;                  // kAlarm：上次 AI 念叨时点（控 20s 重念周期）
+    Kind kind_ = Kind::kAlarm;                    // 当前响铃模式
     std::string message_;                         // AI 播报用 · 仅 Start 内更新
 };
 
