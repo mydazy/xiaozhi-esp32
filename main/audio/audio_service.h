@@ -37,13 +37,15 @@
  * 
  */
 
-#define OPUS_FRAME_DURATION_MS 60
-#define MAX_ENCODE_TASKS_IN_QUEUE 4
-#define MAX_PLAYBACK_TASKS_IN_QUEUE 8
-#define MAX_DECODE_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
-#define MAX_SEND_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
-#define AUDIO_TESTING_MAX_DURATION_MS 10000
-#define MAX_TIMESTAMPS_IN_QUEUE 3
+// 默认 60ms · 百度 20ms · 运行时切换见 AudioService::SetFrameDuration
+extern int g_opus_frame_duration_ms;
+#define OPUS_FRAME_DURATION_MS         (g_opus_frame_duration_ms)
+#define MAX_ENCODE_TASKS_IN_QUEUE      4
+#define MAX_PLAYBACK_TASKS_IN_QUEUE    8
+#define MAX_SEND_PACKETS_IN_QUEUE      (2400 / OPUS_FRAME_DURATION_MS)   // 上行 · 跟编码帧长 · 20ms=120 / 60ms=40 · 缓存 2400ms 严格一致
+#define MAX_DECODE_PACKETS_IN_QUEUE    (2400 / OPUS_FRAME_DURATION_MS)  // 下行 · 按最小 20ms 算固定 · 缓存 ≥ 2400ms（下行帧长由服务端决定，可能 ≠ 上行）
+#define AUDIO_TESTING_MAX_DURATION_MS  10000
+#define MAX_TIMESTAMPS_IN_QUEUE        3
 
 #define AUDIO_POWER_TIMEOUT_MS 15000
 #define AUDIO_POWER_CHECK_INTERVAL_MS 1000
@@ -63,18 +65,19 @@
      (duration_ms) == 100 ? ESP_OPUS_ENC_FRAME_DURATION_100_MS :  \
      (duration_ms) == 120 ? ESP_OPUS_ENC_FRAME_DURATION_120_MS : -1)
 
-#define AS_OPUS_ENC_CONFIG() {                                                                                    \
-        .sample_rate        = ESP_AUDIO_SAMPLE_RATE_16K,                                                          \
-        .channel            = ESP_AUDIO_MONO,                                                                     \
-        .bits_per_sample    = ESP_AUDIO_BIT16,                                                                    \
-        .bitrate            = ESP_OPUS_BITRATE_AUTO,                                                              \
-        .frame_duration     = (esp_opus_enc_frame_duration_t)AS_OPUS_GET_FRAME_DRU_ENUM(OPUS_FRAME_DURATION_MS),  \
-        .application_mode   = ESP_OPUS_ENC_APPLICATION_AUDIO,                                                     \
-        .complexity         = 0,                                                                                  \
-        .enable_fec         = false,                                                                              \
-        .enable_dtx         = true,                                                                               \
-        .enable_vbr         = true,                                                                               \
+#define AS_OPUS_ENC_CONFIG_MS(ms) {                                                          \
+        .sample_rate        = ESP_AUDIO_SAMPLE_RATE_16K,                                     \
+        .channel            = ESP_AUDIO_MONO,                                                \
+        .bits_per_sample    = ESP_AUDIO_BIT16,                                               \
+        .bitrate            = ESP_OPUS_BITRATE_AUTO,                                         \
+        .frame_duration     = (esp_opus_enc_frame_duration_t)AS_OPUS_GET_FRAME_DRU_ENUM(ms), \
+        .application_mode   = ESP_OPUS_ENC_APPLICATION_AUDIO,                                \
+        .complexity         = 0,                                                             \
+        .enable_fec         = false,                                                         \
+        .enable_dtx         = true,                                                          \
+        .enable_vbr         = true,                                                          \
     }
+#define AS_OPUS_ENC_CONFIG() AS_OPUS_ENC_CONFIG_MS(g_opus_frame_duration_ms)
 
 struct AudioServiceCallbacks {
     std::function<void(void)> on_send_queue_available;
@@ -126,6 +129,9 @@ public:
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
 
+    // 切换 OPUS 帧长（百度 20 / 其它 60）· 仅在 audio 空闲态调用
+    void SetFrameDuration(int frame_duration_ms);
+
     void SetCallbacks(AudioServiceCallbacks& callbacks);
 
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
@@ -143,6 +149,7 @@ private:
     std::unique_ptr<AudioDebugger> audio_debugger_;
     void* opus_encoder_ = nullptr;
     void* opus_decoder_ = nullptr;
+    std::mutex encoder_mutex_;
     std::mutex decoder_mutex_;
     std::mutex input_resampler_mutex_;
     esp_ae_rate_cvt_handle_t input_resampler_ = nullptr;

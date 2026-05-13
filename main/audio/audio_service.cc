@@ -38,6 +38,9 @@
 
 #define TAG "AudioService"
 
+// OPUS 帧长 · 默认 60ms · 百度协议时 SetFrameDuration(20) 切换
+int g_opus_frame_duration_ms = 60;
+
 AudioService::AudioService() {
     event_group_ = xEventGroupCreate();
 }
@@ -419,6 +422,7 @@ void AudioService::OpusCodecTask() {
             packet->sample_rate = 16000;
             packet->timestamp = task->timestamp;
 
+            std::lock_guard<std::mutex> enc_lock(encoder_mutex_);
             if (opus_encoder_ != nullptr && task->pcm.size() == encoder_frame_size_) {
                 std::vector<uint8_t> buf(encoder_outbuf_size_);
                 esp_audio_enc_in_frame_t in = {
@@ -647,6 +651,31 @@ void AudioService::EnableDeviceAec(bool enable) {
     }
 
     audio_processor_->EnableDeviceAec(enable);
+}
+
+void AudioService::SetFrameDuration(int frame_duration_ms) {
+    if (g_opus_frame_duration_ms == frame_duration_ms) return;
+    ESP_LOGI(TAG, "SetFrameDuration: %d → %d ms", g_opus_frame_duration_ms, frame_duration_ms);
+
+    // 重建 OPUS encoder · encoder_mutex_ 与 codec task 互斥
+    {
+        std::lock_guard<std::mutex> lock(encoder_mutex_);
+        esp_opus_enc_close(opus_encoder_);
+        g_opus_frame_duration_ms = frame_duration_ms;
+        esp_opus_enc_config_t cfg = AS_OPUS_ENC_CONFIG_MS(frame_duration_ms);
+        esp_opus_enc_open(&cfg, sizeof(cfg), &opus_encoder_);
+        esp_opus_enc_get_frame_size(opus_encoder_, &encoder_frame_size_, &encoder_outbuf_size_);
+        encoder_frame_size_ /= sizeof(int16_t);
+        encoder_duration_ms_ = frame_duration_ms;
+    }
+
+    // AFE 已初始化时重启（耗 200-500ms · WakeNet 重载）
+    if (audio_processor_initialized_) {
+        bool running = xEventGroupGetBits(event_group_) & AS_EVENT_AUDIO_PROCESSOR_RUNNING;
+        if (running) audio_processor_->Stop();
+        audio_processor_->Initialize(codec_, frame_duration_ms, models_list_);
+        if (running) audio_processor_->Start();
+    }
 }
 
 void AudioService::SetCallbacks(AudioServiceCallbacks& callbacks) {

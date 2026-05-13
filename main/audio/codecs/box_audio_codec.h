@@ -37,7 +37,6 @@ public:
     virtual void EnableInput(bool enable) override;
     virtual void EnableOutput(bool enable) override;
 
-    // MIC 灵敏度校准：vol=80 + input=15 → 播 500ms 1kHz → 算 RMS → 阈值 3000
     void CalibrateMicOnce();
 };
 
