@@ -51,9 +51,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         afe_config->ns_model_name = ns_model_name;
         afe_config->afe_ns_mode = AFE_NS_MODE_NET;
     } else {
-        afe_config->ns_init = true;
-        afe_config->ns_model_name = const_cast<char*>("WEBRTC");
-        afe_config->afe_ns_mode = AFE_NS_MODE_WEBRTC;
+        afe_config->ns_init = false;
     }
 
     afe_config->afe_linear_gain = 4.0f;     // 3.0 → 5.0 (≈ +4.4 dB) · 取值范围 [0.1, 10.0] · 嘈杂环境若底噪明显可回退 4.0
