@@ -23,10 +23,14 @@
 
 #define TAG "MCP"
 
+static std::atomic<int> g_preview_inflight_{0};
+static constexpr int kPreviewMaxInflight = 2;
+
 McpServer::McpServer() {
 }
 
 McpServer::~McpServer() {
+    std::lock_guard<std::mutex> lk(tools_mutex_);
     for (auto tool : tools_) {
         delete tool;
     }
@@ -39,7 +43,12 @@ void McpServer::AddCommonTools() {
     // **重要** 为了提升响应速度，我们把常用的工具放在前面，利用 prompt cache 的特性。
 
     // Backup the original tools list and restore it after adding the common tools.
-    auto original_tools = std::move(tools_);
+    // 启动期单线程跑 · 这里 move 和末尾 insert 各加一次锁（防御性 · 不和内嵌 AddTool 嵌套）
+    std::vector<McpTool*> original_tools;
+    {
+        std::lock_guard<std::mutex> lk(tools_mutex_);
+        original_tools = std::move(tools_);
+    }
     auto& board = Board::GetInstance();
 
     // Do not add custom tools here.
@@ -109,12 +118,18 @@ void McpServer::AddCommonTools() {
 
     // MP3 流式播放 — 云端识别到 MP3 URL 后通过此 tool 让设备播放
     AddTool("self.music.play",
-        "Play an MP3 audio stream from an HTTP(S) URL. "
-        "Use this tool when the user asks to play music, a song, or any MP3 audio. "
-        "The 'title' is optional and displayed/logged as current track name. "
-        "Any ongoing TTS or previous music will be stopped automatically. "
-        "The user can interrupt playback by saying the wake word or pressing a button. "
-        "Returns JSON {\"success\":bool,\"error\":string} — check 'success' before telling user.",
+        "Play an MP3 audio stream from an HTTP(S) URL.\n"
+        "Use when the user asks to play music, a song, or any MP3 audio.\n"
+        "'title' is optional and displayed/logged as current track name.\n"
+        "\n"
+        "## Side effects (IMPORTANT — tell user before calling if asked):\n"
+        "- Stops any ongoing TTS and previous music automatically.\n"
+        "- **Pauses voice listening (AFE off) during playback** — user CANNOT call AI by voice while music plays.\n"
+        "- User must press a button or wake word (after music ends) to resume voice.\n"
+        "- UI switches to Player mode (track title + pause/play affordance).\n"
+        "\n"
+        "## Returns JSON {\"success\":bool,\"playing\":bool,\"error\":string} — check 'success' before telling user.\n"
+        "Failure surfaces via screen Alert (HTTP/decode errors).",
         PropertyList({
             Property("url", kPropertyTypeString),
             Property("title", kPropertyTypeString, std::string(""))
@@ -237,7 +252,10 @@ void McpServer::AddCommonTools() {
 #endif
 
     // Restore the original tools list to the end of the tools list
-    tools_.insert(tools_.end(), original_tools.begin(), original_tools.end());
+    {
+        std::lock_guard<std::mutex> lk(tools_mutex_);
+        tools_.insert(tools_.end(), original_tools.begin(), original_tools.end());
+    }
 }
 
 void McpServer::AddUserOnlyTools() {
@@ -311,89 +329,121 @@ void McpServer::AddUserOnlyTools() {
                 auto url = properties["url"].value<std::string>();
                 auto quality = properties["quality"].value<int>();
 
-                std::string jpeg_data;
-                if (!display->SnapshotToJpeg(jpeg_data, quality)) {
+                // ① 主线程同步截图（LVGL 必须在 main_loop）
+                auto jpeg = std::make_shared<std::string>();
+                if (!display->SnapshotToJpeg(*jpeg, quality)) {
                     throw std::runtime_error("Failed to snapshot screen");
                 }
+                ESP_LOGI(TAG, "Snapshot %u bytes, scheduling upload to %s", (unsigned)jpeg->size(), url.c_str());
 
-                ESP_LOGI(TAG, "Upload snapshot %u bytes to %s", jpeg_data.size(), url.c_str());
-                
-                // 构造multipart/form-data请求体
-                std::string boundary = "----ESP32_SCREEN_SNAPSHOT_BOUNDARY";
-                
-                auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
-                http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-                if (!http->Open("POST", url)) {
-                    throw std::runtime_error("Failed to open URL: " + url);
+                // ② 后台任务异步上传（弱网 30s+ 不再阻塞 main_loop）
+                struct UploadCtx { std::shared_ptr<std::string> jpeg; std::string url; };
+                auto* ctx = new UploadCtx{jpeg, url};
+                BaseType_t r = xTaskCreatePinnedToCore([](void* arg) {
+                    auto* c = static_cast<UploadCtx*>(arg);
+                    const std::string boundary = "----ESP32_SCREEN_SNAPSHOT_BOUNDARY";
+                    auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
+                    http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+                    bool ok = false;
+                    if (http->Open("POST", c->url)) {
+                        std::string head = "--" + boundary + "\r\n"
+                            "Content-Disposition: form-data; name=\"file\"; filename=\"screenshot.jpg\"\r\n"
+                            "Content-Type: image/jpeg\r\n\r\n";
+                        http->Write(head.c_str(), head.size());
+                        http->Write(c->jpeg->data(), c->jpeg->size());
+                        std::string foot = "\r\n--" + boundary + "--\r\n";
+                        http->Write(foot.c_str(), foot.size());
+                        http->Write("", 0);
+                        ok = (http->GetStatusCode() == 200);
+                        if (ok) {
+                            std::string result = http->ReadAll();
+                            ESP_LOGI(TAG, "Snapshot upload result: %s", result.c_str());
+                        } else {
+                            ESP_LOGW(TAG, "Snapshot upload failed: status=%d url=%s",
+                                     http->GetStatusCode(), c->url.c_str());
+                        }
+                        http->Close();
+                    } else {
+                        ESP_LOGW(TAG, "Snapshot HTTP open failed: %s", c->url.c_str());
+                    }
+                    delete c;
+                    vTaskDelete(NULL);
+                }, "snap_upload", 4096, ctx, 3 /* P3 后台 IO · 低于 main P10 */, nullptr, 0 /* Core 0 · 网络 */);
+                if (r != pdPASS) {
+                    delete ctx;
+                    throw std::runtime_error("Failed to spawn snapshot upload task");
                 }
-                {
-                    // 文件字段头部
-                    std::string file_header;
-                    file_header += "--" + boundary + "\r\n";
-                    file_header += "Content-Disposition: form-data; name=\"file\"; filename=\"screenshot.jpg\"\r\n";
-                    file_header += "Content-Type: image/jpeg\r\n";
-                    file_header += "\r\n";
-                    http->Write(file_header.c_str(), file_header.size());
-                }
-
-                // JPEG数据
-                http->Write((const char*)jpeg_data.data(), jpeg_data.size());
-
-                {
-                    // multipart尾部
-                    std::string multipart_footer;
-                    multipart_footer += "\r\n--" + boundary + "--\r\n";
-                    http->Write(multipart_footer.c_str(), multipart_footer.size());
-                }
-                http->Write("", 0);
-
-                if (http->GetStatusCode() != 200) {
-                    throw std::runtime_error("Unexpected status code: " + std::to_string(http->GetStatusCode()));
-                }
-                std::string result = http->ReadAll();
-                http->Close();
-                ESP_LOGI(TAG, "Snapshot screen result: %s", result.c_str());
-                return true;
+                return std::string("OK: snapshot uploading async");
             });
-        
+
         AddUserOnlyTool("self.screen.preview_image", "Preview an image on the screen",
             PropertyList({
                 Property("url", kPropertyTypeString)
             }),
             [display](const PropertyList& properties) -> ReturnValue {
                 auto url = properties["url"].value<std::string>();
-                auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
 
-                if (!http->Open("GET", url)) {
-                    throw std::runtime_error("Failed to open URL: " + url);
-                }
-                int status_code = http->GetStatusCode();
-                if (status_code != 200) {
-                    throw std::runtime_error("Unexpected status code: " + std::to_string(status_code));
+                // N2 修复 2026-05-12：限并发 · 防连发 5 次吃满 ~2.5MB SPIRAM
+                // 阈值 2：① 满足"前一张未完成 → 立即换新图"体验 ② 不允许 3+ 并发预下载
+                int cur = g_preview_inflight_.fetch_add(1, std::memory_order_acq_rel);
+                if (cur >= kPreviewMaxInflight) {
+                    g_preview_inflight_.fetch_sub(1, std::memory_order_acq_rel);
+                    ESP_LOGW(TAG, "preview_image: in_flight=%d ≥ %d · 拒绝", cur, kPreviewMaxInflight);
+                    throw std::runtime_error("preview_image busy, please retry in a moment");
                 }
 
-                size_t content_length = http->GetBodyLength();
-                char* data = (char*)heap_caps_malloc(content_length, MALLOC_CAP_8BIT);
-                if (data == nullptr) {
-                    throw std::runtime_error("Failed to allocate memory for image: " + url);
-                }
-                size_t total_read = 0;
-                while (total_read < content_length) {
-                    int ret = http->Read(data + total_read, content_length - total_read);
-                    if (ret < 0) {
+                // P0-2：HTTP 下载在后台任务跑 · 下载完成 Schedule 回主线程做 LVGL SetPreviewImage
+                struct PreviewCtx { std::string url; Display* display; };
+                auto* ctx = new PreviewCtx{url, display};
+                BaseType_t r = xTaskCreatePinnedToCore([](void* arg) {
+                    auto* c = static_cast<PreviewCtx*>(arg);
+                    auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
+                    char* data = nullptr;
+                    size_t content_length = 0;
+                    bool ok = false;
+                    if (http->Open("GET", c->url) && http->GetStatusCode() == 200) {
+                        content_length = http->GetBodyLength();
+                        if (content_length > 0 && content_length <= 512 * 1024 /* 512KB 上限防 OOM */) {
+                            data = (char*)heap_caps_malloc(content_length, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                            if (data) {
+                                size_t total = 0;
+                                while (total < content_length) {
+                                    int n = http->Read(data + total, content_length - total);
+                                    if (n <= 0) break;
+                                    total += n;
+                                }
+                                ok = (total == content_length);
+                                if (!ok) { heap_caps_free(data); data = nullptr; }
+                            }
+                        } else {
+                            ESP_LOGW(TAG, "preview_image: bad content_length=%u", (unsigned)content_length);
+                        }
+                    }
+                    http->Close();
+
+                    if (ok && data) {
+                        char* data_owned = data;
+                        size_t len = content_length;
+                        Display* d = c->display;
+                        Application::GetInstance().Schedule([d, data_owned, len]() {
+                            auto image = std::make_unique<LvglAllocatedImage>(data_owned, len);
+                            d->SetPreviewImage(std::move(image));
+                        });
+                    } else if (data) {
                         heap_caps_free(data);
-                        throw std::runtime_error("Failed to download image: " + url);
+                    } else {
+                        ESP_LOGW(TAG, "preview_image: download failed: %s", c->url.c_str());
                     }
-                    if (ret == 0) {
-                        break;
-                    }
-                    total_read += ret;
+                    delete c;
+                    g_preview_inflight_.fetch_sub(1, std::memory_order_acq_rel);  // N2 释放槽位
+                    vTaskDelete(NULL);
+                }, "preview_dl", 4096, ctx, 3, nullptr, 0 /* Core 0 · 网络 */);
+                if (r != pdPASS) {
+                    delete ctx;
+                    g_preview_inflight_.fetch_sub(1, std::memory_order_acq_rel);  // N2 spawn 失败也释放
+                    throw std::runtime_error("Failed to spawn preview download task");
                 }
-                http->Close();
-
-                auto image = std::make_unique<LvglAllocatedImage>(data, content_length);
-                display->SetPreviewImage(std::move(image));
-                return true;
+                return std::string("OK: preview loading async");
             });
 #endif // CONFIG_LV_USE_SNAPSHOT
     }
@@ -416,9 +466,11 @@ void McpServer::AddUserOnlyTools() {
 }
 
 void McpServer::AddTool(McpTool* tool) {
+    std::lock_guard<std::mutex> lk(tools_mutex_);
     // Prevent adding duplicate tools
     if (std::find_if(tools_.begin(), tools_.end(), [tool](const McpTool* t) { return t->name() == tool->name(); }) != tools_.end()) {
         ESP_LOGW(TAG, "Tool %s already added", tool->name().c_str());
+        delete tool;  // 防泄漏：原代码同名 AddTool 直接 return 丢失 new 出来的对象
         return;
     }
 
@@ -568,9 +620,10 @@ void McpServer::ReplyError(int id, const std::string& message) {
 }
 
 void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_only_tools) {
-    const int max_payload_size = 8000;
+    std::lock_guard<std::mutex> lk(tools_mutex_);
+    const int max_payload_size = 12000;
     std::string json = "{\"tools\":[";
-    
+
     bool found_cursor = cursor.empty();
     auto it = tools_.begin();
     std::string next_cursor = "";
@@ -624,18 +677,25 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
 }
 
 void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments) {
-    auto tool_iter = std::find_if(tools_.begin(), tools_.end(), 
-                                 [&tool_name](const McpTool* tool) { 
-                                     return tool->name() == tool_name; 
-                                 });
-    
-    if (tool_iter == tools_.end()) {
+    McpTool* tool = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(tools_mutex_);
+        auto tool_iter = std::find_if(tools_.begin(), tools_.end(),
+                                     [&tool_name](const McpTool* t) {
+                                         return t->name() == tool_name;
+                                     });
+        if (tool_iter != tools_.end()) {
+            tool = *tool_iter;
+        }
+    }
+
+    if (tool == nullptr) {
         ESP_LOGE(TAG, "tools/call: Unknown tool: %s", tool_name.c_str());
         ReplyError(id, "Unknown tool: " + tool_name);
         return;
     }
 
-    PropertyList arguments = (*tool_iter)->properties();
+    PropertyList arguments = tool->properties();
     try {
         for (auto& argument : arguments) {
             bool found = false;
@@ -667,9 +727,9 @@ void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* to
 
     // Use main thread to call the tool
     auto& app = Application::GetInstance();
-    app.Schedule([this, id, tool_iter, arguments = std::move(arguments)]() {
+    app.Schedule([this, id, tool, arguments = std::move(arguments)]() {
         try {
-            ReplyResult(id, (*tool_iter)->Call(arguments));
+            ReplyResult(id, tool->Call(arguments));
         } catch (const std::exception& e) {
             ESP_LOGE(TAG, "tools/call: %s", e.what());
             ReplyError(id, e.what());

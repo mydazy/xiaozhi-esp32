@@ -4,6 +4,8 @@
 #include "application.h"
 #include "ota.h"
 #include "display/ui_display.h"
+#include "board.h"
+#include "dual_network_board.h"  // 4G/WiFi 模式检测 · show_stroke 4G 降级
 
 #include <esp_log.h>
 #include <esp_heap_caps.h>
@@ -17,6 +19,22 @@
 
 #define TAG "EducationMcp"
 
+// N3 修复 2026-05-12：show_stroke 同字 URL in-flight 去重
+//   场景：t1 下载中孩子又说同字 → t2 触发 → t1 完成时 req_id 过期被 free · 浪费流量
+//   方案：file-static 状态记录正在下载的 URL hash + req_id · 5s in-flight 窗口内同 URL 立即返回旧 req_id
+//   原子三元组：URL hash · 启动时戳 · req_id · 失效条件：hash=0 表示无 in-flight
+static std::atomic<uint32_t> g_inflight_url_hash_{0};
+static std::atomic<int64_t>  g_inflight_start_us_{0};
+static std::atomic<uint32_t> g_inflight_req_id_{0};
+static constexpr int64_t kInflightWindowUs = 5LL * 1000 * 1000;  // 5s · 超时视为僵尸不去重
+
+// FNV-1a 32-bit hash · URL 平均 80B · 单次 ~80ns
+static uint32_t HashUrl(const char* s) {
+    uint32_t h = 2166136261u;
+    while (*s) { h ^= (uint8_t)*s++; h *= 16777619u; }
+    return h ? h : 1;  // 保证非零（0 表示空 slot）
+}
+
 // 设计决策：show_stroke GIF 不缓存。
 //   理由：① GIF buffer 与 LVGL GIF decoder 异步渲染绑定，缓存 buffer 跨 LvglRawImage 实例生命周期复杂
 //        ② PSRAM 占用收益不对等（缓存 1MB vs 重下 200-2000ms · 量产期优先稳定性）
@@ -28,43 +46,27 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
 
     if (include_stroke) {
     mcp.AddTool("self.education.show_stroke",
-        "[识字写字核心工具 · 高优先级] 在屏幕上播放单个汉字的笔画书写 GIF 动画,孩子边看边学笔顺。\n"
+        "[识字核心 · 高优先级] 屏幕播放单个汉字笔顺 GIF,孩子看动画学写字。\n"
         "\n"
-        "## 必须调用的场景(听到下列任一类表达就立即调用,不要先问、不要犹豫):\n"
-        "1) 直接问写法: 怎么写 / X怎么写 / X字怎么写 / 写法 / 笔顺 / 笔画 / 先写哪一笔 / 第一笔是什么\n"
-        "2) 教学请求: 教我写 / 教我X / 教写字 / 学写字 / 我想学写字 / 学个新字 / 学X字 / 陪我练字 / 练字\n"
-        "3) 表达困惑: 我不会写 / 我不会写X / 妈妈我不会 / X字我不会 / X怎么写呀 / 帮我写\n"
-        "4) 看示范: 示范 / 演示 / 给我看看怎么写 / 给我画 / 写给我看 / 一起写X\n"
-        "5) 间接表达: 我想看X字 / 我们写X吧 / 教孩子写X / X字长什么样 / 学习X字\n"
+        "## 必调场景(任一即触发,不要先问):\n"
+        "- 问写法: 怎么写 / X怎么写 / 写法 / 笔顺 / 笔画 / 先写哪笔\n"
+        "- 求教学: 教我写 / 教我X / 教写字 / 学写字 / 学X字 / 陪我练字\n"
+        "- 表困惑: 不会写 / X我不会 / 帮我写 / 怎么写呀\n"
+        "- 求示范: 示范 / 演示 / 给我看 / 写给我看 / 一起写X\n"
+        "- 间接说: 想看X字 / 我们写X / X字长什么样 / 学习X字\n"
         "\n"
-        "## 禁止调用的场景(用别的方式回复):\n"
-        "× '怎么读 / X怎么读 / 读音 / 拼音' -> 不调本工具,用 [X_pīnyīn] 教育卡内联\n"
-        "× '是什么字 / 这是什么 / 那个字是啥' -> 不调本工具,用 [X_pīnyīn] 识字卡\n"
-        "× '什么意思 / X 是什么意思' -> 不调本工具,口语解释 + [X_pīnyīn] 内联\n"
-        "× 算式 / 古诗 / 闲聊 / 故事 -> 完全不涉及\n"
+        "## 禁调场景(改用其他):\n"
+        "- '怎么读 / 读音 / 拼音' → 不调,用 [X_pīnyīn] 卡\n"
+        "- '是什么字 / 这是啥' → 不调,用 [X_pīnyīn] 识字\n"
+        "- '什么意思' → 不调,口语解释 + [X_pīnyīn]\n"
+        "- 算式/古诗/闲聊 → 不涉及\n"
         "\n"
-        "## character 参数取字规则:\n"
-        "- 单字明确: '好字怎么写' -> '好'; '写个山字' -> '山'\n"
-        "- 多字句子取核心字(用户最关注/最难/最后提到的): '我不会写花字' -> '花'\n"
-        "- 不能识别具体字时: 先用 TTS 反问'你想学哪个字?',不要瞎调\n"
-        "- 严格单字,GB2312 常用字范围(U+4E00~U+9FFF)\n"
+        "## character 取字:\n"
+        "- 严格单字 · U+4E00~U+9FFF\n"
+        "- 多字句取核心字('不会写花字' → '花')\n"
+        "- 字不明确 → 先反问'想学哪个字',别瞎调\n"
         "\n"
-        "## 调用示例(对话 -> 工具调用 + 口播):\n"
-        "孩子'好字怎么写?'\n"
-        "  -> show_stroke('好'); 口播'好,看我画给你看。先写女字旁,再写子。组词:好吃、好看。'\n"
-        "孩子'妈妈我不会写花字'\n"
-        "  -> show_stroke('花'); 口播'别担心我教你。花字上面草字头,下面化。组词:花朵、鲜花。'\n"
-        "孩子'教我学写字吧'\n"
-        "  -> 不调,先反问'好呀,你想学哪个字?'\n"
-        "孩子'山字怎么读?'\n"
-        "  -> 不调 show_stroke,回复'是 [山_shān] 哦'\n"
-        "\n"
-        "## 同轮互斥(重要):\n"
-        "本轮调用了 show_stroke -> 本轮 TTS 文本不要再出现 [main_top] 教育卡标记,会画面冲突。\n"
-        "\n"
-        "## 即时反馈(GIF 下载 1-2s):\n"
-        "调用后立刻口播'好,看我画给你看' 让用户在加载期间有反馈,GIF 出现后再讲笔顺要点。\n"
-        "全部回复 <=3 句,语音友好,不超过 30 字一句。",
+        "调用后立即口播'好,画给你看',加载期间有反馈,出图后再讲笔顺。回复 ≤3 句,每句 ≤30 字。",
         PropertyList({Property("character", kPropertyTypeString)}),
         [ui](const PropertyList& properties) -> ReturnValue {
             std::string character = properties["character"].value<std::string>();
@@ -113,9 +115,51 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
                      "https://aiagent.bj.bcebos.com/dict/stroke/%s_%s.gif",
                      encoded_char.c_str(), unicode_hex);
 
+            // ============ 4G/WiFi 网络判定 · 4G 模式降级为静态字体 ============
+            // 决策（2026-05-12）：show_stroke GIF 30-80KB · 4G 下载 1-3s 流量贵且慢
+            //   双网板（P30-4G/P31）跑在 ML307 模式时跳过下载，仅显示字体 + 提示用户切 WiFi
+            //   WifiBoard（P30-WiFi）dynamic_cast 失败 → is_4g=false → 正常下载
+            auto* dual = dynamic_cast<DualNetworkBoard*>(&Board::GetInstance());
+            bool is_4g = (dual && dual->GetNetworkType() == NetworkType::ML307);
+            if (is_4g) {
+                ESP_LOGI(TAG, "show_stroke: 4G 模式 · 跳过 GIF · 字体兜底显示 '%s'",
+                         character.c_str());
+                std::string ch = character;  // 拷贝供 Schedule lambda 用
+                UiDisplay* ui_local = ui;
+                Application::GetInstance().Schedule([ui_local, ch]() {
+                    // 与 GIF 失败兜底路径一致：必须 Speaking 才弹卡（防 LLM 调用时机错位闪屏）
+                    if (Application::GetInstance().GetDeviceState() != kDeviceStateSpeaking) return;
+                    ui_local->ShowEduCard(ch.c_str(), "");
+                });
+                // 回执提示 LLM 主动告知用户切 WiFi（云端会把这段文本传给模型，模型自然口播）
+                return std::string(
+                    "OK: 当前为 4G 网络，已显示静态字体『") + character +
+                    "』。动态笔画动画需要 WiFi 才能流畅播放，"
+                    "请用 TTS 提示用户：『现在用的是 4G 网络看不到笔画动画哦，"
+                    "你可以从控制中心切到 WiFi，就能看动画啦』。"
+                    "提示后正常讲笔顺要点，不需要重复调用本工具。";
+            }
+
+            // ============ WiFi 路径：原 GIF 下载链路 ============
+            // N3 去重：同 URL 5s 内 in-flight 直接复用现有 req_id · 不重发 HTTP
+            uint32_t url_hash = HashUrl(url_buf);
+            int64_t now_us = esp_timer_get_time();
+            uint32_t prev_hash = g_inflight_url_hash_.load(std::memory_order_acquire);
+            int64_t prev_start = g_inflight_start_us_.load(std::memory_order_acquire);
+            if (prev_hash == url_hash && (now_us - prev_start) < kInflightWindowUs) {
+                uint32_t prev_req = g_inflight_req_id_.load(std::memory_order_acquire);
+                ESP_LOGI(TAG, "show_stroke: dedup · same URL in-flight req=%u (elapsed %lldms)",
+                         (unsigned)prev_req, (long long)((now_us - prev_start) / 1000));
+                return std::string("OK: same character already loading, reusing in-flight request");
+            }
+
             // 入口立即翻 pending 守护位（block ShowEduCard 闪屏）+ 拿并发去重 token
-            // 同轮内若 LLM 连发两次 show_stroke → 旧 token 自动作废，新下载覆盖
+            // 同轮内若 LLM 连发两次不同字 show_stroke → 旧 token 自动作废，新下载覆盖
             uint32_t req_id = ui->BeginFontPending();
+            // 登记 in-flight · CAS 不必要（mcp handler 主线程串行执行）
+            g_inflight_url_hash_.store(url_hash, std::memory_order_release);
+            g_inflight_start_us_.store(now_us, std::memory_order_release);
+            g_inflight_req_id_.store(req_id, std::memory_order_release);
             ESP_LOGI(TAG, "show_stroke: U+%s req=%u URL=%s",
                      unicode_hex, (unsigned)req_id, url_buf);
 
@@ -162,7 +206,11 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
                     // 防呆：① state 必须仍是 Speaking ② 释放 pending 让卡能弹出
                     Application::GetInstance().Schedule([d, fallback_char, req_id]() {
                         d->CancelFontPending(req_id);  // 必须先释放，否则 ShowEduCard 被 pending 屏蔽
-                        if (Application::GetInstance().GetDeviceState() != kDeviceStateSpeaking) return;
+                        // N3 修复：清 inflight · 后续重发同字立即触发新下载
+                        g_inflight_url_hash_.store(0, std::memory_order_release);
+                        // N4 修复 2026-05-12：放宽到 Speaking || Listening · 防偶发不出动画
+                        auto state = Application::GetInstance().GetDeviceState();
+                        if (state != kDeviceStateSpeaking && state != kDeviceStateListening) return;
                         ESP_LOGI(TAG, "show_stroke fallback: ShowEduCard(\"%s\", \"\")", fallback_char.c_str());
                         d->ShowEduCard(fallback_char.c_str(), "");
                     });
@@ -174,15 +222,18 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
                          (unsigned)gsz, elapsed_ms, speed_kbs, (unsigned)req_id);
 
                 Application::GetInstance().Schedule([d, gif, gsz, req_id, fallback_char]() {
-                    // 主线程二次守护：只在 Speaking 时装载 GIF（用户已退出 → buffer 丢弃）
-                    // 同时只允许最新 token 装载（FontGif 内部再 dedup）
-                    if (Application::GetInstance().GetDeviceState() != kDeviceStateSpeaking) {
-                        ESP_LOGI(TAG, "show_stroke: state changed, drop GIF req=%u", (unsigned)req_id);
+                    // 主线程二次守护：Speaking || Listening 都允许装载（N4 修复 2026-05-12）
+                    // 原仅 Speaking 守护过严 · 极短 TTS 场景已回 Idle → GIF 被丢
+                    auto state = Application::GetInstance().GetDeviceState();
+                    if (state != kDeviceStateSpeaking && state != kDeviceStateListening) {
+                        ESP_LOGI(TAG, "show_stroke: state=%d drop GIF req=%u", (int)state, (unsigned)req_id);
                         heap_caps_free(gif);
                         d->CancelFontPending(req_id);
+                        g_inflight_url_hash_.store(0, std::memory_order_release);  // N3 清
                         return;
                     }
                     d->FontGif(gif, gsz, req_id);   // PSRAM buffer 所有权转移给 LvglRawImage
+                    g_inflight_url_hash_.store(0, std::memory_order_release);      // N3 清
                 });
                 delete ctx;
                 vTaskDelete(NULL);

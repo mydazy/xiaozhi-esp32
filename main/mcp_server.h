@@ -9,6 +9,7 @@
 #include <optional>
 #include <stdexcept>
 #include <thread>
+#include <mutex>
 #include <mbedtls/base64.h>
 
 #include <cJSON.h>
@@ -339,6 +340,7 @@ private:
     void DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments);
 
     std::vector<McpTool*> tools_;
+    mutable std::mutex tools_mutex_;
 };
 
 #endif // MCP_SERVER_H

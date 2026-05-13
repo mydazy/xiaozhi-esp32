@@ -907,21 +907,6 @@ private:
     // ========================================================
     void InitializeTools() {
         auto& mcp = McpServer::GetInstance();
-
-        // AEC 开关（公开）：动态开/关 device-side AEC（声学回声消除）。
-        mcp.AddTool("self.audio.set_aec",
-            "Enable or disable on-device AEC (Acoustic Echo Cancellation). "
-            "When enabled, AEC removes speaker echo from the microphone input. "
-            "Disable it to capture raw microphone audio (e.g. for recording).",
-            PropertyList({
-                Property("enable", kPropertyTypeBoolean)
-            }),
-            [](const PropertyList& props) -> ReturnValue {
-                bool enable = props["enable"].value<bool>();
-                Application::GetInstance().GetAudioService().EnableDeviceAec(enable);
-                return true;
-            });
-
         // 教育卡 MCP 工具集：show_stroke 笔画 GIF（512KB 直载 + 头尾校验）+ show_card 单词/汉字/拼音三类卡
         RegisterEducationMcpTools(mcp, dynamic_cast<UiDisplay*>(GetDisplay()));
     }
