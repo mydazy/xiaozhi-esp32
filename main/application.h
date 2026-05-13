@@ -112,6 +112,9 @@ public:
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
+
+    // 不重启切换平台: 关连接 → 重做 OTA → 按新配置重建 protocol (仅 RemoteCmd "reload" 触发)
+    bool SwitchProtocol();
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void CloseAudioChannel();

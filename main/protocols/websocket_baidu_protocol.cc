@@ -636,16 +636,23 @@ bool WebsocketBaiduProtocol::OpenAudioChannel() {
     });
 
     // 2026-05-13 WiFi PSM 预热: 避开"刚进 MIN_MODEM 立刻 TLS 握手"竞态
+    ESP_LOGI(TAG, "PSM warmup: PERFORMANCE → wait 300ms before TLS");
     Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
     vTaskDelay(pdMS_TO_TICKS(300));
 
-    ESP_LOGI(TAG, "[1] Connect: %s", url_.c_str());
-    bool connected = websocket_->Connect(url_.c_str());
-    if (!connected) {
-        // 第一次失败常见于 WiFi/4G modem 切换瞬间, 静默重试 1 次再判定失败
-        ESP_LOGW(TAG, "First connect failed, retrying after 500ms ...");
-        vTaskDelay(pdMS_TO_TICKS(500));
+    // 重试策略: 最多 3 次, 每次失败间隔递增 (500ms / 1500ms)
+    constexpr int kMaxConnectAttempts = 3;
+    constexpr int kRetryDelaysMs[] = { 500, 1500 };  // 第 2 次后等 500ms, 第 3 次后等 1500ms
+    bool connected = false;
+    for (int attempt = 0; attempt < kMaxConnectAttempts; ++attempt) {
+        if (attempt > 0) {
+            int delay_ms = kRetryDelaysMs[attempt - 1];
+            ESP_LOGW(TAG, "Connect attempt %d failed, retrying after %dms ...", attempt, delay_ms);
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        }
+        ESP_LOGI(TAG, "[1] Connect (attempt %d/%d): %s", attempt + 1, kMaxConnectAttempts, url_.c_str());
         connected = websocket_->Connect(url_.c_str());
+        if (connected) break;
     }
     if (!connected) {
         SetError(Lang::Strings::SERVER_NOT_CONNECTED);

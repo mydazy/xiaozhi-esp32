@@ -27,6 +27,7 @@ class Application;
  * │ gain          │ {"type":"gain", "input":15, "aec":6}                       │
  * │ download      │ {"type":"download", "files":[...], "emoji":"happy"}        │
  * │ audio_debug   │ {"type":"audio_debug", "server":"IP:8000", "mode":"raw"}   │
+ * │ reload        │ {"type":"reload"}  (重新拉 OTA · 不重启切换平台/协议)        │
  * │ sleep         │ {"type":"sleep", "gyro":true}  (gyro=是否陀螺仪唤醒)        │
  * │ flow         │ {"type":"flow","action":"start/stop/status/load"} │
  * │ stt_url       │ {"type":"stt_url", "url":"https://www.mydazy.com/v1/ota/pushstt"}  设置STT回调地址    │
@@ -63,6 +64,7 @@ private:
     void OnGain(const cJSON* msg);
     void OnMicCalibrate();
     void OnDownload(const cJSON* msg);
+    void OnReload();
     void OnSleep(const cJSON* msg);
     void OnFlow(const cJSON* msg);
     void OnSttUrl(const cJSON* msg);

@@ -614,8 +614,10 @@ void Application::InitializeProtocol() {
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
     // 初始化远程命令处理器和直播伴侣
-    remote_cmd_ = std::make_unique<RemoteCmd>(this);
-    flow_engine_ = std::make_unique<FlowEngine>(this);
+    // 加守卫: SwitchProtocol() 触发重新 InitializeProtocol 时, remote_cmd_/flow_engine_
+    // 不能重建 — 切换由 remote_cmd_::OnProtoSwitch 触发, 重建会让 lambda 自我析构 UB
+    if (!remote_cmd_) remote_cmd_ = std::make_unique<RemoteCmd>(this);
+    if (!flow_engine_) flow_engine_ = std::make_unique<FlowEngine>(this);
 
     if (ota_->HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
@@ -1234,6 +1236,33 @@ void Application::SetListeningMode(ListeningMode mode) {
 
 ListeningMode Application::GetDefaultListeningMode() const {
     return aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime;
+}
+
+// 2026-05-13 不重启切换平台 (仅 RemoteCmd "reload" 触发)
+// 流程: 退出对话 → 关连接 → 析构 protocol → 重做 OTA 检查 → 按新配置重建 protocol
+// 升级/激活中拒绝; CheckNewVersion 若发现新固件会自动 upgrade + reboot, 切换流程被自然覆盖也合理
+bool Application::SwitchProtocol() {
+    auto state = GetDeviceState();
+    if (state == kDeviceStateUpgrading || state == kDeviceStateActivating) {
+        ESP_LOGW(TAG, "Reload refused in state %d", (int)state);
+        return false;
+    }
+    ESP_LOGI(TAG, "===== Reload: re-fetch OTA + rebuild protocol =====");
+
+    SetDeviceState(kDeviceStateIdle);
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        protocol_->CloseAudioChannel();
+        vTaskDelay(pdMS_TO_TICKS(500));   // 等 OnAudioChannelClosed 走完
+    }
+    protocol_.reset();
+    vTaskDelay(pdMS_TO_TICKS(200));       // 等 timer/Schedule lambda 排空
+
+    ota_ = std::make_unique<Ota>();
+    CheckNewVersion();                    // 拉服务端最新 MQTT/WS 配置到 NVS
+    InitializeProtocol();                 // 按新配置选 mqtt/ws_xiaozhi/ws_baidu/ws_joyinside
+
+    ESP_LOGI(TAG, "===== Reload done =====");
+    return true;
 }
 
 void Application::Reboot() {
