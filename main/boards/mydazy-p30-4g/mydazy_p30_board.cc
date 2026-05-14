@@ -777,7 +777,7 @@ private:
                 vTaskDelay(pdMS_TO_TICKS(1500));
                 SwitchNetworkType();
             } else {
-                app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到配网", "logo", Lang::Sounds::OGG_WIFI_CONFIG);
+                app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到配网", "logo", Lang::Sounds::OGG_BLE_CONFIG);
                 vTaskDelay(pdMS_TO_TICKS(1500));
                 app.Schedule([this]() {
                     static_cast<WifiBoard&>(GetCurrentBoard()).ResetWifiConfiguration();
@@ -805,8 +805,6 @@ private:
             }
             if (shutdown_armed_.exchange(true)) return;
             ESP_LOGI(TAG, "长按 3 秒 → 立即播再见音（提示音=松手信号）→ 关机");
-            // 立即播提示音作为"已确认"反馈，用户听到自然松手
-            // EnterDeepSleep 内部兜底等松手 → 保证 sleep 前 GPIO 已 HIGH
             Application::GetInstance().Schedule([this]() {
                 ShutdownOrSleep("再见", "", Lang::Sounds::OGG_REBOOT, 2500, false);
             });

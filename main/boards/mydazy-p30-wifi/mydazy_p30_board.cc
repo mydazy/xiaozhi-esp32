@@ -535,9 +535,6 @@ private:
     }
 
     void ConfigureDeepSleepWakeupSources(bool /*enable_gyro_wakeup*/) {
-        // 此函数只负责 EXT0（BOOT 键）：EXT1（SC7A20H INT1）由 sc7a20h_arm_wakeup 负责，
-        // 必须紧贴 esp_deep_sleep_start 之前调用，否则 ResetAllGpiosForSleep 会先 reset
-        // 共用的 I2C 引脚（GPIO11/12），让 INT1_SRC clear 静默失败 → 睡后立即唤醒。
         ESP_ERROR_CHECK(esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0));
         ESP_ERROR_CHECK(rtc_gpio_pullup_en(BOOT_BUTTON_GPIO));
         ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(BOOT_BUTTON_GPIO));
@@ -573,8 +570,6 @@ private:
     void EnterDeepSleep(bool enable_gyro_wakeup = true) {
         ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
 
-        // ⚠️ 必须最先停 AudioService：让 audio_input/AFE/encode/output 等任务退出，
-        // 否则后面切 AUDIO_PWR_EN 关电源时任务仍在 I2S 读写已掉电的 codec → I2S timeout/panic。
         ESP_LOGI(TAG, "停止 AudioService（释放 codec / 退出 audio_* 任务）");
         Application::GetInstance().GetAudioService().Stop();
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -588,10 +583,6 @@ private:
         Application::GetInstance().ResetProtocol();
         vTaskDelay(pdMS_TO_TICKS(500));
 
-        // ⚠ arm_wakeup 必须在 ShutdownTouchAndAudioForSleep（AUDIO_PWR_EN=0）之前 ·
-        // 否则失电的 ES8311/ES7210 通过 ESD 二极管把 SDA/SCL 钉死 → i2c_master_transmit_receive
-        // 返回 INVALID_STATE → INT1_SRC 清 latch 失败（2026-05-12 量产二阶根因实测复现）。
-        // 配合驱动 v4.0.1 LIR_INT1=0 改动，本调用现在也兼具 defense-in-depth。
         if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
             Settings settings("status", false);
             int32_t pickup_wake = settings.GetInt("pickupWake", 1);
@@ -644,9 +635,6 @@ private:
         esp_deep_sleep_start();
     }
 
-    // 统一关机/休眠入口：先显示 Alert + 播提示音，等指定时长后进 deep sleep
-    //   title/msg/sound 任一可空跳过；delay_ms 覆盖提示音 + 视觉感知（建议 ≥ 2000ms）
-    //   enable_gyro_wakeup=true：陀螺仪可唤醒（自动休眠场景）/ false：仅按键唤醒（按键关机场景）
     void ShutdownOrSleep(const char* title, const char* msg, const std::string_view& sound,
                          int delay_ms, bool enable_gyro_wakeup) {
         auto& app = Application::GetInstance();
@@ -785,7 +773,7 @@ private:
                 vTaskDelay(pdMS_TO_TICKS(1500));
                 app.Reboot();
             } else {
-                app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "进入配网", "logo", Lang::Sounds::OGG_WIFI_CONFIG);
+                app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "进入配网", "logo", Lang::Sounds::OGG_BLE_CONFIG);
                 vTaskDelay(pdMS_TO_TICKS(1500));
                 ResetWifiConfiguration();  // 内部 force_ap=1 + skip_welcome=1 + Reboot
             }
