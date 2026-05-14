@@ -369,7 +369,7 @@ void UiDisplay::SwitchToClockMode() {
 
 void UiDisplay::SwitchToChatMode() {
     DisplayLockGuard lock(this);
-    if (active_scene_ != SceneType::kClock) return;
+    if (active_scene_ != SceneType::kClock && active_scene_ != SceneType::kPomodoro) return;
 
     HideEduCard();   // 状态切换清场，防止教育卡遮挡 emoji 表情
     HideFontGif();   // 同步清 font 状态，防止 GIF 笔画残留

@@ -393,9 +393,14 @@ void AlarmManager::RegisterMcpTools() {
     auto& mcp = McpServer::GetInstance();
 
     mcp.AddTool("self.alarm.add",
-        "设闹钟。必须先问清提醒内容，别拿『闹钟/提醒/起床』敷衍。"
-        "**message 长度硬上限 ≤8 汉字**（设备端唤醒词总长 ≤10 字 · 留 2 字给『闹钟』前缀）。"
-        "用户说的事项若超 8 字，**主动精简成 ≤8 字关键词后再调本工具**（如『下午三点参加产品评审会』→『产品评审会』）。"
+        "设闹钟。先问清提醒事项，别用『闹钟/起床』敷衍。"
+        "**message 必须是 AI 写好的完整唤醒提示词**（设备到点裸用 · 不再拼前缀）。"
+        "**硬上限 ≤10 汉字（30 字节）**，超长返回 message_too_long 让 AI 精简重试。"
+        "示例（按场景自由组合）："
+        "  起床：『起床上学』『早安主人』『该起床啦』；"
+        "  日程：『下午开会』『产品评审会』『该开会了』；"
+        "  生活：『提醒买菜』『记得吃药』『接孩子放学』；"
+        "  保健：『该吃感冒药』『起来喝水』。"
         "repeat_days：0=一次，0x7F=每天，0x3E=工作日，0x41=周末。",
         PropertyList({
             Property("message", kPropertyTypeString),
@@ -411,9 +416,9 @@ void AlarmManager::RegisterMcpTools() {
                 return std::string("missing_message: 需要先询问主人要提醒什么具体事情才能设闹钟。"
                                    "请先问『要提醒您什么呢？』拿到答复后再调用本工具。");
             }
-            // 硬限制：message ≤8 汉字（24 UTF-8 字节）· 防唤醒词超过 10 字红线
-            if (msg.size() > 24) {
-                return std::string("message_too_long: 提醒事项最多 8 个汉字，请精简成关键词再调用本工具。"
+            // 硬限制：message ≤10 汉字（30 UTF-8 字节）· 设备到点裸用此字符串作唤醒词
+            if (msg.size() > 30) {
+                return std::string("message_too_long: 唤醒词最多 10 个汉字，请精简后重试。"
                                    "例：『下午三点参加产品评审会』→『产品评审会』。");
             }
 
@@ -442,9 +447,8 @@ void AlarmManager::RegisterMcpTools() {
 
     mcp.AddTool("self.alarm.list",
         "查闹钟列表。返回 alarms[] + count + next_alarm_in + last_triggered（最近触发的 time/message）。"
-        "**调用时机**：① 用户问『有什么闹钟 / 下一个几点响』；"
-        "② 唤醒词为『闹钟响了』或『再次提醒』（深睡兜底无 message）时 · 取 last_triggered 补充播报。"
-        "（唤醒词形如『闹钟+事项』时事项完整，无需调本工具）",
+        "**仅在用户主动询问**『有什么闹钟 / 下一个几点响 / 设过哪些提醒』时调用。"
+        "（响铃唤醒词『提醒+事项』/『再次提醒』已含完整语义 · AI 直接据此提醒即可 · 不必调本工具反查）",
         PropertyList(),
         [this](const PropertyList&) -> ReturnValue {
             std::lock_guard<std::mutex> lock(mutex_);

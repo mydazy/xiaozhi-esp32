@@ -270,7 +270,7 @@ int BoxAudioCodec::Write(const int16_t* data, int samples) {
 
 // MIC 灵敏度识别（出厂烧录后首次开机一次性）
 //   基准: vol=80, input=15dB, 1kHz amp=24000 播 500ms, 跳 150ms 录 200ms
-//   公式: input = 15 + 20*log10(3500/RMS), 量化 3dB（>31.5 跳 36 避 33 驱动 bug）
+//   公式: input = 15 + 20*log10(5000/RMS), 量化 3dB（>31.5 跳 36 避 33 驱动 bug）
 void BoxAudioCodec::CalibrateMicOnce() {
     ESP_LOGW(TAG, "MIC校准开始 (vol=80 input=15dB tone=1kHz/500ms)");
 
@@ -305,7 +305,7 @@ void BoxAudioCodec::CalibrateMicOnce() {
 
     // 第一轮：测基准 RMS，公式反推 input + mic_type + aec
     int32_t rms = std::max(measure(), (int32_t)1);
-    float in_raw = 15.0f + 20.0f * std::log10(3500.0f / rms);
+    float in_raw = 15.0f + 20.0f * std::log10(5000.0f / rms);
     float input_gain = std::max(0.0f, std::min(36.0f,
         (in_raw <= 31.5f) ? std::round(in_raw / 3.0f) * 3.0f : 36.0f));
     int mic_type = std::max(22, std::min(50,

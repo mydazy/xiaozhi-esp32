@@ -421,7 +421,7 @@ private:
     }
 
     void HandleTouchSingleClick() {
-        if (TryStopAlarmRinger("touch")) return;
+        // 触屏不参与闹钟关停（戳屏误关风险 · 关停走按键/摇晃/语音）
         auto& app = Application::GetInstance();
         auto state = app.GetDeviceState();
 
@@ -445,7 +445,7 @@ private:
 
     // 触摸双击：退出对话回 Idle（孩子最熟悉的"退出"心智）
     void HandleTouchDoubleClick() {
-        if (TryStopAlarmRinger("touch")) return;
+        // 触屏不参与闹钟关停（同 SingleClick）
         auto& app = Application::GetInstance();
 
         if (MusicPlayer::GetInstance().IsPlaying()) {

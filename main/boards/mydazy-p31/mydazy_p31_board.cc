@@ -357,7 +357,7 @@ private:
 
         // 设置手势回调：单击唤醒/打断/退出对话，滑动调节音量
         touch_driver_->SetGestureCallback([this](TouchGesture gesture, int16_t x, int16_t y) {
-            if (TryStopAlarmRinger("touch")) return;
+            // 触屏不参与闹钟关停（孩子专注时戳屏误关风险高 · 关停走按键/摇晃/语音）
             WakeUp();
 
             switch (gesture) {

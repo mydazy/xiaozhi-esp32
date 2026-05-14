@@ -302,15 +302,12 @@ void Application::Initialize() {
                 else                      ui->UpdatePomodoro(remain, running);
             });
         });
-    // 计时结束 → vibration.ogg 短促提示 + 单次 AI 唤醒（≤10 字 · 详情走 self.pomodoro.status 反查）
+    // 计时结束 → vibration 短促提示 + AI 唤醒鼓励对话
     PomodoroManager::GetInstance().SetFinishCallback([]() {
         Application::GetInstance().Schedule([]() {
             auto& app = Application::GetInstance();
-            app.PlaySound(Lang::Sounds::OGG_VIBRATION);     // 与闹铃同款短促提示
-            app.WakeWordInvoke("番茄钟到了鼓励一下");        // 9 字
-            if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
-                ui->SwitchOutPomodoroMode();
-            }
+            app.PlaySound(Lang::Sounds::OGG_VIBRATION);
+            app.WakeWordInvoke("番茄钟到了鼓励一下");        // 9 字 ≤10 红线 ✅
         });
     });
     PomodoroManager::GetInstance().RegisterMcpTools();

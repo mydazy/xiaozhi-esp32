@@ -13,15 +13,14 @@
 // 共用 · tick 周期 5s 一次（两模式都用）
 static constexpr int64_t kTickIntervalUs = 5 * 1000 * 1000;
 
-// ===== kAlarm 闹铃模式 · 必醒（saved_volume 渐入 + 5min 循环 + 20s 重念）=====
+// ===== kAlarm 闹铃模式 · 必醒（60s 循环 · 每周期 3 次提醒 · 5 次循环 = 5min）=====
 namespace alarm_mode {
-constexpr int kStage1Sec       = 10;        // 0-10s : 60% 起步
-constexpr int kStage2Sec       = 30;        // 10-30s: 80% 加强
-constexpr int kVolStage0Pct    = 60;        // 30s+  : 100% 必醒
-constexpr int kVolStage1Pct    = 80;
-constexpr int kVolStage2Pct    = 100;
-constexpr int kAiRepromptSec   = 20;        // AI 重念周期
-constexpr int64_t kAutoStopUs  = 5 * 60 * 1000 * 1000ULL;  // 5min 兜底
+constexpr int kStepsPerCycle   = 12;        // 60s / 5s = 12 步
+constexpr int kAiStep          = 2;         // 第 2 步唤醒 AI（前 2 步响 vibration）
+constexpr int kVolStage0Pct    = 80;        // step 0 起步
+constexpr int kVolStage1Pct    = 90;        // step 1 加强
+constexpr int kVolStage2Pct    = 100;       // step 2+ 必醒
+constexpr int64_t kAutoStopUs  = 5 * 60 * 1000 * 1000ULL;  // 5min（≈5 个周期）
 }  // namespace alarm_mode
 
 // ===== kReminder 提醒模式 · 温和（绝对音量 + 3 次自停 + 每次都念）=====
@@ -38,25 +37,15 @@ AlarmRinger& AlarmRinger::GetInstance() {
     return instance;
 }
 
-// 拼接唤醒词 · 红线：≤10 汉字（message 由 self.alarm.add 限 ≤8 字保证）
-static std::string BuildWakeWord(const std::string& message, int elapsed_s, AlarmRinger::Kind kind) {
-    if (elapsed_s > 0) return "再次提醒";
-    const bool is_alarm = (kind == AlarmRinger::Kind::kAlarm);
-    if (message.empty()) return is_alarm ? "闹钟响了" : "提醒到了";
-    return is_alarm ? ("闹钟" + message) : message;
-}
-
-// 投递唤醒词到主线程（Schedule + WakeWordInvoke 的统一封装）
-void AlarmRinger::DispatchWakeWord(int elapsed_s) {
+// 设备端不做任何拼接/判断 · 裸用即可
+void AlarmRinger::DispatchWakeWord() {
     Application::GetInstance().Schedule(
-        [text = BuildWakeWord(message_, elapsed_s, kind_)]() {
+        [text = message_]() {
             Application::GetInstance().WakeWordInvoke(text);
         });
 }
 
 void AlarmRinger::Start(const std::string& message, Kind kind) {
-    // 幂等：如果已经在响铃中，仅更新 message 不重启 timer（防止重复 Start 累计）
-    // 注意：模式不切换（首次 Kind 锁定 · 重入 Start 即使传不同 kind 也忽略）
     bool was_ringing = ringing_.exchange(true, std::memory_order_acq_rel);
     message_ = message;
 
@@ -73,7 +62,7 @@ void AlarmRinger::Start(const std::string& message, Kind kind) {
     start_us_ = esp_timer_get_time();
     saved_volume_ = codec ? codec->output_volume() : -1;
     ring_count_ = (kind == Kind::kReminder) ? 1 : 0;   // kReminder 视为"将立即响第 1 次"
-    last_ai_prompt_sec_ = 0;
+    cycle_step_ = 1;                                   // kAlarm：Start 已响 step 0 · OnTick 从 step 1 开始
 
     ESP_LOGI(TAG, "Start · kind=%s · message=%s · saved_volume=%d",
              kind == Kind::kReminder ? "Reminder" : "Alarm",
@@ -82,13 +71,13 @@ void AlarmRinger::Start(const std::string& message, Kind kind) {
     // 抑制自动休眠 · 响铃期间禁止 PowerSaveTimer 进深睡
     board.EnableAutoSleep(false);
 
-    // 第 1 次响铃 · 音量起点：kReminder 绝对 60 / kAlarm saved×60%
+    // 第 1 次响铃 · 音量起点：kReminder 绝对 60 / kAlarm saved×80%
     const int first_vol = (kind == Kind::kReminder)
         ? reminder_mode::kVolStep1
-        : (saved_volume_ > 0 ? saved_volume_ * alarm_mode::kVolStage0Pct / 100 : -1);
+        : alarm_mode::kVolStage0Pct;
     if (codec && first_vol >= 0) codec->SetOutputVolume(first_vol);
     app.PlaySound(Lang::Sounds::OGG_VIBRATION);
-    DispatchWakeWord(0);
+    if (kind == Kind::kReminder) DispatchWakeWord();
 
     // 创建周期 tick timer（5s）· 共用
     if (!ring_timer_) {
@@ -135,31 +124,31 @@ void AlarmRinger::OnTick() {
             Stop("done");
             return;
         }
-        // ring_count_=1 → 第 2 次（80） · =2 → 第 3 次（100）
         int vol = (ring_count_ == 1) ? reminder_mode::kVolStep2 : reminder_mode::kVolStep3;
         if (codec) codec->SetOutputVolume(vol);
         app.PlaySound(Lang::Sounds::OGG_VIBRATION);
         ring_count_++;
-        DispatchWakeWord(elapsed_s);
+        DispatchWakeWord();
         ESP_LOGI(TAG, "Reminder #%d @ %ds · vol=%d", ring_count_, elapsed_s, vol);
         return;
     }
 
-    // ===== kAlarm 闹铃模式 · 5min 循环 + 渐入（60→80→100%）+ 20s 重念 =====
-    if (codec && saved_volume_ > 0) {
-        const int pct = (elapsed_s < alarm_mode::kStage1Sec) ? alarm_mode::kVolStage0Pct
-                      : (elapsed_s < alarm_mode::kStage2Sec) ? alarm_mode::kVolStage1Pct
-                      :                                         alarm_mode::kVolStage2Pct;
-        codec->SetOutputVolume(saved_volume_ * pct / 100);
+    // ===== kAlarm 60s 周期 · step 0/1 vibration（80/90%） · step 2 AI 语音（100%） · step 3-11 静默 =====
+    const int s = cycle_step_;
+    const int pct = (s == 0) ? alarm_mode::kVolStage0Pct
+                  : (s == 1) ? alarm_mode::kVolStage1Pct
+                  :            alarm_mode::kVolStage2Pct;
+    if (codec && saved_volume_ > 0 && s <= alarm_mode::kAiStep) {
+        codec->SetOutputVolume(pct);
     }
-    app.PlaySound(Lang::Sounds::OGG_VIBRATION);
-
-    // 周期重唤醒：每 20s（elapsed=0 已在 Start 念过）
-    if (elapsed_s > 0 && (elapsed_s - last_ai_prompt_sec_) >= alarm_mode::kAiRepromptSec) {
-        last_ai_prompt_sec_ = elapsed_s;
-        DispatchWakeWord(elapsed_s);
-        ESP_LOGI(TAG, "Alarm re-wake @ %ds", elapsed_s);
+    if (s < alarm_mode::kAiStep) {
+        app.PlaySound(Lang::Sounds::OGG_VIBRATION);
+        ESP_LOGI(TAG, "Alarm vibration step=%d vol=%d%% elapsed=%ds", s, pct, elapsed_s);
+    } else if (s == alarm_mode::kAiStep) {
+        DispatchWakeWord();
+        ESP_LOGI(TAG, "Alarm AI step=%d elapsed=%ds", s, elapsed_s);
     }
+    cycle_step_ = (s + 1) % alarm_mode::kStepsPerCycle;
 }
 
 void AlarmRinger::OnTimeoutStatic(void* arg) {

@@ -136,11 +136,9 @@ void PomodoroManager::OnTick() {
     remain_sec_.store(remain, std::memory_order_release);
 
     if (remain == 0) {
-        // 计时结束 · 停 timer · 切 Idle · 触发 finish 回调
         esp_timer_stop(timer_);
         state_.store(State::kIdle, std::memory_order_release);
         ESP_LOGI(TAG, "Finished");
-        EmitTick();   // 让 UI 显示 00:00 一帧 + 切回 Idle 状态
         if (finish_cb_) finish_cb_();
         return;
     }
@@ -165,7 +163,6 @@ void PomodoroManager::RegisterMcpTools() {
 
     auto& mcp = McpServer::GetInstance();
 
-    // P1 修（N7 教训）：description 从 ~430B 瘦身到 ~150B
     //   触发词：番茄钟/倒计时/专注 X 分钟/学习 X 分钟 → 立即调（不反问）
     //   时长抽取：『半』=30 · 『一刻钟』=15 · X 范围 1-99 · 超 99 截 99
     //   duration_min 不传 = 默认 25 · 运行中再调 = 重启
@@ -197,13 +194,6 @@ void PomodoroManager::RegisterMcpTools() {
                                        : "{\"success\":false,\"reason\":\"not_running\"}");
         });
 
-    mcp.AddTool("self.pomodoro.resume",
-        "继续番茄钟。用户说『继续 / 接着来』时调。",
-        PropertyList(),
-        [this](const PropertyList&) -> ReturnValue {
-            return std::string(Resume() ? "{\"success\":true,\"state\":\"running\"}"
-                                        : "{\"success\":false,\"reason\":\"not_paused\"}");
-        });
 
     mcp.AddTool("self.pomodoro.stop",
         "取消番茄钟。用户说『停止 / 取消 / 不做了』时调。",
@@ -215,8 +205,8 @@ void PomodoroManager::RegisterMcpTools() {
 
     mcp.AddTool("self.pomodoro.status",
         "查番茄钟状态。返回 {state: idle/running/paused, remain_sec, total_sec}。"
-        "**必调时机**：① 用户问『还剩多久 / 番茄钟到了吗』；"
-        "② 收到唤醒词『番茄钟到了鼓励一下』，从 total_sec 算出『刚专注 X 分钟』，温柔夸奖孩子并提醒休息眼睛。",
+        "**仅在用户主动询问**『还剩多久 / 番茄钟到了吗 / 设了多久』等需要数据的问题时调用。"
+        "（收到唤醒词『番茄钟到了鼓励一下』时已含完整语义 · 直接温柔夸奖+提醒休息眼睛即可 · 不必调本工具）",
         PropertyList(),
         [this](const PropertyList&) -> ReturnValue {
             char buf[128];

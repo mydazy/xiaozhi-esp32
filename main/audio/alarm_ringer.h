@@ -45,8 +45,7 @@ private:
     // esp_timer 回调 · 5 分钟一次（自动停防扰民）
     static void OnTimeoutStatic(void* arg);
 
-    // 投递 WakeWordInvoke 到主线程（去重 Start / OnTick 三处 Schedule lambda）
-    void DispatchWakeWord(int elapsed_s);
+    void DispatchWakeWord();
 
     std::atomic<bool> ringing_{false};
     esp_timer_handle_t ring_timer_ = nullptr;     // 周期 5s · 推进
@@ -56,7 +55,7 @@ private:
     int ring_count_ = 0;                          // kReminder：已响铃次数（1/2/3 · 第 3 次后自停）
     int shake_count_ = 0;                         // ShakeStop 累计窗口内摇晃次数
     int64_t shake_first_us_ = 0;                  // ShakeStop 当前窗口起点
-    int last_ai_prompt_sec_ = 0;                  // kAlarm：上次 AI 念叨时点（控 20s 重念周期）
+    int cycle_step_ = 0;                          // kAlarm：周期内 tick 步数（0..17 · 5s/步 · 90s/周期）
     Kind kind_ = Kind::kAlarm;                    // 当前响铃模式
     std::string message_;                         // AI 播报用 · 仅 Start 内更新
 };
