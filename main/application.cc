@@ -831,7 +831,7 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
     // 通用 ShowQrCode：扫码跳转 H5/小程序绑定页，URL 携带 MAC 用于设备识别
 //    std::string bind_url = "https://mydazy.cn/ota/bind?scene=" + mac;
     std::string bind_url = "https://mydazy.cn/ota/code?code=" + code;
-    display->ShowQrCode(bind_url.c_str(), code.c_str(), "请绑定设备", "微信扫码绑定");       // bottom
+    display->ShowQrCode(bind_url.c_str(), code.c_str(), "扫码绑定设备", mac.c_str());
     display->SetChatMessage("system", message.c_str());
 
 

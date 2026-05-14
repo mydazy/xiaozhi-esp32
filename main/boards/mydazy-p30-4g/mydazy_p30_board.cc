@@ -353,46 +353,40 @@ private:
 
     void PrepareTouchHardware() {
         axs5106l_touch_config_t cfg = {
-            .worker     = i2c_worker_,
-            .rst_gpio   = TOUCH_RST_NUM,
-            .int_gpio   = TOUCH_INT_NUM,
-            .width      = DISPLAY_WIDTH,
-            .height     = DISPLAY_HEIGHT,
-            .wake_cb    = &MyDazyP30_4GBoard::OnTouchWake,
-            .gesture_cb = &MyDazyP30_4GBoard::OnTouchGesture,
-            .cb_ctx     = this,
+            .worker          = i2c_worker_,
+            .rst_gpio        = TOUCH_RST_NUM,
+            .int_gpio        = TOUCH_INT_NUM,
+            .width           = DISPLAY_WIDTH,
+            .height          = DISPLAY_HEIGHT,
+            .rf_mode         = AXS5106L_RF_STRICT,     /* 4G 共线 · 加严 storm/debounce/guard */
+            .cb_ctx          = this,
+            .on_wake         = &OnTouchWake,
+            .on_click        = &OnTouchClick,
+            .on_double_click = &OnTouchDoubleClick,
+            /* on_swipe / on_long_press 不需要 · NULL */
         };
-        if (axs5106l_touch_new(&cfg, &touch_driver_) != ESP_OK) {
+        if (axs5106l_touch_init(&cfg, &touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏硬件初始化失败");
             touch_driver_ = nullptr;
         }
     }
 
-    // C 回调蹦床：把 void* user_ctx 还原为 board 实例
     static void OnTouchWake(void *ctx) {
         static_cast<MyDazyP30_4GBoard*>(ctx)->WakeUp();
     }
 
-    static void OnTouchGesture(axs5106l_gesture_t g, int16_t x, int16_t y, void *ctx) {
+    static void OnTouchClick(int16_t /*x*/, int16_t y, void *ctx) {
         auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
         self->WakeUp();
+        if (y < 36) return;        // 状态栏交给 LVGL
+        self->HandleTouchSingleClick();
+    }
 
-        // 触摸交互矩阵（量产稳定向）：
-        bool is_click        = (g == AXS5106L_GESTURE_SINGLE_CLICK);
-        bool is_double_click = (g == AXS5106L_GESTURE_DOUBLE_CLICK);
-        if (!is_click && !is_double_click) return;
-
-        if (y < 36) {
-            ESP_LOGD(TAG, "状态栏点击交由 LVGL 处理，driver 路径忽略");
-            return;
-        }
-        (void)x;
-
-        if (is_double_click) {
-            self->HandleTouchDoubleClick();
-        } else {
-            self->HandleTouchSingleClick();
-        }
+    static void OnTouchDoubleClick(int16_t /*x*/, int16_t y, void *ctx) {
+        auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
+        self->WakeUp();
+        if (y < 36) return;
+        self->HandleTouchDoubleClick();
     }
 
     void InitializeTouch() {
@@ -429,8 +423,6 @@ private:
     }
 
     // 触摸双击：退出对话回 Idle（孩子最熟悉的"退出"心智）
-    // Listening / Speaking → AbortAnyConversation + 切 Idle + 提示音
-    // Idle / MP3 / 其他 → 忽略（避免误触干扰）
     void HandleTouchDoubleClick() {
         // 触屏不参与闹钟关停（同 SingleClick）
         auto& app = Application::GetInstance();
@@ -910,6 +902,33 @@ public:
         ESP_LOGI(TAG, "MyDazy P30 4G 初始化完成 (ES8311+ES7210, 支持4G、电源管理、触摸屏)");
 
         StartWelcomeTask();
+
+        // ── WiFi 模式短期 hack：临时启动 ML307 → AT+CFUN=4 飞行模式 → 释放 ──
+        // TODO 下版硬件加 ML307 独立电源控制（VT4 栅极独立 GPIO）后可移除本段
+        if (GetNetworkType() == NetworkType::WIFI) {
+            xTaskCreatePinnedToCore(
+                [](void* /*arg*/) {
+                    int64_t t0 = esp_timer_get_time();
+                    ESP_LOGI(TAG, "[ml307_fmode] WiFi 模式 · 等 ML307 boot 2s 再 Detect");
+                    vTaskDelay(pdMS_TO_TICKS(2000));  // GPIO9 上电后 ML307R 内部 boot ~3s 才响应 AT
+                    int64_t t_wait = (esp_timer_get_time() - t0) / 1000;
+                    ESP_LOGI(TAG, "[ml307_fmode] 开始 Detect (boot 等待 %lldms)", t_wait);
+                    auto modem = AtModem::Detect(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 921600);
+                    int64_t t_detect = (esp_timer_get_time() - t0) / 1000;
+                    if (modem == nullptr) {
+                        ESP_LOGW(TAG, "[ml307_fmode] Detect 失败（总 %lldms）· ML307 仍 ~20-50mA 待机", t_detect);
+                    } else {
+                        ESP_LOGI(TAG, "[ml307_fmode] Detect 成功（总 %lldms）· 发送 AT+CFUN=4", t_detect);
+                        modem->SetFlightMode(true);
+                        vTaskDelay(pdMS_TO_TICKS(500));   // 等飞行模式生效
+                        int64_t t_total = (esp_timer_get_time() - t0) / 1000;
+                        ESP_LOGI(TAG, "[ml307_fmode] 飞行模式生效（总 %lldms）· ML307 → ~5mA 待机", t_total);
+                        modem.reset();   // 释放 UART 资源
+                    }
+                    vTaskDelete(NULL);
+                },
+                "ml307_fmode", 6144, nullptr, 3, nullptr, 0);
+        }
     }
 
     // MCP 工具注册（板专属能力）— 通用工具由 McpServer::AddCommonTools 自动注册

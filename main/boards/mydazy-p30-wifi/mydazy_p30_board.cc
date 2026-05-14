@@ -358,54 +358,41 @@ private:
     }
 
     void PrepareTouchHardware() {
-        // v4.0 极简 cfg：worker + GPIO + 尺寸 + 两回调一次性传入
         axs5106l_touch_config_t cfg = {
-            .worker     = i2c_worker_,
-            .rst_gpio   = TOUCH_RST_NUM,
-            .int_gpio   = TOUCH_INT_NUM,
-            .width      = DISPLAY_WIDTH,
-            .height     = DISPLAY_HEIGHT,
-            .wake_cb    = &MyDazyP30_WifiBoard::OnTouchWake,
-            .gesture_cb = &MyDazyP30_WifiBoard::OnTouchGesture,
-            .cb_ctx     = this,
+            .worker          = i2c_worker_,
+            .rst_gpio        = TOUCH_RST_NUM,
+            .int_gpio        = TOUCH_INT_NUM,
+            .width           = DISPLAY_WIDTH,
+            .height          = DISPLAY_HEIGHT,
+            .rf_mode         = AXS5106L_RF_NORMAL,    /* 无 4G 干扰 · 宽容档 */
+            .cb_ctx          = this,
+            .on_wake         = &OnTouchWake,
+            .on_click        = &OnTouchClick,
+            .on_double_click = &OnTouchDoubleClick,
         };
-        if (axs5106l_touch_new(&cfg, &touch_driver_) != ESP_OK) {
+        if (axs5106l_touch_init(&cfg, &touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏硬件初始化失败");
             touch_driver_ = nullptr;
         }
     }
 
-    // C 回调蹦床：把 void* user_ctx 还原为 board 实例
     static void OnTouchWake(void *ctx) {
         static_cast<MyDazyP30_WifiBoard*>(ctx)->WakeUp();
     }
 
-    static void OnTouchGesture(axs5106l_gesture_t g, int16_t x, int16_t y, void *ctx) {
+    // 状态栏（y<36）交给 LVGL · 单击/双击直接业务（量产期不接 swipe / long_press）
+    static void OnTouchClick(int16_t /*x*/, int16_t y, void *ctx) {
         auto* self = static_cast<MyDazyP30_WifiBoard*>(ctx);
         self->WakeUp();
+        if (y < 36) return;
+        self->HandleTouchSingleClick();
+    }
 
-        // 触摸交互矩阵（量产稳定向）：
-        //   SINGLE_CLICK         → Idle 唤醒 / Speaking 打断（与 BOOT 单击同义，参与节流防 RF 误触）
-        //   DOUBLE_CLICK         → 退出对话回时钟主屏（明确意图操作 · 不参与节流，风暴期也响应）
-        //   LONG_PRESS / RELEASE → 已下线（PTT 移除）
-        //   SWIPE_DOWN/UP/LEFT/RIGHT → 全部丢弃（ControlCenter 量产期已 stub，无入口）
-        bool is_click        = (g == AXS5106L_GESTURE_SINGLE_CLICK);
-        bool is_double_click = (g == AXS5106L_GESTURE_DOUBLE_CLICK);
-        if (!is_click && !is_double_click) return;
-
-        // 状态栏区域（顶部 HEADER_HEIGHT=36 px）单击/双击由 LVGL CLICKED 独占处理
-        // 这里跳过避免双路径同时唤醒/打断
-        if (y < 36) {
-            ESP_LOGD(TAG, "状态栏点击交由 LVGL 处理，driver 路径忽略");
-            return;
-        }
-        (void)x;
-
-        if (is_double_click) {
-            self->HandleTouchDoubleClick();
-        } else {
-            self->HandleTouchSingleClick();
-        }
+    static void OnTouchDoubleClick(int16_t /*x*/, int16_t y, void *ctx) {
+        auto* self = static_cast<MyDazyP30_WifiBoard*>(ctx);
+        self->WakeUp();
+        if (y < 36) return;
+        self->HandleTouchDoubleClick();
     }
 
     void InitializeTouch() {

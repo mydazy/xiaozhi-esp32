@@ -4,6 +4,33 @@ All notable changes to **esp_lcd_touch_axs5106l** will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] - 2026-05-14
+
+### Changed (breaking)
+
+- **API rename**: `axs5106l_touch_new` → `axs5106l_touch_init` (与 sc7a20h_init 对齐)
+- **Gesture dispatch**: 删除 `axs5106l_gesture_t` enum + `axs5106l_gesture_cb_t` ·
+  改为 5 个独立 cb 字段（`on_wake` / `on_click` / `on_double_click` / `on_swipe` /
+  `on_long_press`）· 应用层不再需要 switch
+- **Swipe re-enabled**: v4.0 时 swipe 路径被 `#if 0` 注释 · v5.0 启用 ·
+  通过 `on_swipe(dx, dy, ctx)` 上报（应用层判方向）
+
+### Added
+
+- **`axs5106l_rf_mode_t` (NORMAL / STRICT)** · 按板级 i2c 干扰程度切档：
+  - `RF_NORMAL` (WiFi 板)：storm 20/s · debounce 5ms · guard 100ms · mute 1s · traj 3×
+  - `RF_STRICT` (4G 板) ：storm 12/s · debounce 8ms · guard 200ms · mute 2s · traj 2×
+  - 板级 `i2c_master_bus_config_t::glitch_ignore_cnt` 仍需板级分别配置（4G=15 / 其他=7）
+
+### Migration from v4.x
+
+| v4.x | v5.0 |
+|------|------|
+| `axs5106l_touch_new(&cfg, &h)` | `axs5106l_touch_init(&cfg, &h)` |
+| `cfg.wake_cb` / `cfg.gesture_cb` | `cfg.on_wake` / `cfg.on_click` / `cfg.on_double_click` / `cfg.on_swipe` / `cfg.on_long_press` |
+| `OnGesture(g, x, y, ctx)` + switch | 拆为 OnClick/OnDoubleClick/OnSwipe/OnLongPress 独立方法 |
+| RF 参数硬编码 | `cfg.rf_mode = AXS5106L_RF_STRICT` (4G) 或 `RF_NORMAL` |
+
 ## [2.1.0] - 2026-05-02
 
 ### Added

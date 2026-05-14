@@ -2,37 +2,14 @@
  * SPDX-FileCopyrightText: 2026 mydazy
  * SPDX-License-Identifier: Apache-2.0
  *
- * AXS5106L 电容触摸驱动 — v4.0.0 极简版（公开 C API）
+ * AXS5106L 电容触摸驱动 — v5.0.0
  *
- * 设计哲学：判断越少问题越少，保留高频刚需。
- *
- * 仅 4 个 API 覆盖项目所有用例：
- *   1) axs5106l_touch_new          — Phase 1（LCD 启动前）：GPIO + 升级 + chip_id 校验
- *   2) axs5106l_touch_attach_lvgl  — Phase 2（LVGL 启动后）：注册 lv_indev_t
- *   3) axs5106l_touch_sleep        — 进深睡前关 INT ISR + 写 sleep 寄存器
- *   4) axs5106l_touch_resume       — 唤醒后软复位 + 重开 INT ISR
- *
- * 两阶段 init 的硬件原因：rst_gpio 与 LCD 共享 → 必须在 LCD 之前 reset；
- * attach_lvgl 必须在 LVGL 启动后才能调 lv_indev_create。
- *
- * 删除的旧 API（v3.0 vs v4.0）：
- *   - axs5106l_touch_del            → 量产生命周期内不释放，N/A
- *   - axs5106l_touch_set_wake_callback     → 移入 cfg.wake_cb
- *   - axs5106l_touch_set_gesture_callback  → 移入 cfg.gesture_cb
- *   - axs5106l_touch_get_lvgl_device       → 外部不需要
- *
+ * 四 API 覆盖三板（命名规范 / 参数细节 / 调试方法详见 docs/p30-touch-flows.html）：
  * 项目硬编码（编译期常量化）：
- *   - I2C 地址 0x63，速率 400 kHz
- *   - swap_xy=false, mirror_x=false, mirror_y=false（V2907 firmware 已内部 rotation）
- *   - LVGL polling 30ms，硬件 INT 边沿计数 + storm 检测
+ *   - I²C 地址 0x63 / 速率 400 kHz
+ *   - swap_xy / mirror_x / mirror_y 全 false（V2907 firmware 已 rotation）
+ *   - LVGL polling 30ms · INT 边沿计数 + storm 检测
  *
- * 所有 I2C 走 i2c_bus_worker（防 4G RF 共线污染）。
- *
- * 高频使用场景：
- *   - 屏幕唤醒：手指触屏 → INT 下降沿 → wake_cb（亮屏 + 退出省电）
- *   - 单击/双击/长按/松开：gesture_cb（300ms 长按门槛 + 60ms 短触 · PTT 下线后板级无 listener · 仅作内部状态使用）
- *   - 滑动：gesture_cb 上/下/左/右（量产可丢弃）
- *   - 深睡：进 sleep + 关 INT ISR（防 RF 误唤）
  */
 
 #pragma once
@@ -49,82 +26,75 @@
 extern "C" {
 #endif
 
-/* 编译期开关：调试期可开 1 显示触摸轨迹红点 + raw 坐标日志 */
+/* 编译期开关：1=显示触摸轨迹红点 + raw 坐标日志（调试期开启）*/
 #ifndef AXS5106L_TOUCH_DEBUG_OVERLAY
-#define AXS5106L_TOUCH_DEBUG_OVERLAY 0
+#define AXS5106L_TOUCH_DEBUG_OVERLAY 1
 #endif
 
-/* ========================================================================
- * Public types
- * ====================================================================== */
+/* ========== Public types ========== */
 
 typedef struct axs5106l_touch_t *axs5106l_touch_handle_t;
 
-/// Gesture identifiers reported by the recognizer.
+/**
+ * RF 抗扰模式 · 按板级 i2c 干扰程度切档
+ *   NORMAL：WiFi / 无 4G 干扰 · storm 20/s · debounce 5ms · guard 100ms
+ *   STRICT：4G 共线 · storm 12/s · debounce 8ms · guard 200ms
+ * 板级 i2c_master_bus_config_t::glitch_ignore_cnt 仍需板级分别配置（4G=15 / 其他=7）。
+ */
 typedef enum {
-    AXS5106L_GESTURE_NONE = 0,
-    AXS5106L_GESTURE_SINGLE_CLICK,
-    AXS5106L_GESTURE_DOUBLE_CLICK,
-    AXS5106L_GESTURE_LONG_PRESS,
-    AXS5106L_GESTURE_LONG_PRESS_RELEASE,
-    AXS5106L_GESTURE_SWIPE_UP,
-    AXS5106L_GESTURE_SWIPE_DOWN,
-    AXS5106L_GESTURE_SWIPE_LEFT,
-    AXS5106L_GESTURE_SWIPE_RIGHT,
-} axs5106l_gesture_t;
+    AXS5106L_RF_NORMAL = 0,
+    AXS5106L_RF_STRICT = 1,
+} axs5106l_rf_mode_t;
 
-/// 屏唤醒回调（首次触摸）。在 LVGL task 上下文调用。
-typedef void (*axs5106l_wake_cb_t)(void *user_ctx);
+/* 5 类事件回调 · 全部在 LVGL task 上下文调用（非 ISR · 可执行轻量同步动作） */
+typedef void (*axs5106l_wake_cb_t)       (void *ctx);
+typedef void (*axs5106l_click_cb_t)      (int16_t x, int16_t y, void *ctx);
+typedef void (*axs5106l_swipe_cb_t)      (int16_t dx, int16_t dy, void *ctx);
+typedef void (*axs5106l_long_press_cb_t) (bool is_release, int16_t x, int16_t y, void *ctx);
 
-/// 手势回调（识别完成）。在 LVGL task 上下文调用。
-typedef void (*axs5106l_gesture_cb_t)(axs5106l_gesture_t g,
-                                      int16_t x, int16_t y,
-                                      void *user_ctx);
-
-/// 配置（init 时一次性传入，运行时不变）
+/// 配置体（init 时一次性传入，运行时不变）
 typedef struct {
-    i2c_worker_handle_t     worker;     ///< 已创建的 i2c_bus_worker
-    gpio_num_t              rst_gpio;   ///< Reset GPIO（与 LCD 可共享）
-    gpio_num_t              int_gpio;   ///< INT GPIO（active LOW）
-    uint16_t                width;      ///< 屏幕逻辑宽（px）
-    uint16_t                height;     ///< 屏幕逻辑高（px）
-    axs5106l_wake_cb_t      wake_cb;    ///< 首次触摸回调（可 NULL）
-    axs5106l_gesture_cb_t   gesture_cb; ///< 手势识别回调（可 NULL）
-    void                   *cb_ctx;     ///< 两个回调共用的 user context
-} axs5106l_touch_config_t;
+    /* 硬件 · 必填 */
+    i2c_worker_handle_t        worker;
+    gpio_num_t                 rst_gpio;     /* 与 LCD 共享 · 三板均 GPIO_4 */
+    gpio_num_t                 int_gpio;     /* RTC-capable · 三板均 GPIO_5 */
+    uint16_t                   width;        /* 三板 284 */
+    uint16_t                   height;       /* 三板 240 */
 
-/* ========================================================================
- * Lifecycle (Phase 1 / 2)
- * ====================================================================== */
+    /* RF 抗扰 · 4G 共线传 RF_STRICT · 其他传 RF_NORMAL（或 0 等同 NORMAL）*/
+    axs5106l_rf_mode_t         rf_mode;
+
+    /* 回调 · 5 个独立 cb · 不需要的字段传 NULL */
+    void                      *cb_ctx;
+    axs5106l_wake_cb_t         on_wake;          /* 息屏首次触摸（唤醒屏幕）*/
+    axs5106l_click_cb_t        on_click;         /* 单击（含坐标）*/
+    axs5106l_click_cb_t        on_double_click;  /* 双击 */
+    axs5106l_swipe_cb_t        on_swipe;         /* 滑动（dx/dy 给方向 · |dx|>|dy| 横滑）*/
+    axs5106l_long_press_cb_t   on_long_press;    /* 长按（is_release: false=按下 · true=松开）*/
+} axs5106l_touch_config_t;
 
 /**
  * Phase 1 — LCD 启动**前**调用：
- *   - 配 RST GPIO + I2C device
- *   - 检查并升级固件
- *   - 验证 chip_id
+ *   配 RST + I²C device + firmware 升级 + chip_id 校验 + 应用 rf_mode
  *
  * @return ESP_OK / ESP_ERR_INVALID_ARG / ESP_ERR_NO_MEM / ESP_ERR_NOT_FOUND
  */
-esp_err_t axs5106l_touch_new(const axs5106l_touch_config_t *cfg,
-                             axs5106l_touch_handle_t *out);
+esp_err_t axs5106l_touch_init(const axs5106l_touch_config_t *cfg,
+                              axs5106l_touch_handle_t *out);
 
 /**
  * Phase 2 — LVGL 启动**后**调用：
- *   - 配 INT GPIO + 安装 ISR（边沿计数器，不读 I2C）
- *   - 注册 lv_indev_t（30ms polling read 30ms LVGL）
+ *   配 INT GPIO + 安装 IRAM ISR（仅计数）+ lv_indev_create + 30ms polling
  *
  * @return ESP_OK / ESP_ERR_INVALID_ARG
  */
 esp_err_t axs5106l_touch_attach_lvgl(axs5106l_touch_handle_t h);
 
-/* ========================================================================
- * Power
- * ====================================================================== */
 
-/// 进深睡前调：关 INT ISR + 写 sleep 寄存器（0x19=0x03）
+/// 深睡前调：关 INT ISR + 写 sleep 寄存器（0x19=0x03）· 必须先于 AUDIO_PWR_EN=0
 esp_err_t axs5106l_touch_sleep(axs5106l_touch_handle_t h);
 
-/// 唤醒后调：软复位芯片 + 重开 INT ISR + 重置 storm 检测窗口
+/// 浅睡唤醒后调：软复位 + 重开 ISR + 重置 storm 检测（当前三板未用）
 esp_err_t axs5106l_touch_resume(axs5106l_touch_handle_t h);
 
 #ifdef __cplusplus

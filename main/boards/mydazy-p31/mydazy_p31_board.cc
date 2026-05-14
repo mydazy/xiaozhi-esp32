@@ -128,7 +128,7 @@ private:
     PowerSaveTimer* power_save_timer_ = nullptr;
 
     // 触摸屏
-    Axs5106lTouch* touch_driver_ = nullptr;
+    axs5106l_touch_handle_t touch_driver_ = nullptr;
 
     bool first_boot_ = false;
     time_t start_time_;
@@ -316,120 +316,57 @@ private:
     }
 
     void PrepareTouchHardware() {
-        // 共享 LCD/Touch 复位线时，必须先完成触摸芯片的硬件复位和固件检查，
-        // 再初始化 LCD，避免触摸再次拉低复位脚把已经点亮的 LCD 一起复位。
-        // 这里故意只做触摸芯片 bring-up，不注册 LVGL 输入设备。
-        touch_driver_ = new Axs5106lTouch(
-            i2c_bus_,
-            TOUCH_RST_NUM,
-            TOUCH_INT_NUM,
-            DISPLAY_WIDTH,
-            DISPLAY_HEIGHT,
-            TOUCH_SWAP_XY,
-            TOUCH_MIRROR_X,
-            TOUCH_MIRROR_Y
-        );
-
-        if (!touch_driver_->InitializeHardware()) {
+        // Phase 1: LCD 启动前 · GPIO + 升级 + chip_id 校验
+        // swipe 控制中心暂未启用（UiDisplay ShowMenu/IsBrainInfoVisible 待暴露）
+        axs5106l_touch_config_t cfg = {
+            .worker          = i2c_worker_,
+            .rst_gpio        = TOUCH_RST_NUM,
+            .int_gpio        = TOUCH_INT_NUM,
+            .width           = DISPLAY_WIDTH,
+            .height           = DISPLAY_HEIGHT,
+            .rf_mode         = AXS5106L_RF_NORMAL,
+            .cb_ctx          = this,
+            .on_wake         = &OnTouchWake,
+            .on_click        = &OnTouchClick,
+        };
+        if (axs5106l_touch_init(&cfg, &touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏硬件初始化失败");
-            delete touch_driver_;
             touch_driver_ = nullptr;
         }
     }
 
     void InitializeTouch() {
-        if (touch_driver_ == nullptr) {
-            return;
-        }
-
-        // 到这里 LCD 和 LVGL 都已经准备好，才能安全注册触摸输入设备。
-        if (!touch_driver_->InitializeInput()) {
-            ESP_LOGE(TAG, "触摸屏输入初始化失败");
-            delete touch_driver_;
+        if (touch_driver_ == nullptr) return;
+        if (axs5106l_touch_attach_lvgl(touch_driver_) != ESP_OK) {
+            ESP_LOGE(TAG, "触摸屏 LVGL attach 失败");
             touch_driver_ = nullptr;
+        }
+    }
+
+    static void OnTouchWake(void *ctx) {
+        static_cast<MyDazyP31Board*>(ctx)->WakeUp();
+    }
+
+    // 单击业务：MP3 → 停播 · Idle → 唤醒对话 · Speaking → 打断
+    // P31 主菜单（ShowMenu/IsBrainInfoVisible）依赖 UiDisplay 待暴露 · 暂走通用唤醒路径
+    static void OnTouchClick(int16_t /*x*/, int16_t /*y*/, void *ctx) {
+        auto* self = static_cast<MyDazyP31Board*>(ctx);
+        self->WakeUp();
+
+        if (MusicPlayer::GetInstance().IsPlaying()) {
+            MusicPlayer::GetInstance().Stop();
             return;
         }
 
-        // 设置触摸回调（唤醒设备）
-        touch_driver_->SetWakeCallback([this]() {
-            WakeUp();
-        });
-
-        // 设置手势回调：单击唤醒/打断/退出对话，滑动调节音量
-        touch_driver_->SetGestureCallback([this](TouchGesture gesture, int16_t x, int16_t y) {
-            // 触屏不参与闹钟关停（孩子专注时戳屏误关风险高 · 关停走按键/摇晃/语音）
-            WakeUp();
-
-            switch (gesture) {
-                case TouchGesture::SingleClick: {
-                    auto& app = Application::GetInstance();
-                    auto state = app.GetDeviceState();
-
-                    // MP3 播放中：单击 = 停音乐，不进入对话
-                    if (MusicPlayer::GetInstance().IsPlaying()) {
-                        ESP_LOGI(TAG, "单击停止 MP3 播放");
-                        MusicPlayer::GetInstance().Stop();
-                        break;
-                    }
-
-                    if (state == kDeviceStateIdle) {
-                        // 空闲状态：
-                        //  - 时钟页可见 → 进入主菜单（4 宫格）
-                        //  - 菜单已在 → 点到图标由按钮吞掉；点空白由菜单容器自回退
-                        //  - 其它场景 → 原单击唤醒对话路径兜底
-                        auto* lcd = dynamic_cast<UiDisplay*>(GetDisplay());
-                        if (lcd && lcd->IsBrainInfoVisible()) {
-                            // 关于页：空白单击不处理，只能走左上 "<" 返回
-                            break;
-                        }
-                        if (lcd && lcd->IsMenuVisible()) {
-                            // 已在菜单页：图标/空白由 LVGL 事件处理，这里不再兜底
-                            break;
-                        }
-                        if (lcd && lcd->IsClockMode()) {
-                            ESP_LOGI(TAG, "单击时钟 → 主菜单");
-                            lcd->ShowMenu();
-                            break;
-                        }
-                        // 其它 idle 场景（例如配网/激活 overlay）维持原对话唤醒逻辑
-                        ESP_LOGI(TAG, "单击唤醒对话");
-                        app.PlaySound(Lang::Sounds::OGG_WAKEUP);
-                        vTaskDelay(pdMS_TO_TICKS(800));
-                        app.ToggleChatState();
-                    }  else if (state == kDeviceStateSpeaking) {
-                        // 播放状态：单击打断TTS
-                        ESP_LOGI(TAG, "单击打断TTS");
-                        app.AbortSpeaking(kAbortReasonNone);
-                    }
-                    break;
-                }
-                case TouchGesture::SwipeDown:
-                    if (auto* lcd = dynamic_cast<UiDisplay*>(GetDisplay())) {
-                        // 关于页不响应下滑，控制中心必须走右上角 "∨"
-                        if (lcd->IsBrainInfoVisible()) break;
-                        if (!lcd->IsControlCenterVisible()) lcd->ShowControlCenter();
-                    }
-                    break;
-                case TouchGesture::SwipeUp:
-                    if (auto* lcd = dynamic_cast<UiDisplay*>(GetDisplay())) {
-                        // 优先级：控制中心 > 菜单。控制中心可见先关它，再次上滑才回时钟
-                        // 关于页不响应上滑，必须走左上角 "<" 返回
-                        if (lcd->IsBrainInfoVisible()) {
-                            break;
-                        }
-                        if (lcd->IsControlCenterVisible()) {
-                            lcd->HideControlCenter();
-                        } else if (lcd->IsMenuVisible()) {
-                            lcd->HideMenu();
-                        }
-                    }
-                    break;
-                default:
-                    break;
-            }
-        });
-
-        ESP_LOGI(TAG, "✅ 触摸屏初始化完成（使用新驱动，支持手势识别，抗干扰能力更强）");
+        auto& app = Application::GetInstance();
+        auto state = app.GetDeviceState();
+        if (state == kDeviceStateIdle) {
+            app.PlaySound(Lang::Sounds::OGG_WAKEUP);
+            vTaskDelay(pdMS_TO_TICKS(800));
+            app.ToggleChatState();
+        } else if (state == kDeviceStateSpeaking) {
+            app.AbortSpeaking(kAbortReasonNone);
+        }
     }
 
     void InitializePowerManager() {
@@ -544,12 +481,10 @@ private:
         Application::GetInstance().GetAudioService().Stop();
         vTaskDelay(pdMS_TO_TICKS(100));
 
-        // 2. 关闭触摸屏，避免I2C错误
+        // 触摸 sleep（关 INT ISR + 写 sleep 寄存器）· 必须先于 AUDIO_PWR_EN=0
         if (touch_driver_) {
-            touch_driver_->Cleanup();
-            delete touch_driver_;
-            touch_driver_ = nullptr;
-            vTaskDelay(pdMS_TO_TICKS(100)); // 等待触摸屏完全关闭
+            axs5106l_touch_sleep(touch_driver_);
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
 
         if (enable_gyro_wakeup) ArmGyroWakeup();   // EXT1 · 必须在 AUDIO_PWR_EN=0 之前
@@ -1363,8 +1298,9 @@ private:
             IBeaconRequestSwitch(beacon);
         });
 
-        // 延迟启动：等 BLE 协议栈就绪后再开始扫描
-        ibeacon.StartDeferred(30000);
+        // TODO: 延迟启动 · 等 BLE 协议栈就绪后再扫描（IBeacon::StartDeferred 待实现）
+        // ibeacon.StartDeferred(30000);
+        ibeacon.Start();
     }
 
     // 音量调节函数（单次调节）
