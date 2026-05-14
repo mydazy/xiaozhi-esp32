@@ -487,6 +487,7 @@ void Application::HandleActivationDoneEvent() {
     Schedule([this]() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_CONNECT);
+        vTaskDelay(pdMS_TO_TICKS(1500));
     });
 }
 
