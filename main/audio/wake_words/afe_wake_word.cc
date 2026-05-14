@@ -151,18 +151,11 @@ void AfeWakeWord::AudioDetectionTask() {
     ESP_LOGI(TAG, "Audio detection task started, feed size: %d fetch size: %d",
         feed_size, fetch_size);
 
-    const TickType_t kFetchTimeout = pdMS_TO_TICKS(100);
-    uint32_t stack_log_counter = 0;
-
     while (true) {
         xEventGroupWaitBits(event_group_, DETECTION_RUNNING_EVENT, pdFALSE, pdTRUE, portMAX_DELAY);
 
-        auto res = afe_iface_->fetch_with_delay(afe_data_, kFetchTimeout);
+        auto res = afe_iface_->fetch_with_delay(afe_data_, portMAX_DELAY);
         if (res == nullptr || res->ret_value == ESP_FAIL) {
-            continue;
-        }
-
-        if (!(xEventGroupGetBits(event_group_) & DETECTION_RUNNING_EVENT)) {
             continue;
         }
 
@@ -176,12 +169,6 @@ void AfeWakeWord::AudioDetectionTask() {
             if (wake_word_detected_callback_) {
                 wake_word_detected_callback_(last_detected_wake_word_);
             }
-        }
-
-        if (++stack_log_counter >= 100) {
-            stack_log_counter = 0;
-            ESP_LOGI(TAG, "audio_detection stack high watermark: %u bytes",
-                     (unsigned)uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
         }
     }
 }

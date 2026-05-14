@@ -38,19 +38,18 @@ static const char *TAG = "axs5106l_touch";
 
 /* X 死区补偿已移除（v5.0）· 触摸坐标直接来自 V2907 firmware 输出 */
 
-#define SWIPE_THRESHOLD      20       /* min travel for swipe (px) */
-#define CLICK_MAX_TIME_US    800000   /* max press duration for tap (800 ms) */
-#define CLICK_MIN_TIME_US     60000   /* min press duration for tap (60 ms — sensitive light tap) */
-#define CLICK_MAX_MOVE       25       /* max travel still considered a tap (px) — 儿童手抖容忍 */
-#define LONG_PRESS_TIME_US   300000   /* long-press threshold (300 ms — 进一步降低 PTT 起手门槛) */
-#define DOUBLE_CLICK_TIME_US 600000   /* max interval between two taps for double-tap (600 ms) */
-#define DOUBLE_CLICK_DIST    50       /* max distance between tap positions for double-tap (px) */
-#define CLICK_MIN_FRAMES      2       /* tap needs ≥2 PRESSED frames (~60 ms @ 30 ms LVGL) */
-#define SWIPE_MIN_TIME_US    150000   /* min swipe duration (150 ms) */
-#define SWIPE_MIN_FRAMES     5        /* swipe needs ≥5 PRESSED frames */
-#define LONG_PRESS_MIN_FRAMES  9      /* long-press needs ≥9 frames (~270 ms @ 30 ms LVGL) — 配合 300 ms 时间阈值 */
-/* Jitter budget — 儿童手部抖动比成人大，从 24 放宽到 32（每帧 ~6.4 px 平均位移仍允）。 */
-#define JITTER_LIMIT_FOR_TAP   32
+#define SWIPE_THRESHOLD      20       /* ~2.6mm · 与 Apple 10pt 对齐 */
+#define CLICK_MAX_TIME_US    500000   /* 500ms · Apple 标准（800→500）*/
+#define CLICK_MIN_TIME_US     50000   /* 50ms · Apple 标准（60→50）*/
+#define CLICK_MAX_MOVE       20       /* ~2.6mm · 20→Apple 10pt 等效 */
+#define LONG_PRESS_TIME_US   500000   /* 500ms · 防儿童误触（300→500 与 Apple/iOS 对齐）*/
+#define DOUBLE_CLICK_TIME_US 400000   /* 400ms · Apple 300 + 100ms 儿童反应 */
+#define DOUBLE_CLICK_DIST    80       /* ~10.6mm · Apple 30pt 物理等效 */
+#define CLICK_MIN_FRAMES      3       /* 48ms @ 16ms LVGL · 与 50ms tap 配套 */
+#define SWIPE_MIN_TIME_US    150000   /* 150ms 不变 */
+#define SWIPE_MIN_FRAMES      8       /* 128ms @ 16ms · 配 SWIPE_MIN_TIME */
+#define LONG_PRESS_MIN_FRAMES 30      /* 480ms @ 16ms · 配 LONG_PRESS_TIME 500ms */
+#define JITTER_LIMIT_FOR_TAP 20       /* ~2.6mm · 60Hz 采样下抖动应大幅降低（32→20）*/
 #define RELEASE_DEBOUNCE  2             /* 连续 N 帧无触摸才报松开（两档共用）*/
 #define INT_STORM_WINDOW_US      1000000   /* rolling 1s 边沿计数窗（两档共用）*/
 #define INT_STORM_HOT_WINDOW_US 30000000   /* 30s post-storm 灵敏模式（两档共用）*/
@@ -64,12 +63,11 @@ static const char *TAG = "axs5106l_touch";
 #define RF_N_STORM_MUTE_US          1000000
 #define RF_N_SWIPE_TRAJ_RATIO             3
 
-/* RF_STRICT: 4G 共线 · 加严（v2.1 量产实测值）*/
 #define RF_S_INT_DEBOUNCE_US           8000
 #define RF_S_POST_RELEASE_GUARD_US   200000
 #define RF_S_MAX_SPEED_PX_S            2500
-#define RF_S_STORM_THRESHOLD             12
-#define RF_S_STORM_THRESHOLD_HOT          6
+#define RF_S_STORM_THRESHOLD             25      /* 12→25 · 容忍本底噪声 */
+#define RF_S_STORM_THRESHOLD_HOT         18      /* 6→18 · HOT 不再低于本底 */
 #define RF_S_STORM_MUTE_US          2000000
 #define RF_S_SWIPE_TRAJ_RATIO             2
 
@@ -393,9 +391,10 @@ static void IRAM_ATTR int_falling_edge_isr(void *arg)
 
 static bool storm_detected(axs5106l_touch_handle_t self, uint64_t now)
 {
-    /* 触摸进行中（press / long_press）· 手指本身让 INT 抖动 30-100/s · 远超 storm 阈值
-     * 必须跳过 storm 检测 · 否则滑动会被误判为 RF storm → mute 2s → 屏幕卡死 */
-    if (self->touch.pressed || self->gesture.long_fired) {
+    /* 触摸活跃期跳过 storm 检测 · 否则滑动 / 双击间隔期 INT 抖动会被误判为 RF storm */
+    bool recent_release = self->touch.last_release_time != 0 &&
+                          (now - self->touch.last_release_time) < 1500000ULL;
+    if (self->touch.pressed || self->gesture.long_fired || recent_release) {
         if (now - self->int_edge_window_start_us >= INT_STORM_WINDOW_US) {
             self->int_edge_window_start_us = now;
             self->int_edge_window_baseline = self->int_edge_count;
@@ -778,10 +777,17 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
         int manhattan = abs(dx) + abs(dy);
         uint64_t dur  = now - g->press_time;
 
-        if (manhattan < CLICK_MAX_MOVE &&
-            dur >= CLICK_MIN_TIME_US && dur < CLICK_MAX_TIME_US &&
-            g->sample_count >= CLICK_MIN_FRAMES &&
-            !g->jitter_unstable) {
+        bool tap_ok = (manhattan < CLICK_MAX_MOVE &&
+                       dur >= CLICK_MIN_TIME_US && dur < CLICK_MAX_TIME_US &&
+                       g->sample_count >= CLICK_MIN_FRAMES &&
+                       !g->jitter_unstable);
+        if (!tap_ok) {
+            ESP_LOGW(TAG, "tap rejected: move=%d dur=%ums frames=%u jitter=%u unstable=%d",
+                     manhattan, (unsigned)(dur/1000),
+                     (unsigned)g->sample_count, (unsigned)g->jitter_sum,
+                     (int)g->jitter_unstable);
+        }
+        if (tap_ok) {
             int click_dist = abs(g->start_x - g->last_click_x) +
                              abs(g->start_y - g->last_click_y);
             bool is_double = g->last_click_time > 0 &&
