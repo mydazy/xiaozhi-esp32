@@ -236,7 +236,7 @@ ul.compact li { margin: 2px 0; }
 <table>
 <thead><tr><th>类别</th><th>规则</th><th>示例</th></tr></thead>
 <tbody>
-<tr><td>函数</td><td><code>sc7a20h_&lt;动词&gt;[_&lt;对象&gt;]</code></td><td><code>sc7a20h_init</code> · <code>sc7a20h_arm_wakeup</code> · <code>sc7a20h_start_motion_detect</code></td></tr>
+<tr><td>函数</td><td><code>sc7a20h_&lt;动词&gt;[_&lt;对象&gt;]</code></td><td><code>sc7a20h_init</code> · <code>sc7a20h_wakeup</code> · <code>sc7a20h_shake</code> · <code>sc7a20h_strike</code></td></tr>
 <tr><td>句柄</td><td><code>sc7a20h_handle_t</code>（opaque）</td><td>仅持指针 · 不访问内部</td></tr>
 <tr><td>枚举类型</td><td><code>sc7a20h_&lt;名&gt;_t</code></td><td><code>sc7a20h_event_t</code></td></tr>
 <tr><td>枚举值</td><td><code>SC7A20H_&lt;名&gt;_&lt;值&gt;</code></td><td><code>SC7A20H_EVT_SHAKE</code> · <code>SC7A20H_EVT_DOUBLETAP</code></td></tr>
@@ -282,7 +282,7 @@ ul.compact li { margin: 2px 0; }
 <text x="200" y="160" fill="#666" font-size="11">WHO_AM_I 校验 + 10 寄存器原子序列（lock_session 200ms）</text>
 
 <rect x="180" y="178" width="520" height="44" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
-<text x="200" y="198" fill="#2E7D32" font-weight="600">④ sc7a20h_start_motion_detect(h, &amp;cfg, &amp;OnMotion, this)</text>
+<text x="200" y="198" fill="#2E7D32" font-weight="600">④ sc7a20h_shake(h, 1500, 600, 2, 1500, &amp;OnShake, this)</text>
 <text x="200" y="214" fill="#666" font-size="11">创建 motion_task（栈 2560 · P1 · Core 1）· 启动 shake + doubletap 两个算法</text>
 
 <rect x="180" y="232" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
@@ -317,7 +317,7 @@ ul.compact li { margin: 2px 0; }
 <text x="200" y="102">② Settings("status").pickupWake 默认 1（NVS 读）</text>
 
 <rect x="180" y="124" width="520" height="50" rx="4" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
-<text x="200" y="144" fill="#C62828" font-weight="600">③ sc7a20h_arm_wakeup(h, SC7A20H_GPIO_INT1)</text>
+<text x="200" y="144" fill="#C62828" font-weight="600">③ sc7a20h_wakeup(h, SC7A20H_GPIO_INT1)</text>
 <text x="200" y="162" fill="#666" font-size="11">读 INT1_SRC(0x31) 兜底清 latch · enable_ext1_wakeup_io ANY_LOW · rtc_gpio_pullup_en</text>
 
 <rect x="180" y="184" width="520" height="44" rx="4" fill="#FFF3E0" stroke="#F57F17" stroke-width="2"/>
@@ -739,12 +739,12 @@ bool AlarmRinger::ShakeStop(int min_count) {
 <tr><td rowspan="3"><code>sc7a20h_init</code><br>（返回 NULL）</td><td>worker 为 NULL</td><td>板级 i2c_worker_ 尚未构造 · 调换 init 顺序</td></tr>
 <tr><td>calloc 失败</td><td>内部 RAM 不足 · 查 <code>heap_caps_get_free_size(MALLOC_CAP_INTERNAL)</code></td></tr>
 <tr><td>WHO_AM_I ≠ 0x11</td><td>SC7A20H 焊接异常 / 上电时序错 / I²C 地址被占（NFC 0x2A 等）</td></tr>
-<tr><td rowspan="3"><code>sc7a20h_arm_wakeup</code></td><td>ESP_ERR_INVALID_ARG</td><td>h 为 NULL · 上层 sc7a20h_initialized_ flag 应做前置检查</td></tr>
-<tr><td>esp_sleep_enable_ext1_wakeup_io 错误</td><td>int1_gpio 不是 RTC capable · 检查 config.h</td></tr>
+<tr><td rowspan="3"><code>sc7a20h_wakeup</code></td><td>ESP_ERR_INVALID_ARG</td><td>h 为 NULL · 上层应做 <code>sc7a20h_sensor_ != nullptr</code> 前置检查</td></tr>
+<tr><td><code>esp_sleep_enable_ext1_wakeup_io</code> 错误</td><td>int1_gpio 不是 RTC capable · 检查 config.h</td></tr>
 <tr><td>INT1_SRC 读失败（仅 LOGW）</td><td>I²C 已被调用方 reset · 不阻塞唤醒 · LIR=0 兜底</td></tr>
-<tr><td rowspan="3"><code>sc7a20h_start_motion_detect</code></td><td>ESP_ERR_INVALID_ARG</td><td>h / cb 为 NULL</td></tr>
-<tr><td>ESP_ERR_INVALID_STATE</td><td>已经启动过 · 不可重复调用</td></tr>
-<tr><td>ESP_ERR_NO_MEM</td><td>FreeRTOS 任务创建失败 · 通常是内部 RAM 不足</td></tr>
+<tr><td rowspan="3"><code>sc7a20h_shake</code> / <code>sc7a20h_strike</code></td><td>ESP_ERR_INVALID_ARG</td><td>h / cb 为 NULL</td></tr>
+<tr><td>ESP_ERR_INVALID_STATE</td><td>同一个 sensor 已启动过此场景 · 不可重复调用</td></tr>
+<tr><td>ESP_ERR_NO_MEM</td><td>FreeRTOS motion_task 创建失败 · 通常是内部 RAM 不足</td></tr>
 </tbody>
 </table>
 
@@ -755,10 +755,11 @@ bool AlarmRinger::ShakeStop(int min_count) {
 <tr><td><b>WHO_AM_I 校验失败</b></td><td>地址错 / 焊接 / 供电</td><td>① 万用表测 VCC 1.71-3.6V<br>② 示波器看 SDA/SCL 波形<br>③ 改地址试 0x18（SA0=GND）<br>④ I²C scan 看 0x19 是否上线</td></tr>
 <tr><td><b>"睡眠秒醒"</b></td><td>arm_wakeup 时序错 / latch 残留</td><td>① 看 sc7a20h.c:111 是否 CTRL5=0x00<br>② 看 board.cc 中 arm_wakeup 是否在 ShutdownTouchAndAudio <b>之前</b><br>③ 查 log "INT1_SRC clear failed" WARN</td></tr>
 <tr><td><b>拿起不唤醒</b></td><td>NVS 禁用 / INT1 错 / 阈值过高</td><td>① 查 Settings("status").pickupWake 是否 1<br>② 烧录前 ESP_LOGI 显示 INT1_THS / INT1_DUR<br>③ 物理拿起力度不足（&lt;320mg）→ 降阈值试</td></tr>
-<tr><td><b>摇一摇不触发</b></td><td>阈值过高 / motion_task 未启动</td><td>① log 查 "shake detected (strong=X/6)" 是否出现<br>② 用 ESP_LOGD 打 mag_sq 值看实际偏离量<br>③ 检查 enable_shake=true</td></tr>
-<tr><td><b>双击不触发</b></td><td>桌面材质 / 阈值过高</td><td>① 改硬桌面试<br>② 降 tap_peak_mg 到 1400 试<br>③ log 查双击状态机迁移</td></tr>
-<tr><td><b>双击误触</b></td><td>阈值过低 / 桌面震动</td><td>① 升 tap_peak_mg 到 2200<br>② 缩 tap_max_gap_ms 到 300<br>③ 关 enable_doubletap 灰度验证</td></tr>
-<tr><td><b>摇一摇 + 双击同时触发</b></td><td>状态机互斥未生效</td><td>查驱动 update_doubletap_state 是否 reset on shake</td></tr>
+<tr><td><b>摇一摇不触发</b></td><td>阈值过高 / motion_task 未启动 / target 过高</td><td>① log 查 "shake detected (strong=X/N)" 是否出现<br>② log 查 "shake on (dev=... tgt=2/6 ...)" 确认配置<br>③ 板级 sc7a20h_shake 调用 target_frames 是否为 2</td></tr>
+<tr><td><b>闹钟摇一次就停</b></td><td>OnShake 直接 Stop 未走 ShakeStop</td><td>OnShake 内必须 <code>AlarmRinger::GetInstance().ShakeStop(3)</code>，不能用 TryStopAlarmRinger</td></tr>
+<tr><td><b>闹钟无论怎么摇都不停</b></td><td>shake 算法没触发 / 累计未达 3 次</td><td>① 查 "shake stop pending (X/3)" log<br>② 5s 窗口外计数重置 · 需快速连续摇 3 次</td></tr>
+<tr><td><b>双击不触发</b></td><td>板级未启用（当前暂关）/ 桌面材质 / 阈值过高</td><td>① <b>取消 InitializeSc7a20h 中 sc7a20h_strike 注释</b><br>② 改硬桌面试<br>③ 降 peak_mg 到 1400 试</td></tr>
+<tr><td><b>双击误触</b></td><td>阈值过低 / 桌面震动</td><td>① 升 peak_mg 到 2200<br>② 缩 max_gap_ms 到 300<br>③ 板级注释回 sc7a20h_strike 调用</td></tr>
 </tbody>
 </table>
 
@@ -766,10 +767,13 @@ bool AlarmRinger::ShakeStop(int min_count) {
 <table>
 <thead><tr><th>TAG</th><th>典型 log</th><th>含义</th></tr></thead>
 <tbody>
-<tr><td><code>sc7a20h</code></td><td><code>I (xxx) sc7a20h: ready (pickup=320mg/100ms, THS=0x0A DUR=0x0A)</code></td><td>init 成功 · 显示实际寄存器值</td></tr>
+<tr><td><code>sc7a20h</code></td><td><code>I (xxx) sc7a20h: init ok (pickup=320mg/100ms · THS=0x0A DUR=0x0A)</code></td><td>init 成功 · 显示实际寄存器值</td></tr>
 <tr><td><code>sc7a20h</code></td><td><code>E (xxx) sc7a20h: WHO_AM_I=0x00 (expect 0x11)</code></td><td>I²C 读失败或器件异常</td></tr>
-<tr><td><code>sc7a20h</code></td><td><code>I (xxx) sc7a20h: shake detected (strong=4/6)</code></td><td>摇一摇触发 · 显示窗内强动帧数</td></tr>
-<tr><td><code>sc7a20h</code></td><td><code>I (xxx) sc7a20h: doubletap detected (gap=180ms)</code></td><td>双击触发 · 显示两击间隔</td></tr>
+<tr><td><code>sc7a20h</code></td><td><code>I (xxx) sc7a20h: shake on (dev=1500mg win=600ms tgt=2/6 cool=1500ms)</code></td><td>sc7a20h_shake 启动成功</td></tr>
+<tr><td><code>sc7a20h</code></td><td><code>I (xxx) sc7a20h: shake detected (strong=3/6)</code></td><td>摇一摇触发 · 显示窗内强动帧数</td></tr>
+<tr><td><code>sc7a20h</code></td><td><code>I (xxx) sc7a20h: strike detected (gap=180ms)</code></td><td>双击触发 · 显示两击间隔</td></tr>
+<tr><td><code>AlarmRinger</code></td><td><code>I (xxx) AlarmRinger: shake stop pending (1/3)</code></td><td>响铃中累计摇晃 · 未达阈值</td></tr>
+<tr><td><code>AlarmRinger</code></td><td><code>I (xxx) AlarmRinger: Stop by 'shake×N' after xx ms</code></td><td>累计达 3 次 · 闹铃停</td></tr>
 <tr><td><code>sc7a20h</code></td><td><code>W (xxx) sc7a20h: INT1_SRC clear failed (ESP_ERR_INVALID_STATE)</code></td><td>I²C 已被 reset · arm 时机错</td></tr>
 <tr><td><code>sc7a20h</code></td><td><code>I (xxx) sc7a20h: wakeup armed on GPIO3</code></td><td>EXT1 注册成功</td></tr>
 </tbody>
@@ -835,23 +839,25 @@ bool AlarmRinger::ShakeStop(int min_count) {
 </tbody>
 </table>
 
-<h3>11.6 不再公开的 v4.0 API</h3>
+<h3>11.6 v5.0 删除 / 重命名的 API</h3>
 <ul class="compact">
-<li><code>sc7a20h_read_mg</code>：v4.0 时公开但项目内零调用 · v5.0 改为内部 <code>static</code> · 上层若需获取原始加速度 → 改用 motion cb 事件路径</li>
-<li><code>sc7a20h_start_shake_detect</code>：v4.0 单场景 cb · v5.0 改名 <code>start_motion_detect</code> + 增 cfg + 增 evt 类型</li>
-<li><code>sc7a20h_shake_cb_t</code>：v4.0 单参数签名 · v5.0 增 <code>sc7a20h_event_t</code> 首参</li>
+<li><code>sc7a20h_read_mg</code>：v4.0 时公开但项目内零调用 · v5.0 改为内部 <code>static</code></li>
+<li><code>sc7a20h_arm_wakeup</code> → <code>sc7a20h_wakeup</code>（语义不变 · 名字精简）</li>
+<li><code>sc7a20h_start_shake_detect</code> → <code>sc7a20h_shake</code>（名字精简 · 4 个灵敏度参数平铺到签名）</li>
+<li>新增 <code>sc7a20h_strike</code>（桌面双击 · 4 个灵敏度参数平铺）</li>
 </ul>
 
-<h3>11.7 v4.0 → v5.0 板级迁移清单</h3>
+<h3>11.7 v4.0 → v5.0 板级迁移清单（已完成）</h3>
 <table>
-<thead><tr><th>步</th><th>动作</th><th>位置</th></tr></thead>
+<thead><tr><th>步</th><th>动作</th><th>当前状态</th></tr></thead>
 <tbody>
-<tr><td>1</td><td><code>OnShake(void*)</code> 改 <code>OnMotion(sc7a20h_event_t, void*)</code> · body 加 switch(evt)</td><td>4g_board.cc:334 / wifi:341 / p31:291</td></tr>
-<tr><td>2</td><td><code>StartShakeDetect</code> 改 <code>StartMotionDetect</code> · 构造 cfg struct 传入</td><td>4g_board.cc:349 / wifi:356 / p31:306</td></tr>
-<tr><td>3</td><td>调用点 <code>sc7a20h_start_shake_detect</code> 改 <code>sc7a20h_start_motion_detect</code></td><td>同上</td></tr>
-<tr><td>4</td><td>板级 init 序列调用名 <code>StartShakeDetect</code> 改 <code>StartMotionDetect</code></td><td>4g:912 / wifi:925 / p31:1439</td></tr>
-<tr><td>5</td><td>P31 特殊：cfg.tap_peak_mg = 2200</td><td>p31_board.cc 板级 StartMotionDetect</td></tr>
-<tr><td>6</td><td>真机回归：① 拿起唤醒 ② 摇一摇 ③ 双击 ④ 误触 24h</td><td>三板各自</td></tr>
+<tr><td>1</td><td><code>sc7a20h_arm_wakeup</code> → <code>sc7a20h_wakeup</code>（grep 替换）</td><td>✅ 三板已改</td></tr>
+<tr><td>2</td><td>新增板级 <code>ArmGyroWakeup()</code> 聚合方法（替代 EnterDeepSleep 内 5 行散落）</td><td>✅ 三板已加</td></tr>
+<tr><td>3</td><td>合并 <code>ConfigureDeepSleepWakeupSources</code>（3 行 EXT0 + 1 个冗余 200ms 删除）</td><td>✅ 4G/WiFi 已合并</td></tr>
+<tr><td>4</td><td><code>sc7a20h_start_shake_detect(h, cb, ctx)</code> → <code>sc7a20h_shake(h, dev, win, tgt, cool, cb, ctx)</code></td><td>✅ 三板已改 · target=2</td></tr>
+<tr><td>5</td><td>新增 <code>OnStrike</code> 函数（已写完整 · 板级调用注释暂关）</td><td>⏸️ 后续启用</td></tr>
+<tr><td>6</td><td><code>AlarmRinger::ShakeStop(3)</code> 接入 OnShake（替代 TryStopAlarmRinger）</td><td>✅ 三板已改</td></tr>
+<tr><td>7</td><td>真机回归：① 拿起唤醒 ② 摇一摇 ③ 闹钟摇停 ④ 误触 24h</td><td>⏳ 待真机</td></tr>
 </tbody>
 </table>
 
@@ -861,8 +867,8 @@ bool AlarmRinger::ShakeStop(int min_count) {
 <tr><td>2026-04-26</td><td>v2.0 → v4.0 C 重写 · opaque handle · 4G/WiFi 迁移完成</td></tr>
 <tr><td>2026-05-05</td><td>v2.1 arm_wakeup 读 INT1_SRC 清 latch（第一轮修"立即唤醒"）</td></tr>
 <tr><td>2026-05-12</td><td>v4.0.1 <b>CTRL5 LIR_INT1=0</b> + arm_wakeup 反向挪回 audio shutdown 之前 · 修二阶根因（codec 失电短路 I²C → SRC 清不掉 → 秒醒）</td></tr>
-<tr><td>2026-05-14</td><td>P31 板迁移到 v4.0 C handle + OnShake 链路接入 · 三板对齐</td></tr>
-<tr><td>v5.0 规划</td><td>新增桌面双击场景 · 3 API 极简 · 调用时配灵敏度</td></tr>
+<tr><td>2026-05-14 早</td><td>P31 板迁移到 v4.0 C handle + OnShake 链路接入 · 三板对齐</td></tr>
+<tr><td>2026-05-14 晚</td><td><b>v5.0 落地</b>：4 API 平铺签名（init/wakeup/shake/strike）· read_mg/cfg_struct/start_motion_detect 全部删除 · 双击算法实现 · ArmGyroWakeup/ShakeStop 聚合到位 · 桌面双击当前暂关</td></tr>
 </tbody>
 </table>
 </section>

@@ -310,14 +310,12 @@ void BoxAudioCodec::CalibrateMicOnce() {
         (in_raw <= 31.5f) ? std::round(in_raw / 3.0f) * 3.0f : 36.0f));
     int mic_type = std::max(22, std::min(50,
         (int)std::round((36.0f + 20.0f * std::log10(1758.0f / rms)) / 2.0f) * 2));
-    // aec 三段式: 高灵敏(≤30)减小避爆顶 / 低灵敏(≥42)加大补 ASR / 中等基线
     float aec_gain = (mic_type <= 30) ? 3.0f : (mic_type >= 42) ? 9.0f : 6.0f;
     int32_t rms_expected = (int32_t)(rms * std::pow(10.0, (input_gain - 15.0) / 20.0));
     ESP_LOGW(TAG, "第一轮 RMS=%d → input=%.0fdB mic=-%ddBV aec=%.0fdB 预期=%d",
              rms, input_gain, mic_type, aec_gain, rms_expected);
 
     SetInputGain(input_gain);
-    // SetRefGain(...);  // 测试模式: REF 保持开机初值
     SetAecGain(aec_gain);
     Settings("audio", true).SetInt("mic_type", mic_type);
     vTaskDelay(pdMS_TO_TICKS(100));
