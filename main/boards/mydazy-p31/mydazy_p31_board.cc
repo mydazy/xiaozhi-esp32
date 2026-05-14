@@ -121,7 +121,6 @@ private:
 
     // SC7A20H 三轴加速度传感器（v4.0 C 驱动 · 程序生命周期内不释放）
     sc7a20h_handle_t sc7a20h_sensor_ = nullptr;
-    bool sc7a20h_initialized_ = false;
 
     // 显示
     Display* display_ = nullptr;
@@ -274,17 +273,47 @@ private:
 
 
     void InitializeSc7a20h() {
-        // v4.0 C 驱动：一行 init 覆盖 WHO_AM_I 校验 + ODR 100Hz + AOI1 + INT1 latch + 阈值。
-        // 拿起阈值 320mg / 100ms 与 4G/WiFi 板对齐（量产实测调优）。
+        // 拿起灵敏度 320mg/100ms 与 P30 对齐 · 双击 peak=2200（P31 整机 ~60g 含 NFC+GPS+耳机）
         sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 320 /*mg*/, 100 /*ms*/);
-        sc7a20h_initialized_ = (sc7a20h_sensor_ != nullptr);
-        if (!sc7a20h_initialized_) {
-            ESP_LOGE(TAG, "SC7A20H 初始化失败（worker/WHO_AM_I 校验未过）");
-        } else {
-            ESP_LOGI(TAG, "SC7A20H 初始化完成（v4.0 C 驱动 · INT1 已 arm motion detection）");
-        }
+        if (!sc7a20h_sensor_) { ESP_LOGE(TAG, "SC7A20H 初始化失败"); return; }
+        // shake target=2 · 上下 2 次即触发 · 闹钟摇停由 ShakeStop(3) 累计防误关
+        sc7a20h_shake (sc7a20h_sensor_, 1500, 600, 2, 1500, &OnShake,  this);
+        // 桌面双击唤醒 — 暂关 · 后续扩展（P31 整机重 peak 调至 2200）
+        // sc7a20h_strike(sc7a20h_sensor_, 2200,  80, 400, 800, &OnStrike, this);
     }
 
+    // 摇一摇 — 日常 AI 互动 · 闹钟响铃中累计 3 次才停（防走路误关）
+    static void OnShake(void* /*ctx*/) {
+        Application::GetInstance().Schedule([] {
+            if (AlarmRinger::GetInstance().ShakeStop(3)) return;
+            auto& app = Application::GetInstance();
+            auto state = app.GetDeviceState();
+            if (state != kDeviceStateIdle && state != kDeviceStateListening) return;
+            app.PlaySound(Lang::Sounds::OGG_POPUP);
+            ESP_LOGI(TAG, "shake → AI");
+            app.SendTextToAI("摇一摇随机互动");
+        });
+    }
+
+    // 桌面双击 — 唤醒屏幕（与触摸唤醒同语义 · 不进 AI 对话）
+    static void OnStrike(void* ctx) {
+        auto* self = static_cast<MyDazyP31Board*>(ctx);
+        Application::GetInstance().Schedule([self] {
+            if (TryStopAlarmRinger("strike")) return;
+            ESP_LOGI(TAG, "strike → wakeup");
+            self->WakeUp();
+        });
+    }
+
+    // 拿起唤醒 arm — 必须在 AUDIO_PWR_EN=0 之前调
+    // 否则失电的 ES8311/ES7210 通过 ESD 二极管把 SDA/SCL 钉死 → INT1_SRC 清 latch 失败
+    // （配合驱动 v5.0 LIR_INT1=0 双保险锁死秒醒 · 详见 docs § 8.4）
+    void ArmGyroWakeup() {
+        if (!sc7a20h_sensor_) return;
+        if (Settings("status", false).GetInt("pickupWake", 1) == 0) return;
+        esp_err_t r = sc7a20h_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
+        if (r != ESP_OK) ESP_LOGW(TAG, "sc7a20h_wakeup failed: %s", esp_err_to_name(r));
+    }
 
     void PrepareTouchHardware() {
         // 共享 LCD/Touch 复位线时，必须先完成触摸芯片的硬件复位和固件检查，
@@ -523,19 +552,7 @@ private:
             vTaskDelay(pdMS_TO_TICKS(100)); // 等待触摸屏完全关闭
         }
 
-        // ⚠ arm_wakeup 必须在 AUDIO_PWR_EN=0 之前 · 失电的 ES8311/ES7210 通过 ESD
-        // 二极管把 SDA/SCL 钉死 → INT1_SRC 清 latch 会失败（4G/WiFi 板 2026-05-12 量产实测）。
-        // 配合驱动 v4.0.1 LIR_INT1=0 改动，本调用也兼具 defense-in-depth。
-        if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
-            Settings settings("status", false);
-            int32_t pickup_wake = settings.GetInt("pickupWake", 1);
-            if (pickup_wake) {
-                esp_err_t r = sc7a20h_arm_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
-                if (r != ESP_OK) {
-                    ESP_LOGW(TAG, "sc7a20h_arm_wakeup failed: %s", esp_err_to_name(r));
-                }
-            }
-        }
+        if (enable_gyro_wakeup) ArmGyroWakeup();   // EXT1 · 必须在 AUDIO_PWR_EN=0 之前
 
         ESP_LOGI(TAG, "[2/8] 关闭音频电源");
         gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
@@ -1547,9 +1564,8 @@ public:
             vol_down_task_ = NULL;
         }
 
-        // v4.0 C 驱动按"程序生命周期内不释放"设计，无 del API · 这里仅清状态位
+        // v5.0 驱动按"程序生命周期内不释放"设计 · 无 del API · 仅清句柄
         sc7a20h_sensor_ = nullptr;
-        sc7a20h_initialized_ = false;
 
         // 清理其他资源
         if (power_manager_) {

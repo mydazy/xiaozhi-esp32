@@ -30,6 +30,10 @@ public:
     // 按键 / 触摸 / 摇晃 handler 用此 API 抢占（响铃中先 Stop 不进对话）
     bool IsRinging() const { return ringing_.load(std::memory_order_acquire); }
 
+    // 摇晃停闹（防走路误关 · 5s 窗内累计 min_count 次摇晃才真 Stop）
+    // 返回值：是否在响铃中（true = 事件被吞 · 上层应 return）
+    bool ShakeStop(int min_count);
+
 private:
     AlarmRinger() = default;
     ~AlarmRinger() = default;
@@ -50,6 +54,8 @@ private:
     int64_t start_us_ = 0;                        // Start 时戳（kAlarm 算 elapsed 渐入档位 · kReminder 仅 LOG）
     int saved_volume_ = -1;                       // 原音量 · Stop 时恢复
     int ring_count_ = 0;                          // kReminder：已响铃次数（1/2/3 · 第 3 次后自停）
+    int shake_count_ = 0;                         // ShakeStop 累计窗口内摇晃次数
+    int64_t shake_first_us_ = 0;                  // ShakeStop 当前窗口起点
     int last_ai_prompt_sec_ = 0;                  // kAlarm：上次 AI 念叨时点（控 20s 重念周期）
     Kind kind_ = Kind::kAlarm;                    // 当前响铃模式
     std::string message_;                         // AI 播报用 · 仅 Start 内更新

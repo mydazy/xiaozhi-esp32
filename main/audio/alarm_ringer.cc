@@ -168,6 +168,22 @@ void AlarmRinger::OnTimeoutStatic(void* arg) {
     self->Stop("timeout");
 }
 
+bool AlarmRinger::ShakeStop(int min_count) {
+    if (!IsRinging()) return false;
+    int64_t now = esp_timer_get_time();
+    if (now - shake_first_us_ > 5000000LL) {     // 5s 滑窗 · 超出则重置计数
+        shake_count_ = 0;
+        shake_first_us_ = now;
+    }
+    if (++shake_count_ >= min_count) {
+        Stop("shake×N");
+        shake_count_ = 0;
+    } else {
+        ESP_LOGI(TAG, "shake stop pending (%d/%d)", shake_count_, min_count);
+    }
+    return true;
+}
+
 void AlarmRinger::Stop(const char* reason) {
     bool was_ringing = ringing_.exchange(false, std::memory_order_acq_rel);
     if (!was_ringing) return;
@@ -181,6 +197,10 @@ void AlarmRinger::Stop(const char* reason) {
     if (timeout_timer_) {
         esp_timer_stop(timeout_timer_);
     }
+
+    // 清 ShakeStop 累计状态（下次响铃从 0 开始）
+    shake_count_ = 0;
+    shake_first_us_ = 0;
 
     // 恢复原音量
     if (saved_volume_ >= 0) {

@@ -136,7 +136,6 @@ private:
 
     // SC7A20H 三轴加速度传感器（mydazy/esp_sc7a20h component）
     sc7a20h_handle_t sc7a20h_sensor_ = nullptr;
-    bool sc7a20h_initialized_ = false;
 
     // 显示
     Display* display_ = nullptr;
@@ -326,36 +325,36 @@ private:
     }
 
     void InitializeSc7a20h() {
-        // 拿起唤醒灵敏度（P30 系列两板统一）：
-        //   threshold 320mg：0.32g 加速度尖峰，拿起 3–5cm 即触发
-        //   duration  100ms：拿起加速段时长，桌面瞬碰（< 80ms）仍滤掉
-        // 调参历史：256→1024→1280→1024→768→512→448→384→320mg
+        // 拿起灵敏度 320mg/100ms（P30 系列两板统一 · 量产实测调参历史 256→…→320mg）
         sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 320 /*mg*/, 100 /*ms*/);
-        sc7a20h_initialized_ = (sc7a20h_sensor_ != nullptr);
-        if (!sc7a20h_initialized_) {
-            ESP_LOGE(TAG, "SC7A20H 初始化失败");
-        }
+        if (!sc7a20h_sensor_) { ESP_LOGE(TAG, "SC7A20H 初始化失败"); return; }
+        // shake target=2 · 上下 2 次即触发 · 闹钟摇停由 ShakeStop(3) 累计防误关
+        sc7a20h_shake (sc7a20h_sensor_, 1500, 600, 2, 1500, &OnShake,  this);
+        // 桌面双击唤醒 — 暂关 · 后续扩展
+        // sc7a20h_strike(sc7a20h_sensor_, 1800,  80, 400, 800, &OnStrike, this);
     }
 
-    // 摇一摇识别（孩子拿起来甩 → 云端决定返回什么）
+    // 摇一摇 — 日常 AI 互动 · 闹钟响铃中累计 3 次才停（防走路误关）
     static void OnShake(void* /*ctx*/) {
-        Application::GetInstance().Schedule([]() {
-            if (TryStopAlarmRinger("shake")) return;
+        Application::GetInstance().Schedule([] {
+            if (AlarmRinger::GetInstance().ShakeStop(3)) return;
             auto& app = Application::GetInstance();
             auto state = app.GetDeviceState();
-            if (state != kDeviceStateIdle && state != kDeviceStateListening) {
-                ESP_LOGD(TAG, "Shake ignored: state=%d", (int)state);
-                return;
-            }
+            if (state != kDeviceStateIdle && state != kDeviceStateListening) return;
             app.PlaySound(Lang::Sounds::OGG_POPUP);
-            ESP_LOGI(TAG, "Shake → 摇一摇 (state=%d)", (int)state);
+            ESP_LOGI(TAG, "shake → AI");
             app.SendTextToAI("摇一摇随机互动");
         });
     }
 
-    void StartShakeDetect() {
-        if (!sc7a20h_initialized_) return;
-        sc7a20h_start_shake_detect(sc7a20h_sensor_, &MyDazyP30_WifiBoard::OnShake, this);
+    // 桌面双击 — 唤醒屏幕（与触摸唤醒同语义 · 不进 AI 对话）
+    static void OnStrike(void* ctx) {
+        auto* self = static_cast<MyDazyP30_WifiBoard*>(ctx);
+        Application::GetInstance().Schedule([self] {
+            if (TryStopAlarmRinger("strike")) return;
+            ESP_LOGI(TAG, "strike → wakeup");
+            self->WakeUp();
+        });
     }
 
     void PrepareTouchHardware() {
@@ -534,12 +533,14 @@ private:
         rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
     }
 
-    void ConfigureDeepSleepWakeupSources(bool /*enable_gyro_wakeup*/) {
-        ESP_ERROR_CHECK(esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0));
-        ESP_ERROR_CHECK(rtc_gpio_pullup_en(BOOT_BUTTON_GPIO));
-        ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(BOOT_BUTTON_GPIO));
-
-        vTaskDelay(pdMS_TO_TICKS(200));
+    // 拿起唤醒 arm — 必须在 ShutdownTouchAndAudioForSleep（AUDIO_PWR_EN=0）之前调
+    // 否则失电的 ES8311/ES7210 通过 ESD 二极管把 SDA/SCL 钉死 → INT1_SRC 清 latch 失败
+    // （2026-05-12 量产二阶根因 · 配合驱动 v4.0.1 LIR_INT1=0 双保险锁死秒醒）
+    void ArmGyroWakeup() {
+        if (!sc7a20h_sensor_) return;
+        if (Settings("status", false).GetInt("pickupWake", 1) == 0) return;
+        esp_err_t r = sc7a20h_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
+        if (r != ESP_OK) ESP_LOGW(TAG, "sc7a20h_wakeup failed: %s", esp_err_to_name(r));
     }
 
     void ResetAllGpiosForSleep() {
@@ -583,19 +584,11 @@ private:
         Application::GetInstance().ResetProtocol();
         vTaskDelay(pdMS_TO_TICKS(500));
 
-        if (enable_gyro_wakeup && sc7a20h_initialized_ && sc7a20h_sensor_) {
-            Settings settings("status", false);
-            int32_t pickup_wake = settings.GetInt("pickupWake", 1);
-            if (pickup_wake) {
-                esp_err_t r = sc7a20h_arm_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
-                if (r != ESP_OK) {
-                    ESP_LOGW(TAG, "sc7a20h_arm_wakeup failed: %s", esp_err_to_name(r));
-                }
-            }
-        }
-
-        ShutdownTouchAndAudioForSleep();
-        ConfigureDeepSleepWakeupSources(enable_gyro_wakeup);
+        if (enable_gyro_wakeup) ArmGyroWakeup();         // EXT1 · 必须在音频断电之前
+        ShutdownTouchAndAudioForSleep();                 // AUDIO_PWR_EN=0（之后 I²C 不可用）
+        ESP_ERROR_CHECK(esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0));   // EXT0 BOOT 键
+        rtc_gpio_pullup_en(BOOT_BUTTON_GPIO);
+        rtc_gpio_pulldown_dis(BOOT_BUTTON_GPIO);
 
         WifiStation::GetInstance().Stop();
         // STA_STOP 事件链（典型 ~150-300ms），再断电源。
@@ -922,7 +915,6 @@ public:
         InitializeDisplay();
         InitializeTouch();
         InitializeSc7a20h();
-        StartShakeDetect();
         InitializePowerManager();
         InitializePowerSaveTimer();
         InitializeButtons();
