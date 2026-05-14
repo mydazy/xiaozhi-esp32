@@ -26,6 +26,7 @@
 #include <ctime>
 #include <vector>
 #include <optional>
+#include <algorithm>   // std::remove · 绑定 URL 过滤 MAC 冒号
 #include <esp_log.h>
 #include <esp_heap_caps.h>
 #include <cJSON.h>
@@ -829,8 +830,10 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
     ESP_LOGI(TAG, "Activation: scene=%s code=%s", mac.c_str(), code.c_str());
 
     // 通用 ShowQrCode：扫码跳转 H5/小程序绑定页，URL 携带 MAC 用于设备识别
-//    std::string bind_url = "https://mydazy.cn/ota/bind?scene=" + mac;
-    std::string bind_url = "https://mydazy.cn/ota/code?code=" + code;
+    // URL 用无冒号 MAC（紧凑）· 屏幕 bottom 仍显示原 MAC（带冒号便于人眼阅读）
+    std::string mac_url = mac;
+    mac_url.erase(std::remove(mac_url.begin(), mac_url.end(), ':'), mac_url.end());
+    std::string bind_url = "https://mydazy.cn/ota/bind?mac=" + mac_url;
     display->ShowQrCode(bind_url.c_str(), code.c_str(), "扫码绑定设备", mac.c_str());
     display->SetChatMessage("system", message.c_str());
 

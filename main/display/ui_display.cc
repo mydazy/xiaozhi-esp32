@@ -781,10 +781,10 @@ void UiDisplay::ShowQrCode(const char* qr_content,
     make_label(qr_content, lv_color_hex(0x333333), LV_ALIGN_CENTER, 0);
 #endif
 
-    // 高亮大字（蓝色，如激活码 / 付款金额）
+    // 高亮大字（蓝色，如激活码 / 付款金额）· y=-30（原 -25 上移 5px）
     int bottom_y = -3;
     if (highlight && highlight[0]) {
-        make_label(highlight, lv_color_hex(0x2196F3), LV_ALIGN_BOTTOM_MID, -25);
+        make_label(highlight, lv_color_hex(0x2196F3), LV_ALIGN_BOTTOM_MID, -30);
         bottom_y = -6;  // 给高亮让出空间
     }
 
