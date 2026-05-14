@@ -160,7 +160,7 @@ void AlarmRinger::OnTimeoutStatic(void* arg) {
 bool AlarmRinger::ShakeStop(int min_count) {
     if (!IsRinging()) return false;
     int64_t now = esp_timer_get_time();
-    if (now - shake_first_us_ > 5000000LL) {     // 5s 滑窗 · 超出则重置计数
+    if (now - shake_first_us_ > 10000000LL) {    // 10s 滑窗 · 容纳 6 次摇晃（每次 ~1s）
         shake_count_ = 0;
         shake_first_us_ = now;
     }

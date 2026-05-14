@@ -276,8 +276,7 @@ private:
         // 拿起灵敏度 320mg/100ms 与 P30 对齐 · 双击 peak=2200（P31 整机 ~60g 含 NFC+GPS+耳机）
         sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 320 /*mg*/, 100 /*ms*/);
         if (!sc7a20h_sensor_) { ESP_LOGE(TAG, "SC7A20H 初始化失败"); return; }
-        // shake target=2 · 上下 2 次即触发 · 闹钟摇停由 ShakeStop(3) 累计防误关
-        sc7a20h_shake (sc7a20h_sensor_, 1500, 600, 2, 1500, &OnShake,  this);
+        sc7a20h_shake (sc7a20h_sensor_, 1500, 1000, 4, 1500, &OnShake,  this);
         // 桌面双击唤醒 — 暂关 · 后续扩展（P31 整机重 peak 调至 2200）
         // sc7a20h_strike(sc7a20h_sensor_, 2200,  80, 400, 800, &OnStrike, this);
     }
@@ -285,7 +284,7 @@ private:
     // 摇一摇 — 日常 AI 互动 · 闹钟响铃中累计 3 次才停（防走路误关）
     static void OnShake(void* /*ctx*/) {
         Application::GetInstance().Schedule([] {
-            if (AlarmRinger::GetInstance().ShakeStop(3)) return;
+            if (AlarmRinger::GetInstance().ShakeStop(6)) return;   // 6 次累计才停闹铃（防误关）
             auto& app = Application::GetInstance();
             auto state = app.GetDeviceState();
             if (state != kDeviceStateIdle && state != kDeviceStateListening) return;
