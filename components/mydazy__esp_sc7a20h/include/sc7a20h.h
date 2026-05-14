@@ -2,33 +2,15 @@
  * SPDX-FileCopyrightText: 2026 mydazy
  * SPDX-License-Identifier: Apache-2.0
  *
- * SC7A20H 三轴加速度计驱动 — v4.0.0 极简版
+ * SC7A20H 三轴加速度计驱动 — v5.0.0
  *
- * 设计哲学：判断越少问题越少，保留高频刚需，删除运行时切换。
+ * 四 API · 三场景（命名 / 寄存器 / 调试方法详见 docs/p30-sc7a20h-flows.html）：
+ *   sc7a20h_init    — 基础初始化 + 拿起灵敏度
+ *   sc7a20h_wakeup  — ① 深睡前 arm EXT1 唤醒
+ *   sc7a20h_shake   — ② 摇一摇检测 + 回调
+ *   sc7a20h_strike  — ③ 桌面双击检测 + 回调
  *
- * 仅 4 个 API 覆盖项目所有用例：
- *   1) sc7a20h_init                 — 一行初始化（拿起阈值/时长 + worker 注入）
- *   2) sc7a20h_read_mg              — 读三轴加速度（mg），原始数据出口
- *   3) sc7a20h_arm_wakeup           — 进深睡前一调（清 latch + 注册 EXT1）
- *   4) sc7a20h_start_shake_detect   — 后台任务做摇一摇识别，回调通知
- *
- * 项目级硬编码（编译期常量化，零运行时分支）：
- *   - I2C 地址  : 0x19
- *   - I2C 速率  : 400 kHz
- *   - 量程      : ±4g（HR 12-bit, 2 mg/LSB）
- *   - ODR       : 100 Hz
- *   - 中断路由  : INT1 + AOI1 + High Event OR (XYZ)
- *   - INT 极性  : active LOW (idle HIGH)
- *
- * 与项目高频场景的对应：
- *   - 拿起唤醒：sc7a20h_init() + sc7a20h_arm_wakeup() 配对，深睡 → INT1 LOW → wake
- *   - 摇一摇识别：sc7a20h_start_shake_detect() 后台任务，回调出事件
- *   - 闹钟摇停：sc7a20h_read_mg() 自取数据自定义判定
- *
- * 工程细节：
- *   - 所有 I2C 走 i2c_bus_worker（防 4G RF 共线污染）
- *   - init 6+寄存器序列用 lock_session 包裹（防音频/触摸打断）
- *   - 不支持运行时切量程/ODR/power_down/del（程序生命周期内不释放）
+ * 所有灵敏度参数在调用时直接传入 · 不暴露 struct · 不支持运行时切换。
  */
 
 #pragma once
@@ -44,67 +26,73 @@ extern "C" {
 
 typedef struct sc7a20h_dev_t *sc7a20h_handle_t;
 
+/* 回调签名（motion_task 上下文 · 非 ISR · 不可阻塞 · 必须 Schedule 切主线程） */
+typedef void (*sc7a20h_shake_cb_t)(void *ctx);
+typedef void (*sc7a20h_strike_cb_t)(void *ctx);
+
 /**
- * 一行初始化：注册到 worker + verify WHO_AM_I + 配置 motion detection
+ * 基础初始化 + 配置拿起唤醒灵敏度
  *
- * @param worker             已创建的 i2c_bus_worker handle
- * @param pickup_thresh_mg   拿起唤醒阈值（mg）。项目推荐 768
- *                            （步长 32 mg/LSB @ ±4g，0x18 = 768 mg）
- * @param pickup_duration_ms 拿起持续时长（ms）。项目推荐 200
- *                            （步长 10 ms @ 100 Hz ODR，0x14 = 200 ms）
+ * 做了：worker 注册 · WHO_AM_I 校验 · 锁定 ±4g HR / ODR 100Hz / INT1 active LOW
+ *       LIR=0 · AOI1 → INT1 · 写入拿起阈值 + 持续时间
  *
- * @return  handle / NULL on error（自动清理）
+ * 示例：sc7a20h_init(i2c_worker_, 320 / mg /, 100 / ms /);
+ *
+ * @param worker             已创建的 i2c_bus_worker 句柄
+ * @param pickup_thresh_mg   拿起阈值 mg · 步长 32 · 三板项目值 320
+ * @param pickup_duration_ms 拿起持续 ms · 步长 10 · 三板项目值 100
+ * @return  handle / NULL（失败自动清理）
  */
 sc7a20h_handle_t sc7a20h_init(i2c_worker_handle_t worker,
                               uint16_t pickup_thresh_mg,
                               uint16_t pickup_duration_ms);
 
 /**
- * 读三轴加速度（mg，int16 整数，无浮点）
+ * ① 拿起唤醒 — 深睡前 arm · 兜底清 INT1 latch + enable_ext1 ANY_LOW + RTC pullup
  *
- * 输出范围：±4096 mg（量程 ±4g，量产实测 ±3500 内）
- * 调用周期：摇一摇 100 ms / 晃停 50 ms — CPU < 1%
- * 单次开销：1 次 I2C burst read（6 byte）+ 6 次移位乘法 ≈ 30 µs
+ * 示例：sc7a20h_wakeup(handle, GPIO_NUM_3);
+ *
  */
-esp_err_t sc7a20h_read_mg(sc7a20h_handle_t h, int16_t *x, int16_t *y, int16_t *z);
+esp_err_t sc7a20h_wakeup(sc7a20h_handle_t h, gpio_num_t int1_gpio);
 
 /**
- * 进深睡前一调 — 清 INT1 latch + 注册 EXT1 wakeup + RTC GPIO 上拉
+ * ② 摇一摇检测 · 首次调用启动共享 motion_task（栈 2560 · P1 · Core 1）
  *
- * @param int1_gpio  SC7A20H INT1 信号接的 RTC-capable GPIO
+ * 示例：sc7a20h_shake(handle, 1500, 600, 3, 1500, &OnShake, this);
  *
- * 调用顺序约定：
- *   sc7a20h_arm_wakeup(handle, GPIO_NUM_3);
- *   esp_deep_sleep_start();   // 由调用方触发
+ * @param deviation_mg   偏离 1g 阈值 mg · 项目默认 1500（儿童力气小 → 1200）
+ * @param window_ms      滑窗时长 ms · 须 100 整数倍 · 默认 600
+ * @param target_frames  窗内强动帧触发阈值 · 默认 3
+ * @param cooldown_ms    触发后冷却 ms · 默认 1500
+ * @param cb             触发回调（不可为 NULL）
+ * @return ESP_OK / INVALID_ARG / INVALID_STATE(重复启动) / NO_MEM
  */
-esp_err_t sc7a20h_arm_wakeup(sc7a20h_handle_t h, gpio_num_t int1_gpio);
+esp_err_t sc7a20h_shake(sc7a20h_handle_t h,
+                        uint16_t deviation_mg,
+                        uint16_t window_ms,
+                        uint8_t  target_frames,
+                        uint16_t cooldown_ms,
+                        sc7a20h_shake_cb_t cb,
+                        void *ctx);
 
 /**
- * 摇一摇事件回调（非 ISR，在驱动后台任务上下文里直接调用）
- * 上层一般 Schedule 到主线程做业务（Alert/PlaySound/SendTextToAI）。
+ * ③ 桌面双击检测 · 与 shake 共享 motion_task
+ *
+ * 示例：sc7a20h_strike(handle, 1800, 80, 400, 800, &OnStrike, this);
+ *
+ * @param peak_mg       单次撞击瞬态峰值 mg · 默认 1800（P31 整机重 → 2200）
+ * @param min_gap_ms    两击最小间隔 ms · 防抖下限 · 默认 80
+ * @param max_gap_ms    两击最大间隔 ms · 双击窗口 · 默认 400
+ * @param cooldown_ms   触发后冷却 ms · 默认 800
+ * @param cb            触发回调（不可为 NULL）
  */
-typedef void (*sc7a20h_shake_cb_t)(void *user_ctx);
-
-/**
- * 启动摇一摇后台检测任务
- *
- * 算法（项目硬编码 · 量产实测调优）：
- *   - 100 ms 周期采样三轴
- *   - 偏离 1g 重力 ≥1500 mg 视为强动帧
- *   - 600 ms 滑动窗口内 ≥3 帧强动 = 触发
- *   - 触发后 1500 ms 冷却防连发
- *
- * 任务参数：栈 2560 / 优先级 1 / Core 1（与 LVGL 共核但低优先级，CPU < 1%）
- *
- * @param cb        触发回调（不可为 NULL）
- * @param user_ctx  透传给 cb 的上下文
- *
- * @return ESP_OK / ESP_ERR_INVALID_ARG / ESP_ERR_INVALID_STATE（重复启动）
- *         / ESP_ERR_NO_MEM（任务创建失败）
- */
-esp_err_t sc7a20h_start_shake_detect(sc7a20h_handle_t h,
-                                     sc7a20h_shake_cb_t cb,
-                                     void *user_ctx);
+esp_err_t sc7a20h_strike(sc7a20h_handle_t h,
+                         uint16_t peak_mg,
+                         uint16_t min_gap_ms,
+                         uint16_t max_gap_ms,
+                         uint16_t cooldown_ms,
+                         sc7a20h_strike_cb_t cb,
+                         void *ctx);
 
 #ifdef __cplusplus
 }
