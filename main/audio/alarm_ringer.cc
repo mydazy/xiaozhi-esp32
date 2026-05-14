@@ -168,7 +168,7 @@ bool AlarmRinger::ShakeStop(int min_count) {
         Stop("shake×N");
         shake_count_ = 0;
     } else {
-        ESP_LOGI(TAG, "shake stop pending (%d/%d)", shake_count_, min_count);
+        ESP_LOGI(TAG, "闹钟摇停累计 (%d/%d)", shake_count_, min_count);
     }
     return true;
 }

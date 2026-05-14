@@ -41,15 +41,15 @@ static const char *TAG = "axs5106l_touch";
 #define SWIPE_THRESHOLD      20       /* ~2.6mm · 与 Apple 10pt 对齐 */
 #define CLICK_MAX_TIME_US    500000   /* 500ms · Apple 标准（800→500）*/
 #define CLICK_MIN_TIME_US     50000   /* 50ms · Apple 标准（60→50）*/
-#define CLICK_MAX_MOVE       20       /* ~2.6mm · 20→Apple 10pt 等效 */
+#define CLICK_MAX_MOVE       30       /* ~4mm · 容忍儿童手指落屏微移（20→30）*/
 #define LONG_PRESS_TIME_US   500000   /* 500ms · 防儿童误触（300→500 与 Apple/iOS 对齐）*/
 #define DOUBLE_CLICK_TIME_US 400000   /* 400ms · Apple 300 + 100ms 儿童反应 */
 #define DOUBLE_CLICK_DIST    80       /* ~10.6mm · Apple 30pt 物理等效 */
-#define CLICK_MIN_FRAMES      3       /* 48ms @ 16ms LVGL · 与 50ms tap 配套 */
+#define CLICK_MIN_FRAMES      2       /* 32ms @ 16ms LVGL · 短促点击采 2 帧即可（之前 3 太严）*/
 #define SWIPE_MIN_TIME_US    150000   /* 150ms 不变 */
 #define SWIPE_MIN_FRAMES      8       /* 128ms @ 16ms · 配 SWIPE_MIN_TIME */
 #define LONG_PRESS_MIN_FRAMES 30      /* 480ms @ 16ms · 配 LONG_PRESS_TIME 500ms */
-#define JITTER_LIMIT_FOR_TAP 20       /* ~2.6mm · 60Hz 采样下抖动应大幅降低（32→20）*/
+#define JITTER_LIMIT_FOR_TAP 40       /* ~5mm · 容忍儿童手抖 / RF 抖动（20→40）*/
 #define RELEASE_DEBOUNCE  2             /* 连续 N 帧无触摸才报松开（两档共用）*/
 #define INT_STORM_WINDOW_US      1000000   /* rolling 1s 边沿计数窗（两档共用）*/
 #define INT_STORM_HOT_WINDOW_US 30000000   /* 30s post-storm 灵敏模式（两档共用）*/
@@ -63,7 +63,7 @@ static const char *TAG = "axs5106l_touch";
 #define RF_N_STORM_MUTE_US          1000000
 #define RF_N_SWIPE_TRAJ_RATIO             3
 
-#define RF_S_INT_DEBOUNCE_US           8000
+#define RF_S_INT_DEBOUNCE_US           4000
 #define RF_S_POST_RELEASE_GUARD_US   200000
 #define RF_S_MAX_SPEED_PX_S            2500
 #define RF_S_STORM_THRESHOLD             25      /* 12→25 · 容忍本底噪声 */
@@ -755,7 +755,7 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
                 g->sample_count >= LONG_PRESS_MIN_FRAMES) {
                 g->long_fired      = true;
                 g->last_click_time = 0;
-                ESP_LOGI(TAG, "long-press (%d,%d)", g->start_x, g->start_y);
+                ESP_LOGI(TAG, "长按 (%d,%d)", g->start_x, g->start_y);
                 fire_long_press(self, false, g->start_x, g->start_y);
             }
         }
@@ -767,7 +767,7 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
 
         if (g->long_fired) {
             g->long_fired = false;
-            ESP_LOGI(TAG, "long-press release (%d,%d)", g->start_x, g->start_y);
+            ESP_LOGI(TAG, "长按松开 (%d,%d)", g->start_x, g->start_y);
             fire_long_press(self, true, g->start_x, g->start_y);
             return;
         }
@@ -782,7 +782,7 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
                        g->sample_count >= CLICK_MIN_FRAMES &&
                        !g->jitter_unstable);
         if (!tap_ok) {
-            ESP_LOGW(TAG, "tap rejected: move=%d dur=%ums frames=%u jitter=%u unstable=%d",
+            ESP_LOGW(TAG, "单击拒识: 位移=%d 时长=%ums 帧数=%u 抖动=%u 不稳定=%d",
                      manhattan, (unsigned)(dur/1000),
                      (unsigned)g->sample_count, (unsigned)g->jitter_sum,
                      (int)g->jitter_unstable);
@@ -795,13 +795,13 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
                              click_dist < DOUBLE_CLICK_DIST;
             if (is_double) {
                 g->last_click_time = 0;
-                ESP_LOGI(TAG, "double-tap (%d,%d)", g->start_x, g->start_y);
+                ESP_LOGI(TAG, "双击 (%d,%d)", g->start_x, g->start_y);
                 fire_double_click(self, g->start_x, g->start_y);
             } else {
                 g->last_click_time = now;
                 g->last_click_x    = g->start_x;
                 g->last_click_y    = g->start_y;
-                ESP_LOGI(TAG, "tap (%d,%d)", g->start_x, g->start_y);
+                ESP_LOGI(TAG, "单击 (%d,%d)", g->start_x, g->start_y);
                 fire_click(self, g->start_x, g->start_y);
             }
             return;
@@ -816,7 +816,9 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
             dur >= SWIPE_MIN_TIME_US &&
             g->sample_count >= SWIPE_MIN_FRAMES &&
             g->jitter_sum <= traj_budget) {
-            ESP_LOGI(TAG, "swipe dx=%d dy=%d", dx, dy);
+            const char *dir = (abs(dx) > abs(dy)) ? (dx > 0 ? "右滑" : "左滑")
+                                                  : (dy > 0 ? "下滑" : "上滑");
+            ESP_LOGI(TAG, "%s dx=%d dy=%d", dir, dx, dy);
             fire_swipe(self, (int16_t)dx, (int16_t)dy);
         }
     }

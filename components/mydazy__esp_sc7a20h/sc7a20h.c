@@ -128,7 +128,7 @@ static void update_shake(shake_state_t *s, int32_t dev, int64_t now_us)
     }
     if (strong >= s->target && (now_us - s->last_us) > s->cooldown_us) {
         s->last_us = now_us;
-        ESP_LOGI(TAG, "shake detected (strong=%d/%d)", strong, s->window);
+        ESP_LOGI(TAG, "摇一摇触发 (强动帧=%d/%d)", strong, s->window);
         s->cb(s->ctx);
     }
 }
@@ -156,7 +156,7 @@ static void update_strike(strike_state_t *t, int32_t dev, int64_t now_us)
             } else if (is_peak && gap >= t->min_gap_us) {
                 t->last_us = now_us;
                 t->phase = STRIKE_IDLE;
-                ESP_LOGI(TAG, "strike detected (gap=%lldms)", gap / 1000);
+                ESP_LOGI(TAG, "桌面双击触发 (间隔=%lldms)", gap / 1000);
                 t->cb(t->ctx);
             }
             break;
@@ -309,7 +309,7 @@ esp_err_t sc7a20h_shake(sc7a20h_handle_t h,
     esp_err_t r = ensure_motion_task(h);
     if (r != ESP_OK) { h->shake.enabled = false; return r; }
 
-    ESP_LOGI(TAG, "shake on (dev=%umg win=%dms tgt=%d/%d cool=%ums)",
+    ESP_LOGI(TAG, "摇一摇启用 (阈值=%umg 窗=%dms 目标帧=%d/%d 冷却=%ums)",
              deviation_mg, win * MOTION_PERIOD_MS, h->shake.target, win, cooldown_ms);
     return ESP_OK;
 }
@@ -339,7 +339,7 @@ esp_err_t sc7a20h_strike(sc7a20h_handle_t h,
     esp_err_t r = ensure_motion_task(h);
     if (r != ESP_OK) { h->strike.enabled = false; return r; }
 
-    ESP_LOGI(TAG, "strike on (peak=%umg gap=[%u,%u]ms cool=%ums)",
+    ESP_LOGI(TAG, "桌面双击启用 (峰值=%umg 间隔=[%u,%u]ms 冷却=%ums)",
              peak_mg, min_gap_ms, max_gap_ms, cooldown_ms);
     return ESP_OK;
 }
