@@ -366,10 +366,20 @@ void AudioService::AudioOutputTask() {
 void AudioService::OpusCodecTask() {
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
-        audio_queue_cv_.wait(lock, [this]() {
+        auto need_underrun_compensation = [this]() {
+            if (!audio_decode_queue_.empty()) return false;
+            if (audio_playback_queue_.size() >= kPlaybackLowWatermark) return false;
+            // 总上限 = PLC + fade-out 1 帧 + 静音 4 帧 ≈ 160ms · 之后停止补偿等真正数据
+            if (consecutive_underrun_plc_ >= kMaxUnderrunPlcFrames + 5) return false;
+            auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - last_output_time_).count();
+            return since < kRecentPlaybackWindowMs;
+        };
+        audio_queue_cv_.wait(lock, [this, &need_underrun_compensation]() {
             return service_stopped_ ||
                 (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) ||
-                (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE);
+                (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE) ||
+                need_underrun_compensation();
         });
         if (service_stopped_) {
             break;
@@ -431,6 +441,7 @@ void AudioService::OpusCodecTask() {
                     audio_playback_queue_.push_back(std::move(task));
                     audio_queue_cv_.notify_all();
                     debug_statistics_.decode_count++;
+                    consecutive_underrun_plc_ = 0;  // 真正数据到达 · 清零 underrun 补偿计数
                     if (used_plc) {
                         debug_statistics_.decode_plc_count++;
                         if (debug_statistics_.decode_plc_count % 20 == 1) {
@@ -451,6 +462,77 @@ void AudioService::OpusCodecTask() {
                 lock.lock();
             }
             debug_statistics_.decode_count++;
+        }
+        /* Underrun 主动补偿：弱网 decode_queue 空但 playback 即将空 · 防止 DAC 硬切跳变 */
+        else if (need_underrun_compensation() && opus_decoder_ != nullptr && decoder_frame_size_ > 0) {
+            auto task = std::make_unique<AudioTask>();
+            task->type = kAudioTaskTypeDecodeToPlaybackQueue;
+            task->timestamp = 0;
+            task->pcm.assign(decoder_frame_size_, 0);
+            bool synthesized_ok = false;
+            bool used_opus_plc = false;
+
+            if (consecutive_underrun_plc_ < kMaxUnderrunPlcFrames) {
+                // 阶段 1: OPUS PLC 合成（喂 NULL 让解码器预测下一帧）
+                lock.unlock();
+                esp_audio_dec_in_raw_t plc_raw = { nullptr, 0, 0, ESP_AUDIO_DEC_RECOVERY_PLC };
+                esp_audio_dec_out_frame_t plc_frame = {
+                    (uint8_t *)task->pcm.data(),
+                    (uint32_t)(task->pcm.size() * sizeof(int16_t)),
+                    0,
+                };
+                esp_audio_dec_info_t dec_info = {};
+                std::unique_lock<std::mutex> dec_lock(decoder_mutex_);
+                auto ret = esp_opus_dec_decode(opus_decoder_, &plc_raw, &plc_frame, &dec_info);
+                dec_lock.unlock();
+                lock.lock();
+                if (ret == ESP_AUDIO_ERR_OK && plc_frame.decoded_size > 0) {
+                    task->pcm.resize(plc_frame.decoded_size / sizeof(int16_t));
+                    synthesized_ok = true;
+                    used_opus_plc = true;
+                    if (!task->pcm.empty()) last_plc_tail_sample_ = task->pcm.back();
+                }
+            } else if (consecutive_underrun_plc_ == kMaxUnderrunPlcFrames) {
+                // 阶段 2: 一帧 fade-out · last_plc_tail_sample_ 线性衰减到 0 · 平滑桥接到静音
+                size_t n = task->pcm.size();
+                int32_t denom = (n > 1) ? (int32_t)(n - 1) : 1;
+                for (size_t i = 0; i < n; ++i) {
+                    int32_t scale = (int32_t)(n - 1 - i);
+                    task->pcm[i] = (int16_t)((int32_t)last_plc_tail_sample_ * scale / denom);
+                }
+                synthesized_ok = true;
+            } else {
+                // 阶段 3: 纯静音（task->pcm 已 assign 为 0）
+                synthesized_ok = true;
+            }
+
+            if (synthesized_ok) {
+                if (decoder_sample_rate_ != codec_->output_sample_rate() && output_resampler_ != nullptr) {
+                    uint32_t target_size = 0;
+                    esp_ae_rate_cvt_get_max_out_sample_num(output_resampler_, task->pcm.size(), &target_size);
+                    std::vector<int16_t> resampled(target_size);
+                    uint32_t actual_output = target_size;
+                    esp_ae_rate_cvt_process(output_resampler_, (esp_ae_sample_t)task->pcm.data(), task->pcm.size(),
+                                            (esp_ae_sample_t)resampled.data(), &actual_output);
+                    resampled.resize(actual_output);
+                    task->pcm = std::move(resampled);
+                }
+                audio_playback_queue_.push_back(std::move(task));
+                audio_queue_cv_.notify_all();
+                consecutive_underrun_plc_++;
+                if (used_opus_plc) {
+                    debug_statistics_.underrun_plc_count++;
+                } else {
+                    debug_statistics_.underrun_silence_count++;
+                }
+                uint32_t total = debug_statistics_.underrun_plc_count + debug_statistics_.underrun_silence_count;
+                if (total % 50 == 1) {
+                    ESP_LOGW(TAG, "Underrun compensation: plc=%lu silence=%lu (consec=%d)",
+                             (unsigned long)debug_statistics_.underrun_plc_count,
+                             (unsigned long)debug_statistics_.underrun_silence_count,
+                             consecutive_underrun_plc_);
+                }
+            }
         }
         /* Encode the audio to send queue */
         if (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) {
@@ -772,6 +854,8 @@ void AudioService::ResetDecoder() {
     audio_decode_queue_.clear();
     audio_playback_queue_.clear();
     audio_testing_queue_.clear();
+    consecutive_underrun_plc_ = 0;
+    last_plc_tail_sample_ = 0;
     audio_queue_cv_.notify_all();
 }
 

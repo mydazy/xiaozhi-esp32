@@ -104,8 +104,10 @@ struct DebugStatistics {
     uint32_t decode_count = 0;
     uint32_t encode_count = 0;
     uint32_t playback_count = 0;
-    uint32_t decode_plc_count = 0;   // OPUS PLC 合成帧数（弱网丢帧补偿）
-    uint32_t decode_drop_count = 0;  // 解码 + PLC 双失败导致丢弃的帧数
+    uint32_t decode_plc_count = 0;       // OPUS PLC 合成帧数（损坏包补偿）
+    uint32_t decode_drop_count = 0;      // 解码 + PLC 双失败导致丢弃的帧数
+    uint32_t underrun_plc_count = 0;     // playback 即将空时主动合成的 PLC 帧（弱网 jitter 补偿）
+    uint32_t underrun_silence_count = 0; // 超过 PLC 上限后 fade-out + 静音帧
 };
 
 class AudioService {
@@ -196,6 +198,12 @@ private:
     esp_timer_handle_t audio_power_timer_ = nullptr;
     std::chrono::steady_clock::time_point last_input_time_;
     std::chrono::steady_clock::time_point last_output_time_;
+
+    int consecutive_underrun_plc_ = 0;
+    int16_t last_plc_tail_sample_ = 0;                    // 上一帧 PLC PCM 末尾 sample · fade-out 起点
+    static constexpr int kMaxUnderrunPlcFrames    = 3;    // OPUS PLC 安全上限 (~60ms @ 20ms 帧)
+    static constexpr int kPlaybackLowWatermark    = 2;    // playback_queue ≤ 该值时触发补偿
+    static constexpr int kRecentPlaybackWindowMs  = 500;  // 最近 N ms 有过 output → 认为在 TTS 流
 
     void AudioInputTask();
     void AudioOutputTask();

@@ -333,14 +333,14 @@ axs5106l_upgrade_result_t axs5106l_upgrade_run(axs5106l_upgrade_handle_t h)
     uint16_t embedded_version = axs5106l_upgrade_get_embedded_version();
     ESP_LOGI(TAG, "embedded firmware version: V%u", embedded_version);
 
-    /* 3. Compare; skip if chip already matches embedded（量产纪律：减少无谓 flash 擦写）. */
-    if (chip_version != 0 && chip_version == embedded_version) {
-        ESP_LOGI(TAG, "chip firmware up to date (V%u); no upgrade needed", chip_version);
+    /* 3. 版本号不一致就升级（不判断大小 · chip=0 空板/降级/升级都触发烧录）*/
+    if (chip_version == embedded_version) {
+        ESP_LOGI(TAG, "chip firmware 版本一致 (V%u) · 跳过升级", chip_version);
         return AXS5106L_UPGRADE_NOT_NEEDED;
     }
 
-    /* 4. Run the upgrade. */
-    ESP_LOGI(TAG, "starting firmware upgrade: V%u -> V%u", chip_version, embedded_version);
+    /* 4. 不一致 · 触发升级（V_chip → V_embedded · 不论方向）*/
+    ESP_LOGI(TAG, "固件版本不一致 · 开始升级: V%u → V%u", chip_version, embedded_version);
 
     for (int retry = 0; retry < UPGRADE_RETRY_TIMES; retry++) {
         if (do_upgrade(h)) {
