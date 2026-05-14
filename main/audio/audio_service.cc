@@ -403,8 +403,19 @@ void AudioService::OpusCodecTask() {
                 esp_audio_dec_info_t dec_info = {};
                 std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
                 auto ret = esp_opus_dec_decode(opus_decoder_, &raw, &out_frame, &dec_info);
+                // 弱网/帧损坏时用 OPUS 内置 PLC 合成过渡帧，避免上下文断裂导致的吱啦杂音
+                bool used_plc = false;
+                if (ret != ESP_AUDIO_ERR_OK) {
+                    out_frame.decoded_size = 0;
+                    raw.buffer = nullptr;
+                    raw.len = 0;
+                    raw.consumed = 0;
+                    raw.frame_recover = ESP_AUDIO_DEC_RECOVERY_PLC;
+                    ret = esp_opus_dec_decode(opus_decoder_, &raw, &out_frame, &dec_info);
+                    used_plc = true;
+                }
                 decoder_lock.unlock();
-                if (ret == ESP_AUDIO_ERR_OK) {
+                if (ret == ESP_AUDIO_ERR_OK && out_frame.decoded_size > 0) {
                     task->pcm.resize(out_frame.decoded_size / sizeof(int16_t));
                     if (decoder_sample_rate_ != codec_->output_sample_rate() && output_resampler_ != nullptr) {
                         uint32_t target_size = 0;
@@ -420,8 +431,19 @@ void AudioService::OpusCodecTask() {
                     audio_playback_queue_.push_back(std::move(task));
                     audio_queue_cv_.notify_all();
                     debug_statistics_.decode_count++;
+                    if (used_plc) {
+                        debug_statistics_.decode_plc_count++;
+                        if (debug_statistics_.decode_plc_count % 20 == 1) {
+                            ESP_LOGW(TAG, "OPUS PLC synthesized (total=%lu)",
+                                     (unsigned long)debug_statistics_.decode_plc_count);
+                        }
+                    }
                 } else {
-                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);
+                    debug_statistics_.decode_drop_count++;
+                    if (debug_statistics_.decode_drop_count % 20 == 1) {
+                        ESP_LOGW(TAG, "Decode failed even after PLC (ret=%d, total drop=%lu)",
+                                 ret, (unsigned long)debug_statistics_.decode_drop_count);
+                    }
                     lock.lock();
                 }
             } else {

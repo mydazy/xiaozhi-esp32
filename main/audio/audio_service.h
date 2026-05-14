@@ -43,7 +43,7 @@ extern int g_opus_frame_duration_ms;
 #define MAX_ENCODE_TASKS_IN_QUEUE      4
 #define MAX_PLAYBACK_TASKS_IN_QUEUE    8
 #define MAX_SEND_PACKETS_IN_QUEUE      (2400 / OPUS_FRAME_DURATION_MS)   // 上行 · 跟编码帧长 · 20ms=120 / 60ms=40 · 缓存 2400ms 严格一致
-#define MAX_DECODE_PACKETS_IN_QUEUE    (2400 / OPUS_FRAME_DURATION_MS)  // 下行 · 按最小 20ms 算固定 · 缓存 ≥ 2400ms（下行帧长由服务端决定，可能 ≠ 上行）
+#define MAX_DECODE_PACKETS_IN_QUEUE    (3600 / OPUS_FRAME_DURATION_MS)
 #define AUDIO_TESTING_MAX_DURATION_MS  10000
 #define MAX_TIMESTAMPS_IN_QUEUE        3
 
@@ -104,6 +104,8 @@ struct DebugStatistics {
     uint32_t decode_count = 0;
     uint32_t encode_count = 0;
     uint32_t playback_count = 0;
+    uint32_t decode_plc_count = 0;   // OPUS PLC 合成帧数（弱网丢帧补偿）
+    uint32_t decode_drop_count = 0;  // 解码 + PLC 双失败导致丢弃的帧数
 };
 
 class AudioService {

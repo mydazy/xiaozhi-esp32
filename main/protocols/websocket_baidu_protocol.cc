@@ -1235,10 +1235,8 @@ void WebsocketBaiduProtocol::SendInitialDeviceInfo() {
     cJSON_AddBoolToObject(json, "disable_voice_auto_int", !aec_cfg_->cloud_auto_int);
     cJSON_AddNumberToObject(json, "tts_end_delay_ms", aec_cfg_->tts_end_delay_ms);
 
-    // ===== TTS 弱网加速 (与 AEC 模式无关, 二者都开) =====
-    cJSON_AddBoolToObject(json, "tts_enable_fast_send", true);
-    cJSON_AddNumberToObject(json, "tts_fast_send_second", kBaiduTtsFastSendSeconds);
-    cJSON_AddNumberToObject(json, "tts_fast_send_ratio", kBaiduTtsFastSendRatio);
+    // ===== TTS fast_send 默认关闭 =====
+    cJSON_AddBoolToObject(json, "tts_enable_fast_send", false);
 
     // ===== 防御性显式关闭云端 3A =====
     cJSON* cloud_3a = cJSON_CreateObject();

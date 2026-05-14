@@ -493,6 +493,9 @@ void Application::ActivationTask() {
     // Create OTA object for activation process
     ota_ = std::make_unique<Ota>();
 
+    // 等 modem 缓存（CSQ/IMEI/ICCID/Revision）填充完再 POST OTA
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
     // Check for new assets version
     CheckAssetsVersion();
 
@@ -1014,8 +1017,9 @@ void Application::HandleWakeWordDetectedEvent() {
         // 跳过下一条 STT 提示音 · 避免唤醒词音频被 ASR 识别后立刻响（唤醒已有 OGG_WAKEUP 提示）
         skip_next_stt_popup_.store(true);
 
+        // 百度协议 WS 保活复用时 channel 已开 · 仍需先进 Connecting 让 ContinueWakeWordInvoke 通过 state guard
+        SetDeviceState(kDeviceStateConnecting);
         if (!protocol_->IsAudioChannelOpened()) {
-            SetDeviceState(kDeviceStateConnecting);
             // Schedule to let the state change be processed first (UI update),
             // then continue with OpenAudioChannel which may block for ~1 second
             Schedule([this, wake_word]() {

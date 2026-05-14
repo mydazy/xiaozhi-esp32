@@ -71,8 +71,6 @@ static constexpr BaiduAecConfig kBaiduAecOff = {
 };
 
 // 共享参数 (与 AEC 模式无关 · 弱网/防御性配置)
-static constexpr float kBaiduTtsFastSendRatio   = 1.0f;  // fast send 加速倍数
-static constexpr int   kBaiduTtsFastSendSeconds = 1;     // fast send 启动前 N 秒
 static constexpr int   kBaiduWakeWordBreakMs    = 3000;  // 唤醒词打断丢弃音频毫秒数 (备份 break_delay_ms)
 
 class WebsocketBaiduProtocol : public Protocol {
