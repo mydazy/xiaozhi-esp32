@@ -141,8 +141,6 @@ void UiDisplay::SetupUI() {
     }
     if (emoji_box_) {
         lv_obj_set_style_opa(emoji_box_, LV_OPA_TRANSP, 0);
-        // GIF 笔画字（font 模式）触屏退出 — 与教育卡 OnEduCardClicked 同款机制
-        // 永久注册，仅 font 模式回调内才执行 HideFontGif（其他 emotion 不响应）
         lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(emoji_box_, OnFontExitClicked, LV_EVENT_CLICKED, this);
     }
@@ -395,14 +393,11 @@ void UiDisplay::SwitchToChatMode() {
     // 被 move_foreground(container_) 盖住 —— SetChatMessage 即使 remove HIDDEN 也看不见。
     if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
 
-    // chat 模式：top_bar_ 容器保留 / 三个图标 label 全部隐藏（让位 emoji 满屏沉浸感）
-    //          status_bar_ 显示（status_label_ 对话状态 + 通知）必须提顶（emoji_box_/container_/bottom_bar_ 已 foreground）
     SetTopBarIconsVisible(false);
     RaiseStatusBar();
     if (qr_overlay_) lv_obj_move_foreground(qr_overlay_);
 
     active_scene_ = SceneType::kChat;   // chat 主 widget = emoji_box
-    // in_font_mode_ 已由前面 HideFontGif() 处理，此处无需重置
     ESP_LOGI(TAG, "Switched to chat mode");
 }
 

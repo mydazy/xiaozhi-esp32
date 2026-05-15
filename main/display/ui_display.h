@@ -77,8 +77,6 @@ public:
     // 显示笔画 GIF 动画（写字识字）——把 PSRAM buffer 装入 emoji_collection "font" 槽位
     void FontGif(uint8_t* gif_buffer, size_t size, uint32_t request_id = 0);
 
-    // 退出笔画 GIF 模式（与 FontGif 对称）——切回 neutral 表情、恢复 bottom_bar
-    // 调用方：application.cc 下轮 Speaking 清场 + 触摸 emoji_box 退出
     void HideFontGif();
 
     // 申请一次"笔画 GIF 装载"许可：
@@ -173,10 +171,6 @@ private:
     SceneType active_scene_ = SceneType::kChat;
 
     bool in_font_mode_ = false;
-    // 笔画 GIF 异步下载守护：
-    //   - BeginFontPending() 设 true + 递增 request_id_next_，ShowEduCard 检测到不弹卡（防闪屏）
-    //   - FontGif/CancelFontPending 清零（成功装载 → in_font_mode_ 接管 / 失败 → 守护位释放）
-    //   - 多核共享：MCP 下载任务（Core 0）↔ Application Schedule（main thread）
     std::atomic<bool>     font_pending_{false};
     std::atomic<uint32_t> font_request_next_{0};
     std::atomic<uint32_t> font_request_active_{0};

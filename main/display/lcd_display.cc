@@ -229,15 +229,18 @@ void SpiLcdDisplay::EnableTearingEffectSync(gpio_num_t te_pin) {
     };
     ESP_ERROR_CHECK(gpio_config(&te_conf));
 
-    esp_err_t err = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {   // INVALID_STATE = 已安装
-        ESP_LOGE(TAG, "gpio_install_isr_service failed: %s", esp_err_to_name(err));
+    // GPIO ISR service 幂等安装：ESP_OK 首次成功，ESP_ERR_INVALID_STATE 表示已安装
+    esp_err_t isr_svc = gpio_install_isr_service(0);
+    if (isr_svc != ESP_OK && isr_svc != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "gpio_install_isr_service failed: %s, TE 同步禁用",
+                 esp_err_to_name(isr_svc));
+        vSemaphoreDelete(s_te_sem);
+        s_te_sem = nullptr;
         return;
     }
+
     ESP_ERROR_CHECK(gpio_isr_handler_add(te_pin, te_gpio_isr, nullptr));
 
-    // 包装 LVGL flush_cb：保存原 callback，注入 TE 等待
-    // LVGL 9.x 无 getter，直接访问 private 结构字段保存原 cb
     s_orig_flush_cb = display_->flush_cb;
     lv_display_set_flush_cb(display_, te_synced_flush_cb);
 
