@@ -143,7 +143,8 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 48),  // 48 行 PSRAM 双缓冲（匹配 SPI max_transfer_sz）
+        // 全屏双 buf 在 PSRAM · direct_mode 让切换瞬间在 buf 上离线重绘，flush dirty 区域到屏幕
+        .buffer_size = static_cast<uint32_t>(width_ * height_),  // 全屏 framebuffer
         .double_buffer = true,
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),
@@ -160,8 +161,9 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
             .buff_spiram = 1,
             .sw_rotate = 0,
             .swap_bytes = 1,
-            .full_refresh = 0,
-            .direct_mode = 0,
+            //"PSRAM 缓存整图 → 一次推送" 模式：
+            .full_refresh = 1,
+            .direct_mode = 1,
         },
     };
 
