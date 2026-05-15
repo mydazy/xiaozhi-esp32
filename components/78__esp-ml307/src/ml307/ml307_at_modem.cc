@@ -56,8 +56,8 @@ bool Ml307AtModem::SendRadioCommandWithRetry(const char* command, const char* de
 // Patch A · 锁 LTE-only · 频段维持模组默认自动选择（弱网地区不锁 Band 更安全）
 void Ml307AtModem::ConfigureRadioProfile() {
     // 稳定优先：固定 LTE-only，避免 2G/3G 兜底拖慢注册时间
-//    SendRadioCommandWithRetry("AT+MRATLIST=\"LTE\"", "Set LTE-only RAT");
-    SendRadioCommandWithRetry("AT+MBAND=3,1,8", "Lock LTE bands to B1/B3/B8");
+    SendRadioCommandWithRetry("AT+MRATLIST=\"LTE\"", "Set LTE-only RAT");
+//    SendRadioCommandWithRetry("AT+MBAND=3,1,8", "Lock LTE bands to B1/B3/B8");
 
     // 查询当前配置，写入日志便于量产期排查
     if (at_uart_->SendCommand("AT+MRATLIST?", 1000)) {

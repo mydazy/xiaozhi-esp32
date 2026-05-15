@@ -1,8 +1,4 @@
 dependencies:
-  78/uart-uhci:
-    rules:
-    - if: target not in [esp32]
-    version: ~0.2.1
   idf: '>=5.5.2'
 description: ESP32 ML307 / EC801E / NT26K Cat.1 Cellular Module
 files:

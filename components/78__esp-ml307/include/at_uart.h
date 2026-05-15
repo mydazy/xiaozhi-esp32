@@ -18,21 +18,18 @@
 #include <esp_pm.h>
 #include <esp_log.h>
 #include <esp_sleep.h>
-#include <uart_uhci.h>
 
 // UART Events
 #define AT_EVENT_COMMAND_DONE   BIT1
 #define AT_EVENT_COMMAND_ERROR  BIT2
 #define AT_EVENT_RI_PIN_INT     BIT3  // RI pin interrupt event
-#define AT_EVENT_FIFO_OVERFLOW  BIT4  // DMA buffer overflow event
 #define AT_EVENT_PARSE_NEEDED   BIT5  // Signal EventTask to parse response
 
 // Default Configuration
 #define UART_NUM                UART_NUM_1
 
-// DMA Buffer Configuration, OTA upgrade will use up to 6 Buffers
-#define AT_UART_RX_BUFFER_COUNT 12
-#define AT_UART_RX_BUFFER_SIZE  512
+// 标准 driver RX ring buffer 大小（够 OTA / MQTT 突发，~2KB 即可）
+#define AT_UART_RX_BUFFER_SIZE  2048
 
 // AT Command Argument Value Structure
 struct AtArgumentValue {
@@ -117,14 +114,11 @@ private:
     esp_pm_lock_handle_t ri_pm_lock_;  // RI pin PM lock
     bool ri_pm_lock_acquired_;  // Track RI PM lock state
     
-    // DMA controller
-    UartUhci uart_uhci_;
-    
     // FreeRTOS Objects
     TaskHandle_t receive_task_handle_ = nullptr;
     TaskHandle_t event_task_handle_ = nullptr;  // Task for parsing and event handling
-    QueueHandle_t rx_data_queue_;  // Queue for DMA received data
-    EventGroupHandle_t event_group_handle_;
+    QueueHandle_t event_queue_handle_ = nullptr;  // 标准 UART driver 事件队列（DATA/BREAK/OVF）
+    EventGroupHandle_t event_group_handle_ = nullptr;
     
     std::string rx_buffer_;
     std::mutex rx_buffer_mutex_;  // Mutex to protect rx_buffer_ access
@@ -143,15 +137,10 @@ private:
     bool ParseBinaryHttpHeader();
     bool ParseBinaryHttpContent();
     bool DetectBaudRate(int timeout_ms = -1);
+    void FlushRxBuffers();
     // Handle URC
     void HandleUrc(const std::string& command, const std::vector<AtArgumentValue>& arguments);
     bool SendData(const char* data, size_t length);
-    
-    // DMA RX Callback (called from ISR context)
-    static bool IRAM_ATTR DmaRxCallback(const UartUhci::RxEventData& data, void* user_data);
-    
-    // DMA Overflow Callback (called from ISR context when buffer exhaustion detected)
-    static bool IRAM_ATTR DmaOverflowCallback(void* user_data);
     
     // RI Pin ISR Handler
     static void IRAM_ATTR RiPinIsrHandler(void* arg);

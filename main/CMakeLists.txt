@@ -327,7 +327,6 @@ idf_component_register(SRCS ${SOURCES}
                         mydazy__esp_sc7a20h
                         mydazy__i2c_bus_worker          # v3.0+ 共享总线串行化
                         mydazy__codec_ctrl_i2c          # v3.0+ codec I2C 通过 worker
-                        78__uart-uhci
                     )
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME

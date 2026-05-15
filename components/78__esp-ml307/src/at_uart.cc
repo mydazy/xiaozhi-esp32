@@ -12,18 +12,11 @@
 
 #define TAG "AtUart"
 
-// RX data item for queue - stores the buffer pointer for later return
-struct RxDataItem {
-    UartUhci::RxBuffer* buffer;
-    size_t size;
-};
-
 // AtUart 构造函数实现
 AtUart::AtUart(gpio_num_t tx_pin, gpio_num_t rx_pin, gpio_num_t dtr_pin, gpio_num_t ri_pin)
     : tx_pin_(tx_pin), rx_pin_(rx_pin), dtr_pin_(dtr_pin), ri_pin_(ri_pin), uart_num_(UART_NUM),
       baud_rate_(115200), initialized_(false), dtr_pin_state_(false),
-      pm_lock_(nullptr), ri_pm_lock_(nullptr), ri_pm_lock_acquired_(false),
-      receive_task_handle_(nullptr), rx_data_queue_(nullptr), event_group_handle_(nullptr) {
+      pm_lock_(nullptr), ri_pm_lock_(nullptr), ri_pm_lock_acquired_(false) {
     // Create power management lock for DTR operations
     esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "at_uart_pm_lock", &pm_lock_);
     // Create power management lock for RI pin operations
@@ -42,23 +35,14 @@ AtUart::~AtUart() {
     if (event_group_handle_) {
         vEventGroupDelete(event_group_handle_);
     }
-    if (rx_data_queue_) {
-        // Clean up any remaining items in queue - return buffers to pool
-        RxDataItem item;
-        while (xQueueReceive(rx_data_queue_, &item, 0) == pdTRUE) {
-            if (item.buffer) {
-                uart_uhci_.ReturnBuffer(item.buffer);
-            }
-        }
-        vQueueDelete(rx_data_queue_);
-    }
     if (initialized_) {
         // Remove RI pin ISR handler if configured
         if (ri_pin_ != GPIO_NUM_NC) {
             gpio_isr_handler_remove(ri_pin_);
         }
-        // Deinitialize UHCI
-        uart_uhci_.Deinit();
+        // 标准 driver 卸载（内部释放 event_queue_handle_ + ring buffer + 中断）
+        uart_driver_delete(uart_num_);
+        event_queue_handle_ = nullptr;
     }
     if (ri_pm_lock_) {
         if (ri_pm_lock_acquired_) {
@@ -75,63 +59,29 @@ void AtUart::Initialize() {
     if (initialized_) {
         return;
     }
-    
+
     event_group_handle_ = xEventGroupCreate();
     if (!event_group_handle_) {
         ESP_LOGE(TAG, "创建事件组失败");
         return;
     }
 
-    // Create RX data queue
-    rx_data_queue_ = xQueueCreate(16, sizeof(RxDataItem));
-    if (!rx_data_queue_) {
-        ESP_LOGE(TAG, "创建RX数据队列失败");
-        return;
-    }
-
-    // Configure UART parameters (no driver install, UHCI will take over)
+    // 标准 ESP-IDF UART driver：内置 RX FIFO 中断 + ring buffer + event queue。
+    // 同硬件 xiaozhi-esp32-189 已量产验证；放弃 UHCI 是因为 P30 不需要 light sleep / 高速率。
     uart_config_t uart_config = {};
     uart_config.baud_rate = baud_rate_;
     uart_config.data_bits = UART_DATA_8_BITS;
     uart_config.parity = UART_PARITY_DISABLE;
     uart_config.stop_bits = UART_STOP_BITS_1;
     uart_config.source_clk = UART_SCLK_DEFAULT;
-    
+
+    ESP_ERROR_CHECK(uart_driver_install(uart_num_, AT_UART_RX_BUFFER_SIZE, 0, 16, &event_queue_handle_, ESP_INTR_FLAG_IRAM));
     ESP_ERROR_CHECK(uart_param_config(uart_num_, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(uart_num_, tx_pin_, rx_pin_, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    
-    // Enable pull-up on RX pin
+
+    // Enable pull-up on RX pin（与 189 一致）
     gpio_set_pull_mode(rx_pin_, GPIO_PULLUP_ONLY);
-    
-    // Initialize UHCI DMA controller
-    UartUhci::Config uhci_cfg = {
-        .uart_port = uart_num_,
-        .dma_burst_size = 32,
-        .rx_pool = {
-            .buffer_count = AT_UART_RX_BUFFER_COUNT,
-            .buffer_size = AT_UART_RX_BUFFER_SIZE,
-        },
-    };
-    
-    esp_err_t ret = uart_uhci_.Init(uhci_cfg);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "UHCI初始化失败: %s", esp_err_to_name(ret));
-        return;
-    }
-    
-    // Register DMA RX callback
-    uart_uhci_.SetRxCallback(DmaRxCallback, this);
-    
-    // Register DMA overflow callback
-    uart_uhci_.SetOverflowCallback(DmaOverflowCallback, this);
-    
-    // Start DMA receive
-    ret = uart_uhci_.StartReceive();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "启动DMA接收失败: %s", esp_err_to_name(ret));
-        return;
-    }
-    
+
     if (dtr_pin_ != GPIO_NUM_NC) {
         gpio_config_t config = {};
         config.pin_bit_mask = (1ULL << dtr_pin_);
@@ -160,78 +110,64 @@ void AtUart::Initialize() {
         gpio_isr_handler_add(ri_pin_, RiPinIsrHandler, this);
     }
 
-    // ReceiveTask: high priority, only handles DMA data reception
+    // ReceiveTask: 消费 UART event_queue → 读 ring buffer → append rx_buffer_
+    // 栈 6KB match 189（uart_read_bytes + string append 需要充足栈）；优先级 6（高于业务、低于 audio）
     xTaskCreatePinnedToCore([](void* arg) {
         auto at_uart = (AtUart*)arg;
         at_uart->ReceiveTask();
         vTaskDelete(NULL);
-    }, "modem_receive", 1024, this, configMAX_PRIORITIES - 2, &receive_task_handle_, 0 /* Core 0 */);
+    }, "modem_receive", 2048 * 3, this, 6, &receive_task_handle_, 0 /* Core 0 */);
 
-    // EventTask: lower priority, handles parsing and URC callbacks
+    // EventTask: 解析 rx_buffer_ + 派发 URC，优先级 5（低于 ReceiveTask 让 RX 先消化）
     xTaskCreatePinnedToCore([](void* arg) {
         auto at_uart = (AtUart*)arg;
         at_uart->EventTask();
         vTaskDelete(NULL);
-    }, "modem_event", 2048 * 3, this, configMAX_PRIORITIES - 3, &event_task_handle_, 0 /* Core 0 */);
+    }, "modem_event", 2048 * 3, this, 5, &event_task_handle_, 0 /* Core 0 */);
 
     initialized_ = true;
 }
 
-// DMA RX callback (called from ISR context)
-bool IRAM_ATTR AtUart::DmaRxCallback(const UartUhci::RxEventData& data, void* user_data) {
-    AtUart* self = static_cast<AtUart*>(user_data);
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    
-    if (data.buffer && data.recv_size > 0) {
-        // Send buffer pointer to queue for processing in task context
-        // The buffer will be returned by ReceiveTask after processing
-        RxDataItem item;
-        item.buffer = data.buffer;
-        item.size = data.recv_size;
-        
-        if (xQueueSendFromISR(self->rx_data_queue_, &item, &xHigherPriorityTaskWoken) != pdTRUE) {
-            // Queue full, return buffer immediately
-            ESP_DRAM_LOGW("AtUart", "RX queue full, dropping %u bytes", data.recv_size);
-            self->uart_uhci_.ReturnBuffer(data.buffer);
-        }
-    } else if (data.buffer) {
-        // Empty buffer, return immediately
-        ESP_DRAM_LOGW("AtUart", "Empty buffer received, size=%u", data.recv_size);
-        self->uart_uhci_.ReturnBuffer(data.buffer);
-    }
-    
-    return xHigherPriorityTaskWoken == pdTRUE;
-}
-
-// DMA overflow callback (called from ISR context when buffer exhaustion detected)
-bool IRAM_ATTR AtUart::DmaOverflowCallback(void* user_data) {
-    AtUart* self = static_cast<AtUart*>(user_data);
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    
-    // Signal overflow event to ReceiveTask
-    xEventGroupSetBitsFromISR(self->event_group_handle_, AT_EVENT_FIFO_OVERFLOW, &xHigherPriorityTaskWoken);
-    
-    return xHigherPriorityTaskWoken == pdTRUE;
-}
-
 void AtUart::ReceiveTask() {
-    // This task only handles data reception from DMA queue
-    // It runs at high priority to ensure timely buffer return to UHCI pool
-    RxDataItem item;
+    // 标准 UART driver 模式：从 event_queue_handle_ 收 uart_event_t，按事件类型处理。
+    uart_event_t event;
     while (true) {
-        // Block waiting for data from DMA queue
-        if (xQueueReceive(rx_data_queue_, &item, portMAX_DELAY) == pdTRUE) {
-            if (item.buffer && item.size > 0) {
-                // Append to rx_buffer_ with lock protection
-                {
-                    std::lock_guard<std::mutex> lock(rx_buffer_mutex_);
-                    rx_buffer_.append(reinterpret_cast<char*>(item.buffer->data), item.size);
-                }
-                // Return buffer to UHCI pool immediately
-                uart_uhci_.ReturnBuffer(item.buffer);
-                // Notify EventTask to parse response
-                xEventGroupSetBits(event_group_handle_, AT_EVENT_PARSE_NEEDED);
+        if (xQueueReceive(event_queue_handle_, &event, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        switch (event.type) {
+        case UART_DATA: {
+            size_t available = 0;
+            uart_get_buffered_data_len(uart_num_, &available);
+            if (available == 0) break;
+            std::string chunk;
+            chunk.resize(available);
+            int read_len = uart_read_bytes(uart_num_, chunk.data(), available, pdMS_TO_TICKS(20));
+            if (read_len <= 0) break;
+            {
+                std::lock_guard<std::mutex> lock(rx_buffer_mutex_);
+                rx_buffer_.append(chunk.data(), read_len);
             }
+            xEventGroupSetBits(event_group_handle_, AT_EVENT_PARSE_NEEDED);
+            break;
+        }
+        case UART_FIFO_OVF:
+            ESP_LOGW(TAG, "UART FIFO overflow");
+            uart_flush_input(uart_num_);
+            xQueueReset(event_queue_handle_);
+            break;
+        case UART_BUFFER_FULL:
+            ESP_LOGW(TAG, "UART ring buffer full");
+            uart_flush_input(uart_num_);
+            xQueueReset(event_queue_handle_);
+            break;
+        case UART_BREAK:
+        case UART_PARITY_ERR:
+        case UART_FRAME_ERR:
+            // 波特率切换瞬间常见，吞掉不报警
+            break;
+        default:
+            break;
         }
     }
 }
@@ -252,22 +188,15 @@ void AtUart::SetHttpBinaryMode(bool enabled) {
 }
 
 void AtUart::EventTask() {
-    // This task handles parsing and event processing
-    // It runs at lower priority so ReceiveTask can quickly return DMA buffers
+    // 解析任务（低优先级）：从 rx_buffer_ 提取 URC 并派发，与 ReceiveTask 解耦。
     while (true) {
-        auto bits = xEventGroupWaitBits(event_group_handle_, 
-            AT_EVENT_PARSE_NEEDED | AT_EVENT_RI_PIN_INT | AT_EVENT_FIFO_OVERFLOW,
+        auto bits = xEventGroupWaitBits(event_group_handle_,
+            AT_EVENT_PARSE_NEEDED | AT_EVENT_RI_PIN_INT,
             pdTRUE, pdFALSE, portMAX_DELAY);
-        
+
         if (bits & AT_EVENT_PARSE_NEEDED) {
             // Parse all available responses
             while (ParseResponse()) {}
-        }
-        
-        if (bits & AT_EVENT_FIFO_OVERFLOW) {
-            // DMA buffer exhaustion detected - notify upper layer via URC
-            ESP_LOGW(TAG, "DMA buffer overflow detected, notifying upper layer");
-            HandleUrc("FIFO_OVERFLOW", {});
         }
 
         if (ri_pin_ != GPIO_NUM_NC) {
@@ -624,24 +553,51 @@ void AtUart::HandleUrc(const std::string& command, const std::vector<AtArgumentV
     }
 }
 
+void AtUart::FlushRxBuffers() {
+    if (initialized_) {
+        uart_flush_input(uart_num_);   // 标准 driver: 真正清 RX FIFO + ring buffer
+    }
+    {
+        std::lock_guard<std::mutex> lock(rx_buffer_mutex_);
+        rx_buffer_.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        response_.clear();
+    }
+    xEventGroupClearBits(event_group_handle_,
+        AT_EVENT_COMMAND_DONE | AT_EVENT_COMMAND_ERROR | AT_EVENT_PARSE_NEEDED);
+}
+
 bool AtUart::DetectBaudRate(int timeout_ms) {
-    int baud_rates[] = {921600};
+    int baud_rates[] = {115200, 921600, 460800};   // 出厂默认 115200 优先（首启最快）
     TickType_t start_time = xTaskGetTickCount();
     TickType_t timeout_ticks = (timeout_ms == -1) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-    
-    while (true) {
-        ESP_LOGI(TAG, "Detecting baud rate...");
+
+    for (int round = 0; round < 3; ++round) {
+        ESP_LOGI(TAG, "Detecting baud rate... (round %d)", round + 1);
         for (size_t i = 0; i < sizeof(baud_rates) / sizeof(baud_rates[0]); i++) {
             int rate = baud_rates[i];
             uart_set_baudrate(uart_num_, rate);
-            if (SendCommand("AT", 20)) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            FlushRxBuffers();
+            if (SendCommand("AT", 200)) {
                 ESP_LOGI(TAG, "Detected baud rate: %d", rate);
                 baud_rate_ = rate;
                 return true;
             }
+            // 失败时 dump 收到的前 32 字节，便于诊断"无数据 vs 脏数据 vs 解析 bug"
+            {
+                std::lock_guard<std::mutex> lock(rx_buffer_mutex_);
+                if (!rx_buffer_.empty()) {
+                    size_t dump_len = std::min(rx_buffer_.size(), (size_t)32);
+                    ESP_LOG_BUFFER_HEXDUMP(TAG, rx_buffer_.data(), dump_len, ESP_LOG_WARN);
+                } else {
+                    ESP_LOGD(TAG, "No bytes at %d baud", rate);
+                }
+            }
         }
-        
-        // Check timeout before delay if specified
+
         if (timeout_ms != -1) {
             TickType_t elapsed = xTaskGetTickCount() - start_time;
             if (elapsed >= timeout_ticks) {
@@ -649,7 +605,7 @@ bool AtUart::DetectBaudRate(int timeout_ms) {
                 return false;
             }
         }
-        
+
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     return false;
@@ -679,10 +635,9 @@ bool AtUart::SendData(const char* data, size_t length) {
         ESP_LOGE(TAG, "UART未初始化");
         return false;
     }
-    
-    esp_err_t ret = uart_uhci_.Transmit(reinterpret_cast<const uint8_t*>(data), length);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "UHCI transmit failed: %s", esp_err_to_name(ret));
+    int written = uart_write_bytes(uart_num_, data, length);
+    if (written < 0 || static_cast<size_t>(written) != length) {
+        ESP_LOGE(TAG, "uart_write_bytes failed: %d / %u", written, (unsigned)length);
         return false;
     }
     return true;
