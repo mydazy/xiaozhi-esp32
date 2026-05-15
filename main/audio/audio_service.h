@@ -201,9 +201,10 @@ private:
 
     int consecutive_underrun_plc_ = 0;
     int16_t last_plc_tail_sample_ = 0;                    // 上一帧 PLC PCM 末尾 sample · fade-out 起点
+    std::chrono::steady_clock::time_point last_decode_push_time_;
     static constexpr int kMaxUnderrunPlcFrames    = 3;    // OPUS PLC 安全上限 (~60ms @ 20ms 帧)
     static constexpr int kPlaybackLowWatermark    = 2;    // playback_queue ≤ 该值时触发补偿
-    static constexpr int kRecentPlaybackWindowMs  = 500;  // 最近 N ms 有过 output → 认为在 TTS 流
+    static constexpr int kRecentDecodePushWindowMs = 200; // 最近 N ms 有过 decode push → 认为流式 TTS 中
 
     void AudioInputTask();
     void AudioOutputTask();

@@ -13,25 +13,14 @@ public:
     AlarmRinger(const AlarmRinger&) = delete;
     AlarmRinger& operator=(const AlarmRinger&) = delete;
 
-    // 响铃模式 · 两套策略走同一 ringer 单例
     enum class Kind : uint8_t {
         kAlarm    = 0,
         kReminder = 1,
     };
 
-    // 到点触发 · 启动响铃 + AI 语音播报
-    // 幂等：重复 Start 当前 message/kind 覆盖 · 不会启动多个响铃
     void Start(const std::string& message, Kind kind = Kind::kAlarm);
-
-    // 任一关停事件调用 · reason 仅用于 LOG
-    // 幂等：未在响铃中调用 Stop 是 no-op
     void Stop(const char* reason);
-
-    // 按键 / 触摸 / 摇晃 handler 用此 API 抢占（响铃中先 Stop 不进对话）
     bool IsRinging() const { return ringing_.load(std::memory_order_acquire); }
-
-    // 摇晃停闹（防走路误关 · 5s 窗内累计 min_count 次摇晃才真 Stop）
-    // 返回值：是否在响铃中（true = 事件被吞 · 上层应 return）
     bool ShakeStop(int min_count);
 
 private:
