@@ -43,11 +43,11 @@ static const char *TAG = "axs5106l_touch";
 #define CLICK_MIN_TIME_US     50000   /* 50ms · Apple 标准（60→50）*/
 #define CLICK_MAX_MOVE       30       /* ~4mm · 容忍儿童手指落屏微移（20→30）*/
 #define LONG_PRESS_TIME_US   500000   /* 500ms · 防儿童误触（300→500 与 Apple/iOS 对齐）*/
-#define DOUBLE_CLICK_TIME_US 400000   /* 400ms · Apple 300 + 100ms 儿童反应 */
+#define DOUBLE_CLICK_TIME_US 350000   /* 350ms · iOS / Apple Watch S9 标准 · 双击必须快 */
 #define DOUBLE_CLICK_DIST    80       /* ~10.6mm · Apple 30pt 物理等效 */
-#define CLICK_MIN_FRAMES      2       /* 32ms @ 16ms LVGL · 短促点击采 2 帧即可（之前 3 太严）*/
+#define CLICK_MIN_FRAMES      1       /* 事件型芯片 INT 只在边沿 latch · 单帧即合法（50ms 时长 + 抖动=0 兜底）*/
 #define SWIPE_MIN_TIME_US    150000   /* 150ms 不变 */
-#define SWIPE_MIN_FRAMES      8       /* 128ms @ 16ms · 配 SWIPE_MIN_TIME */
+#define SWIPE_MIN_FRAMES      4       /* 事件型芯片快滑只采 4-5 帧 · 配 manhattan 20px + 150ms 时长足以区分 */
 #define LONG_PRESS_MIN_FRAMES 30      /* 480ms @ 16ms · 配 LONG_PRESS_TIME 500ms */
 #define JITTER_LIMIT_FOR_TAP 40       /* ~5mm · 容忍儿童手抖 / RF 抖动（20→40）*/
 #define RELEASE_DEBOUNCE  2             /* 连续 N 帧无触摸才报松开（两档共用）*/
@@ -635,14 +635,12 @@ static bool read_touch(axs5106l_touch_handle_t self, uint16_t *out_x, uint16_t *
 {
     uint64_t now = esp_timer_get_time();
 
-    /* Gate 1: INT must be low (active during touch). */
-    if (gpio_get_level(self->int_gpio) != 0) {
-        self->touch.int_low_since = 0;
-        self->touch.last_time     = 0;
-        return false;
-    }
-    /* Gate 2: INT debounce — only on press edge; skip when already pressed. */
     if (!self->touch.pressed) {
+        if (gpio_get_level(self->int_gpio) != 0) {
+            self->touch.int_low_since = 0;
+            self->touch.last_time     = 0;
+            return false;
+        }
         if (self->touch.int_low_since == 0) self->touch.int_low_since = now;
         if (now - self->touch.int_low_since < self->rf_int_debounce_us) return false;
         esp_rom_delay_us(1);
