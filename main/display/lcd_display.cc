@@ -169,10 +169,6 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        // 退回原 48 行 partial + double_buffer + PSRAM（量产稳定配置）
-        //   esp_lvgl_port v9.x 的 SPI 模式 direct_mode/full_refresh 兼容性差 ·
-        //   会导致字体渲染异常 / 花屏 / 半截字 → 退回 partial
-        //   撕裂消除靠 TE 同步（EnableTearingEffectSync · flush 前等 VSYNC）
         .buffer_size = static_cast<uint32_t>(width_ * 48),
         .double_buffer = true,
         .trans_size = 0,
