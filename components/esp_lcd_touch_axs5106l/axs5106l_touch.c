@@ -780,7 +780,7 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
                        g->sample_count >= CLICK_MIN_FRAMES &&
                        !g->jitter_unstable);
         if (!tap_ok) {
-            ESP_LOGW(TAG, "单击拒识: 位移=%d 时长=%ums 帧数=%u 抖动=%u 不稳定=%d",
+            ESP_LOGD(TAG, "tap_ok=0 位移=%d 时长=%ums 帧数=%u 抖动=%u 不稳定=%d",
                      manhattan, (unsigned)(dur/1000),
                      (unsigned)g->sample_count, (unsigned)g->jitter_sum,
                      (int)g->jitter_unstable);
