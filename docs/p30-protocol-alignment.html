@@ -1,0 +1,1513 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MyDazy P30 · 四协议接口对齐分析</title>
+<meta name="description" content="基准协议（小智 WS/MQTT）与扩展平台（百度 BRTC / 京东 JoyInside）的接口对齐深度分析。Protocol 基类如何吸收平台差异，应用层如何统一调用。" />
+<style>
+:root{
+  --brand:#C62828;
+  --brand-deep:#8E1C1C;
+  --brand-soft:#FCE8E8;
+  --bg:#FAFAFA;
+  --paper:#FFFFFF;
+  --ink:#1F1F1F;
+  --ink-soft:#555;
+  --line:#E5E5E5;
+  --line-strong:#BDBDBD;
+  --base:#E3F2FD;
+  --base-line:#1565C0;
+  --baidu:#E8F5E9;
+  --baidu-line:#2E7D32;
+  --joyai:#FFF3E0;
+  --joyai-line:#E65100;
+  --mqtt:#F3E5F5;
+  --mqtt-line:#6A1B9A;
+  --warn:#F57C00;
+  --danger:#C62828;
+  --ok:#2E7D32;
+  --code-bg:#F5F5F5;
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue","Hiragino Sans GB","Microsoft YaHei",sans-serif;font-size:15px;line-height:1.7}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+code,kbd{font-family:"SF Mono",Menlo,Consolas,"Roboto Mono",monospace;background:var(--code-bg);border-radius:4px;padding:1px 6px;font-size:.92em}
+
+.topbar{position:sticky;top:0;z-index:50;background:var(--brand);color:#fff;padding:10px 28px;display:flex;align-items:center;gap:18px;box-shadow:var(--shadow)}
+.topbar .logo{font-weight:700;letter-spacing:.5px}
+.topbar .meta{opacity:.85;font-size:13px}
+.topbar .spacer{flex:1}
+.topbar a{color:#fff;border-bottom:1px dashed rgba(255,255,255,.5)}
+.topbar a:hover{border-bottom-style:solid;text-decoration:none}
+
+.shell{display:grid;grid-template-columns:240px minmax(0,1fr);gap:24px;max-width:1440px;margin:0 auto;padding:24px}
+.toc{position:sticky;top:64px;align-self:start;max-height:calc(100vh - 84px);overflow:auto;font-size:14px}
+.toc h3{font-size:12px;color:var(--ink-soft);letter-spacing:1px;text-transform:uppercase;margin:8px 0}
+.toc ul{list-style:none;margin:0;padding:0}
+.toc li{margin:2px 0}
+.toc a{display:block;padding:6px 10px;border-radius:6px;color:var(--ink);border-left:3px solid transparent}
+.toc a:hover{background:var(--brand-soft);color:var(--brand);text-decoration:none}
+
+main{min-width:0}
+.section{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:24px 28px;margin-bottom:24px;box-shadow:var(--shadow)}
+.section h2{font-size:22px;margin:0 0 4px;color:var(--brand-deep);display:flex;align-items:center;gap:10px}
+.section h2 .num{display:inline-block;background:var(--brand);color:#fff;font-size:13px;font-weight:600;padding:2px 9px;border-radius:14px}
+.section .sub{color:var(--ink-soft);margin:0 0 18px;font-size:13.5px}
+.section h3{font-size:16px;margin:22px 0 10px;color:var(--ink);border-bottom:1px solid var(--line);padding-bottom:6px}
+
+.hero{background:linear-gradient(135deg,var(--brand) 0%,var(--brand-deep) 100%);color:#fff;border-radius:10px;padding:32px 36px;margin-bottom:24px;box-shadow:var(--shadow)}
+.hero h1{margin:0 0 6px;font-size:28px;letter-spacing:.5px}
+.hero p{margin:0;opacity:.92;font-size:14.5px}
+.hero .badges{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.hero .badge{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);border-radius:14px;padding:3px 10px;font-size:12px}
+
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--ink-soft);margin:8px 0 12px}
+.legend .item{display:flex;align-items:center;gap:6px}
+.legend .swatch{width:14px;height:14px;border-radius:3px;border:1px solid var(--line-strong)}
+
+.svgwrap{background:#FCFCFC;border:1px solid var(--line);border-radius:8px;padding:14px;overflow:auto;margin:12px 0}
+.svgwrap svg{display:block;margin:0 auto;max-width:100%;height:auto}
+
+table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}
+th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#FAFAFA;color:var(--ink-soft);font-weight:600;font-size:12.5px}
+td code{font-size:12px}
+.tbl-compact th,.tbl-compact td{padding:5px 8px;font-size:12.5px}
+.col-base{background:#F0F7FE}
+.col-mqtt{background:#FAF3FE}
+.col-baidu{background:#F1F8F2}
+.col-joyai{background:#FFF8EE}
+
+.callout{border-left:4px solid var(--brand);background:var(--brand-soft);padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:14px}
+.callout.warn{border-left-color:var(--warn);background:#FFF8E1}
+.callout.ok{border-left-color:var(--ok);background:#E8F5E9}
+.callout strong{color:var(--brand-deep)}
+.callout.warn strong{color:#E65100}
+.callout.ok strong{color:#1B5E20}
+
+.tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;font-weight:600;margin:0 2px}
+.tag.ok{background:#E8F5E9;color:#1B5E20}
+.tag.gap{background:#FFEBEE;color:#C62828}
+.tag.warn{background:#FFF3E0;color:#E65100}
+.tag.todo{background:#E3F2FD;color:#1565C0}
+
+footer{color:var(--ink-soft);font-size:12.5px;text-align:center;padding:24px 0 40px}
+
+@media (max-width:820px){
+  .shell{grid-template-columns:1fr}
+  .toc{position:static;max-height:none}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="logo">MyDazy P30 · 四协议接口对齐</span>
+  <span class="meta">2026-05-15 · 深度分析</span>
+  <span class="spacer"></span>
+  <span class="meta">参照源：<code>main/protocols/</code></span>
+</div>
+
+<div class="shell">
+
+<aside class="toc">
+  <h3>目录</h3>
+  <ul>
+    <li><a href="#hero">概览</a></li>
+    <li><a href="#sec1">§ 一 接口分层架构</a></li>
+    <li><a href="#sec2">§ 二 12 接口对照表</a></li>
+    <li><a href="#sec3">§ 三 上行调用 · 泳道图</a></li>
+    <li><a href="#sec4">§ 四 下行事件翻译</a></li>
+    <li><a href="#sec5">§ 五 协议特性思维导图</a></li>
+    <li><a href="#sec6">§ 六 对齐缺口热点</a></li>
+    <li><a href="#sec7">§ 七 对齐方案路线图</a></li>
+    <li><a href="#sec8">§ 八 代码引用速查</a></li>
+    <li><a href="#sec9">§ 九 修复完成进度</a></li>
+    <li><a href="#sec10">§ 十 长期运行风险评估</a></li>
+    <li><a href="#sec11">§ 十一 弱网处理策略</a></li>
+    <li><a href="#sec12">§ 十二 量产标准评估</a></li>
+  </ul>
+</aside>
+
+<main>
+
+<section class="hero" id="hero">
+  <h1>P30 四协议接口对齐 · 深度分析</h1>
+  <p>小智 WebSocket / MQTT 是<strong style="color:#FFE082">系统默认协议</strong>，定义了 Protocol 基类的 12 个虚函数语义。
+     百度 BRTC、京东 JoyInside 是<strong style="color:#FFE082">扩展平台</strong>，需要把各自的平台原生协议（前缀字符串 / 嵌套 EVENT 结构）翻译成基类语义，让 application 层零感知调用。</p>
+  <div class="badges">
+    <span class="badge">4 协议 × 12 接口</span>
+    <span class="badge">2 套基准（小智 WS · 小智 MQTT/UDP）</span>
+    <span class="badge">2 套扩展（百度 BRTC · 京东 JoyInside）</span>
+    <span class="badge">6 处对齐缺口热点</span>
+    <span class="badge">3 档对齐路线（必修 / 应修 / 选修）</span>
+  </div>
+</section>
+
+<!-- ==================== § 一 接口分层架构 ==================== -->
+<section class="section" id="sec1">
+  <h2><span class="num">§ 一</span> 接口分层架构</h2>
+  <p class="sub">application 层只看到 Protocol 基类。三层调用：上行接口（application → protocol）+ 下行事件（protocol → application）+ 平台原生（protocol ↔ 服务端）</p>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:var(--base)"></span>小智 WS（基准）</span>
+    <span class="item"><span class="swatch" style="background:var(--mqtt)"></span>小智 MQTT（基准 UDP 变体）</span>
+    <span class="item"><span class="swatch" style="background:var(--baidu)"></span>百度 BRTC（扩展）</span>
+    <span class="item"><span class="swatch" style="background:var(--joyai)"></span>京东 JoyInside（扩展）</span>
+  </div>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 980 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="协议分层架构图">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+        </marker>
+        <marker id="arr-brand" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#C62828"/>
+        </marker>
+      </defs>
+
+      <!-- application 层 -->
+      <rect x="60" y="30" width="860" height="80" rx="8" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+      <text x="490" y="55" text-anchor="middle" font-weight="700" font-size="14" fill="#8E1C1C">application.cc · 统一调用方</text>
+      <text x="490" y="78" text-anchor="middle" font-size="12" fill="#555">SetDeviceState / AbortSpeaking / SendTextToTts / OnIncomingJson · 完全零感知具体协议</text>
+      <text x="490" y="96" text-anchor="middle" font-size="11" font-family="monospace" fill="#888">protocol_-&gt;SendXxx() / protocol_-&gt;OnIncomingJson([...]{ if(type==tts/stt/mcp) ... })</text>
+
+      <!-- Protocol 基类 -->
+      <rect x="60" y="140" width="860" height="60" rx="8" fill="#FFF" stroke="#666" stroke-width="2" stroke-dasharray="6 3"/>
+      <text x="490" y="165" text-anchor="middle" font-weight="700" font-size="14" fill="#333">Protocol 基类 · 12 virtual 接口</text>
+      <text x="490" y="188" text-anchor="middle" font-size="11" font-family="monospace" fill="#666">Start · OpenAudioChannel · IsAudioChannelOpened · SendAudio · SendStartListening · SendStopListening · SendAbortSpeaking · SendWakeWordDetected · SendMcpMessage · SendTextToTts · SendTextToAI · SendRemoteMusicControl</text>
+
+      <!-- 四协议实现 -->
+      <rect x="60" y="240" width="200" height="170" rx="8" fill="var(--base)" stroke="var(--base-line)" stroke-width="2"/>
+      <text x="160" y="263" text-anchor="middle" font-weight="700" font-size="13" fill="#0D47A1">websocket_protocol</text>
+      <text x="160" y="280" text-anchor="middle" font-size="11" fill="#1565C0">基准 · 254 行 · 最薄</text>
+      <text x="160" y="305" text-anchor="middle" font-size="11" fill="#333">直接透传服务端原生 JSON</text>
+      <text x="160" y="322" text-anchor="middle" font-size="11" fill="#333">{type:"hello/tts/stt/mcp"}</text>
+      <text x="160" y="342" text-anchor="middle" font-size="11" fill="#333">SendStartListening 等</text>
+      <text x="160" y="358" text-anchor="middle" font-size="11" fill="#333">使用基类默认实现</text>
+      <text x="160" y="382" text-anchor="middle" font-size="10" font-family="monospace" fill="#0D47A1">version 2 / 3 二进制帧</text>
+      <text x="160" y="398" text-anchor="middle" font-size="10" font-family="monospace" fill="#0D47A1">BinaryProtocol2/3</text>
+
+      <rect x="280" y="240" width="200" height="170" rx="8" fill="var(--mqtt)" stroke="var(--mqtt-line)" stroke-width="2"/>
+      <text x="380" y="263" text-anchor="middle" font-weight="700" font-size="13" fill="#4A148C">mqtt_protocol</text>
+      <text x="380" y="280" text-anchor="middle" font-size="11" fill="#6A1B9A">基准变体 · 409 行</text>
+      <text x="380" y="305" text-anchor="middle" font-size="11" fill="#333">MQTT 控制 + UDP 音频</text>
+      <text x="380" y="322" text-anchor="middle" font-size="11" fill="#333">AES-CTR 加密音频包</text>
+      <text x="380" y="342" text-anchor="middle" font-size="11" fill="#333">SendStartListening 等</text>
+      <text x="380" y="358" text-anchor="middle" font-size="11" fill="#333">使用基类默认实现</text>
+      <text x="380" y="382" text-anchor="middle" font-size="10" font-family="monospace" fill="#4A148C">序列号校验 + 加解密</text>
+      <text x="380" y="398" text-anchor="middle" font-size="10" font-family="monospace" fill="#4A148C">remote_sequence_</text>
+
+      <rect x="500" y="240" width="200" height="170" rx="8" fill="var(--baidu)" stroke="var(--baidu-line)" stroke-width="2"/>
+      <text x="600" y="263" text-anchor="middle" font-weight="700" font-size="13" fill="#1B5E20">websocket_baidu_protocol</text>
+      <text x="600" y="280" text-anchor="middle" font-size="11" fill="#2E7D32">扩展 · 1600 行 · 最厚</text>
+      <text x="600" y="305" text-anchor="middle" font-size="11" fill="#333">前缀字符串协议</text>
+      <text x="600" y="322" text-anchor="middle" font-size="11" fill="#333">[E]: [Q]: [A]: [Function]</text>
+      <text x="600" y="342" text-anchor="middle" font-size="11" fill="#333">10+ Send 命令重写</text>
+      <text x="600" y="358" text-anchor="middle" font-size="11" fill="#333">LIC 鉴权 / xTimer 超时</text>
+      <text x="600" y="382" text-anchor="middle" font-size="10" font-family="monospace" fill="#1B5E20">CMD_ASR_REALTIME</text>
+      <text x="600" y="398" text-anchor="middle" font-size="10" font-family="monospace" fill="#1B5E20">CMD_AUTO_INT_ON</text>
+
+      <rect x="720" y="240" width="200" height="170" rx="8" fill="var(--joyai)" stroke="var(--joyai-line)" stroke-width="2"/>
+      <text x="820" y="263" text-anchor="middle" font-weight="700" font-size="13" fill="#E65100">websocket_joyai_protocol</text>
+      <text x="820" y="280" text-anchor="middle" font-size="11" fill="#EF6C00">扩展 · 450 行 · 中等</text>
+      <text x="820" y="305" text-anchor="middle" font-size="11" fill="#333">JSON 嵌套 EVENT 结构</text>
+      <text x="820" y="322" text-anchor="middle" font-size="11" fill="#333">contentType.eventType</text>
+      <text x="820" y="342" text-anchor="middle" font-size="11" fill="#333">3 Send 命令重写</text>
+      <text x="820" y="358" text-anchor="middle" font-size="11" fill="#333">Token URL 参数鉴权</text>
+      <text x="820" y="382" text-anchor="middle" font-size="10" font-family="monospace" fill="#E65100">CLIENT_INTERRUPT</text>
+      <text x="820" y="398" text-anchor="middle" font-size="10" font-family="monospace" fill="#E65100">CLIENT_AUDIO_FINISH</text>
+
+      <!-- 平台云端 -->
+      <rect x="60" y="450" width="200" height="80" rx="8" fill="#FFF" stroke="#999"/>
+      <text x="160" y="475" text-anchor="middle" font-weight="600" font-size="12">小智 ws server</text>
+      <text x="160" y="496" text-anchor="middle" font-size="11" fill="#555">JSON 原生 · 服务端 AEC</text>
+      <text x="160" y="514" text-anchor="middle" font-size="10" font-family="monospace" fill="#888">{"type":"tts","state":"start"}</text>
+
+      <rect x="280" y="450" width="200" height="80" rx="8" fill="#FFF" stroke="#999"/>
+      <text x="380" y="475" text-anchor="middle" font-weight="600" font-size="12">小智 mqtt server</text>
+      <text x="380" y="496" text-anchor="middle" font-size="11" fill="#555">控制 + 加密 UDP</text>
+      <text x="380" y="514" text-anchor="middle" font-size="10" font-family="monospace" fill="#888">type=0x01 加密 payload</text>
+
+      <rect x="500" y="450" width="200" height="80" rx="8" fill="#FFF" stroke="#999"/>
+      <text x="600" y="475" text-anchor="middle" font-weight="600" font-size="12">百度 BRTC server</text>
+      <text x="600" y="496" text-anchor="middle" font-size="11" fill="#555">前缀文本 · 服务端 VAD</text>
+      <text x="600" y="514" text-anchor="middle" font-size="10" font-family="monospace" fill="#888">[E]:[TTS_BEGIN_SPEAKING]</text>
+
+      <rect x="720" y="450" width="200" height="80" rx="8" fill="#FFF" stroke="#999"/>
+      <text x="820" y="475" text-anchor="middle" font-weight="600" font-size="12">京东 JoyInside server</text>
+      <text x="820" y="496" text-anchor="middle" font-size="11" fill="#555">JSON 嵌套 EVENT</text>
+      <text x="820" y="514" text-anchor="middle" font-size="10" font-family="monospace" fill="#888">contentType=EVENT</text>
+
+      <!-- 箭头 application → 基类 -->
+      <path d="M 490,110 L 490,140" class="edge" stroke="#C62828" stroke-width="2" marker-end="url(#arr-brand)"/>
+      <text x="500" y="130" font-size="10" fill="#C62828">虚函数调用</text>
+
+      <!-- 基类 → 4 协议 -->
+      <path d="M 200,200 L 160,240" stroke="#666" stroke-width="1.5" marker-end="url(#arr)" fill="none"/>
+      <path d="M 350,200 L 380,240" stroke="#666" stroke-width="1.5" marker-end="url(#arr)" fill="none"/>
+      <path d="M 600,200 L 600,240" stroke="#666" stroke-width="1.5" marker-end="url(#arr)" fill="none"/>
+      <path d="M 800,200 L 820,240" stroke="#666" stroke-width="1.5" marker-end="url(#arr)" fill="none"/>
+
+      <!-- 协议 → 服务端 -->
+      <path d="M 160,410 L 160,450" stroke="var(--base-line)" stroke-width="1.5" stroke-dasharray="4 2" marker-end="url(#arr)" fill="none"/>
+      <path d="M 380,410 L 380,450" stroke="var(--mqtt-line)" stroke-width="1.5" stroke-dasharray="4 2" marker-end="url(#arr)" fill="none"/>
+      <path d="M 600,410 L 600,450" stroke="var(--baidu-line)" stroke-width="1.5" stroke-dasharray="4 2" marker-end="url(#arr)" fill="none"/>
+      <path d="M 820,410 L 820,450" stroke="var(--joyai-line)" stroke-width="1.5" stroke-dasharray="4 2" marker-end="url(#arr)" fill="none"/>
+    </svg>
+  </div>
+
+  <h3>核心原则</h3>
+  <ul>
+    <li><strong>application 层零感知</strong>：所有调用走 <code>protocol_-&gt;SendXxx()</code>，所有回调走 <code>OnIncomingJson(root)</code> + <code>OnIncomingAudio(packet)</code> 两条 channel。</li>
+    <li><strong>基类语义就是小智原生 JSON</strong>：<code>{"type":"tts"/"stt"/"mcp"/"hello",...}</code> 是基类约定的统一格式。扩展协议必须把自家平台事件 <strong>翻译</strong> 成这套 JSON 再 emit。</li>
+    <li><strong>平台差异完全留在协议内</strong>：鉴权流程、心跳、超时、命令名、字段名一律在协议内吸收。<strong>application 不应包含任何 <code>if (protocol == baidu/joyai)</code> 分支</strong>。</li>
+  </ul>
+
+  <div class="callout">
+    <strong>当前对齐评分：</strong>调用方向（上行）小智/百度/京东都已对齐基类签名 <span class="tag ok">100%</span>；
+    回调方向（下行）小智天然透传、百度完整翻译 <span class="tag ok">OK</span>、京东本次刚补齐 <span class="tag warn">OK 但仍有 2 处缺口</span>。
+  </div>
+</section>
+
+<!-- ==================== § 二 12 接口对照表 ==================== -->
+<section class="section" id="sec2">
+  <h2><span class="num">§ 二</span> 12 接口对照表</h2>
+  <p class="sub">Protocol 基类 12 个虚函数 × 4 协议 = 48 个实现点。<span class="tag ok">默认</span>=用基类、<span class="tag warn">重写</span>=自定义、<span class="tag gap">缺失</span>=应该有但没做。</p>
+
+  <table class="tbl-compact">
+    <thead>
+      <tr>
+        <th style="width:24%">基类接口（语义）</th>
+        <th class="col-base" style="width:19%">小智 WS</th>
+        <th class="col-mqtt" style="width:19%">小智 MQTT</th>
+        <th class="col-baidu" style="width:19%">百度 BRTC</th>
+        <th class="col-joyai" style="width:19%">京东 JoyInside</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Start</strong><br/><small>启动后台预热</small></td>
+        <td class="col-base"><span class="tag ok">默认</span> return true</td>
+        <td class="col-mqtt"><span class="tag ok">默认</span> return true</td>
+        <td class="col-baidu"><span class="tag warn">重写</span> PrefetchSessionToken</td>
+        <td class="col-joyai"><span class="tag ok">默认</span> return true</td>
+      </tr>
+      <tr><td><strong>OpenAudioChannel</strong><br/><small>建立通道 + 握手</small></td>
+        <td class="col-base">hello+wait SERVER_HELLO 10s</td>
+        <td class="col-mqtt">hello+wait SERVER_HELLO 10s+UDP</td>
+        <td class="col-baidu">FetchToken + LIC + wait MEDIA_READY</td>
+        <td class="col-joyai">URL 解析 + UPDATE + wait CFG_BOT_EVENT</td>
+      </tr>
+      <tr><td><strong>CloseAudioChannel</strong><br/><small>关通道</small></td>
+        <td class="col-base">websocket_.reset()</td>
+        <td class="col-mqtt">mqtt+udp.reset</td>
+        <td class="col-baidu">优雅断开 + 3 个 xTimer cleanup</td>
+        <td class="col-joyai">reset + tts_started_/interrupt_pending_ clear</td>
+      </tr>
+      <tr><td><strong>IsAudioChannelOpened</strong></td>
+        <td class="col-base">ws &amp;&amp; !err &amp;&amp; !timeout(120s)</td>
+        <td class="col-mqtt">mqtt &amp;&amp; udp &amp;&amp; !err &amp;&amp; !timeout</td>
+        <td class="col-baidu">同基类</td>
+        <td class="col-joyai">同基类</td>
+      </tr>
+      <tr><td><strong>SendAudio</strong><br/><small>OPUS 帧上行</small></td>
+        <td class="col-base">BinaryProtocol2/3 头 + binary frame</td>
+        <td class="col-mqtt">AES-CTR 加密 UDP 包</td>
+        <td class="col-baidu">binary frame + 失败重试 + 断路器</td>
+        <td class="col-joyai">原始 OPUS binary frame</td>
+      </tr>
+      <tr><td><strong>SendStartListening</strong><br/><small>开始录音</small></td>
+        <td class="col-base"><span class="tag ok">默认</span> JSON listen.start</td>
+        <td class="col-mqtt"><span class="tag ok">默认</span> JSON listen.start</td>
+        <td class="col-baidu"><span class="tag warn">重写</span> CMD_ASR_REALTIME/MANUAL + AUTO_INT_ON</td>
+        <td class="col-joyai"><span class="tag warn">重写</span> no-op（服务端自由对话模式）</td>
+      </tr>
+      <tr><td><strong>SendStopListening</strong></td>
+        <td class="col-base"><span class="tag ok">默认</span> JSON listen.stop</td>
+        <td class="col-mqtt"><span class="tag ok">默认</span> JSON listen.stop</td>
+        <td class="col-baidu"><span class="tag warn">重写</span> CMD_ASR_STOP</td>
+        <td class="col-joyai"><span class="tag warn">重写</span> CLIENT_AUDIO_FINISH</td>
+      </tr>
+      <tr><td><strong>SendAbortSpeaking</strong><br/><small>打断 TTS</small></td>
+        <td class="col-base"><span class="tag ok">默认</span> JSON abort + reason</td>
+        <td class="col-mqtt"><span class="tag ok">默认</span> JSON abort + reason</td>
+        <td class="col-baidu"><span class="tag warn">重写</span> ResetDecoder + AGENT_BREAK_BEGIN+delay</td>
+        <td class="col-joyai"><span class="tag warn">重写</span> EmitTtsStop + CLIENT_INTERRUPT</td>
+      </tr>
+      <tr><td><strong>SendWakeWordDetected</strong><br/><small>唤醒上行</small></td>
+        <td class="col-base"><span class="tag ok">默认</span> listen.detect+text</td>
+        <td class="col-mqtt"><span class="tag ok">默认</span> 同上</td>
+        <td class="col-baidu"><span class="tag warn">重写</span> SendTextToAI(wake_word)</td>
+        <td class="col-joyai"><span class="tag ok">默认</span> 同基类</td>
+      </tr>
+      <tr><td><strong>SendMcpMessage</strong><br/><small>工具调用</small></td>
+        <td class="col-base"><span class="tag ok">默认</span> JSON mcp.payload</td>
+        <td class="col-mqtt"><span class="tag ok">默认</span> 同上</td>
+        <td class="col-baidu"><span class="tag warn">重写</span> FUNCTION_CALL_PREFIX + payload</td>
+        <td class="col-joyai"><span class="tag gap">缺失</span> 用基类（百度协议格式发到京东会失败）</td>
+      </tr>
+      <tr><td><strong>SendTextToTts</strong><br/><small>主动 TTS 朗读</small></td>
+        <td class="col-base"><span class="tag gap">false</span> 不支持</td>
+        <td class="col-mqtt"><span class="tag gap">false</span> 不支持</td>
+        <td class="col-baidu"><span class="tag warn">重写</span> LIC_LLM_SAY 命令</td>
+        <td class="col-joyai"><span class="tag gap">false</span> 应该用 CLIENT_INPUT_TEXT_TO_SPEECH</td>
+      </tr>
+      <tr><td><strong>SendTextToAI</strong><br/><small>文本对话</small></td>
+        <td class="col-base"><span class="tag gap">false</span></td>
+        <td class="col-mqtt"><span class="tag gap">false</span></td>
+        <td class="col-baidu"><span class="tag warn">重写</span> LIC_QUERY 命令</td>
+        <td class="col-joyai"><span class="tag gap">false</span> 应该用 contentType=TEXT</td>
+      </tr>
+      <tr><td><strong>UpdateSystemPrompt</strong><br/><small>切教育卡 prompt</small></td>
+        <td class="col-base"><span class="tag gap">false</span></td>
+        <td class="col-mqtt"><span class="tag gap">false</span></td>
+        <td class="col-baidu"><span class="tag warn">重写</span> LIC 命令 + model_type</td>
+        <td class="col-joyai"><span class="tag gap">false</span></td>
+      </tr>
+      <tr><td><strong>SendRemoteMusicControl</strong></td>
+        <td class="col-base"><span class="tag gap">false</span></td>
+        <td class="col-mqtt"><span class="tag gap">false</span></td>
+        <td class="col-baidu"><span class="tag warn">重写</span> CMD_MUSIC_PLAY/PAUSE/STOP</td>
+        <td class="col-joyai"><span class="tag gap">false</span></td>
+      </tr>
+      <tr><td><strong>client_frame_duration</strong></td>
+        <td class="col-base">60ms</td>
+        <td class="col-mqtt">60ms</td>
+        <td class="col-baidu">60ms（实测可 20ms）</td>
+        <td class="col-joyai">60ms</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>SendMcpMessage 缺失尤其值得注意</strong>：京东走基类 emit <code>{type:"mcp",payload:...}</code> 给服务端，
+    但 JoyInside 服务端期望的格式可能是 <code>contentType=EVENT, eventType=CLIENT_MCP_CALL</code> 之类。
+    若产品需要走 MCP 工具调用，京东侧必须重写。
+  </div>
+</section>
+
+<!-- ==================== § 三 上行调用 · 泳道图 ==================== -->
+<section class="section" id="sec3">
+  <h2><span class="num">§ 三</span> 上行调用 · 泳道图（以 SendAbortSpeaking 为例）</h2>
+  <p class="sub">application 一句 <code>protocol_-&gt;SendAbortSpeaking(reason)</code>，在四协议内部展开成完全不同的命令序列。</p>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 980 480" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SendAbortSpeaking 泳道图">
+      <defs>
+        <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+        </marker>
+      </defs>
+
+      <!-- 起点 application -->
+      <rect x="20" y="20" width="940" height="50" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="1.5"/>
+      <text x="490" y="42" text-anchor="middle" font-weight="700" font-size="13" fill="#8E1C1C">application.cc::AbortSpeaking(reason)</text>
+      <text x="490" y="60" text-anchor="middle" font-size="11" font-family="monospace" fill="#555">protocol_-&gt;SendAbortSpeaking(reason); aborted_ = true;</text>
+
+      <!-- 4 个泳道 -->
+      <!-- 小智 WS -->
+      <rect x="20" y="90" width="225" height="370" rx="6" fill="var(--base)" stroke="var(--base-line)" stroke-width="1.5"/>
+      <text x="132" y="110" text-anchor="middle" font-weight="700" font-size="12" fill="#0D47A1">小智 WS · websocket_protocol</text>
+      <line x1="32" y1="118" x2="232" y2="118" stroke="var(--base-line)" stroke-width="1" stroke-dasharray="3 2"/>
+
+      <rect x="40" y="130" width="185" height="40" rx="4" fill="#fff" stroke="#1565C0"/>
+      <text x="132" y="146" text-anchor="middle" font-size="11" font-weight="600">基类默认实现</text>
+      <text x="132" y="162" text-anchor="middle" font-size="10" font-family="monospace" fill="#555">SendText(JSON)</text>
+
+      <rect x="40" y="190" width="185" height="60" rx="4" fill="#fff" stroke="#999"/>
+      <text x="132" y="208" text-anchor="middle" font-size="10" font-family="monospace" fill="#1565C0">{"session_id":"...",</text>
+      <text x="132" y="222" text-anchor="middle" font-size="10" font-family="monospace" fill="#1565C0">"type":"abort",</text>
+      <text x="132" y="236" text-anchor="middle" font-size="10" font-family="monospace" fill="#1565C0">"reason":"wake_word_..."}</text>
+
+      <rect x="40" y="270" width="185" height="40" rx="4" fill="#fff" stroke="#999"/>
+      <text x="132" y="288" text-anchor="middle" font-size="11">服务端响应：</text>
+      <text x="132" y="304" text-anchor="middle" font-size="10" font-family="monospace" fill="#555">{type:tts,state:stop}</text>
+
+      <rect x="40" y="330" width="185" height="100" rx="4" fill="#FFF8E1" stroke="#F57C00" stroke-width="1.5"/>
+      <text x="132" y="350" text-anchor="middle" font-size="10" font-weight="600" fill="#E65100">无本地副作用：</text>
+      <text x="132" y="368" text-anchor="middle" font-size="10" fill="#555">• 不 ResetDecoder</text>
+      <text x="132" y="384" text-anchor="middle" font-size="10" fill="#555">• 不修改状态机</text>
+      <text x="132" y="400" text-anchor="middle" font-size="10" fill="#555">• 完全依赖服务端</text>
+      <text x="132" y="418" text-anchor="middle" font-size="10" fill="#E65100">回送的 tts.stop</text>
+
+      <!-- 小智 MQTT -->
+      <rect x="265" y="90" width="225" height="370" rx="6" fill="var(--mqtt)" stroke="var(--mqtt-line)" stroke-width="1.5"/>
+      <text x="377" y="110" text-anchor="middle" font-weight="700" font-size="12" fill="#4A148C">小智 MQTT · mqtt_protocol</text>
+      <line x1="277" y1="118" x2="477" y2="118" stroke="var(--mqtt-line)" stroke-width="1" stroke-dasharray="3 2"/>
+
+      <rect x="285" y="130" width="185" height="40" rx="4" fill="#fff" stroke="#6A1B9A"/>
+      <text x="377" y="146" text-anchor="middle" font-size="11" font-weight="600">基类默认实现</text>
+      <text x="377" y="162" text-anchor="middle" font-size="10" font-family="monospace" fill="#555">MQTT publish</text>
+
+      <rect x="285" y="190" width="185" height="60" rx="4" fill="#fff" stroke="#999"/>
+      <text x="377" y="208" text-anchor="middle" font-size="10" font-family="monospace" fill="#4A148C">topic: /server/$device_id</text>
+      <text x="377" y="222" text-anchor="middle" font-size="10" font-family="monospace" fill="#4A148C">同 WS 的 JSON 格式</text>
+      <text x="377" y="236" text-anchor="middle" font-size="10" font-family="monospace" fill="#4A148C">QoS=1</text>
+
+      <rect x="285" y="270" width="185" height="40" rx="4" fill="#fff" stroke="#999"/>
+      <text x="377" y="288" text-anchor="middle" font-size="11">服务端响应：</text>
+      <text x="377" y="304" text-anchor="middle" font-size="10" font-family="monospace" fill="#555">通过 MQTT topic 回传</text>
+
+      <rect x="285" y="330" width="185" height="100" rx="4" fill="#FFF8E1" stroke="#F57C00" stroke-width="1.5"/>
+      <text x="377" y="350" text-anchor="middle" font-size="10" font-weight="600" fill="#E65100">行为 = 小智 WS</text>
+      <text x="377" y="368" text-anchor="middle" font-size="10" fill="#555">仅传输介质不同</text>
+      <text x="377" y="384" text-anchor="middle" font-size="10" fill="#555">（控制 MQTT，</text>
+      <text x="377" y="400" text-anchor="middle" font-size="10" fill="#555">音频 UDP 加密）</text>
+
+      <!-- 百度 -->
+      <rect x="510" y="90" width="225" height="370" rx="6" fill="var(--baidu)" stroke="var(--baidu-line)" stroke-width="1.5"/>
+      <text x="622" y="110" text-anchor="middle" font-weight="700" font-size="12" fill="#1B5E20">百度 BRTC · websocket_baidu</text>
+      <line x1="522" y1="118" x2="722" y2="118" stroke="var(--baidu-line)" stroke-width="1" stroke-dasharray="3 2"/>
+
+      <rect x="530" y="130" width="185" height="40" rx="4" fill="#fff" stroke="#2E7D32"/>
+      <text x="622" y="146" text-anchor="middle" font-size="11" font-weight="600">完全重写</text>
+      <text x="622" y="162" text-anchor="middle" font-size="10" font-family="monospace" fill="#555">5 步本地动作</text>
+
+      <rect x="530" y="180" width="185" height="22" rx="3" fill="#fff" stroke="#999"/>
+      <text x="538" y="195" font-size="10.5" fill="#333">① StopListeningTimer()</text>
+
+      <rect x="530" y="208" width="185" height="22" rx="3" fill="#fff" stroke="#999"/>
+      <text x="538" y="223" font-size="10.5" fill="#333">② ResetDecoder() 清队列</text>
+
+      <rect x="530" y="236" width="185" height="22" rx="3" fill="#fff" stroke="#999"/>
+      <text x="538" y="251" font-size="10.5" fill="#333">③ NotifyTtsState("stop")</text>
+
+      <rect x="530" y="264" width="185" height="22" rx="3" fill="#fff" stroke="#999"/>
+      <text x="538" y="279" font-size="10.5" fill="#333">④ AGENT_BREAK_BEGIN+delay_ms</text>
+
+      <rect x="530" y="292" width="185" height="22" rx="3" fill="#fff" stroke="#999"/>
+      <text x="538" y="307" font-size="10.5" fill="#333">⑤ ASR_STOP / MUSIC_PAUSE</text>
+
+      <rect x="530" y="330" width="185" height="100" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5"/>
+      <text x="622" y="350" text-anchor="middle" font-size="10" font-weight="600" fill="#1B5E20">优雅打断（最完整）：</text>
+      <text x="622" y="368" text-anchor="middle" font-size="10" fill="#555">• 立即清解码队列</text>
+      <text x="622" y="384" text-anchor="middle" font-size="10" fill="#555">• 区分唤醒/手动打断</text>
+      <text x="622" y="400" text-anchor="middle" font-size="10" fill="#555">• 唤醒打断丢前 N ms</text>
+      <text x="622" y="418" text-anchor="middle" font-size="10" fill="#1B5E20">音频，去回声残留</text>
+
+      <!-- 京东 -->
+      <rect x="755" y="90" width="225" height="370" rx="6" fill="var(--joyai)" stroke="var(--joyai-line)" stroke-width="1.5"/>
+      <text x="867" y="110" text-anchor="middle" font-weight="700" font-size="12" fill="#E65100">京东 JoyInside · websocket_joyai</text>
+      <line x1="767" y1="118" x2="967" y2="118" stroke="var(--joyai-line)" stroke-width="1" stroke-dasharray="3 2"/>
+
+      <rect x="775" y="130" width="185" height="40" rx="4" fill="#fff" stroke="#EF6C00"/>
+      <text x="867" y="146" text-anchor="middle" font-size="11" font-weight="600">部分重写</text>
+      <text x="867" y="162" text-anchor="middle" font-size="10" font-family="monospace" fill="#555">3 步</text>
+
+      <rect x="775" y="180" width="185" height="30" rx="3" fill="#fff" stroke="#999"/>
+      <text x="783" y="200" font-size="10.5" fill="#333">① interrupt_pending_ = true</text>
+
+      <rect x="775" y="216" width="185" height="30" rx="3" fill="#fff" stroke="#999"/>
+      <text x="783" y="236" font-size="10.5" fill="#333">② EmitTtsStop() 立即上抛</text>
+
+      <rect x="775" y="252" width="185" height="30" rx="3" fill="#fff" stroke="#999"/>
+      <text x="783" y="272" font-size="10.5" fill="#333">③ SendText(CLIENT_INTERRUPT)</text>
+
+      <rect x="775" y="295" width="185" height="35" rx="4" fill="#fff" stroke="#999"/>
+      <text x="867" y="315" text-anchor="middle" font-size="10">窗口期内丢残留下行音频</text>
+
+      <rect x="775" y="345" width="185" height="85" rx="4" fill="#FFEBEE" stroke="#C62828" stroke-width="1.5"/>
+      <text x="867" y="362" text-anchor="middle" font-size="10" font-weight="600" fill="#C62828">缺口 vs 百度：</text>
+      <text x="867" y="380" text-anchor="middle" font-size="10" fill="#555">• 未 ResetDecoder</text>
+      <text x="867" y="396" text-anchor="middle" font-size="10" fill="#555">• 未区分 reason</text>
+      <text x="867" y="412" text-anchor="middle" font-size="10" fill="#C62828">→ 见 § 六 缺口热点</text>
+
+      <!-- 上下连接 -->
+      <path d="M 132,70 L 132,90" stroke="#666" stroke-width="1.5" marker-end="url(#arr2)"/>
+      <path d="M 377,70 L 377,90" stroke="#666" stroke-width="1.5" marker-end="url(#arr2)"/>
+      <path d="M 622,70 L 622,90" stroke="#666" stroke-width="1.5" marker-end="url(#arr2)"/>
+      <path d="M 867,70 L 867,90" stroke="#666" stroke-width="1.5" marker-end="url(#arr2)"/>
+    </svg>
+  </div>
+
+  <div class="callout">
+    <strong>观察：</strong>同一个 application 调用，4 协议内部展开规模从 1 步（小智）到 5 步（百度）不等。
+    application 层始终零感知 — 这就是基类抽象的价值。
+    扩展协议（百度/京东）的"重写"动作越复杂，平台特性越强；但同时也意味着 application 调用方依赖更多被翻译的语义在协议内部正确实现。
+  </div>
+</section>
+
+<!-- ==================== § 四 下行事件翻译 ==================== -->
+<section class="section" id="sec4">
+  <h2><span class="num">§ 四</span> 下行事件翻译流程</h2>
+  <p class="sub">服务端发来的平台原生事件，必须在协议层翻译成基类约定的 <code>{type:"tts/stt/mcp/..."}</code> JSON，application 才能统一处理。</p>
+
+  <h3>4.1 翻译规则总表</h3>
+  <table class="tbl-compact">
+    <thead>
+      <tr>
+        <th style="width:18%">基类语义</th>
+        <th class="col-base">小智 WS（透传）</th>
+        <th class="col-baidu">百度（翻译）</th>
+        <th class="col-joyai">京东（翻译）</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>tts.start</strong><br/><small>TTS 开始播放</small></td>
+        <td class="col-base">服务端直发 <code>{type:tts,state:start}</code></td>
+        <td class="col-baidu">收 <code>[E]:[TTS_BEGIN_SPEAKING]</code> → <code>NotifyTtsState("start","happy")</code></td>
+        <td class="col-joyai">首帧下行音频到达 → <code>EmitTtsStartIfNeeded()</code></td>
+      </tr>
+      <tr>
+        <td><strong>tts.stop</strong></td>
+        <td class="col-base">服务端直发 <code>{type:tts,state:stop}</code></td>
+        <td class="col-baidu"><code>[E]:[TTS_END_SPEAKING]</code> 或 <code>[VOICE_COMING]</code>（barge-in）</td>
+        <td class="col-joyai"><code>TTS_COMPLETE/COMPLETE/CALL_AGENT_INTERRUPTED/EMPTY_CONTENT</code></td>
+      </tr>
+      <tr>
+        <td><strong>tts.sentence_start</strong><br/><small>字幕逐句</small></td>
+        <td class="col-base">服务端直发 <code>{type:tts,state:sentence_start,text}</code></td>
+        <td class="col-baidu"><code>[Q]:final_text|||[emotion]:xxx</code> 拆分扩展</td>
+        <td class="col-joyai"><code>EVENT.eventType=TTS_SENTENCE_START + eventData.text</code></td>
+      </tr>
+      <tr>
+        <td><strong>stt.text</strong><br/><small>用户识别结果</small></td>
+        <td class="col-base">服务端直发 <code>{type:stt,text}</code></td>
+        <td class="col-baidu"><code>final=true</code> + 2 秒去重 → <code>CreateJsonMessage("stt")</code></td>
+        <td class="col-joyai"><code>ASR contentType + textType=IS_FINAL</code> 才 emit</td>
+      </tr>
+      <tr>
+        <td><strong>llm.emotion</strong></td>
+        <td class="col-base">服务端直发 <code>{type:llm,emotion}</code></td>
+        <td class="col-baidu"><code>[Q]:|||[emotion]:happy</code> → 拆出 emotion → 单独 emit llm</td>
+        <td class="col-joyai"><span class="tag gap">缺失</span> 未实现 emotion 翻译</td>
+      </tr>
+      <tr>
+        <td><strong>mcp.payload</strong></td>
+        <td class="col-base">服务端直发 <code>{type:mcp,payload:{...}}</code></td>
+        <td class="col-baidu"><code>[Function_Call]:{...}</code> 前缀去除后透传</td>
+        <td class="col-joyai"><span class="tag gap">缺失</span></td>
+      </tr>
+      <tr>
+        <td><strong>custom.payload</strong><br/><small>远程命令</small></td>
+        <td class="col-base">服务端直发</td>
+        <td class="col-baidu"><code>HandleCustomData</code> 透传</td>
+        <td class="col-joyai"><span class="tag gap">缺失</span></td>
+      </tr>
+      <tr>
+        <td><strong>音频帧</strong></td>
+        <td class="col-base">BinaryProtocol2/3 解头</td>
+        <td class="col-baidu">binary frame 直接转 packet</td>
+        <td class="col-joyai">binary frame 或 base64 (audioBase64 字段) 两路</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>4.2 京东 EMPTY_CONTENT 翻译流程图</h3>
+  <p class="sub">为什么 EMPTY_CONTENT 是问题点：服务端每 3-5s 持续推送，但语义是"没识别到任何内容"。当前实现盲目把它当作"TTS 结束"翻译。</p>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 900 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EMPTY_CONTENT 翻译流程">
+      <defs>
+        <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+        </marker>
+      </defs>
+
+      <rect x="30" y="30" width="180" height="60" rx="6" fill="#fff" stroke="#E65100" stroke-width="2"/>
+      <text x="120" y="55" text-anchor="middle" font-weight="700" font-size="12" fill="#E65100">服务端推</text>
+      <text x="120" y="74" text-anchor="middle" font-size="10" font-family="monospace" fill="#555">eventType: EMPTY_CONTENT</text>
+
+      <path d="M 210,60 L 250,60" stroke="#666" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+      <rect x="250" y="30" width="200" height="60" rx="6" fill="var(--joyai)" stroke="var(--joyai-line)" stroke-width="2"/>
+      <text x="350" y="50" text-anchor="middle" font-weight="600" font-size="11" fill="#E65100">websocket_joyai_protocol</text>
+      <text x="350" y="68" text-anchor="middle" font-size="10" fill="#555">HandleEventMessage()</text>
+      <text x="350" y="83" text-anchor="middle" font-size="9" font-family="monospace" fill="#888">line 308-315</text>
+
+      <path d="M 450,60 L 490,60" stroke="#666" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+      <rect x="490" y="20" width="190" height="80" rx="6" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+      <text x="585" y="42" text-anchor="middle" font-weight="700" font-size="11" fill="#C62828">当前实现（有问题）</text>
+      <text x="585" y="62" text-anchor="middle" font-size="10" fill="#555">EmitTtsStop()</text>
+      <text x="585" y="78" text-anchor="middle" font-size="10" fill="#555">+ 刷新 last_incoming_time_</text>
+      <text x="585" y="93" text-anchor="middle" font-size="9" fill="#C62828">基类 120s 兜底失效</text>
+
+      <path d="M 680,60 L 720,60" stroke="#666" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+      <rect x="720" y="30" width="160" height="60" rx="6" fill="#FFF3E0" stroke="#E65100" stroke-width="2"/>
+      <text x="800" y="50" text-anchor="middle" font-weight="600" font-size="11" fill="#E65100">application</text>
+      <text x="800" y="68" text-anchor="middle" font-size="10" fill="#555">tts.stop 来回切</text>
+      <text x="800" y="83" text-anchor="middle" font-size="9" fill="#C62828">永远不退 listening</text>
+
+      <!-- 应该的流程 -->
+      <rect x="30" y="160" width="180" height="60" rx="6" fill="#fff" stroke="#E65100" stroke-width="2"/>
+      <text x="120" y="185" text-anchor="middle" font-weight="700" font-size="12" fill="#E65100">服务端推</text>
+      <text x="120" y="204" text-anchor="middle" font-size="10" font-family="monospace" fill="#555">eventType: EMPTY_CONTENT</text>
+
+      <path d="M 210,190 L 250,190" stroke="#2E7D32" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+      <rect x="250" y="160" width="200" height="60" rx="6" fill="var(--joyai)" stroke="#2E7D32" stroke-width="2"/>
+      <text x="350" y="180" text-anchor="middle" font-weight="600" font-size="11" fill="#2E7D32">websocket_joyai_protocol</text>
+      <text x="350" y="198" text-anchor="middle" font-size="10" fill="#555">识别为"未识别"</text>
+      <text x="350" y="213" text-anchor="middle" font-size="9" font-family="monospace" fill="#888">计数 / 不刷时间戳</text>
+
+      <path d="M 450,190 L 490,190" stroke="#2E7D32" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+      <rect x="490" y="150" width="190" height="80" rx="6" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+      <text x="585" y="172" text-anchor="middle" font-weight="700" font-size="11" fill="#1B5E20">建议实现</text>
+      <text x="585" y="192" text-anchor="middle" font-size="10" fill="#555">①不刷 last_incoming_time_</text>
+      <text x="585" y="208" text-anchor="middle" font-size="10" fill="#555">②不 emit tts.stop</text>
+      <text x="585" y="223" text-anchor="middle" font-size="9" fill="#1B5E20">基类 120s 兜底生效</text>
+
+      <path d="M 680,190 L 720,190" stroke="#2E7D32" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+      <rect x="720" y="160" width="160" height="60" rx="6" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+      <text x="800" y="180" text-anchor="middle" font-weight="600" font-size="11" fill="#1B5E20">application</text>
+      <text x="800" y="198" text-anchor="middle" font-size="10" fill="#555">120s 后自动</text>
+      <text x="800" y="213" text-anchor="middle" font-size="9" fill="#1B5E20">CloseAudioChannel</text>
+
+      <!-- 标记线 -->
+      <text x="25" y="20" font-size="11" font-weight="700" fill="#C62828">▼ 当前（buggy）</text>
+      <text x="25" y="150" font-size="11" font-weight="700" fill="#2E7D32">▼ 建议（fixed）</text>
+
+      <!-- 对比说明 -->
+      <rect x="30" y="270" width="850" height="70" rx="6" fill="#FFF8E1" stroke="#F57C00" stroke-width="1.5"/>
+      <text x="455" y="293" text-anchor="middle" font-size="12" font-weight="700" fill="#E65100">核心翻译规则</text>
+      <text x="455" y="313" text-anchor="middle" font-size="11" fill="#555">服务端的 <tspan font-family="monospace" fill="#E65100">EMPTY_CONTENT</tspan> 是"我在听但没听到"信号 ≠ "TTS 结束"。</text>
+      <text x="455" y="329" text-anchor="middle" font-size="11" fill="#555">协议层应吸收它而<strong style="fill:#C62828">不暴露给 application</strong>，让基类 IsTimeout() 120s 兜底自然触发会话回收。</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ==================== § 五 协议特性思维导图 ==================== -->
+<section class="section" id="sec5">
+  <h2><span class="num">§ 五</span> 协议特性思维导图</h2>
+  <p class="sub">四协议特性放射状对比 — 中心为 Protocol 基类，分支展开各协议在七大维度的差异化实现。</p>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 980 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="协议特性思维导图">
+      <!-- 中心节点 -->
+      <circle cx="490" cy="320" r="60" fill="#C62828" stroke="#8E1C1C" stroke-width="2"/>
+      <text x="490" y="316" text-anchor="middle" font-weight="700" font-size="13" fill="#fff">Protocol</text>
+      <text x="490" y="334" text-anchor="middle" font-size="11" fill="#fff">基类</text>
+      <text x="490" y="350" text-anchor="middle" font-size="10" fill="#FFE082">12 virtual</text>
+
+      <!-- 7 大维度（围绕一圈） -->
+      <!-- 鉴权 -->
+      <path d="M 490,260 Q 490,180 380,140" stroke="#999" stroke-width="1.5" fill="none"/>
+      <rect x="290" y="100" width="160" height="60" rx="8" fill="#FFF3E0" stroke="#E65100" stroke-width="1.5"/>
+      <text x="370" y="120" text-anchor="middle" font-weight="700" font-size="11" fill="#E65100">①鉴权</text>
+      <text x="370" y="138" text-anchor="middle" font-size="10" fill="#555">小智：Bearer Header</text>
+      <text x="370" y="152" text-anchor="middle" font-size="10" fill="#555">百度：LIC 命令往返 · 京东：URL token</text>
+
+      <!-- 上行命名 -->
+      <path d="M 545,275 Q 620,200 700,150" stroke="#999" stroke-width="1.5" fill="none"/>
+      <rect x="630" y="105" width="180" height="60" rx="8" fill="#FFEBEE" stroke="#C62828" stroke-width="1.5"/>
+      <text x="720" y="125" text-anchor="middle" font-weight="700" font-size="11" fill="#C62828">②上行格式</text>
+      <text x="720" y="143" text-anchor="middle" font-size="10" fill="#555">小智：原生 JSON</text>
+      <text x="720" y="157" text-anchor="middle" font-size="10" fill="#555">百度：[CMD] 前缀 · 京东：EVENT 嵌套</text>
+
+      <!-- 下行解析 -->
+      <path d="M 550,320 Q 700,300 830,295" stroke="#999" stroke-width="1.5" fill="none"/>
+      <rect x="800" y="260" width="170" height="70" rx="8" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5"/>
+      <text x="885" y="280" text-anchor="middle" font-weight="700" font-size="11" fill="#1B5E20">③下行翻译</text>
+      <text x="885" y="298" text-anchor="middle" font-size="10" fill="#555">小智：透传</text>
+      <text x="885" y="313" text-anchor="middle" font-size="10" fill="#555">百度：[E]: 前缀拆</text>
+      <text x="885" y="326" text-anchor="middle" font-size="10" fill="#555">京东：contentType 路由</text>
+
+      <!-- 心跳 -->
+      <path d="M 540,375 Q 660,460 750,500" stroke="#999" stroke-width="1.5" fill="none"/>
+      <rect x="680" y="475" width="180" height="60" rx="8" fill="#FFF3E0" stroke="#E65100" stroke-width="1.5"/>
+      <text x="770" y="495" text-anchor="middle" font-weight="700" font-size="11" fill="#E65100">④心跳/保活</text>
+      <text x="770" y="513" text-anchor="middle" font-size="10" fill="#555">小智：底层 ws ping</text>
+      <text x="770" y="527" text-anchor="middle" font-size="10" fill="#555">百度：LIC 周期 · 京东：缺失（应 30s）</text>
+
+      <!-- 超时管理 -->
+      <path d="M 490,380 Q 490,470 490,510" stroke="#999" stroke-width="1.5" fill="none"/>
+      <rect x="395" y="510" width="190" height="70" rx="8" fill="#FFEBEE" stroke="#C62828" stroke-width="1.5"/>
+      <text x="490" y="530" text-anchor="middle" font-weight="700" font-size="11" fill="#C62828">⑤超时管理</text>
+      <text x="490" y="548" text-anchor="middle" font-size="10" fill="#555">小智：基类 120s 兜底</text>
+      <text x="490" y="563" text-anchor="middle" font-size="10" fill="#555">百度：30s xTimer + 重置</text>
+      <text x="490" y="576" text-anchor="middle" font-size="10" fill="#555">京东：无</text>
+
+      <!-- 打断机制 -->
+      <path d="M 435,375 Q 320,460 220,495" stroke="#999" stroke-width="1.5" fill="none"/>
+      <rect x="115" y="475" width="190" height="70" rx="8" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5"/>
+      <text x="210" y="495" text-anchor="middle" font-weight="700" font-size="11" fill="#1B5E20">⑥打断机制</text>
+      <text x="210" y="513" text-anchor="middle" font-size="10" fill="#555">小智：JSON abort</text>
+      <text x="210" y="528" text-anchor="middle" font-size="10" fill="#555">百度：5 步 · 含 ResetDecoder</text>
+      <text x="210" y="543" text-anchor="middle" font-size="10" fill="#555">京东：3 步 · 含 interrupt 窗口</text>
+
+      <!-- 心跳缺失 -->
+      <path d="M 435,320 Q 270,310 170,300" stroke="#999" stroke-width="1.5" fill="none"/>
+      <rect x="35" y="260" width="170" height="70" rx="8" fill="#FFF3E0" stroke="#E65100" stroke-width="1.5"/>
+      <text x="120" y="280" text-anchor="middle" font-weight="700" font-size="11" fill="#E65100">⑦扩展能力</text>
+      <text x="120" y="298" text-anchor="middle" font-size="10" fill="#555">小智：仅基础</text>
+      <text x="120" y="313" text-anchor="middle" font-size="10" fill="#555">百度：LLM/Music/Prompt</text>
+      <text x="120" y="326" text-anchor="middle" font-size="10" fill="#555">京东：仅基础</text>
+
+      <!-- 协议色块 -->
+      <rect x="35" y="170" width="270" height="60" rx="8" fill="var(--base)" stroke="var(--base-line)" stroke-width="1.5"/>
+      <text x="170" y="190" text-anchor="middle" font-weight="700" font-size="12" fill="#0D47A1">小智 WS（基准）</text>
+      <text x="170" y="207" text-anchor="middle" font-size="10" fill="#555">最薄实现 · 服务端定义协议</text>
+      <text x="170" y="221" text-anchor="middle" font-size="10" fill="#555">application 直接透传 JSON</text>
+
+      <rect x="675" y="170" width="270" height="60" rx="8" fill="var(--mqtt)" stroke="var(--mqtt-line)" stroke-width="1.5"/>
+      <text x="810" y="190" text-anchor="middle" font-weight="700" font-size="12" fill="#4A148C">小智 MQTT（基准变体）</text>
+      <text x="810" y="207" text-anchor="middle" font-size="10" fill="#555">控制 MQTT + 加密 UDP 音频</text>
+      <text x="810" y="221" text-anchor="middle" font-size="10" fill="#555">JSON 格式同 WS</text>
+
+      <rect x="35" y="360" width="270" height="60" rx="8" fill="var(--baidu)" stroke="var(--baidu-line)" stroke-width="1.5"/>
+      <text x="170" y="380" text-anchor="middle" font-weight="700" font-size="12" fill="#1B5E20">百度 BRTC（扩展）</text>
+      <text x="170" y="397" text-anchor="middle" font-size="10" fill="#555">最厚实现 · 9 个虚函数重写</text>
+      <text x="170" y="411" text-anchor="middle" font-size="10" fill="#555">前缀协议 · 3 个 xTimer</text>
+
+      <rect x="675" y="360" width="270" height="60" rx="8" fill="var(--joyai)" stroke="var(--joyai-line)" stroke-width="1.5"/>
+      <text x="810" y="380" text-anchor="middle" font-weight="700" font-size="12" fill="#E65100">京东 JoyInside（扩展）</text>
+      <text x="810" y="397" text-anchor="middle" font-size="10" fill="#555">中等实现 · 3 个虚函数重写</text>
+      <text x="810" y="411" text-anchor="middle" font-size="10" fill="#555">EVENT 嵌套 · 待补 timer + heartbeat</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ==================== § 六 对齐缺口热点 ==================== -->
+<section class="section" id="sec6">
+  <h2><span class="num">§ 六</span> 对齐缺口热点</h2>
+  <p class="sub">站在"统一架构、零感知调用"立场，当前实现还有 6 处必须补齐的缺口，按风险级排列。</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:6%">#</th>
+        <th style="width:18%">缺口</th>
+        <th style="width:16%">影响协议</th>
+        <th style="width:24%">现状</th>
+        <th style="width:24%">建议</th>
+        <th style="width:12%">优先级</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td><strong>京东 listening 不退出</strong></td>
+        <td>京东 JoyAI</td>
+        <td>EMPTY_CONTENT 每 3-5s 刷 <code>last_incoming_time_</code>，基类 120s 兜底永远不触发，listening 卡死</td>
+        <td>HandleEventMessage 内 EMPTY_CONTENT 分支<strong>不更新</strong>时间戳，且<strong>不 emit tts.stop</strong>（无 TTS 上下文）</td>
+        <td><span class="tag gap">P0 必修</span></td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><strong>application 缺统一 listening 超时</strong></td>
+        <td>小智 WS · MQTT · 京东</td>
+        <td>仅百度自己有 30s xTimer，其他三协议靠基类 120s 但只在被动调用时检查</td>
+        <td>application.cc 进 kDeviceStateListening 启 30s esp_timer，state 切走停；超时 SetDeviceState(Idle)</td>
+        <td><span class="tag gap">P0 必修</span></td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><strong>京东 SendAbortSpeaking 不 ResetDecoder</strong></td>
+        <td>京东 JoyAI</td>
+        <td>打断后解码队列残留 1-2 秒，用户感觉"按了打断还在说"</td>
+        <td>对齐百度：<code>Application::GetInstance().GetAudioService().ResetDecoder()</code> + 区分 reason</td>
+        <td><span class="tag warn">P1 应修</span></td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><strong>京东缺 PING 心跳</strong></td>
+        <td>京东 JoyAI</td>
+        <td>JoyInside 文档建议 30s 一次，弱网/4G 网关可能 60s+ 闲连接断</td>
+        <td>xTimer 30s 周期发 <code>contentType=PING</code>，OnAudioChannelClosed 时停</td>
+        <td><span class="tag warn">P1 应修</span></td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td><strong>mid 唯一性</strong></td>
+        <td>京东 JoyAI</td>
+        <td>文档语义"请求唯一标识符"，代码用 bot_id_ 填充，所有上行 mid 一样</td>
+        <td>每次 BuildClientEvent 用 UUID 或 esp_random() + 单调计数器</td>
+        <td><span class="tag todo">P2 选修</span></td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td><strong>京东 ASR textType 区分</strong></td>
+        <td>京东 JoyAI</td>
+        <td>每条 ASR 都 emit stt，包括中间识别结果，UI 反复刷新 + 重复 popup</td>
+        <td>仅 textType=IS_FINAL 才 emit（本次刚补，已修 ✓）</td>
+        <td><span class="tag ok">已完成</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>P0 两条是真因</strong>：用户日志里 listening 卡死 130+ 秒就是 #1 + #2 联合作用。
+    单独修任一条都不够：只修 #1 京东能退（120s 兜底生效）但慢；只修 #2 京东仍会被 EMPTY_CONTENT 阻挡。两个一起做才完整。
+  </div>
+</section>
+
+<!-- ==================== § 七 对齐方案路线图 ==================== -->
+<section class="section" id="sec7">
+  <h2><span class="num">§ 七</span> 对齐方案路线图</h2>
+  <p class="sub">三档分阶段实施，量产纪律下"保守先 P0、稳定后 P1、长期看 P2"。</p>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="对齐路线图">
+      <!-- 横向时间线 -->
+      <line x1="60" y1="180" x2="920" y2="180" stroke="#666" stroke-width="2"/>
+
+      <!-- 3 个里程碑 -->
+      <circle cx="180" cy="180" r="10" fill="#C62828"/>
+      <circle cx="490" cy="180" r="10" fill="#F57C00"/>
+      <circle cx="800" cy="180" r="10" fill="#1565C0"/>
+
+      <text x="180" y="160" text-anchor="middle" font-weight="700" font-size="13" fill="#C62828">阶段 1 · P0 必修</text>
+      <text x="180" y="200" text-anchor="middle" font-size="11" fill="#666">即刻 · 1 天</text>
+
+      <text x="490" y="160" text-anchor="middle" font-weight="700" font-size="13" fill="#E65100">阶段 2 · P1 应修</text>
+      <text x="490" y="200" text-anchor="middle" font-size="11" fill="#666">本周内 · 2-3 天</text>
+
+      <text x="800" y="160" text-anchor="middle" font-weight="700" font-size="13" fill="#1565C0">阶段 3 · P2 选修</text>
+      <text x="800" y="200" text-anchor="middle" font-size="11" fill="#666">下迭代 · 1 周+</text>
+
+      <!-- P0 内容 -->
+      <rect x="50" y="20" width="260" height="120" rx="8" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+      <text x="180" y="42" text-anchor="middle" font-weight="700" font-size="12" fill="#8E1C1C">阶段 1：止血</text>
+      <text x="60" y="62" font-size="11" fill="#333">① 京东 EMPTY_CONTENT 不刷</text>
+      <text x="78" y="76" font-size="11" fill="#555">last_incoming_time_</text>
+      <text x="60" y="92" font-size="11" fill="#333">② application 加 listening</text>
+      <text x="78" y="106" font-size="11" fill="#555">超时 30s（小智+京东受益）</text>
+      <text x="60" y="124" font-size="11" font-family="monospace" fill="#1565C0">改 main/protocols/+application.cc</text>
+
+      <!-- P1 内容 -->
+      <rect x="360" y="20" width="260" height="120" rx="8" fill="#FFF3E0" stroke="#E65100" stroke-width="2"/>
+      <text x="490" y="42" text-anchor="middle" font-weight="700" font-size="12" fill="#E65100">阶段 2：完善体验</text>
+      <text x="370" y="62" font-size="11" fill="#333">③ 京东 SendAbortSpeaking 加</text>
+      <text x="388" y="76" font-size="11" fill="#555">ResetDecoder（对齐百度）</text>
+      <text x="370" y="92" font-size="11" fill="#333">④ 京东 PING 心跳 30s</text>
+      <text x="370" y="108" font-size="11" fill="#333">⑤ 京东 emotion 翻译</text>
+      <text x="370" y="124" font-size="11" fill="#333">⑥ 错误重连指数退避</text>
+
+      <!-- P2 内容 -->
+      <rect x="670" y="20" width="260" height="120" rx="8" fill="#E3F2FD" stroke="#1565C0" stroke-width="2"/>
+      <text x="800" y="42" text-anchor="middle" font-weight="700" font-size="12" fill="#0D47A1">阶段 3：架构统一</text>
+      <text x="680" y="62" font-size="11" fill="#333">⑦ 删百度自带 30s timer</text>
+      <text x="698" y="76" font-size="11" fill="#555">全交 application 管理</text>
+      <text x="680" y="92" font-size="11" fill="#333">⑧ 京东 mid 唯一化</text>
+      <text x="680" y="108" font-size="11" fill="#333">⑨ 京东补全 MCP/Music/</text>
+      <text x="698" y="124" font-size="11" fill="#555">SystemPrompt 接口</text>
+
+      <!-- 风险标签 -->
+      <rect x="50" y="230" width="260" height="100" rx="8" fill="#fff" stroke="#C62828" stroke-width="1.5"/>
+      <text x="180" y="250" text-anchor="middle" font-weight="700" font-size="11" fill="#C62828">风险评估</text>
+      <text x="60" y="270" font-size="10.5" fill="#333">• 改动文件：3</text>
+      <text x="60" y="285" font-size="10.5" fill="#333">• 代码量：&lt; 50 行</text>
+      <text x="60" y="300" font-size="10.5" fill="#333">• 影响协议：京东 + 通用</text>
+      <text x="60" y="316" font-size="10.5" fill="#2E7D32">• 风险：低（量产可行）</text>
+
+      <rect x="360" y="230" width="260" height="100" rx="8" fill="#fff" stroke="#E65100" stroke-width="1.5"/>
+      <text x="490" y="250" text-anchor="middle" font-weight="700" font-size="11" fill="#E65100">风险评估</text>
+      <text x="370" y="270" font-size="10.5" fill="#333">• 改动文件：1-2（仅京东）</text>
+      <text x="370" y="285" font-size="10.5" fill="#333">• 代码量：~100 行</text>
+      <text x="370" y="300" font-size="10.5" fill="#333">• 影响协议：京东独占</text>
+      <text x="370" y="316" font-size="10.5" fill="#E65100">• 风险：中（需联调）</text>
+
+      <rect x="670" y="230" width="260" height="100" rx="8" fill="#fff" stroke="#1565C0" stroke-width="1.5"/>
+      <text x="800" y="250" text-anchor="middle" font-weight="700" font-size="11" fill="#0D47A1">风险评估</text>
+      <text x="680" y="270" font-size="10.5" fill="#333">• 改动文件：3-4</text>
+      <text x="680" y="285" font-size="10.5" fill="#333">• 代码量：~200 行</text>
+      <text x="680" y="300" font-size="10.5" fill="#333">• 影响协议：百度 + 京东</text>
+      <text x="680" y="316" font-size="10.5" fill="#C62828">• 风险：高（百度需回归）</text>
+    </svg>
+  </div>
+
+  <h3>7.1 推荐执行顺序</h3>
+  <ol>
+    <li>
+      <strong>立即修 P0</strong> — 5 行 + 30 行 = 35 行代码，零回归风险。先解决"listening 卡死"问题。
+      <ul>
+        <li><code>websocket_joyai_protocol.cc::HandleEventMessage()</code> EMPTY_CONTENT 分支</li>
+        <li><code>application.cc</code> 加 <code>esp_timer listening_timeout_timer_</code></li>
+      </ul>
+    </li>
+    <li>
+      <strong>本周完成 P1</strong> — 改 100 行代码，全部限定在京东协议内，对其他协议零影响。
+    </li>
+    <li>
+      <strong>下迭代评估 P2</strong> — 涉及百度，量产稳定的代码不轻易动；评估后开新分支做。
+    </li>
+  </ol>
+
+  <div class="callout ok">
+    <strong>对齐目标达成判定：</strong>
+    application.cc 全文 grep <code>protocol_-&gt;</code> 后，所有调用上下文都不出现 <code>baidu / joyai / mqtt</code> 关键字 — 那就说明"统一调用、协议内吸收差异"目标完成。
+  </div>
+</section>
+
+<!-- ==================== § 八 代码引用速查 ==================== -->
+<section class="section" id="sec8">
+  <h2><span class="num">§ 八</span> 代码引用速查</h2>
+  <p class="sub">深度分析涉及的所有 file:line，方便配合 IDE 跳转验证。</p>
+
+  <h3>Protocol 基类</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>位置</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>main/protocols/protocol.h:44</code></td><td><code>class Protocol</code> 12 个 virtual 接口定义</td></tr>
+      <tr><td><code>main/protocols/protocol.h:96-104</code></td><td>受保护成员 + IsTimeout/SetError 工具方法</td></tr>
+      <tr><td><code>main/protocols/protocol.cc:42-49</code></td><td><code>SendAbortSpeaking</code> 默认实现 = JSON abort</td></tr>
+      <tr><td><code>main/protocols/protocol.cc:51-55</code></td><td><code>SendWakeWordDetected</code> 默认实现</td></tr>
+      <tr><td><code>main/protocols/protocol.cc:57-69</code></td><td><code>SendStartListening</code> 默认 = JSON listen.start + mode</td></tr>
+      <tr><td><code>main/protocols/protocol.cc:81-90</code></td><td><code>IsTimeout</code> 120s 兜底</td></tr>
+    </tbody>
+  </table>
+
+  <h3>小智 WebSocket / MQTT</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>位置</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>main/protocols/websocket_protocol.cc:83-201</code></td><td>OpenAudioChannel + hello 握手</td></tr>
+      <tr><td><code>main/protocols/websocket_protocol.cc:112-166</code></td><td>OnData：透传 type=hello/tts/stt/mcp</td></tr>
+      <tr><td><code>main/protocols/websocket_protocol.cc:228-254</code></td><td>ParseServerHello（session_id + sr）</td></tr>
+      <tr><td><code>main/protocols/mqtt_protocol.cc:222-302</code></td><td>OpenAudioChannel + UDP 加密通道建立</td></tr>
+      <tr><td><code>main/protocols/mqtt_protocol.cc:173-198</code></td><td>SendAudio：AES-CTR 加密 UDP 包</td></tr>
+    </tbody>
+  </table>
+
+  <h3>百度 BRTC</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>位置</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>main/protocols/websocket_baidu_protocol.cc:160-177</code></td><td>listening_timer_handle_ 30s xTimer 创建</td></tr>
+      <tr><td><code>main/protocols/websocket_baidu_protocol.cc:835-922</code></td><td>HandleAsrResult 翻译 + 2s 去重</td></tr>
+      <tr><td><code>main/protocols/websocket_baidu_protocol.cc:954-1041</code></td><td>HandleEvent 前缀字符串路由（TTS_BEGIN/END/VOICE_COMING/MEDIA/AGENTID/PROMPT_UPDATED）</td></tr>
+      <tr><td><code>main/protocols/websocket_baidu_protocol.cc:1378-1407</code></td><td>SendStartListening 区分 manual/realtime + AUTO_INT</td></tr>
+      <tr><td><code>main/protocols/websocket_baidu_protocol.cc:1413-1437</code></td><td>SendAbortSpeaking 5 步实现（含 ResetDecoder）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>京东 JoyInside</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>位置</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>main/protocols/websocket_joyai_protocol.cc:58-60</code></td><td>SendStartListening no-op（服务端自由对话）</td></tr>
+      <tr><td><code>main/protocols/websocket_joyai_protocol.cc:63-65</code></td><td>SendStopListening = CLIENT_AUDIO_FINISH</td></tr>
+      <tr><td><code>main/protocols/websocket_joyai_protocol.cc:71-76</code></td><td>SendAbortSpeaking 3 步（含 interrupt_pending_ 窗口）</td></tr>
+      <tr><td><code>main/protocols/websocket_joyai_protocol.cc:243-318</code></td><td>HandleEventMessage 路由 CFG_BOT_EVENT/CALL_AGENT_*/TTS_*/COMPLETE/EMPTY_CONTENT</td></tr>
+      <tr><td><code>main/protocols/websocket_joyai_protocol.cc:320-397</code></td><td>HandleTextMessage contentType=EVENT/ASR/TTS/PONG/AGENT/ACTIVITY 路由</td></tr>
+      <tr><td><code>main/protocols/websocket_joyai_protocol.cc:399-410</code></td><td>HandleBinaryMessage 含 interrupt_pending_ 窗口丢帧</td></tr>
+      <tr><td><code>main/protocols/websocket_joyai_protocol.h:46-51</code></td><td>tts_started_ / interrupt_pending_ atomic 状态机字段</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Application 层调用方</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>位置</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>main/application.cc:658-675</code></td><td>InitializeProtocol：按 URL 选 WebsocketProtocol / WebsocketBaidu / WebsocketJoeai / Mqtt</td></tr>
+      <tr><td><code>main/application.cc:686-691</code></td><td>OnIncomingAudio：state==Speaking 才推入解码队列</td></tr>
+      <tr><td><code>main/application.cc:710-805</code></td><td>OnIncomingJson 路由：tts/stt/llm/mcp/system/alert/custom 七种统一类型</td></tr>
+      <tr><td><code>main/application.cc:1190-1196</code></td><td>AbortSpeaking：仅 SendAbortSpeaking + aborted_=true（不知道协议是谁）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>JoyInside 官方协议文档</h3>
+  <ul>
+    <li>上行事件：<a href="https://joyinside.com/docs/zh-cn/realtimeVoiceChat/inputData.md">inputData.md</a> — CLIENT_VOICE_CHAT_UPDATE / CLIENT_AUDIO_FINISH / CLIENT_INTERRUPT / CLIENT_INPUT_TEXT_TO_SPEECH</li>
+    <li>下行事件：<a href="https://joyinside.com/docs/zh-cn/realtimeVoiceChat/ouputData.md">ouputData.md</a> — CFG_BOT_EVENT / SERVER_VOICE_CHAT_UPDATED / CALL_AGENT_START_EVENT / TTS_SENTENCE_START / TTS_COMPLETE / CALL_AGENT_INTERRUPTED / EMPTY_CONTENT</li>
+    <li>WebSocket 接入：<a href="https://joyinside.com/docs/zh-cn/realtimeVoiceChat/voiceChat.md">voiceChat.md</a> — botId / sessionId / requestId / needManualCall</li>
+  </ul>
+</section>
+
+<!-- ==================== § 九 修复完成进度 ==================== -->
+<section class="section" id="sec9">
+  <h2><span class="num">§ 九</span> 修复完成进度（2026-05-15）</h2>
+  <p class="sub">按"按文档做、不做就不补、不过度设计"原则推进的实际进度。</p>
+
+  <table class="tbl-compact">
+    <thead>
+      <tr>
+        <th style="width:8%">编号</th>
+        <th style="width:30%">改动</th>
+        <th style="width:14%">状态</th>
+        <th style="width:14%">代码量</th>
+        <th style="width:34%">备注</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>P0-1</td>
+        <td>JoyAI EMPTY_CONTENT 不刷 <code>last_incoming_time_</code></td>
+        <td><span class="tag ok">已完成</span></td>
+        <td>~20 行</td>
+        <td>HandleEventMessage 改返 bool；EMPTY_CONTENT/PONG 不算"活动"，让基类 120s IsTimeout 兜底真正生效</td>
+      </tr>
+      <tr>
+        <td>P0-2</td>
+        <td>application 加 listening_timeout_timer 30s</td>
+        <td><span class="tag warn">已撤回</span></td>
+        <td>0 行</td>
+        <td>用户决定不加额外 timer 层；改走方案 A 复用 SendAudio 失败链路</td>
+      </tr>
+      <tr>
+        <td>P0-2'</td>
+        <td><strong>方案 A</strong> · application SendAudio 失败计数兜底</td>
+        <td><span class="tag ok">已完成</span></td>
+        <td>5 行</td>
+        <td>application.cc:374 连续 100 帧 (~6s) 失败 → CloseAudioChannel；配合 P0-1 IsTimeout 老化，~126s 自动退 idle。4 协议通用，零新增 timer</td>
+      </tr>
+      <tr>
+        <td>P1-3</td>
+        <td>JoyAI PING 心跳 30s（含弱网断路器）</td>
+        <td><span class="tag ok">已完成</span></td>
+        <td>~40 行</td>
+        <td>xTimer 30s 周期 + Schedule 到主任务（避免 timer task 阻塞）+ 连续 3 次失败主动 CloseAudioChannel</td>
+      </tr>
+      <tr>
+        <td>P1-4</td>
+        <td>JoyAI mid 唯一化</td>
+        <td><span class="tag ok">已完成</span></td>
+        <td>~10 行</td>
+        <td>BuildClientEvent / ConfigureChatParameters / PING 三处统一 <code>esp_random() + 单调计数器</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>实际改动量：</strong>3 处 + 弱网断路器，共约 70 行；全部限定在 <code>main/protocols/websocket_joyai_protocol.{cc,h}</code>，对 application 层和其他三协议零影响。
+  </div>
+
+  <h3>9.1 验证清单（烧录后真机测）</h3>
+  <ul>
+    <li><strong>EMPTY_CONTENT 兜底</strong>：唤醒后不说话 → 服务端持续推 EMPTY_CONTENT → 应该在 120s 内通过 SendAudio 失败链路触发退出（如果 120s 仍不退，说明需要重新加 P0-2）</li>
+    <li><strong>PING 保活</strong>：日志看每 30s 有 <code>mid:xxx, contentType:PING</code> 上行，弱网下连续 3 次失败后看到 <code>PING 3 consecutive failures, closing</code></li>
+    <li><strong>mid 唯一性</strong>：抓 ws 帧确认每条上行 mid 不同（grep <code>"mid":"</code> 看值）</li>
+    <li><strong>打断功能</strong>：唤醒/按键打断 TTS 立即停（本次任务前已修）</li>
+  </ul>
+</section>
+
+<!-- ==================== § 十 长期运行风险评估 ==================== -->
+<section class="section" id="sec10">
+  <h2><span class="num">§ 十</span> 长期运行风险评估</h2>
+  <p class="sub">3 遍推演 + 5 项风险，按"不要过度设计 + 真机长期运行 + 弱网"三维度。</p>
+
+  <h3>10.1 三遍推演结论</h3>
+
+  <h3 style="font-size:14px;color:#1565C0;margin-top:14px;">推演 1：网络层已有保活，应用层做的是否冗余？</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>层级</th><th>谁来管</th><th>保什么</th><th>是否冗余</th></tr></thead>
+    <tbody>
+      <tr><td>TCP keepalive</td><td>内核</td><td>死连接清理</td><td>⚠️ 默认禁用，通常不开</td></tr>
+      <tr><td>WebSocket ping/pong (RFC 6455 §5.5)</td><td>esp_websocket_client</td><td>双向心跳 + 网络存活</td><td>✅ 已有，足够保连接</td></tr>
+      <tr><td>4G PDP keepalive</td><td>ML307 modem</td><td>LTE 链路保活</td><td>✅ modem 自管</td></tr>
+      <tr><td><strong>JoyAI 应用层 PING</strong></td><td>本次新加</td><td>让服务端知道客户端在</td><td><span class="tag ok">不冗余</span> 业务语义</td></tr>
+      <tr><td><strong>EMPTY_CONTENT 不刷</strong></td><td>本次新加</td><td>"用户不说话"自动退出</td><td><span class="tag ok">不冗余</span> 产品体验</td></tr>
+    </tbody>
+  </table>
+  <p>结论：网络层 ping/pong 保<strong>连接活着</strong>；应用层 PING + 不刷时间戳保<strong>产品体验</strong>。两者目标不同。</p>
+
+  <h3 style="font-size:14px;color:#E65100;margin-top:14px;">推演 2：是否需要再加 application 30s timer？</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>方案</th><th>退出机制</th><th>用户体验</th><th>架构成本</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>A. 仅 P0-1（当前）</td>
+        <td>基类 120s IsTimeout（被动检查）</td>
+        <td>120s 后用户操作时才察觉</td>
+        <td>0 行</td>
+      </tr>
+      <tr>
+        <td>B. P0-1 + application 30s</td>
+        <td>application 主动 SetState(Idle)</td>
+        <td>30s 自动退出</td>
+        <td>30 行</td>
+      </tr>
+      <tr>
+        <td>C. P0-1 + 协议层 30s</td>
+        <td>每个协议各自重写</td>
+        <td>30s 退</td>
+        <td>每协议 30+ 行</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>当前选 A，理由：先测基类 120s 兜底是否对真机够用。120s 兜底通过 SendAudio 链路被动检查：</p>
+  <ol>
+    <li>用户不说话 → application 仍在 listening，audio_service 持续 SendAudio 上行</li>
+    <li>JoyAI 服务端 EMPTY_CONTENT 不刷时间戳，last_incoming_time_ 老化</li>
+    <li>120s 后 IsTimeout 返回 true → IsAudioChannelOpened 返回 false → SendAudio 返回 false</li>
+    <li>音频持续发送失败 → 触发 OnDisconnected 或上层察觉 → 切 idle</li>
+  </ol>
+  <div class="callout warn">
+    <strong>真机验证后再决定：</strong>如果 120s 内真能退（音频发送失败传导切 state），方案 A 够用；如果 120s 后仍卡 listening 不退，需要补 B（30s timer）。
+  </div>
+
+  <h3 style="font-size:14px;color:#2E7D32;margin-top:14px;">推演 3：架构是否过度</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>层</th><th>是否保留</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr><td>基类 120s 兜底</td><td><span class="tag ok">保留</span></td><td>零成本被动检查</td></tr>
+      <tr><td>百度 30s xTimer</td><td><span class="tag gap">已删除 2026-05-15</span></td><td>统一靠方案 A + 基类 IsTimeout 兜底；ASR 引擎卡死场景由 ~126s 兜底覆盖；StartListeningTimer/StopListeningTimer 改 no-op 避免大面积改调用点</td></tr>
+      <tr><td>application 30s timer</td><td><span class="tag warn">不加</span></td><td>先测兜底，避免过度设计</td></tr>
+      <tr><td>JoyAI 30s PING</td><td><span class="tag ok">保留</span></td><td>文档要求</td></tr>
+    </tbody>
+  </table>
+
+  <h3>10.2 五项长期运行风险</h3>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:5%">#</th>
+        <th style="width:24%">风险</th>
+        <th style="width:14%">概率</th>
+        <th style="width:34%">缓解</th>
+        <th style="width:23%">本次是否解决</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td>PING timer task 阻塞（直接 SendText 4G 可能阻塞 5s+）</td>
+        <td>🟠 中</td>
+        <td>Schedule 到主任务执行</td>
+        <td><span class="tag ok">已解决</span></td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>弱网 PING 失败堆积，无断路器</td>
+        <td>🟠 中</td>
+        <td>连续 3 次失败主动 CloseAudioChannel</td>
+        <td><span class="tag ok">已解决</span></td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>mid_counter_ 溢出</td>
+        <td>🟢 极低</td>
+        <td>uint32_t，70 天 30s/次约 200 万，远不到 4G 溢出</td>
+        <td><span class="tag ok">无需处理</span></td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>timer 析构竞态（Application 单例不析构）</td>
+        <td>🟢 极低</td>
+        <td>~Application() 不会被调用</td>
+        <td><span class="tag ok">无需处理</span></td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>EMPTY_CONTENT 兜底是否真的让 state 切走</td>
+        <td>🟢 已闭环</td>
+        <td>方案 A 在 application.cc:374 加失败计数 100 帧 → close → 自动切 idle</td>
+        <td><span class="tag ok">已解决</span></td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ==================== § 十一 弱网处理策略 ==================== -->
+<section class="section" id="sec11">
+  <h2><span class="num">§ 十一</span> 弱网处理策略</h2>
+  <p class="sub">P30 量产以 4G modem (ML307) 为主，弱网/抖动/失联是常态，必须分层处理。</p>
+
+  <div class="svgwrap">
+    <svg viewBox="0 0 980 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="弱网分层处理">
+      <defs>
+        <marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+        </marker>
+      </defs>
+
+      <!-- 弱网场景层 -->
+      <rect x="30" y="20" width="920" height="80" rx="8" fill="#FFEBEE" stroke="#C62828" stroke-width="2"/>
+      <text x="490" y="42" text-anchor="middle" font-weight="700" font-size="13" fill="#8E1C1C">弱网场景</text>
+      <text x="80" y="68" font-size="11" fill="#555">• WiFi 临时丢包（10-100ms）</text>
+      <text x="280" y="68" font-size="11" fill="#555">• 4G 切基站（300-2000ms）</text>
+      <text x="500" y="68" font-size="11" fill="#555">• TCP 重传抖动（100-5000ms）</text>
+      <text x="730" y="68" font-size="11" fill="#555">• 完全失联（&gt;30s）</text>
+      <text x="80" y="86" font-size="11" fill="#555">• ML307 AT 卡住</text>
+      <text x="280" y="86" font-size="11" fill="#555">• 服务端处理慢</text>
+      <text x="500" y="86" font-size="11" fill="#555">• ws 协议层超时</text>
+      <text x="730" y="86" font-size="11" fill="#555">• DNS 失败</text>
+
+      <!-- 应对策略分层 -->
+      <rect x="30" y="120" width="290" height="240" rx="8" fill="var(--base)" stroke="var(--base-line)" stroke-width="2"/>
+      <text x="175" y="142" text-anchor="middle" font-weight="700" font-size="12" fill="#0D47A1">① 网络层（库本身）</text>
+      <text x="45" y="165" font-size="11" fill="#333">• esp_websocket_client</text>
+      <text x="60" y="180" font-size="10.5" fill="#555">- ws ping/pong 自动</text>
+      <text x="60" y="195" font-size="10.5" fill="#555">- 自动重连指数退避</text>
+      <text x="60" y="210" font-size="10.5" fill="#555">- TCP 重传内核处理</text>
+      <text x="45" y="232" font-size="11" fill="#333">• ML307 modem</text>
+      <text x="60" y="247" font-size="10.5" fill="#555">- PDP context 保活</text>
+      <text x="60" y="262" font-size="10.5" fill="#555">- AT 命令 5s 超时</text>
+      <text x="60" y="277" font-size="10.5" fill="#555">- 失败自动重发</text>
+      <text x="45" y="299" font-size="11" fill="#1565C0">不依赖应用层介入</text>
+      <text x="45" y="318" font-size="10" font-family="monospace" fill="#0D47A1">→ 短抖动自动恢复</text>
+      <text x="45" y="334" font-size="10" font-family="monospace" fill="#0D47A1">→ 失联 OnDisconnected</text>
+
+      <!-- 协议层 -->
+      <rect x="345" y="120" width="290" height="240" rx="8" fill="var(--joyai)" stroke="var(--joyai-line)" stroke-width="2"/>
+      <text x="490" y="142" text-anchor="middle" font-weight="700" font-size="12" fill="#E65100">② 协议层（本次加强）</text>
+      <text x="360" y="165" font-size="11" fill="#333">• PING 30s 周期保活</text>
+      <text x="375" y="180" font-size="10.5" fill="#555">- Schedule 到主任务（避卡 timer）</text>
+      <text x="375" y="195" font-size="10.5" fill="#555">- 失败计数 ping_failures_</text>
+      <text x="360" y="217" font-size="11" fill="#333">• 弱网断路器</text>
+      <text x="375" y="232" font-size="10.5" fill="#555">- 连续 3 次 PING 失败</text>
+      <text x="375" y="247" font-size="10.5" fill="#555">- → CloseAudioChannel()</text>
+      <text x="360" y="269" font-size="11" fill="#333">• EMPTY_CONTENT 不刷时间戳</text>
+      <text x="375" y="284" font-size="10.5" fill="#555">- 让基类 IsTimeout 老化</text>
+      <text x="375" y="299" font-size="10.5" fill="#555">- 120s 兜底自然失效</text>
+      <text x="360" y="321" font-size="11" fill="#333">• mid 唯一化</text>
+      <text x="375" y="336" font-size="10.5" fill="#555">- 服务端可追溯请求响应配对</text>
+
+      <!-- 应用层 -->
+      <rect x="660" y="120" width="290" height="240" rx="8" fill="var(--baidu)" stroke="var(--baidu-line)" stroke-width="2"/>
+      <text x="805" y="142" text-anchor="middle" font-weight="700" font-size="12" fill="#1B5E20">③ 应用层（事件响应）</text>
+      <text x="675" y="165" font-size="11" fill="#333">• OnDisconnected 回调</text>
+      <text x="690" y="180" font-size="10.5" fill="#555">- 任意层关连接都触发</text>
+      <text x="690" y="195" font-size="10.5" fill="#555">- on_audio_channel_closed_</text>
+      <text x="675" y="217" font-size="11" fill="#333">• SetDeviceState(Idle)</text>
+      <text x="690" y="232" font-size="10.5" fill="#555">- 自动切走 listening</text>
+      <text x="690" y="247" font-size="10.5" fill="#555">- UI 切回时钟主屏</text>
+      <text x="675" y="269" font-size="11" fill="#333">• 状态机统一管理</text>
+      <text x="690" y="284" font-size="10.5" fill="#555">- 不知道是哪一层断的</text>
+      <text x="690" y="299" font-size="10.5" fill="#555">- 只响应"断了"事件</text>
+      <text x="675" y="321" font-size="11" fill="#1B5E20">application 零感知协议差异</text>
+      <text x="675" y="338" font-size="10" font-family="monospace" fill="#1B5E20">→ 协议吸收弱网细节</text>
+
+      <!-- 箭头 -->
+      <path d="M 320,240 L 345,240" stroke="#666" stroke-width="2" marker-end="url(#arr4)"/>
+      <path d="M 635,240 L 660,240" stroke="#666" stroke-width="2" marker-end="url(#arr4)"/>
+    </svg>
+  </div>
+
+  <h3>11.1 各场景的处理路径</h3>
+  <table class="tbl-compact">
+    <thead>
+      <tr>
+        <th>弱网场景</th>
+        <th>哪一层处理</th>
+        <th>用户感知</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>WiFi 临时丢包 100ms</td>
+        <td>① TCP 重传</td>
+        <td>语音稍慢，无感知</td>
+      </tr>
+      <tr>
+        <td>4G 切基站 1-2s</td>
+        <td>① ml307 重发 + TCP 重传</td>
+        <td>语音延迟 1-2s</td>
+      </tr>
+      <tr>
+        <td>ws 心跳 60s+ 无响应</td>
+        <td>① ws 库 OnDisconnected</td>
+        <td>→ ③ 自动回 idle</td>
+      </tr>
+      <tr>
+        <td>服务端处理卡死但连接活</td>
+        <td>② JoyAI PING 失败 3 次 → CloseAudioChannel</td>
+        <td>→ ③ 自动回 idle</td>
+      </tr>
+      <tr>
+        <td>用户不说话 + 服务端持续 EMPTY_CONTENT</td>
+        <td>② 不刷 → ① SendAudio 120s 失败 → ③ 100 帧失败 close</td>
+        <td>→ 自动回 idle ~126s</td>
+      </tr>
+      <tr>
+        <td>完全失联（飞行模式）</td>
+        <td>① TCP RST → OnDisconnected</td>
+        <td>→ ③ 自动回 idle</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>11.2 还未验证的边界</h3>
+  <ul>
+    <li><strong>EMPTY_CONTENT 兜底链路完整性</strong>：120s 后 SendAudio 返回 false，audio_service 是否会触发 OnDisconnected 或主动切 state？需真机测</li>
+    <li><strong>弱网下 PING 串扰</strong>：30s 周期 PING 是否与音频上行冲突影响延迟？真机抓 ws 看时序</li>
+    <li><strong>断路器误触发</strong>：3 次 PING 失败阈值是否过紧？弱网下可能正常情况下也失败几次</li>
+    <li><strong>OnDisconnected 重连</strong>：京东侧重连流程是否健壮？application 切 idle 后用户再唤醒能否重建连接</li>
+  </ul>
+</section>
+
+<!-- ==================== § 十二 量产标准评估 ==================== -->
+<section class="section" id="sec12">
+  <h2><span class="num">§ 十二</span> 量产标准评估（2026-05-15 终稿）</h2>
+  <p class="sub">本节是经过 3 遍量产推演后的最终评估 — 哪些已达量产标准，哪些仍是风险点。</p>
+
+  <h3>12.1 本轮全部改动一览</h3>
+  <table class="tbl-compact">
+    <thead>
+      <tr><th>类别</th><th>文件</th><th>核心改动</th><th>commit</th></tr>
+    </thead>
+    <tbody>
+      <tr><td rowspan="3">京东 JoyAI</td>
+        <td><code>websocket_joyai_protocol.cc</code></td>
+        <td>事件名修正（CLIENT_INTERRUPT/CLIENT_AUDIO_FINISH）+ tts_started_/interrupt_pending_ 打断机制 + EMPTY_CONTENT 不刷时间戳 + textType=IS_FINAL 过滤 + PING 30s 心跳 + 弱网断路器 + mid 唯一化</td>
+        <td>c5f456a6 / 39412800 优化百度京东协议</td>
+      </tr>
+      <tr>
+        <td><code>websocket_joyai_protocol.h</code></td>
+        <td>+5 字段（ping_timer_handle_, ping_failures_, mid_counter_, tts_started_, interrupt_pending_）</td>
+        <td>同上</td>
+      </tr>
+      <tr>
+        <td>—</td><td>—</td><td>—</td>
+      </tr>
+      <tr><td>百度 BRTC</td>
+        <td><code>websocket_baidu_protocol.{cc,h}</code></td>
+        <td>删 listening_timer_handle_ (30s xTimer + partial 重置) ；改 Start/StopListeningTimer 为 no-op；统一靠 application SendAudio 失败 + 基类 IsTimeout 兜底</td>
+        <td>同上</td>
+      </tr>
+      <tr><td>application 层</td>
+        <td><code>application.{cc,h}</code></td>
+        <td>SendAudio 失败计数 audio_send_fail_count_ 100 帧 → CloseAudioChannel（方案 A · 跨协议通用兜底）</td>
+        <td>0041aeba 音频发送失败连续错误处理</td>
+      </tr>
+      <tr><td>Protocol 基类</td>
+        <td><code>protocol.h</code></td>
+        <td>last_incoming_time_ 默认值（用户决定不初始化为 now，简洁优先）</td>
+        <td>未提交（工作树）</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>12.2 三层兜底链最终态</h3>
+  <div class="callout">
+    <strong>四协议统一退出链：</strong><br/>
+    <code>① 协议层 EMPTY_CONTENT 不刷时间戳 → ② 基类 IsTimeout 120s 老化 → ③ application SendAudio 失败 100 帧 → CloseAudioChannel</code><br/>
+    总退出时长 ~126s · 4 协议（小智 WS/MQTT/百度/京东）完全对齐 · application 零感知协议差异
+  </div>
+
+  <h3>12.3 12 项量产 checklist 评估</h3>
+  <table>
+    <thead>
+      <tr><th style="width:4%">#</th><th style="width:22%">维度</th><th style="width:48%">当前状态</th><th style="width:26%">量产风险</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>application 零感知协议差异</td><td>4 协议 12 接口完全对齐，无 if(protocol_==baidu/...) 分支</td><td><span class="tag ok">达标</span></td></tr>
+      <tr><td>2</td><td>内存稳定（无泄漏）</td><td>atomic 字段不累积；mid_counter_ uint32_t 70 天才到 200 万</td><td><span class="tag ok">达标</span></td></tr>
+      <tr><td>3</td><td>内部 RAM 红线 > 60KB</td><td>本轮无新增任务/无 PSRAM 栈 + Core 0 红线触碰</td><td><span class="tag ok">达标</span></td></tr>
+      <tr><td>4</td><td>xTimer 析构清理</td><td>京东 PING xTimer stop+delete；百度 3 个 timer 都有清理</td><td><span class="tag ok">达标</span></td></tr>
+      <tr><td>5</td><td>重连闭包 use-after-free</td><td>百度有 prevent_destroy_guard_ shared_ptr&lt;atomic&lt;bool&gt;&gt;；京东 PING 闭包 <strong>缺此保护</strong></td><td><span class="tag warn">⚠️ 中</span></td></tr>
+      <tr><td>6</td><td>弱网鲁棒</td><td>3 层兜底（PING 30s · IsTimeout 120s · SendAudio 100 帧）</td><td><span class="tag ok">达标</span></td></tr>
+      <tr><td>7</td><td>listening 超时自动退</td><td>4 协议统一 ~126s</td><td><span class="tag ok">达标</span></td></tr>
+      <tr><td>8</td><td>OpenAudioChannel 极弱网误判</td><td>last_incoming_time_ 默认值=启动时刻；若构造 protocol 至首条消息间隔 > 120s 会触发误判（极端 4G 弱网拨号场景）</td><td><span class="tag warn">⚠️ 低-中</span></td></tr>
+      <tr><td>9</td><td>打断功能（唤醒/手动/AEC）</td><td>京东本轮已修事件名 CLIENT_TTS_ABORT→CLIENT_INTERRUPT，三场景全通</td><td><span class="tag ok">达标</span></td></tr>
+      <tr><td>10</td><td>状态机一致性（12 态不增）</td><td>本轮无新增 DeviceState，符合架构约束</td><td><span class="tag ok">达标</span></td></tr>
+      <tr><td>11</td><td>长期运行 24h+</td><td>50+ 次重连场景下 #5 use-after-free 累积概率上升</td><td><span class="tag warn">⚠️ 中</span></td></tr>
+      <tr><td>12</td><td>跨平台一致性</td><td>application 调用方零感知；上行接口签名一致；下行 stt/tts/mcp 语义统一</td><td><span class="tag ok">达标</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>3 项 ⚠️ 中风险（未达完全量产标准）：</strong><br/>
+    #5 京东 PING 闭包 + #8 OpenAudioChannel 误判 + #11 长期运行累积。需要在量产前补完才能彻底闭环。
+  </div>
+
+  <h3>12.4 推演 3 遍详细记录</h3>
+
+  <h3 style="font-size:14px;color:#0D47A1;margin-top:14px;">推演 1：正常路径（开机 → 唤醒 → 对话 → 退出）</h3>
+  <pre style="background:#F5F5F5;padding:12px;border-radius:6px;font-size:11.5px;line-height:1.6;overflow:auto">
+T=0      设备启动 → 网络初始化 → InitializeProtocol → 构造 Protocol 对象
+         last_incoming_time_ = 启动时刻（默认 0）⚠️ 风险点 #8
+T=0~60s  4G/WiFi 拨号 + LIC/Token 鉴权（典型场景）
+T=60s    OpenAudioChannel 成功，OnData 收首条消息 → last_incoming_time_=60s
+T=60~70s 用户唤醒 → ContinueWakeWordInvoke → state listening
+T=70~75s 用户说"你好" → 服务端 ASR(IS_FINAL) → stt 上抛 → popup
+T=75s    state listening → speaking (CALL_AGENT_START_EVENT)
+T=75~80s TTS 字幕 + 音频 → 用户听到回话
+T=80s    TTS_COMPLETE → state speaking → listening
+T=80~110s 用户不再说话 → 服务端持续 EMPTY_CONTENT（不刷时间戳）
+T=200s   last 仍是 75s（最后一条非 EMPTY），200-75=125s &gt; 120s → IsTimeout=true
+T=200~206s SendAudio 100 帧失败 → audio_send_fail_count_=100 → CloseAudioChannel
+T=206s   OnDisconnected → SetDeviceState(Idle) → 时钟主屏
+
+✅ 总耗时 ~126s 退出（产品体验可接受）
+  </pre>
+
+  <h3 style="font-size:14px;color:#E65100;margin-top:14px;">推演 2：异常路径（弱网/断连/服务端卡死）</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>异常</th><th>处理路径</th><th>退出</th></tr></thead>
+    <tbody>
+      <tr><td>WiFi 短抖动 50-100ms</td><td>内核 TCP 重传</td><td>0（自愈）</td></tr>
+      <tr><td>4G 切基站 1-2s</td><td>ml307 modem 重发</td><td>0（自愈）</td></tr>
+      <tr><td>ws 60s 无心跳响应</td><td>ws 库 OnDisconnected → app 切 idle</td><td>~60s</td></tr>
+      <tr><td>服务端断 ws</td><td>OnDisconnected 即时</td><td>即时</td></tr>
+      <tr><td>服务端 TTS 卡死（TCP 活）</td><td>IsTimeout 120s + SendAudio 100 帧</td><td>~126s</td></tr>
+      <tr><td>京东 PING 失败 3 次</td><td>CloseAudioChannel → OnDisconnected</td><td>~90s</td></tr>
+      <tr><td>飞行模式 / 完全失联</td><td>TCP RST → OnDisconnected</td><td>5-30s</td></tr>
+      <tr><td>百度 ASR 引擎卡死（partial 不发）</td><td><strong>不再有 30s 主动退</strong>，靠 IsTimeout 120s 兜底</td><td>~126s（之前 30s）</td></tr>
+    </tbody>
+  </table>
+
+  <h3 style="font-size:14px;color:#2E7D32;margin-top:14px;">推演 3：长期运行（24h+）</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>维度</th><th>评估</th><th>结论</th></tr></thead>
+    <tbody>
+      <tr><td>内存累积</td><td>mid_counter_ uint32_t 70 天才溢出；其他 atomic/状态切换不累积</td><td>✅ 安全</td></tr>
+      <tr><td>Timer 累积</td><td>京东 1 + 百度 3 + application 2 = 7 个 timer，启动后不增长</td><td>✅ 安全</td></tr>
+      <tr><td>重连 50+ 次</td><td>每次 protocol_.reset() 触发析构，京东 PING 闭包 use-after-free 风险累积</td><td>⚠️ 隐患</td></tr>
+      <tr><td>OnDisconnected 重入</td><td>多协议层都有 protocol_.reset() 时检查 nullptr，无 double free</td><td>✅ 安全</td></tr>
+    </tbody>
+  </table>
+
+  <h3>12.5 量产前补完建议</h3>
+  <table>
+    <thead>
+      <tr><th>优先级</th><th>项</th><th>修复</th><th>工作量</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag warn">P1</span></td>
+        <td>#5 京东 PING 闭包 use-after-free</td>
+        <td>添加 prevent_destroy_guard_ shared_ptr&lt;atomic&lt;bool&gt;&gt;（参照 baidu line 148-156）</td>
+        <td>10 行</td>
+      </tr>
+      <tr>
+        <td><span class="tag warn">P1</span></td>
+        <td>#8 OpenAudioChannel 极弱网误判</td>
+        <td>protocol.h:100 默认 = now() 或各协议 OpenAudioChannel 开头调 UpdateLastIncomingTime()</td>
+        <td>1 行</td>
+      </tr>
+      <tr>
+        <td><span class="tag todo">P2</span></td>
+        <td>百度 30s 删除后体验回归测试</td>
+        <td>真机测百度场景下 ASR 卡死 → 126s 退是否可接受（之前 30s）</td>
+        <td>测试 1 天</td>
+      </tr>
+      <tr>
+        <td><span class="tag todo">P2</span></td>
+        <td>长期 24h 稳定性测试</td>
+        <td>烧录后真机跑 24h 自动唤醒/对话循环，监控 SRAM / 重连次数 / 是否崩</td>
+        <td>测试 1 天</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>量产准入判定：</strong><br/>
+    现状是 <strong>"基本达标，3 项中风险待修"</strong>。如果先把 P1 两项（#5 + #8，共 11 行代码）补完，可视为量产就绪。<br/>
+    实际烧录验证用户体感后，再判 P2 项是否需要。
+  </div>
+
+  <h3>12.6 与上轮文档（§ 七 路线图）对比</h3>
+  <table class="tbl-compact">
+    <thead><tr><th>项</th><th>上轮计划</th><th>本轮实际</th></tr></thead>
+    <tbody>
+      <tr><td>京东 EMPTY_CONTENT 不刷</td><td>P0 必修</td><td>✅ 已修</td></tr>
+      <tr><td>application listening 超时</td><td>P0 必修（30s timer）</td><td>✅ 改走方案 A（SendAudio 失败计数 100 帧）— 更精简</td></tr>
+      <tr><td>京东 SendAbortSpeaking 加 ResetDecoder</td><td>P1 应修</td><td>未做 — 已通过本地 interrupt_pending_ 窗口 + EmitTtsStop 等价覆盖</td></tr>
+      <tr><td>京东 PING 心跳</td><td>P1 应修</td><td>✅ 已修 + 弱网断路器</td></tr>
+      <tr><td>京东 mid 唯一化</td><td>P2 选修</td><td>✅ 已修</td></tr>
+      <tr><td>删百度 30s timer</td><td>P3 后修</td><td>✅ 本轮已删 — 架构对齐前置</td></tr>
+    </tbody>
+  </table>
+</section>
+
+</main>
+</div>
+
+<footer>
+  MyDazy P30 · 四协议接口对齐分析 · 2026-05-15
+  <br/>
+  <span class="src">参照源：main/protocols/{protocol,websocket_protocol,mqtt_protocol,websocket_baidu_protocol,websocket_joyai_protocol}.{cc,h}</span>
+</footer>
+
+</body>
+</html>

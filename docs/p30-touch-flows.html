@@ -3,10 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MyDazy P30 · AXS5106L 触屏</title>
+<title>MyDazy P30 · AXS5106L 触摸屏 · 应用层 SDK 文档</title>
 <style>
-:root { --brand:#C62828; --brand-deep:#8E0F0F; --brand-light:#FFEBEE;
-        --core0:#E3F2FD; --core0-line:#1976D2; --core1:#FFF3E0; --core1-line:#F57F17;
+:root { --brand:#1565C0; --brand-deep:#0D47A1; --brand-light:#E3F2FD;
         --ok:#2E7D32; --warn:#FB8C00; --bad:#D32F2F;
         --bg:#FAFAFA; --border:#E0E0E0; --text:#212121; --text-2:#666; }
 * { box-sizing: border-box; }
@@ -32,10 +31,13 @@ section h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--brand-deep);
              border-bottom: 2px solid var(--brand-light); padding-bottom: 6px; }
 section h2 .num { display: inline-block; background: var(--brand); color: white;
                   padding: 2px 8px; border-radius: 4px; font-size: 13px; margin-right: 8px; }
-section h3 { margin: 16px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
+section h3 { margin: 14px 0 6px 0; font-size: 15px; color: var(--brand-deep); }
 section p.sub { color: var(--text-2); font-size: 13px; margin: 4px 0 12px; }
 code { background: #F5F5F5; padding: 1px 5px; border-radius: 3px;
-       font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px; color: #C2185B; }
+       font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px; color: #0288D1; }
+pre { background: #F5F5F5; padding: 12px; border-radius: 6px; font-size: 12.5px;
+      overflow-x: auto; line-height: 1.5; }
+pre code { background: none; color: var(--text); padding: 0; }
 table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 13px; }
 th { background: #F5F5F5; padding: 6px 9px; text-align: left; border: 1px solid var(--border);
      font-weight: 600; font-size: 12.5px; }
@@ -50,402 +52,509 @@ tr:nth-child(even) td { background: #FAFAFA; }
 .svgwrap svg { display: block; max-width: 100%; height: auto; }
 text { font-family: -apple-system, "PingFang SC", sans-serif; }
 .svg-title { font-size: 13px; font-weight: 600; fill: var(--brand-deep); }
-.svg-axis { font-size: 11px; fill: var(--text-2); }
-.node-text { font-size: 12px; fill: var(--text); text-anchor: middle; dominant-baseline: middle; }
-.node-text.sm { font-size: 10.5px; fill: var(--text-2); }
 ul.compact { padding-left: 18px; margin: 6px 0; }
 ul.compact li { margin: 2px 0; }
 .pill { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
-.pill.p0 { background:#FFEBEE; color:var(--bad); }
-.pill.p1 { background:#FFF3E0; color:var(--warn); }
-.pill.p2 { background:#E3F2FD; color:var(--core0-line); }
-.pill.lean { background:#F3E5F5; color:#6A1B9A; }
+.pill.new  { background:#E8F5E9; color:var(--ok); }
+.pill.cur  { background:#E3F2FD; color:#1976D2; }
+.pill.dep  { background:#FFEBEE; color:var(--bad); }
+.api-sig { background:#F5F5F5; border-left:3px solid var(--brand); padding:8px 12px;
+           font-family:"SFMono-Regular",Consolas,monospace; font-size:12.5px;
+           color:#0288D1; margin:6px 0; border-radius:0 4px 4px 0; }
+.must { color: var(--bad); font-weight: 600; }
+.opt  { color: var(--text-2); }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>MyDazy P30 · AXS5106L 触摸屏驱动</h1>
-  <div class="meta">v1.0 · 2026-05-11 · 1.83" 284×240 圆角矩形 IIC 电容触摸 · C handle API（v2.0+）</div>
+  <h1>MyDazy P30 · AXS5106L 电容触摸屏 · 应用层 SDK 文档</h1>
+  <div class="meta">v2.1 · 2026-05-14 · 4 API · 5 cb · RF 防御按板可配 · 应用层视角倒推</div>
 </header>
 
 <div class="layout">
 
 <nav>
   <h3>目录</h3>
-  <a href="#overview">1. 概览</a>
-  <a href="#scope">2. 模块边界</a>
-  <a href="#boot">3. 启动 + 复位时序</a>
-  <a href="#gesture">4. 手势识别状态机</a>
-  <a href="#wake">5. INT 中断 + 唤醒</a>
-  <a href="#sleep">6. 深睡进出</a>
-  <a href="#diff">7. 三板差异</a>
-  <a href="#review">8. 三遍评审 + log</a>
+  <a href="#intro">1. 模块简介</a>
+  <a href="#scenarios">2. 应用场景</a>
+  <a href="#naming">3. API 命名规范</a>
+  <a href="#init-flow">4. 初始化流程</a>
+  <a href="#api">5. API 详细说明</a>
+  <a href="#config">6. 配置参数说明</a>
+  <a href="#keyparams">7. 关键参数说明</a>
+  <a href="#regs">8. 寄存器说明</a>
+  <a href="#examples">9. 典型配置示例</a>
+  <a href="#errcode">10. 错误码与调试方法</a>
+  <a href="#notes">11. 注意事项</a>
 </nav>
 
 <main>
 
-<!-- =============== 1 概览 =============== -->
-<section id="overview">
-<h2><span class="num">1</span> 概览</h2>
+<!-- =============== 1 模块简介 =============== -->
+<section id="intro">
+<h2><span class="num">1</span> 模块简介</h2>
 
-<p class="sub">AXS5106L IIC 电容触摸控制器 · 0 内部任务 · 走 LVGL 30ms poll + IRAM ISR 边沿计数 · I2C 经 i2c_bus_worker 串行化（共线 codec/sensor/NFC）。</p>
+<p class="sub">AXS5106L 电容触摸 + JD9853 284×240 LCD · 极简 C handle 驱动 · 内置三层 RF 抗扰 · I²C 走 i2c_bus_worker。</p>
 
-<h3>5 大宏观状态</h3>
 <table>
-<thead><tr><th>状态</th><th>说明</th><th>触发进入</th></tr></thead>
+<thead><tr><th>项</th><th>值</th><th>项</th><th>值</th></tr></thead>
 <tbody>
-<tr><td><b>UNINIT</b></td><td>句柄未创建</td><td>启动初期</td></tr>
-<tr><td><b>READY</b></td><td>chip_id 校验 OK · 等 LVGL attach</td><td>axs5106l_touch_new 成功</td></tr>
-<tr><td><b>ACTIVE</b></td><td>LVGL poll 中 · 手势识别工作</td><td>axs5106l_touch_attach_lvgl</td></tr>
-<tr><td><b>STORM_MUTE</b></td><td>INT edge > 12/s · 静默 2s 防 RF 干扰风暴</td><td>read_touch 检测到 INT 风暴</td></tr>
-<tr><td><b>SLEEPING</b></td><td>深睡前 写 REG_SLEEP=0x03 · INT disable</td><td>axs5106l_touch_sleep</td></tr>
+<tr><td>I²C 地址</td><td><code>0x63</code> @ 400 kHz</td><td>固件</td><td>V2907（rotation 内置 · X 死区 [9..272] 软件补偿）</td></tr>
+<tr><td>屏幕分辨率</td><td>284 × 240（1.83" 圆角）</td><td>INT 极性</td><td>active LOW · 下降沿 ISR 仅计数</td></tr>
+<tr><td>RST GPIO</td><td><b>GPIO_4</b>（与 LCD 共享）</td><td>INT GPIO</td><td><b>GPIO_5</b>（RTC-capable）</td></tr>
+<tr><td>三板状态</td><td>P30-4G ✅ · P30-WiFi ✅ · P31 ⚠️ 待迁移</td><td>驱动</td><td>v4.0 当前 · v5.0 规划</td></tr>
 </tbody>
 </table>
 
-<h3>关键参数（v3.0 灵敏度调整）</h3>
-<table>
-<thead><tr><th>参数</th><th>值</th><th>位置</th></tr></thead>
-<tbody>
-<tr><td>IIC 地址</td><td>0x63 · 400 kHz</td><td><code>axs5106l_touch.c</code></td></tr>
-<tr><td>触摸帧</td><td>6 字节 [gesture, num, XH, XL, YH, YL]</td><td>REG_DATA=0x01</td></tr>
-<tr><td>坐标精度</td><td>12-bit · X 死区映射 raw 9..272 → 0..283</td><td>:55-57</td></tr>
-<tr><td>SWIPE 阈值</td><td>20 px · 已 #if 0 封死</td><td>:69</td></tr>
-<tr><td>点击时长</td><td>60-800 ms</td><td>:70-71</td></tr>
-<tr><td>最小帧数</td><td>2 frames</td><td>:76</td></tr>
-<tr><td>长按门槛</td><td><b>300 ms</b>（⚠ 注释 .h 写 500 ms 不一致）</td><td>:73</td></tr>
-<tr><td>双击窗口</td><td>600 ms · 距离 ≤ 50 px</td><td>:74-75</td></tr>
-<tr><td>抖动上限</td><td>32 (jitter sum)</td><td>:81</td></tr>
-<tr><td>INT 防抖</td><td>8 ms 持续低</td><td>:95</td></tr>
-<tr><td>最大速度</td><td>2500 px/s</td><td>:100</td></tr>
-<tr><td>STORM 阈值</td><td>12 edges/s · mute 2s</td><td>:123-124</td></tr>
-<tr><td>POST_RELEASE_GUARD</td><td>100 ms（防 RF 复触）</td><td>:103</td></tr>
-<tr><td>LVGL poll</td><td>30 ms</td><td>:365-367</td></tr>
-</tbody>
-</table>
-
-<h3>手势 enum</h3>
-<table>
-<thead><tr><th>枚举值</th><th>用途</th><th>板级处理</th></tr></thead>
-<tbody>
-<tr><td>NONE</td><td>无</td><td>—</td></tr>
-<tr><td><b>SINGLE_CLICK</b></td><td>单击</td><td>Idle 唤醒对话 · Speaking 打断</td></tr>
-<tr><td><b>DOUBLE_CLICK</b></td><td>双击</td><td>Listening/Speaking → Idle 退出对话</td></tr>
-<tr><td>LONG_PRESS / LONG_PRESS_RELEASE</td><td>长按</td><td><span style="color:#999">⚠ 板级忽略 · 死代码（PTT 已下线）</span></td></tr>
-<tr><td>SWIPE_UP/DOWN/LEFT/RIGHT</td><td>滑动</td><td><span style="color:#999">⚠ 识别已 #if 0 封死 · enum 还在</span></td></tr>
-</tbody>
-</table>
+<div class="callout warn">
+<b>本文档是应用层视角</b>：从板级实际用法倒推驱动 API。v5.0 设计目标 — ① 删 gesture enum + switch · 改 5 个独立 cb；② RF 抗扰由 cfg 字段切档（4G/普通板分别配置）。
+</div>
 </section>
 
-<!-- =============== 2 模块边界 =============== -->
-<section id="scope">
-<h2><span class="num">2</span> 模块边界</h2>
+<!-- =============== 2 应用场景 =============== -->
+<section id="scenarios">
+<h2><span class="num">2</span> 应用场景</h2>
 
-<h3>2.1 源文件清单</h3>
+<h3>2.1 板级实际用法盘点</h3>
 <table>
-<thead><tr><th>文件</th><th>行数</th><th>职责</th></tr></thead>
+<thead><tr><th>事件</th><th>P30-4G</th><th>P30-WiFi</th><th>P31</th><th>典型业务</th></tr></thead>
 <tbody>
-<tr><td><code>components/esp_lcd_touch_axs5106l/axs5106l_touch.c</code></td><td>875</td><td>主体驱动 · v2.0 C handle 重写</td></tr>
-<tr><td><code>include/axs5106l_touch.h</code></td><td>—</td><td>4 个公开 API + 2 个回调类型 + cfg struct + handle</td></tr>
-<tr><td><code>axs5106l_upgrade.c/h</code></td><td>—</td><td>固件升级（debug mode 重烧）</td></tr>
-<tr><td><code>axs5106l_firmware.h</code></td><td>15071B</td><td>8051 firmware image</td></tr>
+<tr><td><b>息屏首触摸</b></td><td class="must">必</td><td class="must">必</td><td class="must">必</td><td><code>WakeUp()</code> 亮屏</td></tr>
+<tr><td><b>SINGLE_CLICK</b></td><td class="must">必</td><td class="must">必</td><td class="must">必</td><td>ToggleChatState / 打断 TTS</td></tr>
+<tr><td><b>DOUBLE_CLICK</b></td><td class="must">必</td><td class="must">必</td><td class="opt">—</td><td>出厂确认 / 切场景</td></tr>
+<tr><td><b>SWIPE_UP / DOWN</b></td><td class="opt">—</td><td class="opt">—</td><td class="must">必</td><td>ShowControlCenter / HideControlCenter</td></tr>
+<tr><td><b>SWIPE_LEFT / RIGHT</b></td><td class="opt">—</td><td class="opt">—</td><td class="opt">—</td><td>保留扩展（调音量）</td></tr>
+<tr><td><b>LONG_PRESS</b></td><td class="opt">—</td><td class="opt">—</td><td class="opt">—</td><td>PTT 已下线 · 内部状态机保留</td></tr>
+<tr><td><b>LVGL 标准触摸</b></td><td class="must">必</td><td class="must">必</td><td class="must">必</td><td>自动 · attach_lvgl 注册</td></tr>
+<tr><td><b>sleep 深睡</b></td><td class="must">必</td><td class="must">必</td><td class="must">必</td><td>EnterDeepSleep 前关 ISR</td></tr>
 </tbody>
 </table>
 
-<h3>2.2 公开 API（C handle 风格）</h3>
+<h3>2.2 应用层真正需要的事件 → API 设计依据</h3>
 <table>
-<thead><tr><th>API</th><th>用途</th></tr></thead>
+<thead><tr><th>事件</th><th>必备级</th><th>cb 字段命名</th></tr></thead>
 <tbody>
-<tr><td><code>axs5106l_touch_new(cfg, &handle)</code></td><td>Phase 1 · GPIO + 升级 + chip_id 校验</td></tr>
-<tr><td><code>axs5106l_touch_attach_lvgl(handle)</code></td><td>Phase 2 · INT ISR + LVGL indev</td></tr>
-<tr><td><code>axs5106l_touch_sleep(handle)</code></td><td>深睡前关 INT + REG_SLEEP=0x03</td></tr>
-<tr><td><code>axs5106l_touch_resume(handle)</code></td><td>从深睡恢复（暂未在主链路使用）</td></tr>
+<tr><td>① 息屏首触摸</td><td>🔴 三板</td><td><code>on_wake</code></td></tr>
+<tr><td>② 单击</td><td>🔴 三板</td><td><code>on_click</code></td></tr>
+<tr><td>③ 双击</td><td>🟡 P30 用</td><td><code>on_double_click</code></td></tr>
+<tr><td>④ 滑动（含 dx/dy）</td><td>🟡 P31 用</td><td><code>on_swipe</code></td></tr>
+<tr><td>⑤ 长按（按下/松开两阶段）</td><td>🟢 保留扩展</td><td><code>on_long_press</code></td></tr>
 </tbody>
 </table>
 
-<h3>2.3 触发链（量产板 P30-WiFi/4G）</h3>
-<ol class="compact">
-<li>板级 <code>PrepareTouchHardware</code>（4g_board.cc:357 / wifi_board.cc:361）</li>
-<li>→ 填 <code>axs5106l_touch_config_t</code>（i2c_worker / rst_gpio / int_gpio / wake_cb / gesture_cb / cb_ctx）</li>
-<li>→ <code>axs5106l_touch_new(&cfg, &touch_driver_)</code></li>
-<li>→ InitializeDisplay（LCD 启动）</li>
-<li>→ <code>InitializeTouch</code> → <code>axs5106l_touch_attach_lvgl(touch_driver_)</code></li>
-</ol>
-
-<h3>2.4 板级回调蹦床</h3>
-<table>
-<thead><tr><th>静态函数</th><th>动作</th></tr></thead>
-<tbody>
-<tr><td><code>OnTouchWake(ctx)</code></td><td>cast ctx → board · 调 <code>WakeUp()</code> → PowerSaveTimer.WakeUp</td></tr>
-<tr><td><code>OnTouchGesture(g, x, y, ctx)</code></td><td>① TryStopAlarmRinger("touch") ② y&lt;36 状态栏跳过 ③ HandleTouchSingleClick / HandleTouchDoubleClick</td></tr>
-</tbody>
-</table>
+<div class="callout ok">
+<b>不暴露但内部识别</b>：驱动状态机保留长按 / 4 方向滑动 · 当前 cb 不暴露左右滑动单独字段。未来要用时加一个 cb 字段即可 · 状态机不动。
+</div>
 </section>
 
-<!-- =============== 3 启动 + 复位时序 =============== -->
-<section id="boot">
-<h2><span class="num">3</span> 启动 + 复位时序</h2>
+<!-- =============== 3 API 命名规范 =============== -->
+<section id="naming">
+<h2><span class="num">3</span> API 命名规范</h2>
 
+<table>
+<thead><tr><th>类别</th><th>规则</th><th>示例</th></tr></thead>
+<tbody>
+<tr><td>函数</td><td><code>axs5106l_touch_&lt;动词&gt;</code></td><td><code>axs5106l_touch_init</code> · <code>_attach_lvgl</code> · <code>_sleep</code> · <code>_resume</code></td></tr>
+<tr><td>句柄</td><td><code>axs5106l_touch_handle_t</code>（opaque）</td><td>仅持指针</td></tr>
+<tr><td>配置体</td><td><code>axs5106l_touch_config_t</code></td><td>详见 § 6</td></tr>
+<tr><td>回调类型</td><td><code>axs5106l_&lt;事件&gt;_cb_t</code> · 一事件一类型</td><td><code>wake_cb_t</code> / <code>click_cb_t</code> / <code>swipe_cb_t</code> / <code>long_press_cb_t</code></td></tr>
+<tr><td>cfg cb 字段</td><td><code>on_&lt;事件&gt;</code></td><td><code>on_wake</code> / <code>on_click</code> / <code>on_double_click</code> / <code>on_swipe</code> / <code>on_long_press</code></td></tr>
+<tr><td>枚举</td><td><code>axs5106l_&lt;名&gt;_t</code> + <code>AXS5106L_&lt;名&gt;_&lt;值&gt;</code></td><td><code>axs5106l_rf_mode_t</code> · <code>AXS5106L_RF_NORMAL</code> / <code>STRICT</code></td></tr>
+<tr><td>内部</td><td><code>static</code> · 无前缀</td><td><code>read_register</code> · <code>lvgl_read_cb</code> · <code>int_isr_handler</code></td></tr>
+</tbody>
+</table>
+
+<h3>v4.0 → v5.0 关键命名变更</h3>
+<table>
+<thead><tr><th>v4.0</th><th>v5.0</th><th>理由</th></tr></thead>
+<tbody>
+<tr><td><code>axs5106l_touch_new</code></td><td><code>axs5106l_touch_init</code></td><td>与 sc7a20h_init 一致</td></tr>
+<tr><td><code>cfg.gesture_cb</code> + 8 enum</td><td>5 独立 cb 字段 + enum 删除</td><td>每事件一个方法 · 无 switch</td></tr>
+<tr><td>RF 参数硬编码</td><td><code>cfg.rf_mode</code> 切档</td><td>4G / 普通板按需切（详见 § 6 + § 7）</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<b>cb 线程</b>：所有 cb 在 LVGL task · 非 ISR · 可执行轻量同步动作 · 建议仍走 <code>Application::Schedule</code> 切主线程避免阻塞渲染。
+</div>
+</section>
+
+<!-- =============== 4 初始化流程 =============== -->
+<section id="init-flow">
+<h2><span class="num">4</span> 初始化流程</h2>
+
+<h3>4.1 板级 boot 两阶段 init</h3>
 <div class="svgwrap">
-<svg viewBox="0 0 880 380" xmlns="http://www.w3.org/2000/svg">
-<defs><marker id="bArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
-<text x="440" y="20" class="svg-title" text-anchor="middle">axs5106l_touch_new · 7 步</text>
+<svg viewBox="0 0 880 320" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="iArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+<text x="440" y="20" class="svg-title" text-anchor="middle">Phase 1 LCD 前 · Phase 2 LVGL 后（RST 与 LCD 共享 GPIO_4 · 时序强约束）</text>
 
-<rect x="180" y="50" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
-<text x="200" y="70">① calloc 80+B handle + RST GPIO 输出 + 拉高</text>
+<rect x="180" y="40" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+<text x="200" y="60">① InitializeGpio · InitializeI2c（含 glitch_ignore_cnt 板级差异）</text>
 
-<rect x="180" y="92" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
-<text x="200" y="112">② i2c_worker_add_device(0x63, 400 kHz) 注册共享 worker</text>
+<rect x="180" y="82" width="520" height="44" rx="4" fill="#E3F2FD" stroke="#1565C0" stroke-width="2"/>
+<text x="200" y="102" fill="#1565C0" font-weight="600">② Phase 1: axs5106l_touch_init(&amp;cfg, &amp;handle)</text>
+<text x="200" y="118" fill="#666" font-size="11">RST↓ 30ms · I²C 添加 · firmware 升级 · chip_id 校验 · 应用 cfg.rf_mode</text>
 
-<rect x="180" y="134" width="520" height="44" rx="4" fill="#FFEBEE" stroke="#C62828"/>
-<text x="200" y="153" fill="#C62828" font-weight="600">③ reset_chip：5-byte I2C 软复位 + RST 拉低 50μs + 20ms + 拉高 + 50ms</text>
-<text x="200" y="170" fill="#666" font-size="11">软复位序列 {B3,55,AA,34,01} 写到 REG_RESET=0xF0</text>
+<rect x="180" y="136" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
+<text x="200" y="156">③ InitializeSpi → InitializeDisplay（LCD 上线 · 不再 reset）</text>
 
-<rect x="180" y="188" width="520" height="32" rx="4" fill="#fff" stroke="#999"/>
-<text x="200" y="208">④ 读 fw_ver（REG_FW_VER=0x05）与 firmware.h offset 0x400 比较</text>
+<rect x="180" y="178" width="520" height="44" rx="4" fill="#E3F2FD" stroke="#1565C0" stroke-width="2"/>
+<text x="200" y="198" fill="#1565C0" font-weight="600">④ Phase 2: axs5106l_touch_attach_lvgl(handle)</text>
+<text x="200" y="214" fill="#666" font-size="11">INT GPIO + IRAM ISR · lv_indev_create + 30ms read_cb</text>
 
-<rect x="180" y="230" width="520" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
-<text x="200" y="250" fill="#F57F17">⑤ 必要时 check_and_upgrade_firmware：debug mode 烧 15 KB 8051 image</text>
+<rect x="180" y="232" width="520" height="40" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="200" y="252" fill="#F57F17">⑤ 触摸触发 → on_wake / on_click / on_double_click / on_swipe / on_long_press</text>
+<text x="200" y="266" fill="#666" font-size="11">每个 cb 独立 · 应用层无 switch</text>
 
-<rect x="180" y="272" width="520" height="44" rx="4" fill="#fff" stroke="#999"/>
-<text x="200" y="291">⑥ 5 次 chip_id 读 · 任一 (or!=0 && and!=0xFF) 即存活</text>
-<text x="200" y="307" fill="#666" font-size="11">REG_CHIP_ID=0x08 · 每次 100ms 间隔</text>
-
-<rect x="180" y="326" width="520" height="40" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
-<text x="200" y="346" fill="#2E7D32" font-weight="600">⑦ Attach LVGL：INT 配 NEGEDGE + pull-up · install ISR · lv_indev_create POINTER 30ms</text>
-
-<line x1="440" y1="82" x2="440" y2="92" stroke="#666" marker-end="url(#bArr)"/>
-<line x1="440" y1="124" x2="440" y2="134" stroke="#666" marker-end="url(#bArr)"/>
-<line x1="440" y1="178" x2="440" y2="188" stroke="#666" marker-end="url(#bArr)"/>
-<line x1="440" y1="220" x2="440" y2="230" stroke="#666" marker-end="url(#bArr)"/>
-<line x1="440" y1="262" x2="440" y2="272" stroke="#666" marker-end="url(#bArr)"/>
-<line x1="440" y1="316" x2="440" y2="326" stroke="#666" marker-end="url(#bArr)"/>
+<line x1="440" y1="72" x2="440" y2="82" stroke="#666" marker-end="url(#iArr)"/>
+<line x1="440" y1="126" x2="440" y2="136" stroke="#666" marker-end="url(#iArr)"/>
+<line x1="440" y1="168" x2="440" y2="178" stroke="#666" marker-end="url(#iArr)"/>
+<line x1="440" y1="222" x2="440" y2="232" stroke="#666" marker-end="url(#iArr)"/>
 </svg>
 </div>
 
-<div class="callout">
-<b>GPIO 引脚</b>：TOUCH_RST=GPIO_4 · TOUCH_INT=GPIO_5（三板 config.h 一致）。INT 配负边沿 + 内部 pull-up ~45kΩ。
+<h3>4.2 EnterDeepSleep / 唤醒后重 init</h3>
+<div class="svgwrap">
+<svg viewBox="0 0 880 200" xmlns="http://www.w3.org/2000/svg">
+<defs><marker id="dArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
+<text x="440" y="20" class="svg-title" text-anchor="middle">sleep 必须在 AUDIO_PWR_EN=0 之前 · 唤醒走完整 init</text>
+
+<rect x="180" y="40" width="520" height="44" rx="4" fill="#E3F2FD" stroke="#1565C0" stroke-width="2"/>
+<text x="200" y="60" fill="#1565C0" font-weight="600">① axs5106l_touch_sleep(handle)</text>
+<text x="200" y="76" fill="#666" font-size="11">gpio_isr_handler_remove + I²C 写 0x19=0x03 · 100ms 等芯片归位</text>
+
+<rect x="180" y="94" width="520" height="32" rx="4" fill="#FFF3E0" stroke="#F57F17"/>
+<text x="200" y="114" fill="#F57F17">② ShutdownTouchAndAudioForSleep · AUDIO_PWR_EN=0（I²C 失效）</text>
+
+<rect x="180" y="136" width="520" height="32" rx="4" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+<text x="200" y="156" fill="#2E7D32" font-weight="600">③ esp_deep_sleep_start → 唤醒 → 重 touch_init + attach_lvgl</text>
+
+<line x1="440" y1="84" x2="440" y2="94" stroke="#666" marker-end="url(#dArr)"/>
+<line x1="440" y1="126" x2="440" y2="136" stroke="#666" marker-end="url(#dArr)"/>
+</svg>
 </div>
 </section>
 
-<!-- =============== 4 手势识别状态机 =============== -->
-<section id="gesture">
-<h2><span class="num">4</span> 手势识别状态机</h2>
+<!-- =============== 5 API 详细说明 =============== -->
+<section id="api">
+<h2><span class="num">5</span> API 详细说明</h2>
 
-<div class="svgwrap">
-<svg viewBox="0 0 880 400" xmlns="http://www.w3.org/2000/svg">
-<defs><marker id="gArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker></defs>
-<text x="440" y="20" class="svg-title" text-anchor="middle">recognize_gesture · 5 路分支</text>
+<table>
+<thead><tr><th>API</th><th>签名</th><th>调用时机</th><th>返回</th></tr></thead>
+<tbody>
+<tr><td><b>① 创建</b></td><td><code>axs5106l_touch_init(&amp;cfg, &amp;handle)</code></td><td>LCD init <b>之前</b></td><td>OK / INVALID_ARG / NO_MEM / NOT_FOUND</td></tr>
+<tr><td><b>② 接 LVGL</b></td><td><code>axs5106l_touch_attach_lvgl(handle)</code></td><td>LVGL init <b>之后</b> · 幂等</td><td>OK / INVALID_ARG</td></tr>
+<tr><td><b>③ 进深睡</b></td><td><code>axs5106l_touch_sleep(handle)</code></td><td>EnterDeepSleep · 先于 AUDIO_PWR_EN=0</td><td>OK / INVALID_ARG</td></tr>
+<tr><td><b>④ 浅睡唤醒</b></td><td><code>axs5106l_touch_resume(handle)</code></td><td>当前未用 · 走完整 reboot · 保留 light sleep</td><td>OK / INVALID_ARG / NOT_FOUND</td></tr>
+</tbody>
+</table>
 
-<ellipse cx="440" cy="60" rx="160" ry="24" fill="#FAFAFA" stroke="#666"/>
-<text class="node-text" x="440" y="65" style="font-weight:600">read_touch (LVGL 30ms)</text>
-
-<rect x="80" y="120" width="200" height="60" rx="6" fill="#FFEBEE" stroke="#C62828"/>
-<text class="node-text" x="180" y="138" style="font-weight:600;fill:#C62828">pressed-edge</text>
-<text class="node-text sm" x="180" y="154">记 start/last/press_time</text>
-<text class="node-text sm" x="180" y="170">sample_count=1</text>
-
-<rect x="340" y="120" width="200" height="60" rx="6" fill="#FFF3E0" stroke="#F57F17"/>
-<text class="node-text" x="440" y="138" style="font-weight:600;fill:#F57F17">pressed-hold</text>
-<text class="node-text sm" x="440" y="154">累计 frame_jitter</text>
-<text class="node-text sm" x="440" y="170">超过 32 → jitter_unstable=true</text>
-
-<rect x="600" y="120" width="200" height="60" rx="6" fill="#fff" stroke="#999"/>
-<text class="node-text" x="700" y="138" style="font-weight:600">长按检测</text>
-<text class="node-text sm" x="700" y="154">dur≥300ms + dist&lt;25 + frames≥9</text>
-<text class="node-text sm" x="700" y="170">→ fire LONG_PRESS</text>
-
-<rect x="200" y="230" width="480" height="60" rx="6" fill="#fff" stroke="#999"/>
-<text class="node-text" x="440" y="248" style="font-weight:600">release</text>
-<text class="node-text sm" x="440" y="266">long_fired → LONG_PRESS_RELEASE · 否则 tap 路径</text>
-<text class="node-text sm" x="440" y="282">tap：manhattan&lt;25 + 60≤dur&lt;800ms + frames≥2 + !jitter_unstable</text>
-
-<rect x="100" y="320" width="220" height="50" rx="6" fill="#E3F2FD" stroke="#1976D2"/>
-<text class="node-text" x="210" y="340" style="font-weight:600;fill:#1976D2">SINGLE_CLICK</text>
-<text class="node-text sm" x="210" y="356">last_click_time 内无前 tap</text>
-
-<rect x="560" y="320" width="220" height="50" rx="6" fill="#E8F5E9" stroke="#2E7D32"/>
-<text class="node-text" x="670" y="340" style="font-weight:600;fill:#2E7D32">DOUBLE_CLICK</text>
-<text class="node-text sm" x="670" y="356">600ms 内 · 距离&lt;50px · 前 tap 存在</text>
-
-<path d="M380,82 L180,120" stroke="#666" fill="none" marker-end="url(#gArr)"/>
-<path d="M440,84 L440,120" stroke="#666" marker-end="url(#gArr)"/>
-<path d="M500,82 L700,120" stroke="#666" fill="none" marker-end="url(#gArr)"/>
-<path d="M180,180 L300,230" stroke="#666" fill="none" stroke-dasharray="3 3" marker-end="url(#gArr)"/>
-<path d="M440,180 L440,230" stroke="#666" marker-end="url(#gArr)"/>
-<path d="M700,180 L580,230" stroke="#666" fill="none" stroke-dasharray="3 3" marker-end="url(#gArr)"/>
-<path d="M340,290 L210,320" stroke="#666" fill="none" marker-end="url(#gArr)"/>
-<path d="M540,290 L670,320" stroke="#666" fill="none" marker-end="url(#gArr)"/>
-</svg>
-</div>
-
-<h3>关键边界</h3>
 <ul class="compact">
-<li><b>jitter_unstable</b>：累计抖动 &gt; 32 屏蔽 tap（防 RF 干扰假帧）</li>
-<li><b>last_click_time 清零</b>：manhattan ≥ SWIPE_THRESHOLD 时清，防"tap→拒绝 swipe→tap"被错配为 double（v3 已修）</li>
-<li><b>release_count</b>：无触摸帧 ≥ 2 才报 RELEASED（防 4G RF 引起的瞬时丢帧）</li>
-<li><b>POST_RELEASE_GUARD</b>：release 后 100ms 内若再 press，作为 double 候选；超时则新事件起点</li>
-<li><b>swipe 路径 #if 0 封死</b>：识别代码已删 · 但 enum 值 SWIPE_UP/DOWN/LEFT/RIGHT 还在 .h 公开 API</li>
+<li><code>touch_init</code> 失败兜底：chip_id 全 0/0xFF → NOT_FOUND · firmware 升级失败仅 LOGW</li>
+<li><code>sleep</code> I²C 失败仅 LOGW · 不阻塞流程</li>
+<li><code>resume</code> 内部：RST 序列 + 软复位 + 重装 ISR + 重置 storm 检测</li>
 </ul>
 </section>
 
-<!-- =============== 5 INT + 唤醒 =============== -->
-<section id="wake">
-<h2><span class="num">5</span> INT 中断 + 唤醒</h2>
+<!-- =============== 6 配置参数说明 =============== -->
+<section id="config">
+<h2><span class="num">6</span> 配置参数说明</h2>
 
-<h3>5.1 INT 处理链路</h3>
+<p class="sub">v5.0 推荐 config struct · 一次性传入 · 运行时不变。</p>
+
+<pre><code>/* RF 抗扰模式 · 按板级 i2c 干扰程度选档 */
+typedef enum {
+    AXS5106L_RF_NORMAL = 0,   /* WiFi 板 / 无 4G 干扰 · 较宽容 */
+    AXS5106L_RF_STRICT = 1,   /* 4G 共线 · storm/debounce/guard 加严 */
+} axs5106l_rf_mode_t;
+
+/* 5 个事件回调类型（一事件一类型） */
+typedef void (*axs5106l_wake_cb_t)       (void *ctx);
+typedef void (*axs5106l_click_cb_t)      (int16_t x, int16_t y, void *ctx);
+typedef void (*axs5106l_swipe_cb_t)      (int16_t dx, int16_t dy, void *ctx);
+typedef void (*axs5106l_long_press_cb_t) (bool is_release, int16_t x, int16_t y, void *ctx);
+
+typedef struct {
+    /* 硬件 · 必填 */
+    i2c_worker_handle_t   worker;
+    gpio_num_t            rst_gpio, int_gpio;
+    uint16_t              width, height;
+
+    /* RF 抗扰 · 按板级 i2c 干扰单独配置 */
+    axs5106l_rf_mode_t    rf_mode;     /* 默认 NORMAL · 4G 板传 STRICT */
+
+    /* 回调 · 5 个独立 cb · 不需要的传 NULL */
+    void                 *cb_ctx;
+    axs5106l_wake_cb_t        on_wake;
+    axs5106l_click_cb_t       on_click;
+    axs5106l_click_cb_t       on_double_click;
+    axs5106l_swipe_cb_t       on_swipe;
+    axs5106l_long_press_cb_t  on_long_press;
+} axs5106l_touch_config_t;</code></pre>
+
+<h3>三板 cfg 配置对照</h3>
 <table>
-<thead><tr><th>层</th><th>动作</th><th>线程</th></tr></thead>
+<thead><tr><th>字段</th><th>P30-4G</th><th>P30-WiFi</th><th>P31</th></tr></thead>
 <tbody>
-<tr><td>IRAM ISR (int_falling_edge_isr)</td><td>self-&gt;int_edge_count++（原子 ++uint32_t）</td><td>ISR 上下文</td></tr>
-<tr><td>LVGL 30ms poll (lvgl_read_cb)</td><td>检 sleeping → 检 storm_detected → read_touch</td><td>LVGL task · Core 1</td></tr>
-<tr><td>read_touch 门 1</td><td>INT level==0（INT 仍低）</td><td>LVGL task</td></tr>
-<tr><td>read_touch 门 2</td><td>INT 持续低 ≥ 8ms（防抖）</td><td>LVGL task</td></tr>
-<tr><td>I2C 读 6 字节</td><td>经 i2c_bus_worker 串行</td><td>worker task</td></tr>
-<tr><td>wake_cb（仅边沿）</td><td>OnTouchWake → board.WakeUp()</td><td>LVGL task</td></tr>
-<tr><td>gesture_cb</td><td>OnTouchGesture → 板级处理</td><td>LVGL task</td></tr>
+<tr><td><code>rf_mode</code></td><td><b><code>RF_STRICT</code></b></td><td><code>RF_NORMAL</code></td><td><code>RF_NORMAL</code></td></tr>
+<tr><td><code>on_wake</code></td><td>OnTouchWake</td><td>OnTouchWake</td><td>OnTouchWake</td></tr>
+<tr><td><code>on_click</code></td><td>HandleSingleClick</td><td>HandleSingleClick</td><td>SingleClick 业务</td></tr>
+<tr><td><code>on_double_click</code></td><td>HandleDoubleClick</td><td>HandleDoubleClick</td><td>NULL</td></tr>
+<tr><td><code>on_swipe</code></td><td>NULL</td><td>NULL</td><td>OnTouchSwipe（控制中心）</td></tr>
+<tr><td><code>on_long_press</code></td><td>NULL</td><td>NULL</td><td>NULL</td></tr>
 </tbody>
 </table>
 
-<h3>5.2 STORM 防护（v3.0+）</h3>
-<div class="callout">
-<b>RF 干扰风暴</b>：4G TX 期间 INT 引脚被脉冲打穿可能产生 &gt; 12 edges/s 假中断。检测到 storm 时 mute 2 秒（不读 I2C 不投递回调）· INT 一直 disable · 等 baseline 重置。
+<div class="callout warn">
+<b>板级 i2c glitch_ignore_cnt 仍需板级 i2c_worker 配置</b>：4G 板 <code>i2c_master_bus_config_t::glitch_ignore_cnt=15</code> · 其他板 <code>=7</code>。<code>rf_mode</code> 只控制触摸驱动内部 storm/debounce/guard 三个阈值 · 不动 i2c 硬件层 glitch。
 </div>
 
-<h3>5.3 唤醒回调时机</h3>
+<div class="callout warn">
+<b>swap_xy / mirror_x/y 不暴露</b>：V2907 firmware 已内部 rotation · 项目锁定 false。
+</div>
+</section>
+
+<!-- =============== 7 关键参数说明 =============== -->
+<section id="keyparams">
+<h2><span class="num">7</span> 关键参数说明</h2>
+
+<h3>7.1 RF 抗扰参数 · 按 rf_mode 切档</h3>
 <table>
-<thead><tr><th>场景</th><th>wake_cb 是否触发</th></tr></thead>
+<thead><tr><th>层</th><th>参数</th><th>RF_NORMAL 默认</th><th>RF_STRICT（4G）</th></tr></thead>
 <tbody>
-<tr><td>新触摸 press-edge</td><td>✓</td></tr>
-<tr><td>同一长按持续中</td><td>❌（仅边沿）</td></tr>
-<tr><td>POST_RELEASE_GUARD 期间触摸</td><td>下一帧才触发（30ms 延迟）</td></tr>
-<tr><td>storm_detected 期间</td><td>❌（被 mute）</td></tr>
+<tr><td>边沿 storm 阈值</td><td><code>INT_STORM_THRESHOLD</code></td><td>20 edges/s</td><td><b>12 edges/s</b></td></tr>
+<tr><td>storm HOT 模式</td><td><code>THRESHOLD_HOT</code> · 30s 窗</td><td>10 edges/s</td><td>6 edges/s</td></tr>
+<tr><td>静音时长</td><td><code>STORM_MUTE_US</code></td><td>1 s</td><td>2 s</td></tr>
+<tr><td>INT 防抖</td><td><code>INT_DEBOUNCE_US</code></td><td>5 ms</td><td>8 ms</td></tr>
+<tr><td>松开保护</td><td><code>POST_RELEASE_GUARD_US</code></td><td>100 ms</td><td>200 ms</td></tr>
+<tr><td>速度上限</td><td><code>MAX_SPEED_PX_S</code></td><td>3000</td><td>2500</td></tr>
+<tr><td>轨迹效率</td><td><code>SWIPE_TRAJECTORY_RATIO</code></td><td>2.5 ×</td><td>2.0 ×</td></tr>
+</tbody>
+</table>
+
+<div class="callout ok">
+<b>板级 i2c 硬件层</b>：P30-4G <code>glitch_ignore_cnt=15</code>（~187ns 过滤） · 其他板 7（~87ns）· 由板级 i2c_master_bus_config_t 配置 · 不在 touch cfg 内。
+</div>
+
+<h3>7.2 手势识别参数（应用层不暴露 · 内部硬编码）</h3>
+<table>
+<thead><tr><th>类</th><th>参数 · 默认</th><th>调校方向</th></tr></thead>
+<tbody>
+<tr><td>tap</td><td>CLICK_MIN_TIME <b>60 ms</b> · MIN_FRAMES <b>2</b> · MAX_MOVE <b>24 px</b></td><td>误触多 → 80ms · 儿童手抖 → 30 px</td></tr>
+<tr><td>双击</td><td>DOUBLE_CLICK_TIME <b>600 ms</b> · DIST <b>50 px</b></td><td>儿童慢 → 800/70</td></tr>
+<tr><td>长按</td><td>LONG_PRESS_TIME <b>300 ms</b> · MIN_FRAMES <b>9</b></td><td>PTT 已下线 · 仅状态机收尾</td></tr>
+<tr><td>滑动</td><td>SWIPE_THRESHOLD <b>25 px</b> · MIN_TIME <b>150 ms</b> · MIN_FRAMES <b>5</b></td><td>—</td></tr>
+<tr><td>抖动</td><td>JITTER_LIMIT <b>32 px</b></td><td>抖动大降级为 swipe</td></tr>
+</tbody>
+</table>
+
+<h3>7.3 板级 GPIO（三板一致）</h3>
+<table>
+<tbody>
+<tr><td>TOUCH_RST_NUM / TOUCH_INT_NUM</td><td>GPIO_NUM_4 / GPIO_NUM_5</td></tr>
+<tr><td>SWAP_XY / MIRROR_X/Y</td><td>false / false / false（V2907 firmware 已 rotation）</td></tr>
 </tbody>
 </table>
 </section>
 
-<!-- =============== 6 深睡进出 =============== -->
-<section id="sleep">
-<h2><span class="num">6</span> 深睡进出</h2>
+<!-- =============== 8 寄存器说明 =============== -->
+<section id="regs">
+<h2><span class="num">8</span> 寄存器说明</h2>
 
-<h3>6.1 进入深睡</h3>
+<table>
+<thead><tr><th>寄存器</th><th>地址</th><th>方向</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td>REG_DATA</td><td>0x01</td><td>R · 6 字节</td><td>buf[0] 硬件手势（不用）· buf[1] touch_num · X=(b[2]&amp;0x0F)&lt;&lt;8|b[3] · Y=(b[4]&amp;0x0F)&lt;&lt;8|b[5]</td></tr>
+<tr><td>REG_FW_VER</td><td>0x05</td><td>R · 2</td><td>固件版本 V2907=0x2907</td></tr>
+<tr><td>REG_CHIP_ID</td><td>0x08</td><td>R · 3</td><td>全 0/0xFF 视为故障</td></tr>
+<tr><td>REG_SLEEP</td><td>0x19</td><td>W · 1</td><td>写 0x03 进 sleep</td></tr>
+<tr><td>REG_RESET</td><td>0xF0</td><td>W · 5</td><td>软复位 <code>{B3,55,AA,34,01}</code></td></tr>
+</tbody>
+</table>
+
+<ul class="compact">
+<li><b>X 死区软件补偿</b>：raw [9..272] → 屏 [0..283] · <code>x = (raw - 9) × 284 / 263</code></li>
+<li><b>ISR（IRAM）</b>：仅 <code>int_edge_count++</code> · 不读 I²C · &lt; 1μs</li>
+<li><b>LVGL task</b>：30ms 周期读 REG_DATA + 手势状态机 + 三层 RF 过滤</li>
+<li><b>storm 检测</b>：1s rolling 窗采样 int_edge_count · 超阈（NORMAL 20/STRICT 12）→ mute</li>
+</ul>
+</section>
+
+<!-- =============== 9 典型配置示例 =============== -->
+<section id="examples">
+<h2><span class="num">9</span> 典型配置示例</h2>
+
+<h3>9.1 P30-4G · 4G 共线 → RF_STRICT</h3>
+<pre><code>axs5106l_touch_handle_t touch_ = nullptr;
+
+void InitializeTouchHardware() {
+    axs5106l_touch_config_t cfg = {
+        .worker          = i2c_worker_,
+        .rst_gpio        = TOUCH_RST_NUM,         /* GPIO_4 */
+        .int_gpio        = TOUCH_INT_NUM,         /* GPIO_5 */
+        .width           = DISPLAY_WIDTH,         /* 284 */
+        .height          = DISPLAY_HEIGHT,        /* 240 */
+        .rf_mode         = AXS5106L_RF_STRICT,    /* 4G 共线加严 */
+        .cb_ctx          = this,
+        .on_wake         = &amp;OnTouchWake,
+        .on_click        = &amp;OnTouchClick,
+        .on_double_click = &amp;OnTouchDoubleClick,
+    };
+    if (axs5106l_touch_init(&amp;cfg, &amp;touch_) != ESP_OK) {
+        ESP_LOGE(TAG, "touch init 失败");
+        touch_ = nullptr;
+    }
+}
+
+void InitializeTouchInput() {
+    if (touch_) axs5106l_touch_attach_lvgl(touch_);
+}
+
+static void OnTouchWake(void *ctx) {
+    static_cast&lt;MyDazyP30_4GBoard*&gt;(ctx)->WakeUp();
+}
+
+static void OnTouchClick(int16_t x, int16_t y, void *ctx) {
+    auto* self = static_cast&lt;MyDazyP30_4GBoard*&gt;(ctx);
+    self->WakeUp();
+    if (y &lt; 36) return;                          /* 状态栏交给 LVGL */
+    self->HandleTouchSingleClick();
+}
+
+static void OnTouchDoubleClick(int16_t x, int16_t y, void *ctx) {
+    auto* self = static_cast&lt;MyDazyP30_4GBoard*&gt;(ctx);
+    self->WakeUp();
+    if (y &lt; 36) return;
+    self->HandleTouchDoubleClick();
+}
+
+void EnterDeepSleep(...) {
+    if (touch_) axs5106l_touch_sleep(touch_);
+    ShutdownTouchAndAudioForSleep();
+    /* esp_deep_sleep_start ... */
+}</code></pre>
+
+<h3>9.2 P30-WiFi · 无 4G 干扰 → RF_NORMAL</h3>
+<pre><code>/* 仅 rf_mode 与 4G 板不同 · 其余完全一致 */
+.rf_mode = AXS5106L_RF_NORMAL,</code></pre>
+
+<h3>9.3 P31 · 加 swipe 控制中心</h3>
+<pre><code>axs5106l_touch_config_t cfg = {
+    /* ... 硬件 + rf_mode = RF_NORMAL ... */
+    .on_wake  = &amp;OnTouchWake,
+    .on_click = &amp;OnTouchClick,
+    .on_swipe = &amp;OnTouchSwipe,
+};
+
+static void OnTouchSwipe(int16_t dx, int16_t dy, void *ctx) {
+    auto* self = static_cast&lt;MyDazyP31Board*&gt;(ctx);
+    if (abs(dx) &gt; abs(dy)) return;                /* 仅纵向 */
+    auto* lcd = dynamic_cast&lt;UiDisplay*&gt;(self->GetDisplay());
+    if (!lcd || lcd->IsBrainInfoVisible()) return;
+    if (dy &gt; 0) {
+        if (!lcd->IsControlCenterVisible()) lcd->ShowControlCenter();
+    } else {
+        if (lcd->IsControlCenterVisible()) lcd->HideControlCenter();
+        else if (lcd->IsMenuVisible())     lcd->HideMenu();
+    }
+}</code></pre>
+</section>
+
+<!-- =============== 10 错误码与调试方法 =============== -->
+<section id="errcode">
+<h2><span class="num">10</span> 错误码与调试方法</h2>
+
+<h3>10.1 esp_err_t 返回 + 典型故障</h3>
+<table>
+<thead><tr><th>症状</th><th>排查</th></tr></thead>
+<tbody>
+<tr><td><b>touch_init NOT_FOUND</b></td><td>chip_id 全 0/0xFF · 焊接 / 上电时序 / I²C 地址 / I²C scan 看 0x63</td></tr>
+<tr><td><b>触摸完全无响应</b></td><td>① log 看 "chip ID" + "attach_lvgl ok" ② INT 引脚示波器看是否触屏拉低</td></tr>
+<tr><td><b>幻影触摸（4G 弱信号）</b></td><td>① cfg.rf_mode 是否 RF_STRICT ② 看 "RF storm muted" 频率 ③ 硬件加 RC 10kΩ+1nF</td></tr>
+<tr><td><b>触摸"死了 · 必须长按"</b></td><td>storm 误判 · 试 RF_NORMAL（普通场景下 STRICT 可能过严）</td></tr>
+<tr><td><b>位置偏移</b></td><td>① DEBUG_OVERLAY=1 看 raw 是否在 [9..272] ② width/height 是否 284/240</td></tr>
+<tr><td><b>双击不识别</b></td><td>DOUBLE_CLICK_TIME 800 / DIST 70 试</td></tr>
+<tr><td><b>滑动识别为 tap</b></td><td>降 SWIPE_THRESHOLD 到 20 · 查 jitter trajectory gate</td></tr>
+</tbody>
+</table>
+
+<h3>10.2 关键 log（TAG=axs5106l_touch）</h3>
+<table>
+<tbody>
+<tr><td><code>chip ID: 0x12 0x34 0x56 · fw=0x2907 · rf=STRICT</code></td><td>init 成功 · 显示 RF mode</td></tr>
+<tr><td><code>RF storm 12 edges/s → muted 2s</code></td><td>storm 触发</td></tr>
+<tr><td><code>press_pending dropped after 1 frame</code></td><td>post-release guard 丢 RF 尖峰</td></tr>
+<tr><td><code>click @ (123,45)</code> · <code>swipe dx=12 dy=-80</code></td><td>事件 cb 触发（LOGD）</td></tr>
+</tbody>
+</table>
+
+<h3>10.3 调试技巧</h3>
+<ul class="compact">
+<li>编译 <code>-DAXS5106L_TOUCH_DEBUG_OVERLAY=1</code> 启用红点追踪 + raw 坐标 LOG</li>
+<li>I²C scan 0x63 · INT 引脚示波器 · LOGD 看 1s edge count</li>
+</ul>
+</section>
+
+<!-- =============== 11 注意事项 =============== -->
+<section id="notes">
+<h2><span class="num">11</span> 注意事项</h2>
+
+<h3>11.1 关键铁律</h3>
+<div class="callout bad">
+<b>① 两阶段 init 顺序</b>：GPIO → I²C → <code>touch_init</code> → SPI → LCD → LVGL → <code>attach_lvgl</code>。RST 与 LCD 共享 · 颠倒会把已点亮 LCD 一起 reset。
+</div>
+<div class="callout bad">
+<b>② sleep 时机</b>：必须先于 AUDIO_PWR_EN=0 · 否则 codec 失电后 ESD 短路 SDA/SCL · I²C 写 sleep 失败（与 sc7a20h_wakeup 同时序铁律）。
+</div>
+<div class="callout bad">
+<b>③ ISR 约束</b>：仅 <code>++int_edge_count</code> · 不读 I²C · 不调阻塞 API · 不调 ESP_LOG。
+</div>
+
+<h3>11.2 三板差异</h3>
+<table>
+<thead><tr><th>项</th><th>P30-4G</th><th>P30-WiFi</th><th>P31</th></tr></thead>
+<tbody>
+<tr><td>API 状态</td><td>✅ v4.0</td><td>✅ v4.0</td><td><span class="must">⚠️ v2.x C++ 类</span></td></tr>
+<tr><td>cfg.rf_mode</td><td>STRICT</td><td>NORMAL</td><td>NORMAL</td></tr>
+<tr><td>板级 i2c glitch</td><td>15</td><td>7</td><td>7</td></tr>
+<tr><td>实际事件</td><td>wake / click / double_click</td><td>同 4G</td><td>wake / click / swipe</td></tr>
+</tbody>
+</table>
+
+<h3>11.3 v4.0 → v5.0 迁移清单</h3>
 <table>
 <thead><tr><th>步</th><th>动作</th></tr></thead>
 <tbody>
-<tr><td>1</td><td>ShutdownTouchAndAudioForSleep 调 axs5106l_touch_sleep</td></tr>
-<tr><td>2</td><td>sleeping=true（LVGL read 立即跳出）</td></tr>
-<tr><td>3</td><td>gpio_intr_disable(INT)</td></tr>
-<tr><td>4</td><td>I2C 写 REG_SLEEP(0x19)=0x03</td></tr>
-<tr><td>5</td><td>RST 拉高保持</td></tr>
-<tr><td>6</td><td>touch_driver_ = nullptr · 句柄不可再用</td></tr>
+<tr><td>1</td><td><code>axs5106l_touch_new</code> → <code>axs5106l_touch_init</code></td></tr>
+<tr><td>2</td><td>删除 <code>axs5106l_gesture_t</code> + <code>axs5106l_gesture_cb_t</code></td></tr>
+<tr><td>3</td><td>cfg.gesture_cb 单 cb → 5 独立 cb 字段（on_wake/click/double_click/swipe/long_press）</td></tr>
+<tr><td>4</td><td>新增 <code>cfg.rf_mode</code>（NORMAL/STRICT）· 内部 storm/debounce/guard 按 mode 选默认值</td></tr>
+<tr><td>5</td><td>板级 OnTouchGesture switch → 拆为 OnTouchClick / OnTouchDoubleClick(/ OnTouchSwipe)</td></tr>
+<tr><td>6</td><td>P31 板：<code>Axs5106lTouch*</code> + new → C handle + init · <code>SetXxxCallback</code> → cfg.on_xxx</td></tr>
+<tr><td>7</td><td>版本号统一升 v5.0.0（yml + .h + CHANGELOG）</td></tr>
 </tbody>
 </table>
 
-<h3>6.2 唤醒（非深睡场景 · 暂未主链路使用）</h3>
-<p class="sub">axs5106l_touch_resume：reset_chip + 重置 storm baseline + gpio_intr_enable。当前深睡唤醒走完整重启路径（PrepareTouchHardware 重新调 axs5106l_touch_new），不使用 resume。</p>
-</section>
+<h3>11.4 量产保守原则</h3>
+<ul class="compact">
+<li>手势 / 7.2 内部参数<b>不开放调用方调参</b> · RF 仅给 NORMAL/STRICT 两档</li>
+<li>swap/mirror 锁定 false · 不开放修改</li>
+<li>改默认值<b>必须真机回归</b>：日常 / 弱信号 / 走路 / 儿童 · 24h 误触率</li>
+</ul>
 
-<!-- =============== 7 三板差异 =============== -->
-<section id="diff">
-<h2><span class="num">7</span> 三板差异</h2>
-
-<table>
-<thead><tr><th>差异</th><th>P30-WiFi</th><th>P30-4G</th><th>P31</th></tr></thead>
-<tbody>
-<tr><td>API 风格</td><td>v2.0 C handle ✓</td><td>v2.0 C handle ✓</td><td><span style="color:var(--bad);font-weight:600">❌ 仍用 v1.x C++ class · 编译失败</span></td></tr>
-<tr><td>OnTouchGesture 实现</td><td>逐行同 4G</td><td>HandleTouchSingleClick / DoubleClick</td><td>独有 SwipeDown 唤出 ControlCenter · SwipeUp 回退</td></tr>
-<tr><td>I2C worker</td><td>codec ×2 + sensor</td><td>+ ml307 共线</td><td>+ NFC 共线</td></tr>
-<tr><td>storm 检测价值</td><td>低（WiFi RF 较温和）</td><td><b>高</b>（4G TX 干扰）</td><td><b>高</b>（同 4G）</td></tr>
-<tr><td>闹钟响铃抢占</td><td>TryStopAlarmRinger("touch") ✓</td><td>同 ✓</td><td>同 ✓</td></tr>
-</tbody>
-</table>
-
-<div class="callout bad">
-<b>P31 板编译失败</b>：mydazy_p31_board.cc:130 `Axs5106lTouch* touch_driver_` + :292 `new Axs5106lTouch(...)` 使用 v1.x C++ 类 API · 但驱动 v2.0 已删 class，只导出 C handle (`axs5106l_touch_handle_t` + `axs5106l_touch_new()`)。**P31 量产前必须修**（见评审 P0-1）。
-</div>
-</section>
-
-<!-- =============== 8 三遍评审 =============== -->
-<section id="review">
-<h2><span class="num">8</span> 三遍评审 + log</h2>
-<p class="sub">三角度：① 并发/资源 ② 状态机/时序 ③ 精简/可读 · 共 18 项 · 按量产风险分级。</p>
-
-<h3>8.1 P0 · 量产 blocker</h3>
-<div class="callout ok">
-<b>✅ P0-2 已修复</b>（2026-05-12 · P30-4G/WiFi 量产 blocker 清零）· 详见 § 8.4 已修 log 末行
-</div>
-<table>
-<thead><tr><th>#</th><th>问题</th><th>位置</th><th>修复</th><th>状态</th></tr></thead>
-<tbody>
-<tr><td><span class="pill p0">P0-1</span></td><td><b>P31 编译失败</b>：仍用 v1.x C++ class API（new Axs5106lTouch · SetWakeCallback · TouchGesture::SingleClick）· 驱动组件已删 class</td><td><code>p31_board.cc:130, 288-403</code></td><td>照搬 wifi/4g 板 axs5106l_touch_config_t + 静态 trampoline + 保留 P31 独有的 swipe→ControlCenter 分支</td><td><b>P31-only</b> · 不阻塞 P30-4G/WiFi 量产</td></tr>
-</tbody>
-</table>
-
-<h3>8.2 P1 · 建议修</h3>
-<table>
-<thead><tr><th>#</th><th>问题</th><th>位置</th><th>修复</th></tr></thead>
-<tbody>
-<tr><td><span class="pill p1">P1-1</span></td><td><b>HandleTouchSingleClick vTaskDelay(800ms) 卡 LVGL</b>：UI 卡 800ms 触摸完全死</td><td><code>wifi_board.cc:439, 4g_board.cc:426</code></td><td>移到 main_app task / xTimerSet 异步</td></tr>
-<tr><td><span class="pill p1">P1-2</span></td><td><b>volatile int_edge_count 跨核读写</b>：ISR 写 LVGL 读 · 标 volatile 不充分</td><td><code>axs5106l_touch.c:204</code></td><td>改 <code>atomic_uint32_t</code></td></tr>
-<tr><td><span class="pill p1">P1-3</span></td><td><b>INT 仅内部 pull-up ~45kΩ</b>：4G RF 抗扰极差</td><td>硬件 PCB</td><td>外部 4.7kΩ + 10kΩ+1nF RC 低通（CHANGELOG 推荐 · 量产前确认改板）</td></tr>
-<tr><td><span class="pill p1">P1-4</span></td><td><b>storm_detected 内 long_fired 旁路死代码</b>：long_fired 永不为 true（PTT 已下线）</td><td><code>axs5106l_touch.c:434-442</code></td><td>删整段</td></tr>
-<tr><td><span class="pill p1">P1-5</span></td><td><b>Board::WakeUp 持锁审计</b>：wake_cb 在 LVGL task 同步调用 · 若 WakeUp 内部 mutex 与 worker 互锁会死锁</td><td><code>:621</code></td><td>audit WakeUp 调用链 + 文档化 LVGL 上下文</td></tr>
-<tr><td><span class="pill p1">P1-6</span></td><td><b>fail 路径 RST GPIO 不复原</b>：下次 boot 重复配置</td><td><code>:323</code></td><td>fail 时 gpio_reset_pin(RST)</td></tr>
-</tbody>
-</table>
-
-<h3>8.3 P2 / lean · 精简</h3>
+<h3>11.5 已修关键 bug · 历史追溯</h3>
 <table>
 <tbody>
-<tr><td><span class="pill p2">P2-1</span></td><td><b>resume 后 last_release_time 残留</b>：第一次触屏 wake_cb 延迟一帧 · 用户无感 lean</td></tr>
-<tr><td><span class="pill p2">P2-2</span></td><td><b>sample_count saturation 注释陈旧</b>：指向已删除常量 · 易误导维护</td></tr>
-<tr><td><span class="pill p2">P2-3</span></td><td><b>raw_x/y 边界 50px tolerance 重复</b>：X 死区映射后已 clamp · 可删</td></tr>
-<tr><td><span class="pill lean">lean</span> <b>swipe 识别整段 #if 0 死代码 ~20 行</b>：删 SWIPE_THRESHOLD/SWIPE_MIN_TIME_US/SWIPE_MIN_FRAMES/SWIPE_TRAJECTORY 常量 + 公开 API 的 SWIPE_* enum 值 4 个</td></tr>
-<tr><td><span class="pill lean">lean</span> <b>LONG_PRESS 识别死代码 ~30 行</b>：板级全部丢弃（PTT 已下线）· 删 recognize_gesture 长按分支 + 2 enum 值</td></tr>
-<tr><td><span class="pill lean">lean</span> <b>README v1.x C++ 风格陈旧</b>：v2.0 已 C 化 · 同步</td></tr>
-<tr><td><span class="pill lean">lean</span> <b>DEBUG_OVERLAY 块占 50 行</b>：量产 0 编入 · 移 axs5106l_debug.inc 守卫</td></tr>
-<tr><td><span class="pill lean">lean</span> <b>wake_ctx / gesture_ctx 冗余</b>：实际指同一指针 · 合并 cb_ctx</td></tr>
-<tr><td><span class="pill lean">lean</span> <b>dt_us 500ms 速度窗 + last_time 双源</b>：可整合 touch_state_t pressed flag</td></tr>
+<tr><td>2026-04-26</td><td>v2.0 → v4.0 C 重写 · 4G/WiFi 板迁移</td></tr>
+<tr><td>2026-05-02</td><td>v2.1.0 双层 RF 噪声过滤器（post-release guard + bus-recovery state reset）</td></tr>
+<tr><td>2026-05 中</td><td>v3.0 灵敏度提升 · CLICK_MIN_TIME 100→60ms · MIN_FRAMES 3→2 · JITTER 24→32</td></tr>
+<tr><td>2026-05 中</td><td>INT_STORM_THRESHOLD 5→12 · 防 4G 30-140/s burst</td></tr>
+<tr><td>2026-05-12</td><td>X 死区映射 + trajectory gate · 防 RF 伪 swipe</td></tr>
+<tr><td>待办 v5.0</td><td>5 独立 cb + cfg.rf_mode 切档 + init 命名 + P31 迁移 + 版本号收敛</td></tr>
 </tbody>
 </table>
-
-<h3>8.4 已修 log</h3>
-<table>
-<tbody>
-<tr><td>v2.1（2026-05-02）POST_RELEASE_GUARD_US 100ms 防 4G RF 复触 + bus-recovery 清 transient</td></tr>
-<tr><td>v2.0（2026-04-26）C 重写 + handle/free-fn API（<b>P31 未跟进 → P0-1</b>）</td></tr>
-<tr><td>v3.0+ 全量走 i2c_bus_worker · worker_bus_reset 不砸共线</td></tr>
-<tr><td>v4.0 极简 API（4 个公开函数 · cfg 一次性回调）</td></tr>
-<tr><td>闹钟响铃抢占 TryStopAlarmRinger("touch")（A1 已修）</td></tr>
-<tr><td>LVGL attach 失败置 touch_driver_=nullptr</td></tr>
-<tr><td>INT-edge storm 检测 12 edges/s · 2s mute</td></tr>
-<tr><td>"tap→拒绝 swipe→tap" 误配 double 清 last_click_time</td></tr>
-<tr><td><b>P0-2</b> · LONG_PRESS_TIME 注释代码对齐到 300ms（PTT 已下线 · 板级无 listener · 注释 .c L64 + .h L33）— <code>axs5106l_touch.c:59-68</code> + <code>axs5106l_touch.h:33</code></td></tr>
-</tbody>
-</table>
-
-<h3>8.5 推荐落地批次</h3>
-<div class="callout bad">
-<b>批次 A · P0 量产前必修</b><br>
-① P31 board.cc 改 C handle API（参照 wifi/4g 整段复制 + 加 swipe→ControlCenter 分支）<br>
-② 与产品拍板 LONG_PRESS 300ms / 500ms · 改一致
-</div>
-<div class="callout warn">
-<b>批次 B · P1 稳定性</b><br>
-① HandleTouchSingleClick 800ms 移异步<br>
-② volatile → atomic<br>
-③ PCB 改板：外部 4.7kΩ + 10kΩ+1nF RC<br>
-④ 删 storm long_fired 死代码<br>
-⑤ Board::WakeUp 调用链 audit
-</div>
-<div class="callout ok">
-<b>批次 C · lean 精简（~60 行 -）</b><br>
-① 删 swipe 识别 + 公开 API SWIPE_* enum<br>
-② 删 long-press 识别 + LONG_PRESS_* enum<br>
-③ 同步 README v2.0 C 风格<br>
-④ DEBUG_OVERLAY 移独立 inc<br>
-⑤ wake_ctx / gesture_ctx 合并
-</div>
 </section>
 
 </main>

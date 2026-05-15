@@ -702,6 +702,30 @@ void Application::InitializeProtocol() {
     
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+
+        // 弱网保护：Listening/Speaking 中断线 → 后台重连 3 次（500/1000/1500ms 退避）
+        auto state_at_close = GetDeviceState();
+        if (state_at_close == kDeviceStateListening || state_at_close == kDeviceStateSpeaking) {
+            ESP_LOGW(TAG, "Audio channel closed in %s, attempt reconnect",
+                     state_at_close == kDeviceStateListening ? "Listening" : "Speaking");
+            Schedule([this]() {
+                SetDeviceState(kDeviceStateConnecting);
+                for (int attempt = 1; attempt <= 3; ++attempt) {
+                    vTaskDelay(pdMS_TO_TICKS(attempt * 500));
+                    ESP_LOGI(TAG, "Reconnect attempt %d/3", attempt);
+                    if (protocol_->OpenAudioChannel()) {
+                        ESP_LOGI(TAG, "Reconnected on attempt %d", attempt);
+                        SetListeningMode(kListeningModeManualStop);
+                        return;
+                    }
+                }
+                ESP_LOGW(TAG, "Reconnect 3/3 failed, fall back to Idle");
+                Board::GetInstance().GetDisplay()->SetChatMessage("system", "");
+                SetDeviceState(kDeviceStateIdle);
+            });
+            return;
+        }
+        // 用户主动结束 / 其他状态：保持原逻辑
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
