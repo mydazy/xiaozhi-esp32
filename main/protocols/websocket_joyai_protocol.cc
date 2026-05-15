@@ -53,23 +53,26 @@ bool WebsocketJoeaiProtocol::SendText(const std::string& text) {
     return true;
 }
 
+// JoyInside 协议无对应"开始录音"事件：连接建立后客户端持续发 AUDIO 帧即可，
+// 服务端依据自由对话模式（默认 needManualCall=false）VAD 自动判断对话边界
 void WebsocketJoeaiProtocol::SendStartListening(ListeningMode mode) {
-    // 将上层控制映射为 Joyai 的会话事件：开始录音/模式声明
-    // 参照文档，发送 CLIENT_VOICE_CHAT_UPDATE 可附带模式；保持最小实现，仅声明开始
     (void)mode;
-    std::string event = BuildClientEvent("CLIENT_VOICE_CHAT_START", "{}");
-    SendText(event);
 }
 
+// 仅手动模式 (URL needManualCall=true) 下有意义；自由对话模式服务端自动检测停顿
 void WebsocketJoeaiProtocol::SendStopListening() {
-    std::string event = BuildClientEvent("CLIENT_VOICE_CHAT_STOP", "{}");
-    SendText(event);
+    SendText(BuildClientEvent("CLIENT_AUDIO_FINISH", "{}"));
 }
 
+// 打断：上行 CLIENT_INTERRUPT (旧实现误用 CLIENT_TTS_ABORT，服务端不识别→打断失效)
+// 三件事：(1) 立即抛 tts.stop 让 application 切走 speaking
+//         (2) 置 interrupt_pending_=true，期间所有下行 TTS 帧丢弃，防残留音频复活 speaking
+//         (3) 上行 CLIENT_INTERRUPT 通知服务端停 TTS
 void WebsocketJoeaiProtocol::SendAbortSpeaking(AbortReason reason) {
     (void)reason;
-    std::string event = BuildClientEvent("CLIENT_TTS_ABORT", "{}");
-    SendText(event);
+    interrupt_pending_ = true;
+    EmitTtsStop();
+    SendText(BuildClientEvent("CLIENT_INTERRUPT", "{}"));
 }
 
 bool WebsocketJoeaiProtocol::IsAudioChannelOpened() const {
@@ -77,6 +80,9 @@ bool WebsocketJoeaiProtocol::IsAudioChannelOpened() const {
 }
 
 void WebsocketJoeaiProtocol::CloseAudioChannel(bool send_goodbye) {
+    (void)send_goodbye;
+    tts_started_ = false;
+    interrupt_pending_ = false;
     websocket_.reset();
 }
 
@@ -212,153 +218,192 @@ bool WebsocketJoeaiProtocol::ConfigureChatParameters() {
     return SendText(msg);
 }
 
+// 首次音频帧到达时（无论二进制还是 base64 文本）才向上抛 tts.start，
+// 防止 LLM 思考期/已打断后残留事件错误激活 speaking 状态
+void WebsocketJoeaiProtocol::EmitTtsStartIfNeeded() {
+    if (tts_started_) return;
+    tts_started_ = true;
+    cJSON* fake = cJSON_CreateObject();
+    cJSON_AddStringToObject(fake, "type", "tts");
+    cJSON_AddStringToObject(fake, "state", "start");
+    if (on_incoming_json_ != nullptr) on_incoming_json_(fake);
+    cJSON_Delete(fake);
+}
+
+void WebsocketJoeaiProtocol::EmitTtsStop() {
+    if (!tts_started_) return;
+    tts_started_ = false;
+    cJSON* fake = cJSON_CreateObject();
+    cJSON_AddStringToObject(fake, "type", "tts");
+    cJSON_AddStringToObject(fake, "state", "stop");
+    if (on_incoming_json_ != nullptr) on_incoming_json_(fake);
+    cJSON_Delete(fake);
+}
+
+void WebsocketJoeaiProtocol::HandleEventMessage(const cJSON* content) {
+    auto eventType = cJSON_GetObjectItem(content, "eventType");
+    auto eventData = cJSON_GetObjectItem(content, "eventData");
+    if (!cJSON_IsString(eventType)) return;
+    const char* et = eventType->valuestring;
+    ESP_LOGI(TAG, "event: %s", et);
+
+    // 任何 CALL_AGENT_START_EVENT (新一轮对话开始) / CFG_BOT_EVENT (新连接) 都意味着
+    // 之前的打断窗口已结束，恢复正常下行处理
+    if (strcmp(et, "CALL_AGENT_START_EVENT") == 0 ||
+        strcmp(et, "CFG_BOT_EVENT") == 0) {
+        interrupt_pending_ = false;
+    }
+
+    // 服务端就绪：CFG_BOT_EVENT (连接默认配置) + SERVER_VOICE_CHAT_UPDATED (配置更新成功响应)
+    if (strcmp(et, "CFG_BOT_EVENT") == 0 ||
+        strcmp(et, "SERVER_VOICE_CHAT_UPDATED") == 0) {
+        // CFG_BOT_EVENT 的 eventData.tts: { sr, aue, bit, channels }
+        // SERVER_VOICE_CHAT_UPDATED 的 eventData.audio.output: { sampleRate, frameSizeMs }
+        if (cJSON_IsObject(eventData)) {
+            int sr = 0, fm = 0;
+            auto audio = cJSON_GetObjectItem(eventData, "audio");
+            if (cJSON_IsObject(audio)) {
+                auto output = cJSON_GetObjectItem(audio, "output");
+                if (cJSON_IsObject(output)) {
+                    auto srj = cJSON_GetObjectItem(output, "sampleRate");
+                    auto fmj = cJSON_GetObjectItem(output, "frameSizeMs");
+                    if (cJSON_IsNumber(srj)) sr = srj->valueint;
+                    else if (cJSON_IsString(srj)) sr = atoi(srj->valuestring);
+                    if (cJSON_IsNumber(fmj)) fm = fmj->valueint;
+                    else if (cJSON_IsString(fmj)) fm = atoi(fmj->valuestring);
+                }
+            }
+            auto tts = cJSON_GetObjectItem(eventData, "tts");
+            if (cJSON_IsObject(tts) && sr == 0) {
+                auto srj = cJSON_GetObjectItem(tts, "sr");
+                if (cJSON_IsNumber(srj)) sr = srj->valueint;
+                else if (cJSON_IsString(srj)) sr = atoi(srj->valuestring);
+            }
+            if (sr > 0) server_sample_rate_ = sr;
+            if (fm > 0) server_frame_duration_ = fm;
+        }
+        ESP_LOGI(TAG, "Server ready: sr=%d, frame=%dms", server_sample_rate_, server_frame_duration_);
+        xEventGroupSetBits(event_group_handle_, WEBSOCKET_JOEAI_SERVER_READY_EVENT);
+        return;
+    }
+
+    // 字幕事件：text 字段在 eventData.text
+    if (strcmp(et, "TTS_SENTENCE_START") == 0) {
+        const char* txt = nullptr;
+        if (cJSON_IsObject(eventData)) {
+            auto t = cJSON_GetObjectItem(eventData, "text");
+            if (cJSON_IsString(t)) txt = t->valuestring;
+        }
+        cJSON* fake = cJSON_CreateObject();
+        cJSON_AddStringToObject(fake, "type", "tts");
+        cJSON_AddStringToObject(fake, "state", "sentence_start");
+        if (txt != nullptr) cJSON_AddStringToObject(fake, "text", txt);
+        if (on_incoming_json_ != nullptr) on_incoming_json_(fake);
+        cJSON_Delete(fake);
+        return;
+    }
+
+    // 停止/结束/打断/空内容 → 统一抛 tts.stop 让上层切走 speaking
+    // 服务端确认打断或本轮自然结束 → 清打断窗口，下一轮恢复正常下行
+    if (strcmp(et, "TTS_COMPLETE") == 0 ||
+        strcmp(et, "COMPLETE") == 0 ||
+        strcmp(et, "CALL_AGENT_INTERRUPTED") == 0 ||
+        strcmp(et, "EMPTY_CONTENT") == 0) {
+        interrupt_pending_ = false;
+        EmitTtsStop();
+        return;
+    }
+}
+
 void WebsocketJoeaiProtocol::HandleTextMessage(const char* data, size_t len) {
-    // 与 websocket_protocol 对齐：仅在 JSON 合法且包含字符串 type 时转发到上层
     std::string s(data, len);
     auto root = cJSON_Parse(s.c_str());
     if (!root) {
         ESP_LOGE(TAG, "json parse failed: %s", s.c_str());
         return;
     }
+
+    // 兼容上层直接构造的通用 JSON（带顶层 type 字段）
     auto type = cJSON_GetObjectItem(root, "type");
     if (cJSON_IsString(type)) {
-        if (on_incoming_json_ != nullptr) {
-            on_incoming_json_(root);
+        if (on_incoming_json_ != nullptr) on_incoming_json_(root);
+        cJSON_Delete(root);
+        return;
+    }
+
+    // JoyInside 下行 contentType 清单：EVENT / ASR / AGENT / ACTIVITY / TTS / PONG
+    auto contentType = cJSON_GetObjectItem(root, "contentType");
+    auto content = cJSON_GetObjectItem(root, "content");
+    if (!cJSON_IsString(contentType)) {
+        ESP_LOGE(TAG, "Missing contentType, data: %s", s.c_str());
+        cJSON_Delete(root);
+        return;
+    }
+    const char* ct = contentType->valuestring;
+
+    if (strcmp(ct, "EVENT") == 0 && cJSON_IsObject(content)) {
+        HandleEventMessage(content);
+    } else if (strcmp(ct, "ASR") == 0 && cJSON_IsObject(content)) {
+        // 用户语音识别 → 新一轮对话开始，清打断窗口
+        interrupt_pending_ = false;
+        // textType: START (中间) / IS_FINAL (最终)，仅最终结果 emit stt
+        // 对齐 baidu / 小智协议——让 application.cc 在用户说完一句时仅响一次 OGG_POPUP（"已收到"提示音）
+        auto textTypeJ = cJSON_GetObjectItem(content, "textType");
+        bool is_final = (cJSON_IsString(textTypeJ) &&
+                         strcmp(textTypeJ->valuestring, "IS_FINAL") == 0);
+        auto t = cJSON_GetObjectItem(content, "text");
+        if (is_final && cJSON_IsString(t) && t->valuestring[0] != '\0') {
+            cJSON* fake = cJSON_CreateObject();
+            cJSON_AddStringToObject(fake, "type", "stt");
+            cJSON_AddStringToObject(fake, "text", t->valuestring);
+            if (on_incoming_json_ != nullptr) on_incoming_json_(fake);
+            cJSON_Delete(fake);
         }
-    } else {
-        // Joyai 文本事件为 contentType/EVENT 或 AUDIO 结构
-        auto contentType = cJSON_GetObjectItem(root, "contentType");
-        auto content = cJSON_GetObjectItem(root, "content");
-        if (cJSON_IsString(contentType)) {
-            // 处理事件：用于获取服务端音频参数并置位 ready
-            if (strcmp(contentType->valuestring, "EVENT") == 0 && cJSON_IsObject(content)) {
-                auto eventType = cJSON_GetObjectItem(content, "eventType");
-                auto eventData = cJSON_GetObjectItem(content, "eventData");
-                if (cJSON_IsString(eventType)) {
-                    const char* et = eventType->valuestring;
-                    ESP_LOGI(TAG, "event: %s", et);
-                    bool is_ready_event = (
-                        strcmp(et, "SERVER_VOICE_CHAT_UPDATED") == 0 ||
-                        strcmp(et, "SERVER_VOICE_CHAT_STARTED") == 0 ||
-                        strcmp(et, "SERVER_VOICE_CHAT_READY") == 0 ||
-                        strcmp(et, "SERVER_READY") == 0
-                    );
-                    if (is_ready_event) {
-                        int sample_rate = server_sample_rate_;
-                        int frame_ms = server_frame_duration_;
-                        if (cJSON_IsObject(eventData)) {
-                            auto audio = cJSON_GetObjectItem(eventData, "audio");
-                            if (cJSON_IsObject(audio)) {
-                                auto output = cJSON_GetObjectItem(audio, "output");
-                                if (cJSON_IsObject(output)) {
-                                    auto sr = cJSON_GetObjectItem(output, "sampleRate");
-                                    auto fm = cJSON_GetObjectItem(output, "frameSizeMs");
-                                    if (cJSON_IsNumber(sr)) sample_rate = sr->valueint; else if (cJSON_IsString(sr)) sample_rate = atoi(sr->valuestring);
-                                    if (cJSON_IsNumber(fm)) frame_ms = fm->valueint; else if (cJSON_IsString(fm)) frame_ms = atoi(fm->valuestring);
-                                }
-                            }
-                        }
-                        if (sample_rate > 0) server_sample_rate_ = sample_rate;
-                        if (frame_ms > 0) server_frame_duration_ = frame_ms;
-                        ESP_LOGI(TAG, "Server ready: sr=%d, frame=%dms", server_sample_rate_, server_frame_duration_);
-                        xEventGroupSetBits(event_group_handle_, WEBSOCKET_JOEAI_SERVER_READY_EVENT);
-                        // 继续处理其他事件，不 return
-                    }
-
-                    // 将 Joyai 事件映射为系统通用 JSON（type: tts/stt）上抛
-                    auto emit_tts = [this](const char* state, const char* text){
-                        cJSON* fake = cJSON_CreateObject();
-                        cJSON_AddStringToObject(fake, "type", "tts");
-                        cJSON_AddStringToObject(fake, "state", state);
-                        if (text != nullptr) {
-                            cJSON_AddStringToObject(fake, "text", text);
-                        }
-                        if (on_incoming_json_ != nullptr) on_incoming_json_(fake);
-                        cJSON_Delete(fake);
-                    };
-
-                    // 常见事件映射
-                    if (strcmp(et, "CALL_AGENT_START_EVENT") == 0) {
-                        emit_tts("start", nullptr);
-                    } else if (strcmp(et, "TTS_SENTENCE_START") == 0) {
-                        const char* txt = nullptr;
-                        if (cJSON_IsObject(eventData)) {
-                            auto t = cJSON_GetObjectItem(eventData, "text");
-                            if (cJSON_IsString(t)) txt = t->valuestring;
-                        }
-                        emit_tts("sentence_start", txt);
-                    } else if (strcmp(et, "TTS_COMPLETE") == 0 || strcmp(et, "COMPLETE") == 0
-                               || strcmp(et, "CALL_AGENT_INTERRUPTED") == 0 || strcmp(et, "INTERRUPT") == 0) {
-                        emit_tts("stop", nullptr);
-                    } else if (strcmp(et, "EMPTY_CONTENT") == 0) {
-                        // 无内容，按 stop 处理，避免卡在 speaking/listening 边界
-                        emit_tts("stop", nullptr);
-                    }
-                }
-            } else if (strcmp(contentType->valuestring, "AUDIO") == 0) {
-                // 可选：文本承载的 base64 音频帧
-                if (on_incoming_audio_ != nullptr && cJSON_IsObject(content)) {
-                    int sr = server_sample_rate_;
-                    int fm = server_frame_duration_;
-                    auto srj = cJSON_GetObjectItem(content, "sampleRate");
-                    auto fmj = cJSON_GetObjectItem(content, "frameSizeMs");
-                    if (cJSON_IsNumber(srj)) sr = srj->valueint; else if (cJSON_IsString(srj)) sr = atoi(srj->valuestring);
-                    if (cJSON_IsNumber(fmj)) fm = fmj->valueint; else if (cJSON_IsString(fmj)) fm = atoi(fmj->valuestring);
-                    auto dataj = cJSON_GetObjectItem(content, "data");
-                    if (cJSON_IsString(dataj)) {
-                        const char* b64 = dataj->valuestring;
-                        std::vector<uint8_t> payload;
-                        size_t in_len = strlen(b64);
-                        // 预估最大输出长度并解码
-                        payload.resize((in_len * 3) / 4 + 4);
-                        size_t out_len = 0;
-                        int rc = mbedtls_base64_decode(payload.data(), payload.size(), &out_len, (const unsigned char*)b64, in_len);
-                        if (rc == 0 && out_len > 0) {
-                            payload.resize(out_len);
-                            // 下发音频前，若上层未切 speaking，主动发出 tts start，避免音频被丢弃
-                            cJSON* fake = cJSON_CreateObject();
-                            cJSON_AddStringToObject(fake, "type", "tts");
-                            cJSON_AddStringToObject(fake, "state", "start");
-                            if (on_incoming_json_ != nullptr) on_incoming_json_(fake);
-                            cJSON_Delete(fake);
-                            on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
-                                .sample_rate = sr,
-                                .frame_duration = fm,
-                                .timestamp = 0,
-                                .payload = std::move(payload)
-                            }));
-                        } else {
-                            ESP_LOGE(TAG, "base64 decode failed: %d", rc);
-                        }
-                    }
-                }
-            } else if (strcmp(contentType->valuestring, "TEXT") == 0) {
-                // 文本识别结果，映射到系统 stt
-                if (cJSON_IsObject(content)) {
-                    const char* txt = nullptr;
-                    auto t = cJSON_GetObjectItem(content, "text");
-                    if (cJSON_IsString(t)) txt = t->valuestring;
-                    if (txt != nullptr) {
-                        cJSON* fake = cJSON_CreateObject();
-                        cJSON_AddStringToObject(fake, "type", "stt");
-                        cJSON_AddStringToObject(fake, "text", txt);
-                        if (on_incoming_json_ != nullptr) on_incoming_json_(fake);
-                        cJSON_Delete(fake);
-                    }
+    } else if (strcmp(ct, "TTS") == 0 && cJSON_IsObject(content)) {
+        // base64 文本承载的下行音频（audio.binary=false 时；当前配置走二进制）
+        // 打断窗口期内：丢弃残留音频，不复活 speaking 状态
+        if (interrupt_pending_) {
+            cJSON_Delete(root);
+            return;
+        }
+        if (on_incoming_audio_ != nullptr) {
+            auto dataj = cJSON_GetObjectItem(content, "audioBase64");
+            if (cJSON_IsString(dataj)) {
+                const char* b64 = dataj->valuestring;
+                size_t in_len = strlen(b64);
+                std::vector<uint8_t> payload((in_len * 3) / 4 + 4);
+                size_t out_len = 0;
+                int rc = mbedtls_base64_decode(payload.data(), payload.size(), &out_len,
+                                               (const unsigned char*)b64, in_len);
+                if (rc == 0 && out_len > 0) {
+                    payload.resize(out_len);
+                    EmitTtsStartIfNeeded();
+                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
+                        .sample_rate = server_sample_rate_,
+                        .frame_duration = server_frame_duration_,
+                        .timestamp = 0,
+                        .payload = std::move(payload)
+                    }));
+                } else {
+                    ESP_LOGE(TAG, "base64 decode failed: %d", rc);
                 }
             }
-        } else {
-            ESP_LOGE(TAG, "Missing message type, data: %s", s.c_str());
         }
+    } else if (strcmp(ct, "PONG") == 0) {
+        // 心跳响应，静默
+    } else if (strcmp(ct, "AGENT") == 0 || strcmp(ct, "ACTIVITY") == 0) {
+        // 增量文本回复 / 主动文本回复：依赖 TTS_SENTENCE_START 显示字幕，此处不处理
+    } else {
+        ESP_LOGD(TAG, "ignored contentType=%s", ct);
     }
     cJSON_Delete(root);
 }
 
 void WebsocketJoeaiProtocol::HandleBinaryMessage(const char* data, size_t len) {
-    if (on_incoming_audio_ == nullptr) {
-        return;
-    }
-    // 可按需添加更详细日志
+    if (on_incoming_audio_ == nullptr) return;
+    // 打断窗口期内：丢弃残留下行音频，避免复活 speaking 状态
+    if (interrupt_pending_) return;
+    EmitTtsStartIfNeeded();
     on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
         .sample_rate = server_sample_rate_,
         .frame_duration = server_frame_duration_,
@@ -393,7 +438,6 @@ std::string WebsocketJoeaiProtocol::BuildUpdateChatConfigMessage(const std::stri
 }
 
 std::string WebsocketJoeaiProtocol::BuildClientEvent(const std::string& event_type, const std::string& event_data_json) {
-    // 统一的事件封装，兼容 demo/文档结构
     // mid=botId，uid=clientId（Board UUID），requestId=设备 deviceId（MAC）
     std::string mid = bot_id_;
     std::string uid = Board::GetInstance().GetUuid();
