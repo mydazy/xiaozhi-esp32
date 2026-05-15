@@ -72,20 +72,12 @@ CONFIG_LWIP_TCP_WND_DEFAULT=4096
 # R3' · LWIP TCP 发送 buffer 同步缩 5760 → 4096 · 释放 ~2 KB INT
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=4096
 
-# R4 · WiFi TX buffer 改回 DYNAMIC + 减半（2026-05-15 激进策略）· 释放 ~17 KB INT + ~27 KB PSRAM
-# 历史：弱网破音治疗将 DYNAMIC 改 STATIC 16 + CACHE 32（吃 ~27 KB INT + ~54 KB PSRAM）
-# 测算：Opus 60ms 帧 < 300 byte（远小于 WiFi MTU 1500），同时 in-flight buffer 1-2 个即可
-# 实测：业务层 2.4s 上行队列已吸收抖动，SDK 层无需大量预分配
-# 且 4G 走 ML307 PPP/AT 通道，根本不走 WiFi 栈 → 该 buffer 对 4G 弱网零收益
-CONFIG_ESP_WIFI_STATIC_TX_BUFFER=n
+# R4 · WiFi TX buffer 改 DYNAMIC + 16 个（2026-05-15 修复 Kconfig choice 写法）
+# 历史：先前写法 STATIC=n + DYNAMIC=y 错误（choice 不能用 =n），被 reconfigure 自动回退到 STATIC=16
+# 正确写法：choice 组只设一个 =y，互斥项 IDF 自动推导；TX_BUFFER_TYPE 是派生值，禁止手设
+# 节省：~17 KB INT（avoid static 16 preallocation）+ ~27 KB PSRAM（CACHE 自动失效）
 CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER=y
-CONFIG_ESP_WIFI_TX_BUFFER_TYPE=1
 CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
-# R4-alias · ESP32_WIFI_* 是 ESP-IDF 5.5 同选项别名 namespace · 两套保持一致
-CONFIG_ESP32_WIFI_STATIC_TX_BUFFER=n
-CONFIG_ESP32_WIFI_DYNAMIC_TX_BUFFER=y
-CONFIG_ESP32_WIFI_TX_BUFFER_TYPE=1
-CONFIG_ESP32_WIFI_DYNAMIC_TX_BUFFER_NUM=16
 
 # R5 · 噪声抑制 WebRTC → NSNET2（2026-05-15 激进策略）· 释放 ~8-10 KB INT
 # WebRTC NS：DSP 算法跑 INT RAM；NSNET2：神经网络跑 PSRAM（NPU 加速）
@@ -93,6 +85,75 @@ CONFIG_ESP32_WIFI_DYNAMIC_TX_BUFFER_NUM=16
 # 如听感对比 NSNET2 不达标可回滚（cost: 8-10 KB INT）
 CONFIG_SR_NSN_NSNET2=y
 # CONFIG_SR_NSN_WEBRTC is not set
+
+# ============================================================
+# P30 P0a-WiFi · WiFi 模式 SRAM 紧急救援（2026-05-15）
+# 实测：WiFi 模式 SRAM free 19.9 KB（4G 53.6 KB · 差 ~35 KB 是 WiFi 协议栈占用）
+# 红线 60 KB · 这一轮裁剪目标释放 ~20-25 KB INT
+# 项目事实核对：
+#   ✅ IPv6 项目内 0 处使用（无 AF_INET6/sockaddr_in6/IPV6 引用）
+#   ✅ NETIF_LOOPBACK 项目无 localhost/127.0.0.1 用法
+#   ✅ SoftAP（APSTA + 192.168.4.1 网页配网）必须保留 · 但 SoftAP 不需 WPA3
+#   ✅ DHCPS 必须保留（SoftAP 配网期手机分配 IP）· STA 数缩到 2
+#   ✅ Opus 60ms 帧 < MTU 1440，不需要大 IP 分片重组池
+# ============================================================
+
+# R6 · IPv6 全关 · 释放 ~8-10 KB INT
+# 项目 0 处使用 IPv6 · 关闭后 ND6/MLDV6 自动失效
+CONFIG_LWIP_IPV6=n
+# CONFIG_LWIP_IPV6 is not set
+# CONFIG_LWIP_ND6 is not set
+# CONFIG_LWIP_ESP_MLDV6_REPORT is not set
+
+# R7 · NETIF Loopback 关 · 释放 ~2 KB INT
+# 项目无 127.0.0.1 / localhost 自身回环通信
+CONFIG_LWIP_NETIF_LOOPBACK=n
+# CONFIG_LWIP_NETIF_LOOPBACK is not set
+
+# R8 · TCP 控制块数量适度裁剪（2026-05-15 回退过激 · 6/4 引发 MQTT 频繁 goodbye）
+# 实测教训：6/4 临界，MQTT(1) + WS音频(1) + OTA + HTTP 短连接同时存在时连接被踢
+# 折中：active 10 / listening 8（仍比原 16/16 节省 ~2-3 KB INT）
+CONFIG_LWIP_MAX_ACTIVE_TCP=10
+CONFIG_LWIP_MAX_LISTENING_TCP=8
+
+# R9 · LWIP TCPIP 接收 mbox 回退默认（2026-05-15 回退）
+# 实测教训：8 太小，音频 16 帧/秒 + MQTT keepalive 突发溢出 → 丢包 → 服务端 goodbye
+# 保留默认 16 不动（每 mbox 仅 ~128 byte，省 1KB 不值得稳定性代价）
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16
+
+# R10 · WiFi 管理帧 SBUF 减半 · 释放 ~2-3 KB INT
+# 管理帧（beacon/probe/auth）少，32 → 16 充裕
+CONFIG_ESP_WIFI_MGMT_SBUF_NUM=16
+
+# R11 · DHCPS STA 数 8 → 2 · 释放 ~1-2 KB INT
+# SoftAP 配网仅允许 1-2 个手机连接
+CONFIG_LWIP_DHCPS_MAX_STATION_NUM=2
+
+# R12 · SoftAP 关闭 WPA3-SAE · 释放 ~1-2 KB INT
+# 配网 SoftAP 用 WPA2 或 open 即可（手机浏览器访问 192.168.4.1）
+CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT=n
+# CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT is not set
+
+# R13 · IP 分片重组池 10 → 3 · 释放 ~1 KB INT
+# Opus 60ms 帧 < 300 byte < MTU 1440 · 几乎不会分片
+CONFIG_LWIP_IP_REASS_MAX_PBUFS=3
+
+# R14 · mDNS DNS 查询支持关 · 释放 ~1 KB INT/Flash
+# 项目无 *.local 域名解析需求
+CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES=n
+# CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES is not set
+
+# R15 · LWIP loopback pbuf 池缩零 · 释放 ~1-2 KB INT
+# 与 R7 NETIF_LOOPBACK=n 配套（已无回环路径）
+CONFIG_LWIP_LOOPBACK_MAX_PBUFS=0
+
+# R16 · WPA3 高级特性裁剪 · 释放 ~2-3 KB INT
+# 保留 WPA3_SAE 基础（路由器兼容） + SAE_H2E（hash-to-element 改进握手）
+# 关 SAE_PK（公钥认证 · 家用零需求）+ OWE_STA（机会性加密 · 公共 WiFi 才用）
+CONFIG_ESP_WIFI_ENABLE_SAE_PK=n
+# CONFIG_ESP_WIFI_ENABLE_SAE_PK is not set
+CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=n
+# CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA is not set
 
 # P30 P0a-2 · NimBLE role 裁剪（2026-04-29）· 释放 ~5-8 KB INT + Flash
 # BluFi 配网只需要 PERIPHERAL + BROADCASTER + GATT_SERVER（设备作为外设被手机连接）
