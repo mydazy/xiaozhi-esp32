@@ -149,15 +149,26 @@ void AtUart::ReceiveTask() {
             break;
         }
         case UART_FIFO_OVF:
-            ESP_LOGW(TAG, "UART FIFO overflow");
+        case UART_BUFFER_FULL: {
+            // RX 路径数据丢失 → TCP/WS 流必然错位（实测 v32 日志：50s 卡死在脏数据上挣扎）。
+            // 立即清 buffer + 触发上层"网络断开"事件让 Ml307AtModem 触发 Disconnected,
+            // 走通 Application::HandleNetworkDisconnectedEvent → CloseAudioChannel → L6 重连。
+            ESP_LOGW(TAG, "UART %s, notify upper layer to reconnect",
+                     event.type == UART_FIFO_OVF ? "FIFO overflow" : "ring buffer full");
             uart_flush_input(uart_num_);
             xQueueReset(event_queue_handle_);
+            {
+                std::lock_guard<std::mutex> lock(rx_buffer_mutex_);
+                rx_buffer_.clear();
+            }
+            {
+                std::lock_guard<std::mutex> lock(urc_mutex_);
+                for (auto& cb : urc_callbacks_) {
+                    cb("__UART_OVERFLOW__", {});
+                }
+            }
             break;
-        case UART_BUFFER_FULL:
-            ESP_LOGW(TAG, "UART ring buffer full");
-            uart_flush_input(uart_num_);
-            xQueueReset(event_queue_handle_);
-            break;
+        }
         case UART_BREAK:
         case UART_PARITY_ERR:
         case UART_FRAME_ERR:

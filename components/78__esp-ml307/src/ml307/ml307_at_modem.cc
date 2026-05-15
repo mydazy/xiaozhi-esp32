@@ -85,6 +85,17 @@ void Ml307AtModem::HandleUrc(const std::string& command, const std::vector<AtArg
                 on_network_state_changed_(false);
             }
         }
+    } else if (command == "__UART_OVERFLOW__") {
+        // L5-a · UART RX 路径数据丢失 = TCP/WS 流污染。
+        // 强制 network_ready_=false 触发上层 Disconnected → CloseAudioChannel → L6 重连，
+        // 不再 50s 卡死在脏数据上挣扎。
+        ESP_LOGE(TAG, "UART overflow → force disconnect (TCP stream corrupted)");
+        if (network_ready_) {
+            network_ready_ = false;
+            if (on_network_state_changed_) {
+                on_network_state_changed_(false);
+            }
+        }
     }
 }
 

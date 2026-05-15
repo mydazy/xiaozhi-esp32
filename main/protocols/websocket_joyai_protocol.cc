@@ -20,7 +20,7 @@ WebsocketJoeaiProtocol::WebsocketJoeaiProtocol() {
     event_group_handle_ = xEventGroupCreate();
     ping_timer_handle_ = xTimerCreate(
         "joyai_ping",
-        pdMS_TO_TICKS(30000),
+        pdMS_TO_TICKS(15000),
         pdTRUE,
         this,
         [](TimerHandle_t timer) {
