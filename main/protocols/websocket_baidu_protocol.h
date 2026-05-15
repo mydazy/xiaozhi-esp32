@@ -160,13 +160,12 @@ private:
     TimerHandle_t idle_timer_handle_ = nullptr;
     bool idle_goodbye_sent_ = false;
 
-    // Listening 超时
-    TimerHandle_t listening_timer_handle_ = nullptr;
-    static constexpr int kListeningTimeoutMs = 30000;
-
     // License 激活防抖
     std::chrono::steady_clock::time_point last_lic_active_time_;
     TimerHandle_t lic_retry_timer_handle_ = nullptr;
+
+    TimerHandle_t keepalive_timer_handle_ = nullptr;
+    static constexpr int kKeepaliveIntervalMs = 5000;
 
     // 会话 Token 缓存（连接方式一）
     bool session_token_fetched_ = false;
@@ -214,6 +213,10 @@ private:
     // Listening 超时管理
     void StartListeningTimer();
     void StopListeningTimer();
+
+    // WS keepalive 心跳管理
+    void StartKeepaliveTimer();
+    void StopKeepaliveTimer();
 
     // 连接方式一：动态获取会话 Token
     bool FetchSessionToken(std::string& instance_id, std::string& token);

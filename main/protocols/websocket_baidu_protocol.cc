@@ -176,6 +176,23 @@ WebsocketBaiduProtocol::WebsocketBaiduProtocol() {
             }
         });
 
+    // 创建 WS PING 心跳定时器（auto-reload 5s · 维持 4G modem socket 不被空闲断开）
+    keepalive_timer_handle_ = xTimerCreate(
+        "bd_keepalive",
+        pdMS_TO_TICKS(kKeepaliveIntervalMs),
+        pdTRUE,   // auto-reload
+        this,
+        [](TimerHandle_t timer) {
+            auto* self = static_cast<WebsocketBaiduProtocol*>(pvTimerGetTimerID(timer));
+            if (!self) return;
+            auto guard = self->prevent_destroy_guard_;
+            Application::GetInstance().Schedule([self, guard]() {
+                if (!guard->load()) return;
+                if (self->websocket_ && self->websocket_->IsConnected() && self->media_ready_) {
+                    self->websocket_->Ping();
+                }
+            });
+        });
 }
 
 WebsocketBaiduProtocol::~WebsocketBaiduProtocol() {
@@ -200,6 +217,12 @@ WebsocketBaiduProtocol::~WebsocketBaiduProtocol() {
         xTimerStop(listening_timer_handle_, pdMS_TO_TICKS(100));
         xTimerDelete(listening_timer_handle_, pdMS_TO_TICKS(1000));
         listening_timer_handle_ = nullptr;
+    }
+
+    if (keepalive_timer_handle_) {
+        xTimerStop(keepalive_timer_handle_, pdMS_TO_TICKS(100));
+        xTimerDelete(keepalive_timer_handle_, pdMS_TO_TICKS(1000));
+        keepalive_timer_handle_ = nullptr;
     }
 
     if (websocket_ && websocket_->IsConnected()) {
@@ -322,6 +345,7 @@ void WebsocketBaiduProtocol::CloseAudioChannel(bool send_goodbye) {
 
     StopIdleTimer();
     StopListeningTimer();
+    StopKeepaliveTimer();
     if (lic_retry_timer_handle_) xTimerStop(lic_retry_timer_handle_, 0);
 
     // 重置 DeviceInfo 标志，下次 OpenAudioChannel 复用连接时重新发送
@@ -544,6 +568,7 @@ bool WebsocketBaiduProtocol::OpenAudioChannel() {
         }
         media_ready_ = true;
         StartIdleTimer();
+        StartKeepaliveTimer();
         if (on_connected_) on_connected_();
         if (on_audio_channel_opened_) on_audio_channel_opened_();
         return true;
@@ -626,6 +651,7 @@ bool WebsocketBaiduProtocol::OpenAudioChannel() {
         ESP_LOGW(TAG, "WS disconnected");
         bool was_ready = media_ready_.exchange(false, std::memory_order_acq_rel);
         device_info_sent_ = false;
+        StopKeepaliveTimer();
 
         // 补发 TTS stop 通知应用层
         if (is_speaking_.exchange(false)) {
@@ -696,6 +722,7 @@ bool WebsocketBaiduProtocol::OpenAudioChannel() {
 
     ESP_LOGI(TAG, "===== INIT OK =====");
     StartIdleTimer();
+    StartKeepaliveTimer();
 
     if (on_connected_) on_connected_();
     if (on_audio_channel_opened_) on_audio_channel_opened_();
@@ -1451,6 +1478,18 @@ void WebsocketBaiduProtocol::StartListeningTimer() {
 void WebsocketBaiduProtocol::StopListeningTimer() {
     if (listening_timer_handle_) {
         xTimerStop(listening_timer_handle_, 0);
+    }
+}
+
+void WebsocketBaiduProtocol::StartKeepaliveTimer() {
+    if (keepalive_timer_handle_ && !xTimerIsTimerActive(keepalive_timer_handle_)) {
+        xTimerStart(keepalive_timer_handle_, 0);
+    }
+}
+
+void WebsocketBaiduProtocol::StopKeepaliveTimer() {
+    if (keepalive_timer_handle_) {
+        xTimerStop(keepalive_timer_handle_, 0);
     }
 }
 

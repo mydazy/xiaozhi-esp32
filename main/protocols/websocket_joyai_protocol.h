@@ -7,6 +7,7 @@
 #include <web_socket.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
+#include <freertos/timers.h>
 
 #include <atomic>
 #include <memory>
@@ -45,13 +46,16 @@ private:
     std::atomic<bool> connected_ { false };
     std::atomic<bool> tts_started_ { false };
     std::atomic<bool> interrupt_pending_ { false };
+    TimerHandle_t ping_timer_handle_ = nullptr;
+    std::atomic<int> ping_failures_ { 0 };
+    std::atomic<uint32_t> mid_counter_ { 0 };
 
     // 内部辅助
     bool SendText(const std::string& text) override;
     void HandleTextMessage(const char* data, size_t len);
     void HandleBinaryMessage(const char* data, size_t len);
     void HandleErrorMessage(const char* data, size_t len);
-    void HandleEventMessage(const cJSON* content);
+    bool HandleEventMessage(const cJSON* content);
     void EmitTtsStartIfNeeded();
     void EmitTtsStop();
     bool ConfigureChatParameters();

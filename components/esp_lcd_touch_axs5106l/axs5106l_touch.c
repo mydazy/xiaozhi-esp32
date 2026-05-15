@@ -105,6 +105,7 @@ typedef struct {
     uint64_t press_time;
     uint64_t last_click_time;
     int16_t  last_click_x, last_click_y;
+    uint32_t press_edges_baseline;  /* 4G 干扰可观测 · press 起点的 INT 边沿快照 */
 } gesture_state_t;
 
 #if AXS5106L_TOUCH_DEBUG_OVERLAY
@@ -724,16 +725,17 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
     gesture_state_t *g = &self->gesture;
 
     if (pressed && !g->pressed) {
-        g->pressed         = true;
-        g->long_fired      = false;
-        g->sample_count    = 1;
-        g->jitter_sum      = 0;
-        g->jitter_unstable = false;
-        g->start_x         = x;
-        g->start_y         = y;
-        g->last_x          = x;
-        g->last_y          = y;
-        g->press_time      = now;
+        g->pressed              = true;
+        g->long_fired           = false;
+        g->sample_count         = 1;
+        g->jitter_sum           = 0;
+        g->jitter_unstable      = false;
+        g->start_x              = x;
+        g->start_y              = y;
+        g->last_x               = x;
+        g->last_y               = y;
+        g->press_time           = now;
+        g->press_edges_baseline = self->int_edge_count;
         return;
     }
 
@@ -753,7 +755,11 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
                 g->sample_count >= LONG_PRESS_MIN_FRAMES) {
                 g->long_fired      = true;
                 g->last_click_time = 0;
-                ESP_LOGI(TAG, "长按 (%d,%d)", g->start_x, g->start_y);
+                uint32_t edges_lp = self->int_edge_count - g->press_edges_baseline;
+                ESP_LOGI(TAG, "长按 (%d,%d) f=%u j=%u e=%u i2c=%u",
+                         g->start_x, g->start_y,
+                         (unsigned)g->sample_count, (unsigned)g->jitter_sum,
+                         (unsigned)edges_lp, (unsigned)self->i2c_err_streak);
                 fire_long_press(self, false, g->start_x, g->start_y);
             }
         }
@@ -773,17 +779,24 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
         int dx = g->last_x - g->start_x;
         int dy = g->last_y - g->start_y;
         int manhattan = abs(dx) + abs(dy);
-        uint64_t dur  = now - g->press_time;
+        uint64_t dur   = now - g->press_time;
+        /* 4G 干扰可观测参数 · 每个 release 分支共享 */
+        uint32_t edges = self->int_edge_count - g->press_edges_baseline;
+        const char *rf_st = (now < self->storm_mute_until_us) ? "mute"
+                          : (now < self->storm_hot_until_us)  ? "hot"
+                                                              : "ok";
+        const char *rf_md = (self->rf_storm_threshold == RF_S_STORM_THRESHOLD) ? "S" : "N";
 
         bool tap_ok = (manhattan < CLICK_MAX_MOVE &&
                        dur >= CLICK_MIN_TIME_US && dur < CLICK_MAX_TIME_US &&
                        g->sample_count >= CLICK_MIN_FRAMES &&
                        !g->jitter_unstable);
         if (!tap_ok) {
-            ESP_LOGD(TAG, "tap_ok=0 位移=%d 时长=%ums 帧数=%u 抖动=%u 不稳定=%d",
+            ESP_LOGD(TAG, "tap_ok=0 位移=%d dur=%ums f=%u j=%u unst=%d e=%u rf=%s/%s i2c=%u",
                      manhattan, (unsigned)(dur/1000),
                      (unsigned)g->sample_count, (unsigned)g->jitter_sum,
-                     (int)g->jitter_unstable);
+                     (int)g->jitter_unstable, (unsigned)edges,
+                     rf_md, rf_st, (unsigned)self->i2c_err_streak);
         }
         if (tap_ok) {
             int click_dist = abs(g->start_x - g->last_click_x) +
@@ -793,13 +806,19 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
                              click_dist < DOUBLE_CLICK_DIST;
             if (is_double) {
                 g->last_click_time = 0;
-                ESP_LOGI(TAG, "双击 (%d,%d)", g->start_x, g->start_y);
+                ESP_LOGI(TAG, "双击 (%d,%d) dur=%ums f=%u j=%u e=%u rf=%s/%s i2c=%u",
+                         g->start_x, g->start_y, (unsigned)(dur/1000),
+                         (unsigned)g->sample_count, (unsigned)g->jitter_sum,
+                         (unsigned)edges, rf_md, rf_st, (unsigned)self->i2c_err_streak);
                 fire_double_click(self, g->start_x, g->start_y);
             } else {
                 g->last_click_time = now;
                 g->last_click_x    = g->start_x;
                 g->last_click_y    = g->start_y;
-                ESP_LOGI(TAG, "单击 (%d,%d)", g->start_x, g->start_y);
+                ESP_LOGI(TAG, "单击 (%d,%d) dur=%ums f=%u j=%u e=%u rf=%s/%s i2c=%u",
+                         g->start_x, g->start_y, (unsigned)(dur/1000),
+                         (unsigned)g->sample_count, (unsigned)g->jitter_sum,
+                         (unsigned)edges, rf_md, rf_st, (unsigned)self->i2c_err_streak);
                 fire_click(self, g->start_x, g->start_y);
             }
             return;
@@ -816,7 +835,10 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
             g->jitter_sum <= traj_budget) {
             const char *dir = (abs(dx) > abs(dy)) ? (dx > 0 ? "右滑" : "左滑")
                                                   : (dy > 0 ? "下滑" : "上滑");
-            ESP_LOGI(TAG, "%s dx=%d dy=%d", dir, dx, dy);
+            ESP_LOGI(TAG, "%s dx=%d dy=%d dur=%ums f=%u j=%u e=%u rf=%s/%s i2c=%u",
+                     dir, dx, dy, (unsigned)(dur/1000),
+                     (unsigned)g->sample_count, (unsigned)g->jitter_sum,
+                     (unsigned)edges, rf_md, rf_st, (unsigned)self->i2c_err_streak);
             fire_swipe(self, (int16_t)dx, (int16_t)dy);
         }
     }

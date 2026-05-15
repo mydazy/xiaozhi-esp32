@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cJSON.h>
 #include <esp_log.h>
+#include <esp_random.h>
 #include <web_socket.h>
 #include "assets/lang_config.h"
 #include <mbedtls/base64.h>
@@ -17,9 +18,44 @@
 
 WebsocketJoeaiProtocol::WebsocketJoeaiProtocol() {
     event_group_handle_ = xEventGroupCreate();
+    ping_timer_handle_ = xTimerCreate(
+        "joyai_ping",
+        pdMS_TO_TICKS(30000),
+        pdTRUE,
+        this,
+        [](TimerHandle_t timer) {
+            auto* self = static_cast<WebsocketJoeaiProtocol*>(pvTimerGetTimerID(timer));
+            if (!self) return;
+            Application::GetInstance().Schedule([self]() {
+                if (!self->IsAudioChannelOpened()) return;
+                char mid_buf[32];
+                snprintf(mid_buf, sizeof(mid_buf), "%08lx-%lu",
+                         (unsigned long)esp_random(),
+                         (unsigned long)self->mid_counter_.fetch_add(1));
+                std::string uid = Board::GetInstance().GetUuid();
+                std::string msg = std::string("{\"mid\":\"") + mid_buf +
+                                  "\",\"contentType\":\"PING\",\"uid\":\"" + uid + "\"}";
+                if (!self->SendText(msg)) {
+                    // 弱网保护：连续失败 3 次主动关通道，让 OnDisconnected 走重连流程
+                    int n = self->ping_failures_.fetch_add(1) + 1;
+                    ESP_LOGW(TAG, "PING failed #%d/3", n);
+                    if (n >= 3) {
+                        ESP_LOGE(TAG, "PING 3 consecutive failures, closing");
+                        self->CloseAudioChannel();
+                    }
+                } else {
+                    self->ping_failures_ = 0;
+                }
+            });
+        });
 }
 
 WebsocketJoeaiProtocol::~WebsocketJoeaiProtocol() {
+    if (ping_timer_handle_) {
+        xTimerStop(ping_timer_handle_, pdMS_TO_TICKS(100));
+        xTimerDelete(ping_timer_handle_, pdMS_TO_TICKS(1000));
+        ping_timer_handle_ = nullptr;
+    }
     vEventGroupDelete(event_group_handle_);
 }
 
@@ -81,6 +117,8 @@ bool WebsocketJoeaiProtocol::IsAudioChannelOpened() const {
 
 void WebsocketJoeaiProtocol::CloseAudioChannel(bool send_goodbye) {
     (void)send_goodbye;
+    if (ping_timer_handle_) xTimerStop(ping_timer_handle_, pdMS_TO_TICKS(100));
+    ping_failures_ = 0;
     tts_started_ = false;
     interrupt_pending_ = false;
     websocket_.reset();
@@ -144,10 +182,10 @@ bool WebsocketJoeaiProtocol::OpenAudioChannel() {
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (binary) {
             HandleBinaryMessage(data, len);
+            last_incoming_time_ = std::chrono::steady_clock::now();
         } else {
             HandleTextMessage(data, len);
         }
-        last_incoming_time_ = std::chrono::steady_clock::now();
     });
 
     websocket_->OnDisconnected([this]() {
@@ -196,6 +234,10 @@ bool WebsocketJoeaiProtocol::OpenAudioChannel() {
         return false;
     }
 
+    if (ping_timer_handle_) {
+        xTimerStart(ping_timer_handle_, pdMS_TO_TICKS(100));
+    }
+
     if (on_audio_channel_opened_ != nullptr) {
         on_audio_channel_opened_();
     }
@@ -205,16 +247,15 @@ bool WebsocketJoeaiProtocol::OpenAudioChannel() {
 bool WebsocketJoeaiProtocol::ConfigureChatParameters() {
     if (!websocket_) return false;
 
-    std::string mid = Board::GetInstance().GetUuid();
-    std::string uid = SystemInfo::GetMacAddress();
-
-    // mid 对应 botId，uid 对应 clientId（Device-Id 在 header），requestId 对应设备的 deviceId
-    // 如果 URL 中携带了明确字段，则优先使用
-    if (!bot_id_.empty()) mid = bot_id_;
-    // uid 继续沿用 Board::UUID 作为 clientId
-    auto msg = BuildUpdateChatConfigMessage(mid, uid, true, "opus", 16000, "opus", 24000, 60);
+    // mid 文档要求"请求唯一标识"，每次发送不重复
+    char mid_buf[32];
+    snprintf(mid_buf, sizeof(mid_buf), "%08lx-%lu",
+             (unsigned long)esp_random(),
+             (unsigned long)mid_counter_.fetch_add(1));
+    std::string uid = Board::GetInstance().GetUuid();
+    auto msg = BuildUpdateChatConfigMessage(mid_buf, uid, true, "opus", 16000, "opus", 24000, 60);
     ESP_LOGI(TAG, "Send chat config: mid=%s uid=%s in=opus/16000 out=opus/24000 frame=60 len=%u",
-             mid.c_str(), uid.c_str(), (unsigned)msg.size());
+             mid_buf, uid.c_str(), (unsigned)msg.size());
     return SendText(msg);
 }
 
@@ -240,10 +281,10 @@ void WebsocketJoeaiProtocol::EmitTtsStop() {
     cJSON_Delete(fake);
 }
 
-void WebsocketJoeaiProtocol::HandleEventMessage(const cJSON* content) {
+bool WebsocketJoeaiProtocol::HandleEventMessage(const cJSON* content) {
     auto eventType = cJSON_GetObjectItem(content, "eventType");
     auto eventData = cJSON_GetObjectItem(content, "eventData");
-    if (!cJSON_IsString(eventType)) return;
+    if (!cJSON_IsString(eventType)) return false;
     const char* et = eventType->valuestring;
     ESP_LOGI(TAG, "event: %s", et);
 
@@ -284,7 +325,7 @@ void WebsocketJoeaiProtocol::HandleEventMessage(const cJSON* content) {
         }
         ESP_LOGI(TAG, "Server ready: sr=%d, frame=%dms", server_sample_rate_, server_frame_duration_);
         xEventGroupSetBits(event_group_handle_, WEBSOCKET_JOEAI_SERVER_READY_EVENT);
-        return;
+        return true;  // 配置确认事件 = 有效会话活动
     }
 
     // 字幕事件：text 字段在 eventData.text
@@ -300,19 +341,28 @@ void WebsocketJoeaiProtocol::HandleEventMessage(const cJSON* content) {
         if (txt != nullptr) cJSON_AddStringToObject(fake, "text", txt);
         if (on_incoming_json_ != nullptr) on_incoming_json_(fake);
         cJSON_Delete(fake);
-        return;
+        return true;
     }
 
-    // 停止/结束/打断/空内容 → 统一抛 tts.stop 让上层切走 speaking
-    // 服务端确认打断或本轮自然结束 → 清打断窗口，下一轮恢复正常下行
     if (strcmp(et, "TTS_COMPLETE") == 0 ||
         strcmp(et, "COMPLETE") == 0 ||
-        strcmp(et, "CALL_AGENT_INTERRUPTED") == 0 ||
-        strcmp(et, "EMPTY_CONTENT") == 0) {
+        strcmp(et, "CALL_AGENT_INTERRUPTED") == 0) {
         interrupt_pending_ = false;
         EmitTtsStop();
-        return;
+        return true;
     }
+
+    if (strcmp(et, "EMPTY_CONTENT") == 0) {
+        interrupt_pending_ = false;
+        EmitTtsStop();
+        return false;
+    }
+
+    if (strcmp(et, "CALL_AGENT_START_EVENT") == 0) {
+        return true;
+    }
+    // 其他未识别 EVENT 也算活动（兜底）
+    return true;
 }
 
 void WebsocketJoeaiProtocol::HandleTextMessage(const char* data, size_t len) {
@@ -327,6 +377,7 @@ void WebsocketJoeaiProtocol::HandleTextMessage(const char* data, size_t len) {
     auto type = cJSON_GetObjectItem(root, "type");
     if (cJSON_IsString(type)) {
         if (on_incoming_json_ != nullptr) on_incoming_json_(root);
+        last_incoming_time_ = std::chrono::steady_clock::now();
         cJSON_Delete(root);
         return;
     }
@@ -340,9 +391,10 @@ void WebsocketJoeaiProtocol::HandleTextMessage(const char* data, size_t len) {
         return;
     }
     const char* ct = contentType->valuestring;
+    bool touch_activity = (strcmp(ct, "PONG") != 0);
 
     if (strcmp(ct, "EVENT") == 0 && cJSON_IsObject(content)) {
-        HandleEventMessage(content);
+        touch_activity = HandleEventMessage(content);
     } else if (strcmp(ct, "ASR") == 0 && cJSON_IsObject(content)) {
         // 用户语音识别 → 新一轮对话开始，清打断窗口
         interrupt_pending_ = false;
@@ -396,6 +448,9 @@ void WebsocketJoeaiProtocol::HandleTextMessage(const char* data, size_t len) {
     } else {
         ESP_LOGD(TAG, "ignored contentType=%s", ct);
     }
+    if (touch_activity) {
+        last_incoming_time_ = std::chrono::steady_clock::now();
+    }
     cJSON_Delete(root);
 }
 
@@ -438,13 +493,15 @@ std::string WebsocketJoeaiProtocol::BuildUpdateChatConfigMessage(const std::stri
 }
 
 std::string WebsocketJoeaiProtocol::BuildClientEvent(const std::string& event_type, const std::string& event_data_json) {
-    // mid=botId，uid=clientId（Board UUID），requestId=设备 deviceId（MAC）
-    std::string mid = bot_id_;
+    char mid_buf[32];
+    snprintf(mid_buf, sizeof(mid_buf), "%08lx-%lu",
+             (unsigned long)esp_random(),
+             (unsigned long)mid_counter_.fetch_add(1));
     std::string uid = Board::GetInstance().GetUuid();
     std::string requestId = SystemInfo::GetMacAddress();
     std::string msg = std::string("{") +
         "\"requestId\":\"" + requestId + "\"," +
-        "\"mid\":\"" + mid + "\"," +
+        "\"mid\":\"" + mid_buf + "\"," +
         "\"contentType\":\"EVENT\"," +
         "\"uid\":\"" + uid + "\"," +
         "\"content\":{\"eventType\":\"" + event_type + "\",\"eventData\":" + event_data_json + "}}";
