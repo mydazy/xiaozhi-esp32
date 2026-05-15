@@ -135,6 +135,8 @@ void Ml307Board::NetworkTask() {
 }
 
 void Ml307Board::StartNetwork() {
+    // ─── 系统冷启动电源稳定窗口 ────────────────────────────────────────────
+    vTaskDelay(pdMS_TO_TICKS(1500));
 
     xTaskCreatePinnedToCore([](void* arg) {
         Ml307Board* board = static_cast<Ml307Board*>(arg);

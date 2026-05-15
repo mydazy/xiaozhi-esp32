@@ -6,9 +6,6 @@
 #include "esp_log.h"
 #include "sdkconfig.h"
 
-// iBeacon 需要 NimBLE Observer 角色（被动扫描）
-// 当前量产 P30-4G/WIFI 关闭 OBSERVER 释放 25-35KB INT RAM · 此模块编译成 stub
-// 将来 P31 启用 iBeacon 时需重开 CONFIG_BT_NIMBLE_ROLE_OBSERVER（详见 docs/p30-bluetooth-flows.html § 5.2）
 #if defined(CONFIG_BT_NIMBLE_ENABLED) && defined(CONFIG_BT_NIMBLE_ROLE_OBSERVER)
 #include "host/ble_hs.h"
 #include "host/ble_gap.h"
