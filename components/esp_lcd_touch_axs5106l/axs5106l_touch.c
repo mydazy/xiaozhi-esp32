@@ -50,7 +50,7 @@ static const char *TAG = "axs5106l_touch";
 #define SWIPE_MIN_FRAMES      4       /* 事件型芯片快滑只采 4-5 帧 · 配 manhattan 20px + 150ms 时长足以区分 */
 #define LONG_PRESS_MIN_FRAMES 30      /* 480ms @ 16ms · 配 LONG_PRESS_TIME 500ms */
 #define JITTER_LIMIT_FOR_TAP 40       /* ~5mm · 容忍儿童手抖 / RF 抖动（20→40）*/
-#define RELEASE_DEBOUNCE  2             /* 连续 N 帧无触摸才报松开（两档共用）*/
+#define RELEASE_DEBOUNCE  3             /* 连续 N 帧无触摸才报松开 · 量产 v2.2.16 抗扰加严（2→3）*/
 #define INT_STORM_WINDOW_US      1000000   /* rolling 1s 边沿计数窗（两档共用）*/
 #define INT_STORM_HOT_WINDOW_US 30000000   /* 30s post-storm 灵敏模式（两档共用）*/
 
@@ -63,11 +63,11 @@ static const char *TAG = "axs5106l_touch";
 #define RF_N_STORM_MUTE_US          1000000
 #define RF_N_SWIPE_TRAJ_RATIO             3
 
-#define RF_S_INT_DEBOUNCE_US           4000
-#define RF_S_POST_RELEASE_GUARD_US   200000
-#define RF_S_MAX_SPEED_PX_S            2500
+#define RF_S_INT_DEBOUNCE_US           6000      /* 量产 v2.2.16: 4→6ms · 进一步过滤 4G TDD 突发伪边沿 */
+#define RF_S_POST_RELEASE_GUARD_US   300000      /* 量产 v2.2.16: 200→300ms · 抬手后保护窗加宽 · 抑制 release 后伪 press */
+#define RF_S_MAX_SPEED_PX_S            2000      /* 量产 v2.2.16: 2500→2000 · 滑动速度上限收紧 · 真实滑动 200-300px/s 留 6x 余量 */
 #define RF_S_STORM_THRESHOLD             25      /* 12→25 · 容忍本底噪声 */
-#define RF_S_STORM_THRESHOLD_HOT         18      /* 6→18 · HOT 不再低于本底 */
+#define RF_S_STORM_THRESHOLD_HOT         14      /* 量产 v2.2.16: 18→14 · HOT 期更敏感（30s 复发窗内更早屏蔽）*/
 #define RF_S_STORM_MUTE_US          2000000
 #define RF_S_SWIPE_TRAJ_RATIO             2
 
