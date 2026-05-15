@@ -179,7 +179,7 @@ int Ml307Tcp::Send(const std::string& data) {
         if (baud <= 0) baud = 115200;
         size_t bytes_to_tx = command.size();
         uint32_t tx_time_ms = static_cast<uint32_t>((bytes_to_tx * 10ULL * 1000ULL) / static_cast<uint32_t>(baud));
-        uint32_t timeout_ms = tx_time_ms + 2000; // 余量
+        uint32_t timeout_ms = tx_time_ms + 1500; // 余量
 
         // 弱网保护两层：
         bool sent = at_uart_->SendCommand(command, timeout_ms, false);

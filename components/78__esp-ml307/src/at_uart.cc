@@ -111,12 +111,11 @@ void AtUart::Initialize() {
     }
 
     // ReceiveTask: 消费 UART event_queue → 读 ring buffer → append rx_buffer_
-    // 栈 6KB match 189（uart_read_bytes + string append 需要充足栈）；优先级 6（高于业务、低于 audio）
     xTaskCreatePinnedToCore([](void* arg) {
         auto at_uart = (AtUart*)arg;
         at_uart->ReceiveTask();
         vTaskDelete(NULL);
-    }, "modem_receive", 2048 * 3, this, 6, &receive_task_handle_, 0 /* Core 0 */);
+    }, "modem_receive", 2048 * 3, this, 8, &receive_task_handle_, 0 /* Core 0 */);
 
     // EventTask: 解析 rx_buffer_ + 派发 URC，优先级 5（低于 ReceiveTask 让 RX 先消化）
     xTaskCreatePinnedToCore([](void* arg) {
