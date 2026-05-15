@@ -372,8 +372,14 @@ void Application::Run() {
         if (bits & MAIN_EVENT_SEND_AUDIO) {
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
+                    if (++audio_send_fail_count_ >= 100) {
+                        ESP_LOGW(TAG, "Audio send 连续失败 100 帧 → CloseAudioChannel");
+                        audio_send_fail_count_ = 0;
+                        if (protocol_) protocol_->CloseAudioChannel();
+                    }
                     break;
                 }
+                audio_send_fail_count_ = 0;
             }
         }
 

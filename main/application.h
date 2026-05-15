@@ -175,12 +175,11 @@ private:
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
 
-    // 跳过：① stt_popup_enabled_=false 关闭 ② 唤醒词首条 STT
-    // Settings 字段："audio.stt_popup"（默认 1=开）
     bool stt_popup_enabled_ = true;
     std::atomic<bool> auto_chat_pending_{false};  // 开机自动对话 pending（A1 · 见 RequestAutoChatOnIdle）
     std::atomic<bool> skip_next_stt_popup_{false};
     int clock_ticks_ = 0;
+    int audio_send_fail_count_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 
 
