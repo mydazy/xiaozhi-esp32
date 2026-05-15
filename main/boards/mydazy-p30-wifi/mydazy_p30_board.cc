@@ -313,15 +313,6 @@ private:
         // 音频芯片上电稳定时间 200ms（ES8311/ES7210 datasheet 建议）
         vTaskDelay(pdMS_TO_TICKS(200));
 
-        // 配置TE输入GPIO（当前未启用 VSYNC，硬件预留）
-        gpio_config_t input_conf = {
-            .pin_bit_mask = (1ULL << DISPLAY_LCD_TE),
-            .mode = GPIO_MODE_INPUT,
-            .pull_up_en = GPIO_PULLUP_DISABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE,
-        };
-        gpio_config(&input_conf);
     }
 
     void InitializeSc7a20h() {
@@ -643,7 +634,8 @@ private:
         display_ = new UiDisplay(panel_io_, panel_,
                                  DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
                                  DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
-        ESP_LOGI(TAG, "UiDisplay 已启用 (时钟 + 配网 + 激活 + 控制中心)");
+        static_cast<UiDisplay*>(display_)->EnableTearingEffectSync(DISPLAY_LCD_TE);
+        ESP_LOGI(TAG, "UiDisplay 已启用 (时钟 + 配网 + 激活 + 控制中心) + TE 同步");
 #endif
 
         SystemInfo::PrintHeapStats();

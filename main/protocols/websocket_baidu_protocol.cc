@@ -155,27 +155,6 @@ WebsocketBaiduProtocol::WebsocketBaiduProtocol() {
             }
         });
 
-    // 创建 listening 超时定时器（一次性，30s 无 ASR 结果自动关闭会话）
-    // 弱网下服务器可能因 LIC_FAILED 停止处理，设备永久卡在 listening 发音频
-    listening_timer_handle_ = xTimerCreate(
-        "bd_listen_to",
-        pdMS_TO_TICKS(kListeningTimeoutMs),
-        pdFALSE,  // 一次性
-        this,
-        [](TimerHandle_t timer) {
-            auto* self = static_cast<WebsocketBaiduProtocol*>(pvTimerGetTimerID(timer));
-            if (self) {
-                auto guard = self->prevent_destroy_guard_;
-                Application::GetInstance().Schedule([self, guard]() {
-                    if (!guard->load()) return;
-                    ESP_LOGW(TAG, "Listening timeout (%ds no ASR result), closing session",
-                             kListeningTimeoutMs / 1000);
-                    self->StopListeningTimer();
-                    self->CloseAudioChannel();
-                });
-            }
-        });
-
     // 创建 WS PING 心跳定时器（auto-reload 5s · 维持 4G modem socket 不被空闲断开）
     keepalive_timer_handle_ = xTimerCreate(
         "bd_keepalive",
@@ -211,12 +190,6 @@ WebsocketBaiduProtocol::~WebsocketBaiduProtocol() {
         xTimerStop(lic_retry_timer_handle_, pdMS_TO_TICKS(100));
         xTimerDelete(lic_retry_timer_handle_, pdMS_TO_TICKS(1000));
         lic_retry_timer_handle_ = nullptr;
-    }
-
-    if (listening_timer_handle_) {
-        xTimerStop(listening_timer_handle_, pdMS_TO_TICKS(100));
-        xTimerDelete(listening_timer_handle_, pdMS_TO_TICKS(1000));
-        listening_timer_handle_ = nullptr;
     }
 
     if (keepalive_timer_handle_) {
@@ -1468,18 +1441,8 @@ void WebsocketBaiduProtocol::SendMcpMessage(const std::string& payload) {
     SendText(std::string(FUNCTION_CALL_PREFIX) + payload);
 }
 
-void WebsocketBaiduProtocol::StartListeningTimer() {
-    if (listening_timer_handle_) {
-        // 无论是否已在运行，重置定时器（收到部分 ASR 结果时重置）
-        xTimerReset(listening_timer_handle_, 0);
-    }
-}
-
-void WebsocketBaiduProtocol::StopListeningTimer() {
-    if (listening_timer_handle_) {
-        xTimerStop(listening_timer_handle_, 0);
-    }
-}
+void WebsocketBaiduProtocol::StartListeningTimer() {}
+void WebsocketBaiduProtocol::StopListeningTimer() {}
 
 void WebsocketBaiduProtocol::StartKeepaliveTimer() {
     if (keepalive_timer_handle_ && !xTimerIsTimerActive(keepalive_timer_handle_)) {

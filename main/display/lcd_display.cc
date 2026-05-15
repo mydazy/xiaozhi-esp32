@@ -12,11 +12,37 @@
 #include <esp_lvgl_port.h>
 #include <esp_psram.h>
 #include <cstring>
+#include <driver/gpio.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <src/misc/cache/lv_cache.h>
+#include <src/display/lv_display_private.h>   // 直接访问 lv_display_t::flush_cb（LVGL 9.x 无 getter）
 
 #include "board.h"
 
 #define TAG "LcdDisplay"
+
+// ============================================================
+// TE（Tearing Effect）硬件同步：LCD 控制器在 VSYNC 拉高 TE，主机等 TE 上升沿再推 SPI
+//   消除"SPI 推送中扫描线跨帧"导致的撕裂 · 全局单例（一块屏一个 TE）
+// ============================================================
+static SemaphoreHandle_t s_te_sem = nullptr;
+static lv_display_flush_cb_t s_orig_flush_cb = nullptr;
+
+static void IRAM_ATTR te_gpio_isr(void* /*arg*/) {
+    BaseType_t hpw = pdFALSE;
+    if (s_te_sem) xSemaphoreGiveFromISR(s_te_sem, &hpw);
+    if (hpw) portYIELD_FROM_ISR();
+}
+
+// 包装 LVGL flush_cb：每次 flush 前等一个 TE 上升沿（带 20ms 超时兜底 · 防永久阻塞）
+static void te_synced_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
+    if (s_te_sem) {
+        xSemaphoreTake(s_te_sem, 0);   // 清掉队列中过期信号
+        xSemaphoreTake(s_te_sem, pdMS_TO_TICKS(20));
+    }
+    if (s_orig_flush_cb) s_orig_flush_cb(disp, area, px_map);
+}
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
@@ -143,8 +169,11 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        // 全屏双 buf 在 PSRAM · direct_mode 让切换瞬间在 buf 上离线重绘，flush dirty 区域到屏幕
-        .buffer_size = static_cast<uint32_t>(width_ * height_),  // 全屏 framebuffer
+        // 退回原 48 行 partial + double_buffer + PSRAM（量产稳定配置）
+        //   esp_lvgl_port v9.x 的 SPI 模式 direct_mode/full_refresh 兼容性差 ·
+        //   会导致字体渲染异常 / 花屏 / 半截字 → 退回 partial
+        //   撕裂消除靠 TE 同步（EnableTearingEffectSync · flush 前等 VSYNC）
+        .buffer_size = static_cast<uint32_t>(width_ * 48),
         .double_buffer = true,
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),
@@ -161,9 +190,8 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
             .buff_spiram = 1,
             .sw_rotate = 0,
             .swap_bytes = 1,
-            //"PSRAM 缓存整图 → 一次推送" 模式：
-            .full_refresh = 1,
-            .direct_mode = 1,
+            .full_refresh = 0,
+            .direct_mode = 0,
         },
     };
 
@@ -176,6 +204,48 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
+}
+
+// 启用 TE 硬件同步 · 板子初始化阶段调一次
+//   ① 配 GPIO 为输入 + 上升沿中断 ② 安装 ISR 给信号量 ③ 包装 LVGL flush_cb 等 TE
+void SpiLcdDisplay::EnableTearingEffectSync(gpio_num_t te_pin) {
+    if (!display_ || te_pin == GPIO_NUM_NC) {
+        ESP_LOGW(TAG, "EnableTearingEffectSync skip: display=%p te=%d", display_, (int)te_pin);
+        return;
+    }
+    if (s_te_sem) {
+        ESP_LOGW(TAG, "EnableTearingEffectSync already enabled, skip");
+        return;
+    }
+
+    s_te_sem = xSemaphoreCreateBinary();
+    if (!s_te_sem) {
+        ESP_LOGE(TAG, "TE sem create failed");
+        return;
+    }
+
+    gpio_config_t te_conf = {
+        .pin_bit_mask = (1ULL << te_pin),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_POSEDGE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&te_conf));
+
+    esp_err_t err = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {   // INVALID_STATE = 已安装
+        ESP_LOGE(TAG, "gpio_install_isr_service failed: %s", esp_err_to_name(err));
+        return;
+    }
+    ESP_ERROR_CHECK(gpio_isr_handler_add(te_pin, te_gpio_isr, nullptr));
+
+    // 包装 LVGL flush_cb：保存原 callback，注入 TE 等待
+    // LVGL 9.x 无 getter，直接访问 private 结构字段保存原 cb
+    s_orig_flush_cb = display_->flush_cb;
+    lv_display_set_flush_cb(display_, te_synced_flush_cb);
+
+    ESP_LOGI(TAG, "TE sync enabled on GPIO%d (JD9853 0x35 已开 TE 输出)", (int)te_pin);
 }
 
 
