@@ -43,7 +43,7 @@ static const char *TAG = "axs5106l_touch";
 #define CLICK_MIN_TIME_US     50000   /* 50ms · Apple 标准（60→50）*/
 #define CLICK_MAX_MOVE       30       /* ~4mm · 容忍儿童手指落屏微移（20→30）*/
 #define LONG_PRESS_TIME_US   500000   /* 500ms · 防儿童误触（300→500 与 Apple/iOS 对齐）*/
-#define DOUBLE_CLICK_TIME_US 350000   /* 350ms · iOS / Apple Watch S9 标准 · 双击必须快 */
+#define DOUBLE_CLICK_TIME_US 300000   /* 300ms · iOS / Apple Watch S9 标准 · 双击必须快 */
 #define DOUBLE_CLICK_DIST    80       /* ~10.6mm · Apple 30pt 物理等效 */
 #define CLICK_MIN_FRAMES      1       /* 事件型芯片 INT 只在边沿 latch · 单帧即合法（50ms 时长 + 抖动=0 兜底）*/
 #define SWIPE_MIN_TIME_US    150000   /* 150ms 不变 */
