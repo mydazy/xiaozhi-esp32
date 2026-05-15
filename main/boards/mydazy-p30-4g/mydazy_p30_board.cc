@@ -880,9 +880,12 @@ public:
         InitializeGpio();
         HandleWakeupCause();
         InitializeI2c();
-        PrepareTouchHardware();
         InitializeSpi();
         InitializeDisplay();
+        // 推迟触屏初始化 · 让 LCD 先出画面 + 给 ML307 modem AT 启动空出 I²C 总线 ·
+        // 触屏 I²C 探测 / 固件升级判断是最敏感环节 · 避开 4G modem 启动期 RF 干扰
+        vTaskDelay(pdMS_TO_TICKS(500));
+        PrepareTouchHardware();
         InitializeTouch();
         InitializeSc7a20h();
         InitializePowerManager();

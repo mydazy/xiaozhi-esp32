@@ -896,9 +896,11 @@ public:
         // 解析唤醒原因（按键开机要求长按 1.5s，否则立即回深睡——不会返回）
         HandleWakeupCause();
         InitializeI2c();
-        PrepareTouchHardware();
         InitializeSpi();
         InitializeDisplay();
+        // 推迟触屏初始化 · 让 LCD 先出画面 + 给 WiFi 启动空出 I²C 总线 · 避开 RF 干扰
+        vTaskDelay(pdMS_TO_TICKS(500));
+        PrepareTouchHardware();
         InitializeTouch();
         InitializeSc7a20h();
         InitializePowerManager();

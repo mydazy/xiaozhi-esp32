@@ -1360,10 +1360,12 @@ public:
 
         InitializeGpio();           // 1. 先启用音频电源
         InitializeI2c();            // 2. 初始化I2C总线 (音频编解码器需要)
-        PrepareTouchHardware();     // 3. 先完成共享复位线上的触摸硬件初始化
-        InitializeSpi();            // 4. 初始化SPI总线 (显示需要)
-        InitializeDisplay();        // 5. 初始化显示 (依赖SPI)
-        InitializeTouch();          // 6. LCD/LVGL 就绪后再注册触摸输入
+        InitializeSpi();            // 3. 初始化SPI总线 (显示需要)
+        InitializeDisplay();        // 4. 初始化显示 · 让 LCD 先出画面
+        // 5. 推迟触屏初始化 · 给 ML307 modem AT 启动空出 I²C 总线 · 避开 4G/WiFi 启动期 RF 干扰
+        vTaskDelay(pdMS_TO_TICKS(500));
+        PrepareTouchHardware();     // 6. 触摸 I²C 探测 / 固件升级判断
+        InitializeTouch();          // 7. LCD/LVGL 就绪后再注册触摸输入
         InitializeSc7a20h();        // 7. 初始化SC7A20H传感器 (依赖I2C)
         InitializePowerManager();  // 8. 初始化电池监控
         InitializePowerSaveTimer(); // 9. 初始化省电定时器

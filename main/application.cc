@@ -276,21 +276,15 @@ void Application::Initialize() {
         }
     });
 
-    // 闹钟回调：交 AlarmRinger 接管（持续响 + 渐入音量 + 摇晃/按键/语音/超时关停）
     AlarmManager::GetInstance().SetAlarmCallback([](const AlarmConfig& evt) {
         AlarmRinger::GetInstance().Start(evt.message);
     });
-    // MCP 工具注册（self.alarm.add / list / delete / set_enabled）
     AlarmManager::GetInstance().RegisterMcpTools();
-
-    // ===== 番茄钟（self.pomodoro.start/pause/resume/stop/status · MCP+触屏双入口）=====
-    // 触屏按钮 → 主线程调 TogglePaused（同 Player 套路 · 已在 UiDisplay 内 Schedule 一次）
     if (auto* ui = dynamic_cast<UiDisplay*>(display)) {
         ui->OnPomodoroToggle([]() {
             PomodoroManager::GetInstance().TogglePaused();
         });
     }
-    // tick 在 esp_timer 任务上下文 → Schedule 到主线程 + DisplayLock 内更新 UI
     PomodoroManager::GetInstance().SetTickCallback(
         [](PomodoroManager::State state, uint32_t remain, uint32_t /*total*/) {
             bool running = (state == PomodoroManager::State::kRunning);
@@ -493,8 +487,10 @@ void Application::ActivationTask() {
     // Create OTA object for activation process
     ota_ = std::make_unique<Ota>();
 
-    // 等 modem 缓存（CSQ/IMEI/ICCID/Revision）填充完再 POST OTA
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    // 4G 模式：PDP 拿到 IP 后 DNS 服务器还需协商几秒，弱网更慢，先等够再 OTA。
+    if (Board::GetInstance().GetBoardType() == "ml307") {
+        vTaskDelay(pdMS_TO_TICKS(3000));
+    }
 
     // Check for new assets version
     CheckAssetsVersion();
@@ -1017,9 +1013,8 @@ void Application::HandleWakeWordDetectedEvent() {
         // 跳过下一条 STT 提示音 · 避免唤醒词音频被 ASR 识别后立刻响（唤醒已有 OGG_WAKEUP 提示）
         skip_next_stt_popup_.store(true);
 
-        // 百度协议 WS 保活复用时 channel 已开 · 仍需先进 Connecting 让 ContinueWakeWordInvoke 通过 state guard
-        SetDeviceState(kDeviceStateConnecting);
         if (!protocol_->IsAudioChannelOpened()) {
+            SetDeviceState(kDeviceStateConnecting);
             // Schedule to let the state change be processed first (UI update),
             // then continue with OpenAudioChannel which may block for ~1 second
             Schedule([this, wake_word]() {
