@@ -66,8 +66,6 @@ void AtUart::Initialize() {
         return;
     }
 
-    // 标准 ESP-IDF UART driver：内置 RX FIFO 中断 + ring buffer + event queue。
-    // 同硬件 xiaozhi-esp32-189 已量产验证；放弃 UHCI 是因为 P30 不需要 light sleep / 高速率。
     uart_config_t uart_config = {};
     uart_config.baud_rate = baud_rate_;
     uart_config.data_bits = UART_DATA_8_BITS;
@@ -78,8 +76,8 @@ void AtUart::Initialize() {
     ESP_ERROR_CHECK(uart_driver_install(uart_num_, AT_UART_RX_BUFFER_SIZE, 0, 16, &event_queue_handle_, ESP_INTR_FLAG_IRAM));
     ESP_ERROR_CHECK(uart_param_config(uart_num_, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(uart_num_, tx_pin_, rx_pin_, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-
-    // Enable pull-up on RX pin（与 189 一致）
+    
+    // Enable pull-up on RX pin
     gpio_set_pull_mode(rx_pin_, GPIO_PULLUP_ONLY);
 
     if (dtr_pin_ != GPIO_NUM_NC) {
