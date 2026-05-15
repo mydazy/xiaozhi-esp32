@@ -71,6 +71,22 @@ CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
 CONFIG_BT_NIMBLE_GATT_CLIENT=n
 
+# P30 P0a-3 · BT 控制器 role 裁剪（2026-05-15）· 释放 ~20-30 KB INT
+# 修复："E BLE_INIT: Malloc failed / esp_bt_controller_init -4 (ESP_ERR_NO_MEM)"
+# 根因：MAX_ACT_EFF=6（受 MASTER+SCAN+ADV+SECURITY 四 role 叠加），每 act ~5KB INT
+#       SwitchConfigMode 时 WiFi+LVGL+4G+Audio 已吃满 INT RAM，BT 申不到 → init 失败
+# 关掉：MASTER（主动连别人）/ SCAN（主动扫描）/ DTM（出厂自测·量产不用）
+# 保留：ADV（广播必需）/ SECURITY（Blufi DH 协商需）/ 隐含 SLAVE（被连接必需）
+# 效果：MAX_ACT_EFF 从 6 降到 2（adv + 1 conn slot）
+CONFIG_BT_CTRL_BLE_MASTER=n
+CONFIG_BT_CTRL_BLE_SCAN=n
+CONFIG_BT_CTRL_DTM_ENABLE=n
+
+# P30 P0a-3 · NimBLE ACL buffer 缩容（2026-05-15）· 释放 ~4 KB INT
+# 默认 24 个 × 255 byte ≈ 6 KB INT（HCI 传输层 ACL 收包池）
+# BluFi 协议短包居多（SSID/PWD < 100 byte），8 个足够吸收突发
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=8
+
 CONFIG_CODEC_I2C_BACKWARD_COMPATIBLE=n
 
 # Fix ML307 FIFO Overflow

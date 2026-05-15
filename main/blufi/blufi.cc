@@ -77,16 +77,24 @@ bool Blufi::InitializeController() {
     return true;
   }
 
+  size_t free_int_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGI(TAG, "BT 控制器 init 前 INT RAM free=%u bytes", (unsigned)free_int_before);
+
   // 初始化 BLE 控制器（不启动主机栈）
-  if (esp_blufi_controller_init() != ESP_OK) {
-    ESP_LOGE(TAG, "BLE 控制器初始化失败");
-    // 【P1改进】清理部分初始化的资源
-    esp_blufi_controller_deinit();
+  esp_err_t err = esp_blufi_controller_init();
+  if (err != ESP_OK) {
+    size_t free_int_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    ESP_LOGE(TAG, "BLE 控制器初始化失败: %s (INT RAM %u → %u, 消耗 %d bytes)",
+             esp_err_to_name(err), (unsigned)free_int_before,
+             (unsigned)free_int_after, (int)(free_int_before - free_int_after));
     return false;
   }
 
+  size_t free_int_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   controller_initialized_ = true;
-  ESP_LOGI(TAG, "✅ BLE 控制器初始化成功");
+  ESP_LOGI(TAG, "✅ BLE 控制器初始化成功 (INT RAM %u → %u, 消耗 %u bytes)",
+           (unsigned)free_int_before, (unsigned)free_int_after,
+           (unsigned)(free_int_before - free_int_after));
   return true;
 }
 
