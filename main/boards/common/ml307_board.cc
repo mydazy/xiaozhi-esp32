@@ -65,8 +65,8 @@ void Ml307Board::OnNetworkEvent(NetworkEvent event, const std::string& data) {
 }
 
 void Ml307Board::NetworkTask() {
-    // ─── ML307R 模组上电稳定窗口（必须保留）────────────────────────────────
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    // ─── ML307R 模组上电稳定窗口 ────────────────────────────────
+    vTaskDelay(pdMS_TO_TICKS(5000));
 
     // Notify modem detection started
     OnNetworkEvent(NetworkEvent::ModemDetecting);

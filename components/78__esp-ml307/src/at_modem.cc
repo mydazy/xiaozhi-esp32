@@ -157,7 +157,7 @@ std::string AtModem::GetModuleRevision() {
 
 std::string AtModem::GetCarrierName() {
     if (!at_uart_->SendCommand("AT+COPS?")) {
-        ESP_LOGE(TAG, "Failed to send AT+COPS? command");
+        ESP_LOGW(TAG, "AT+COPS? failed (busy or HTTP binary), use cached");
     }
     return carrier_name_;
 }
@@ -167,14 +167,14 @@ int AtModem::GetCsq() {
         return csq_;
     }
     if (!at_uart_->SendCommand("AT+CSQ", 100)) {
-        ESP_LOGE(TAG, "Failed to send AT+CSQ command");
+        ESP_LOGW(TAG, "AT+CSQ failed (busy), use cached csq=%d", csq_);
     }
     return csq_;
 }
 
 CeregState AtModem::GetRegistrationState() {
     if (!at_uart_->SendCommand("AT+CEREG?")) {
-        ESP_LOGE(TAG, "Failed to send AT+CEREG? command");
+        ESP_LOGW(TAG, "AT+CEREG? failed (busy), use cached stat=%d", cereg_state_.stat);
     }
     return cereg_state_;
 }
