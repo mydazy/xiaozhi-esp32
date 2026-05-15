@@ -26,7 +26,9 @@ WebsocketJoeaiProtocol::WebsocketJoeaiProtocol() {
         [](TimerHandle_t timer) {
             auto* self = static_cast<WebsocketJoeaiProtocol*>(pvTimerGetTimerID(timer));
             if (!self) return;
-            Application::GetInstance().Schedule([self]() {
+            auto guard = self->prevent_destroy_guard_;
+            Application::GetInstance().Schedule([self, guard]() {
+                if (!guard->load()) return;
                 if (!self->IsAudioChannelOpened()) return;
                 char mid_buf[32];
                 snprintf(mid_buf, sizeof(mid_buf), "%08lx-%lu",
@@ -36,7 +38,6 @@ WebsocketJoeaiProtocol::WebsocketJoeaiProtocol() {
                 std::string msg = std::string("{\"mid\":\"") + mid_buf +
                                   "\",\"contentType\":\"PING\",\"uid\":\"" + uid + "\"}";
                 if (!self->SendText(msg)) {
-                    // 弱网保护：连续失败 3 次主动关通道，让 OnDisconnected 走重连流程
                     int n = self->ping_failures_.fetch_add(1) + 1;
                     ESP_LOGW(TAG, "PING failed #%d/3", n);
                     if (n >= 3) {
@@ -51,6 +52,7 @@ WebsocketJoeaiProtocol::WebsocketJoeaiProtocol() {
 }
 
 WebsocketJoeaiProtocol::~WebsocketJoeaiProtocol() {
+    prevent_destroy_guard_->store(false);
     if (ping_timer_handle_) {
         xTimerStop(ping_timer_handle_, pdMS_TO_TICKS(100));
         xTimerDelete(ping_timer_handle_, pdMS_TO_TICKS(1000));

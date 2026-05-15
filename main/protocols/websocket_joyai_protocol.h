@@ -49,6 +49,8 @@ private:
     TimerHandle_t ping_timer_handle_ = nullptr;
     std::atomic<int> ping_failures_ { 0 };
     std::atomic<uint32_t> mid_counter_ { 0 };
+    std::shared_ptr<std::atomic<bool>> prevent_destroy_guard_ =
+        std::make_shared<std::atomic<bool>>(true);
 
     // 内部辅助
     bool SendText(const std::string& text) override;

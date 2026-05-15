@@ -97,7 +97,8 @@ protected:
     int server_frame_duration_ = 60;
     bool error_occurred_ = false;
     std::string session_id_;
-    std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_;
+    std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_ =
+        std::chrono::steady_clock::now();
 
     virtual bool SendText(const std::string& text) = 0;
     virtual void SetError(const std::string& message);
