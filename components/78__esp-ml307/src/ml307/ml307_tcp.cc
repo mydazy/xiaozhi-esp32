@@ -172,20 +172,32 @@ int Ml307Tcp::Send(const std::string& data) {
         command += std::to_string(chunk_size);
         command += ",";
         
-        // 直接在command字符串上进行十六进制编码
         at_uart_->EncodeHexAppend(command, data.data() + total_sent, chunk_size);
         command += "\r\n";
         
-        // 根据波特率和命令长度动态计算超时：传输时间(10位/字节) + 处理余量
         int baud = at_uart_->GetBaudRate();
         if (baud <= 0) baud = 115200;
         size_t bytes_to_tx = command.size();
-        // 发送位数≈字节*10（1起始+8数据+1停止），转毫秒
         uint32_t tx_time_ms = static_cast<uint32_t>((bytes_to_tx * 10ULL * 1000ULL) / static_cast<uint32_t>(baud));
-        uint32_t timeout_ms = tx_time_ms + 100; // 余量
+        uint32_t timeout_ms = tx_time_ms + 2000; // 余量
 
-        if (!at_uart_->SendCommand(command, timeout_ms, false)) {
-            ESP_LOGE(TAG, "Failed to send data chunk");
+        // 弱网保护两层：
+        bool sent = at_uart_->SendCommand(command, timeout_ms, false);
+        if (!sent) {
+            ESP_LOGW(TAG, "AT send chunk timeout (%ums), retry once after 200ms", (unsigned)timeout_ms);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            sent = at_uart_->SendCommand(command, timeout_ms, false);
+        }
+        if (sent) {
+            consecutive_send_failures_ = 0;
+        } else {
+            int n = ++consecutive_send_failures_;
+            ESP_LOGW(TAG, "AT send failed cumulative #%d/%d", n, kMaxConsecutiveSendFailures);
+            if (n < kMaxConsecutiveSendFailures) {
+                return -1;
+            }
+            ESP_LOGE(TAG, "AT send %d consecutive failures, Disconnect", n);
+            consecutive_send_failures_ = 0;
             Disconnect();
             return -1;
         }

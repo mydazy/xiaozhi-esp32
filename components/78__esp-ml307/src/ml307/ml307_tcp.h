@@ -33,7 +33,9 @@ protected:
     EventGroupHandle_t event_group_handle_;
     std::list<UrcCallback>::iterator urc_callback_it_;
     int last_error_ = 0;
-    
+    int consecutive_send_failures_ = 0;
+    static constexpr int kMaxConsecutiveSendFailures = 5;
+
     // 虚函数允许子类自定义SSL配置
     virtual bool ConfigureSsl(int port);
 };
