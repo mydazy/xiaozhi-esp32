@@ -322,16 +322,18 @@ esp_err_t axs5106l_touch_attach_lvgl(axs5106l_touch_handle_t self)
     esp_err_t ret = gpio_config(&int_cfg);
     if (ret != ESP_OK) return ret;
 
-    esp_err_t isr_svc = gpio_install_isr_service(0);
-    if (isr_svc != ESP_OK && isr_svc != ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "gpio_install_isr_service failed: %s, storm detection disabled",
-                 esp_err_to_name(isr_svc));
-    } else if (gpio_isr_handler_add(self->int_gpio, int_falling_edge_isr, self) == ESP_OK) {
+    esp_err_t add_ret = gpio_isr_handler_add(self->int_gpio, int_falling_edge_isr, self);
+    if (add_ret == ESP_ERR_INVALID_STATE) {
+        gpio_install_isr_service(0);
+        add_ret = gpio_isr_handler_add(self->int_gpio, int_falling_edge_isr, self);
+    }
+    if (add_ret == ESP_OK) {
         self->isr_installed = true;
         self->int_edge_window_start_us = esp_timer_get_time();
         ESP_LOGI(TAG, "INT edge ISR installed for RF storm detection");
     } else {
-        ESP_LOGW(TAG, "gpio_isr_handler_add failed, storm detection disabled");
+        ESP_LOGW(TAG, "ISR install failed: %s, storm detection disabled",
+                 esp_err_to_name(add_ret));
     }
 
     self->lvgl_indev = lv_indev_create();
