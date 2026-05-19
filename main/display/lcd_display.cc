@@ -11,12 +11,13 @@
 #include <esp_err.h>
 #include <esp_lvgl_port.h>
 #include <esp_psram.h>
+#include <esp_heap_caps.h>
 #include <cstring>
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <src/misc/cache/lv_cache.h>
-#include <src/display/lv_display_private.h>   // 直接访问 lv_display_t::flush_cb（LVGL 9.x 无 getter）
+#include <src/display/lv_display_private.h>
 
 #include "board.h"
 
@@ -27,7 +28,6 @@
 //   消除"SPI 推送中扫描线跨帧"导致的撕裂 · 全局单例（一块屏一个 TE）
 // ============================================================
 static SemaphoreHandle_t s_te_sem = nullptr;
-static lv_display_flush_cb_t s_orig_flush_cb = nullptr;
 
 static void IRAM_ATTR te_gpio_isr(void* /*arg*/) {
     BaseType_t hpw = pdFALSE;
@@ -35,13 +35,27 @@ static void IRAM_ATTR te_gpio_isr(void* /*arg*/) {
     if (hpw) portYIELD_FROM_ISR();
 }
 
-// 包装 LVGL flush_cb：每次 flush 前等一个 TE 上升沿（带 20ms 超时兜底 · 防永久阻塞）
-static void te_synced_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
+static esp_lcd_panel_handle_t s_flush_panel = nullptr;
+static bool on_color_trans_done(esp_lcd_panel_io_handle_t /*io*/,
+                                esp_lcd_panel_io_event_data_t* /*edata*/,
+                                void* user_ctx) {
+    lv_display_flush_ready(static_cast<lv_display_t*>(user_ctx));
+    return false;
+}
+
+static void spi_psram_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
+    uint32_t px_cnt = lv_area_get_size(area);
+    lv_draw_sw_rgb565_swap(px_map, px_cnt);
+
     if (s_te_sem) {
-        xSemaphoreTake(s_te_sem, 0);   // 清掉队列中过期信号
+        xSemaphoreTake(s_te_sem, 0);   // 清过期信号
         xSemaphoreTake(s_te_sem, pdMS_TO_TICKS(20));
     }
-    if (s_orig_flush_cb) s_orig_flush_cb(disp, area, px_map);
+
+    esp_lcd_panel_draw_bitmap(s_flush_panel,
+                              area->x1, area->y1,
+                              area->x2 + 1, area->y2 + 1, px_map);
+    (void)disp;
 }
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
@@ -164,46 +178,46 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
 #endif
     lvgl_port_init(&port_cfg);
 
-    ESP_LOGI(TAG, "Adding LCD display");
-    const lvgl_port_display_cfg_t display_cfg = {
-        .io_handle = panel_io_,
-        .panel_handle = panel_,
-        .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 48),
-        .double_buffer = true,
-        .trans_size = 0,
-        .hres = static_cast<uint32_t>(width_),
-        .vres = static_cast<uint32_t>(height_),
-        .monochrome = false,
-        .rotation = {
-            .swap_xy = swap_xy,
-            .mirror_x = mirror_x,
-            .mirror_y = mirror_y,
-        },
-        .color_format = LV_COLOR_FORMAT_RGB565,
-        .flags = {
-            .buff_dma = 0,
-            .buff_spiram = 1,
-            .sw_rotate = 0,
-            .swap_bytes = 1,
-            .full_refresh = 0,
-            .direct_mode = 0,
-        },
-    };
+    ESP_LOGI(TAG, "方案X: 自建 display · 全屏双 buf @ PSRAM 64B 对齐");
 
-    display_ = lvgl_port_add_disp(&display_cfg);
-    if (display_ == nullptr) {
-        ESP_LOGE(TAG, "Failed to add display");
+    size_t fb_bytes = static_cast<size_t>(width_) * height_ * 2;   // RGB565 全屏
+    size_t fb_alloc = (fb_bytes + 63) & ~static_cast<size_t>(63);  // 64B 向上取整（D-cache line）
+    auto* fb1 = static_cast<uint8_t*>(heap_caps_aligned_alloc(64, fb_alloc, MALLOC_CAP_SPIRAM));
+    auto* fb2 = static_cast<uint8_t*>(heap_caps_aligned_alloc(64, fb_alloc, MALLOC_CAP_SPIRAM));
+    if (!fb1 || !fb2) {
+        ESP_LOGE(TAG, "PSRAM framebuffer alloc 失败 (need 2x%u B)", (unsigned)fb_alloc);
+        if (fb1) heap_caps_free(fb1);
+        if (fb2) heap_caps_free(fb2);
         return;
     }
+    ESP_LOGI(TAG, "PSRAM fb: 2x%u B @ %p / %p (内部 RAM 零占用)",
+             (unsigned)fb_alloc, fb1, fb2);
+
+    s_flush_panel = panel_;
+
+    display_ = lv_display_create(width_, height_);
+    if (display_ == nullptr) {
+        ESP_LOGE(TAG, "lv_display_create 失败");
+        heap_caps_free(fb1); heap_caps_free(fb2);
+        return;
+    }
+    lv_display_set_color_format(display_, LV_COLOR_FORMAT_RGB565);
+    // PARTIAL mode + 全屏 buffer：切换页面整屏 dirty 一次 flush；日常只 flush 小 dirty 区
+    lv_display_set_buffers(display_, fb1, fb2, fb_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_display_set_flush_cb(display_, spi_psram_flush_cb);
+    lv_display_set_user_data(display_, this);
+
+    // DMA 完成异步回调 → lv_display_flush_ready（不可在 flush_cb 内同步 ready）
+    const esp_lcd_panel_io_callbacks_t io_cbs = {
+        .on_color_trans_done = on_color_trans_done,
+    };
+    ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(panel_io_, &io_cbs, display_));
 
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
 }
 
-// 启用 TE 硬件同步 · 板子初始化阶段调一次
-//   ① 配 GPIO 为输入 + 上升沿中断 ② 安装 ISR 给信号量 ③ 包装 LVGL flush_cb 等 TE
 void SpiLcdDisplay::EnableTearingEffectSync(gpio_num_t te_pin) {
     if (!display_ || te_pin == GPIO_NUM_NC) {
         ESP_LOGW(TAG, "EnableTearingEffectSync skip: display=%p te=%d", display_, (int)te_pin);
@@ -229,7 +243,6 @@ void SpiLcdDisplay::EnableTearingEffectSync(gpio_num_t te_pin) {
     };
     ESP_ERROR_CHECK(gpio_config(&te_conf));
 
-    // GPIO ISR service 幂等安装：ESP_OK 首次成功，ESP_ERR_INVALID_STATE 表示已安装
     esp_err_t isr_svc = gpio_install_isr_service(0);
     if (isr_svc != ESP_OK && isr_svc != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "gpio_install_isr_service failed: %s, TE 同步禁用",
@@ -240,10 +253,6 @@ void SpiLcdDisplay::EnableTearingEffectSync(gpio_num_t te_pin) {
     }
 
     ESP_ERROR_CHECK(gpio_isr_handler_add(te_pin, te_gpio_isr, nullptr));
-
-    s_orig_flush_cb = display_->flush_cb;
-    lv_display_set_flush_cb(display_, te_synced_flush_cb);
-
     ESP_LOGI(TAG, "TE sync enabled on GPIO%d (JD9853 0x35 已开 TE 输出)", (int)te_pin);
 }
 
