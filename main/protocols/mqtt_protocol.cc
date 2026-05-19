@@ -161,9 +161,7 @@ bool MqttProtocol::SendText(const std::string& text) {
         return false;
     }
     if (!mqtt_->Publish(publish_topic_, text)) {
-        ESP_LOGE(TAG, "Failed to publish message (%u B): %.128s%s",
-                 (unsigned)text.size(), text.c_str(),
-                 text.size() > 128 ? "..." : "");
+        ESP_LOGE(TAG, "Failed to publish message: %s", text.c_str());
         SetError(Lang::Strings::SERVER_ERROR);
         return false;
     }
@@ -402,7 +400,6 @@ bool MqttProtocol::SendTextToTts(const std::string& text) {
 }
 
 bool MqttProtocol::SendTextToAI(const std::string& text) {
-    // 同 SendTextToTts，以 detect 消息触发 AI 对话（云端按文本指令处理）
     std::string json = "{\"session_id\":\"" + session_id_ +
                        "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + text + "\"}";
     return SendText(json);
