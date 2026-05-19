@@ -211,7 +211,7 @@ void AfeWakeWord::EncodeWakeWordData() {
                 std::lock_guard<std::mutex> lock(this_->wake_word_mutex_);
                 this_->wake_word_opus_.push_back(std::vector<uint8_t>());
                 this_->wake_word_cv_.notify_all();
-                this_->encode_in_progress_ = false;  // [rest-P0-3] 异常路径也必须清
+                this_->encode_in_progress_ = false;
                 return;
             }
             

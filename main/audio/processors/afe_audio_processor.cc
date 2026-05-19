@@ -39,7 +39,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     
     afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_HIGH_PERF);
     afe_config->aec_mode = AEC_MODE_VOIP_HIGH_PERF;
-    afe_config->vad_mode = VAD_MODE_0;
+    afe_config->vad_mode = VAD_MODE_1;
     afe_config->vad_min_noise_ms = 100;
     if (vad_model_name != nullptr) {
         afe_config->vad_model_name = vad_model_name;
@@ -53,7 +53,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         afe_config->ns_init = false;
     }
 
-    afe_config->afe_linear_gain = 4.0f;
+    afe_config->afe_linear_gain = 3.0f;
     afe_config->agc_init = true;
     afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
@@ -73,7 +73,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         auto this_ = (AfeAudioProcessor*)arg;
         this_->AudioProcessorTask();
         vTaskDelete(NULL);
-    }, "audio_communication", 4096, this, 7, NULL, 1);  // 2026-04-29 优先级 P3→P7（AFE 计算密集 · 高于 LVGL P5）
+    }, "audio_communication", 4096, this, 7, NULL, 1);
 }
 
 AfeAudioProcessor::~AfeAudioProcessor() {

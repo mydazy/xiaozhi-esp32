@@ -170,7 +170,7 @@ private:
     DebugStatistics debug_statistics_;
 
     // AEC 后增益的噪声门门限（增益值在 codec_->aec_gain_linear() 读取，统一管理）
-    static constexpr int32_t kNoiseGateRmsSq = 100 * 200;  // RMS 200 ≈ -44 dBFS，低于此值跳过增益
+    static constexpr int32_t kNoiseGateRmsSq = 50 * 200;  // RMS 200 ≈ -44 dBFS，低于此值跳过增益
     srmodel_list_t* models_list_ = nullptr;
 
     EventGroupHandle_t event_group_;
@@ -200,11 +200,11 @@ private:
     std::chrono::steady_clock::time_point last_output_time_;
 
     int consecutive_underrun_plc_ = 0;
-    int16_t last_plc_tail_sample_ = 0;                    // 上一帧 PLC PCM 末尾 sample · fade-out 起点
+    int16_t last_plc_tail_sample_ = 0;
     std::chrono::steady_clock::time_point last_decode_push_time_;
-    static constexpr int kMaxUnderrunPlcFrames    = 3;    // OPUS PLC 安全上限 (~60ms @ 20ms 帧)
-    static constexpr int kPlaybackLowWatermark    = 2;    // playback_queue ≤ 该值时触发补偿
-    static constexpr int kRecentDecodePushWindowMs = 200; // 最近 N ms 有过 decode push → 认为流式 TTS 中
+    static constexpr int kMaxUnderrunPlcFrames    = 3;
+    static constexpr int kPlaybackLowWatermark    = 2;
+    static constexpr int kRecentDecodePushWindowMs = 200;
 
     void AudioInputTask();
     void AudioOutputTask();

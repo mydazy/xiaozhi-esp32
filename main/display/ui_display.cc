@@ -812,9 +812,8 @@ void UiDisplay::EnsureControlCenter() {
     control_center_->SetAecCallback([&app](bool on) {
         app.SetAecMode(on ? kAecOnDeviceSide : kAecOff);
     });
-    // TODO(产品决策): "休眠"语义未定 —— UI 标签为"5分钟/无"暗示自动休眠定时器，
     control_center_->SetSleepCallback([](bool on) {
-        ESP_LOGI(TAG, "休眠: %s", on ? "ON" : "OFF");
+        Board::GetInstance().EnableAutoSleep(on);
     });
     control_center_->SetNetworkCallback([](int /*mode*/) {
         auto& b = Board::GetInstance();
@@ -823,6 +822,7 @@ void UiDisplay::EnsureControlCenter() {
     if (auto* dnb = dynamic_cast<DualNetworkBoard*>(&board)) {
         control_center_->SetNetworkMode(dnb->GetNetworkType() == NetworkType::ML307 ? 1 : 0);
     }
+    control_center_->SetSleepState(board.IsAutoSleepEnabled());
 }
 
 void UiDisplay::ShowControlCenter() {

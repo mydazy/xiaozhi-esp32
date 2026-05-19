@@ -25,16 +25,9 @@
         .self_delimited = false,                                                                          \
     }
 
-#if CONFIG_USE_AUDIO_PROCESSOR
 #include "processors/afe_audio_processor.h"
-#else
-#include "processors/no_audio_processor.h"
-#endif
-
-#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
 #include "wake_words/afe_wake_word.h"
 #include "wake_words/custom_wake_word.h"
-#endif
 
 #define TAG "AudioService"
 
@@ -103,15 +96,12 @@ void AudioService::Initialize(AudioCodec* codec) {
 #endif
 
     audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
-        // ─── AEC 后软件增益 + 噪声门 + RMS 调试日志 ───
         const float g = codec_ ? codec_->aec_gain_linear() : 1.0f;
 
-        // 算 AFE 输出帧均方能量（噪声门判断用）
         int64_t sum_in = 0;
         for (int16_t s : data) sum_in += (int64_t)s * s;
         const int32_t avg_in = data.empty() ? 0 : (int32_t)(sum_in / (int64_t)data.size());
 
-        // 应用 aec_gain（仅有声段）
         if (g > 1.01f && avg_in >= kNoiseGateRmsSq) {
             for (int16_t& s : data) {
                 int32_t v = (int32_t)(s * g);
@@ -153,28 +143,27 @@ void AudioService::Start() {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
         vTaskDelete(NULL);
-    }, "audio_input", 2048 * 3, this, 10, &audio_input_task_handle_, 1);  // 2026-04-29 优先级 P8→P10（高于 LVGL P5 · 抢占以保实时）
+    }, "audio_input", 2048 * 3, this, 10, &audio_input_task_handle_, 1);
 
-    /* Start the audio output task — Pin Core 0 P10（实时 DAC · 与 codec 写同核 · 计算量小不会过载） */
     xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioOutputTask();
         vTaskDelete(NULL);
-    }, "audio_output", 2048 * 2, this, 10, &audio_output_task_handle_, 0);  // 2026-04-29 优先级 P4→P10（实时 DAC）
+    }, "audio_output", 2048 * 2, this, 10, &audio_output_task_handle_, 0);
 #else
     /* Start the audio input task — 同上 · Pin Core 1 P10 */
     xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
         vTaskDelete(NULL);
-    }, "audio_input", 2048 * 2, this, 10, &audio_input_task_handle_, 1);  // 2026-04-29 优先级 P8→P10
+    }, "audio_input", 2048 * 2, this, 10, &audio_input_task_handle_, 1);
 
     /* Start the audio output task — Pin Core 0 P10 */
     xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioOutputTask();
         vTaskDelete(NULL);
-    }, "audio_output", 2048, this, 10, &audio_output_task_handle_, 0);  // 2026-04-29 优先级 P4→P10
+    }, "audio_output", 2048, this, 10, &audio_output_task_handle_, 0);
 #endif
 
     /* Start the opus codec task */
@@ -201,8 +190,6 @@ void AudioService::Stop() {
         audio_queue_cv_.notify_all();
     }
 
-    // 等三个 task 真的退出 · 防 Start 立刻重 create 引发新+旧 task 共存窗口
-    // 每个 task 超时 500ms · 总最坏 1.5s · 超时不 force kill（task 可能持锁）
     auto join_task = [](TaskHandle_t& h, const char* name) {
         if (!h) return;
         TickType_t start = xTaskGetTickCount();
