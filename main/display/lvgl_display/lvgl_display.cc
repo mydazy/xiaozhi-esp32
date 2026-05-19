@@ -102,8 +102,6 @@ void LvglDisplay::ShowNotification(const char* notification, int duration_ms) {
         }
         return;
     }
-    // 临时浮起 status_bar_：保存原可见性 + 强制 visible，timer 还原时按原状态恢复
-    // 用途：player/chat 模式下 status_bar_ 可能被 HIDDEN，仍能短暂看到 notification（音量提示等）
     if (status_bar_) {
         status_bar_was_hidden_before_notify_ = lv_obj_has_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);

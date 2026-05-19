@@ -67,20 +67,4 @@ public:
     void EnableTearingEffectSync(gpio_num_t te_pin);
 };
 
-// RGB LCD display
-class RgbLcdDisplay : public LcdDisplay {
-public:
-    RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
-                  int width, int height, int offset_x, int offset_y,
-                  bool mirror_x, bool mirror_y, bool swap_xy);
-};
-
-// MIPI LCD display
-class MipiLcdDisplay : public LcdDisplay {
-public:
-    MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
-                   int width, int height, int offset_x, int offset_y,
-                   bool mirror_x, bool mirror_y, bool swap_xy);
-};
-
 #endif // LCD_DISPLAY_H

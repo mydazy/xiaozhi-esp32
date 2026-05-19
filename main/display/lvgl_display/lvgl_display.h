@@ -41,10 +41,10 @@ protected:
     const char* network_icon_ = nullptr;
     bool muted_ = false;
 
-    lv_obj_t* status_bar_ = nullptr;       // 子类（LcdDisplay/OledDisplay）创建时赋值
+    lv_obj_t* status_bar_ = nullptr;
     std::chrono::system_clock::time_point last_status_update_time_;
     esp_timer_handle_t notification_timer_ = nullptr;
-    bool status_bar_was_hidden_before_notify_ = false;   // ShowNotification 临时浮起 status_bar_ 前的原状态
+    bool status_bar_was_hidden_before_notify_ = false;
 
     friend class DisplayLockGuard;
     virtual bool Lock(int timeout_ms = 0) = 0;

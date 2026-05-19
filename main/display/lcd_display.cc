@@ -25,7 +25,6 @@
 
 // ============================================================
 // TE（Tearing Effect）硬件同步：LCD 控制器在 VSYNC 拉高 TE，主机等 TE 上升沿再推 SPI
-//   消除"SPI 推送中扫描线跨帧"导致的撕裂 · 全局单例（一块屏一个 TE）
 // ============================================================
 static SemaphoreHandle_t s_te_sem = nullptr;
 
@@ -171,15 +170,14 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
 
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    port_cfg.task_priority = 5;         // P5: LVGL 渲染优先级（低于音频，高于 main_loop）
-    port_cfg.timer_period_ms = 20;      // 50 Hz
+    port_cfg.task_priority = 5;
+    port_cfg.timer_period_ms = 20;
 #if CONFIG_SOC_CPU_CORES_NUM > 1
     port_cfg.task_affinity = 1;
 #endif
     lvgl_port_init(&port_cfg);
 
     ESP_LOGI(TAG, "方案X: 自建 display · 全屏双 buf @ PSRAM 64B 对齐");
-
     size_t fb_bytes = static_cast<size_t>(width_) * height_ * 2;   // RGB565 全屏
     size_t fb_alloc = (fb_bytes + 63) & ~static_cast<size_t>(63);  // 64B 向上取整（D-cache line）
     auto* fb1 = static_cast<uint8_t*>(heap_caps_aligned_alloc(64, fb_alloc, MALLOC_CAP_SPIRAM));
@@ -254,122 +252,6 @@ void SpiLcdDisplay::EnableTearingEffectSync(gpio_num_t te_pin) {
 
     ESP_ERROR_CHECK(gpio_isr_handler_add(te_pin, te_gpio_isr, nullptr));
     ESP_LOGI(TAG, "TE sync enabled on GPIO%d (JD9853 0x35 已开 TE 输出)", (int)te_pin);
-}
-
-
-// RGB LCD implementation
-RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
-                           int width, int height, int offset_x, int offset_y,
-                           bool mirror_x, bool mirror_y, bool swap_xy)
-    : LcdDisplay(panel_io, panel, width, height) {
-
-    // 清屏白色（按 10 行一批减少 SPI 事务）
-    {
-        const int batch = 10;
-        std::vector<uint16_t> buffer(width_ * batch, 0x0000);
-        for (int y = 0; y < height_; y += batch) {
-            int rows = std::min(batch, height_ - y);
-            esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + rows, buffer.data());
-        }
-    }
-
-    ESP_LOGI(TAG, "Initialize LVGL library");
-    lv_init();
-
-    ESP_LOGI(TAG, "Initialize LVGL port");
-    lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    port_cfg.task_priority = 1;
-    port_cfg.timer_period_ms = 33;
-    lvgl_port_init(&port_cfg);
-
-    ESP_LOGI(TAG, "Adding LCD display");
-    const lvgl_port_display_cfg_t display_cfg = {
-        .io_handle = panel_io_,
-        .panel_handle = panel_,
-        .buffer_size = static_cast<uint32_t>(width_ * 20),
-        .double_buffer = true,
-        .hres = static_cast<uint32_t>(width_),
-        .vres = static_cast<uint32_t>(height_),
-        .rotation = {
-            .swap_xy = swap_xy,
-            .mirror_x = mirror_x,
-            .mirror_y = mirror_y,
-        },
-        .flags = {
-            .buff_dma = 1,
-            .swap_bytes = 0,
-            .full_refresh = 1,
-            .direct_mode = 1,
-        },
-    };
-
-    const lvgl_port_display_rgb_cfg_t rgb_cfg = {
-        .flags = {
-            .bb_mode = true,
-            .avoid_tearing = true,
-        }
-    };
-    
-    display_ = lvgl_port_add_disp_rgb(&display_cfg, &rgb_cfg);
-    if (display_ == nullptr) {
-        ESP_LOGE(TAG, "Failed to add RGB display");
-        return;
-    }
-    
-    if (offset_x != 0 || offset_y != 0) {
-        lv_display_set_offset(display_, offset_x, offset_y);
-    }
-}
-
-MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
-                            int width, int height,  int offset_x, int offset_y,
-                            bool mirror_x, bool mirror_y, bool swap_xy)
-    : LcdDisplay(panel_io, panel, width, height) {
-
-    ESP_LOGI(TAG, "Initialize LVGL library");
-    lv_init();
-
-    ESP_LOGI(TAG, "Initialize LVGL port");
-    lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    lvgl_port_init(&port_cfg);
-
-    ESP_LOGI(TAG, "Adding LCD display");
-    const lvgl_port_display_cfg_t disp_cfg = {
-        .io_handle = panel_io,
-        .panel_handle = panel,
-        .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 50),
-        .double_buffer = false,
-        .hres = static_cast<uint32_t>(width_),
-        .vres = static_cast<uint32_t>(height_),
-        .monochrome = false,
-        /* Rotation values must be same as used in esp_lcd for initial settings of the screen */
-        .rotation = {
-            .swap_xy = swap_xy,
-            .mirror_x = mirror_x,
-            .mirror_y = mirror_y,
-        },
-        .flags = {
-            .buff_dma = true,
-            .buff_spiram =false,
-            .sw_rotate = true,
-        },
-    };
-
-    const lvgl_port_display_dsi_cfg_t dpi_cfg = {
-        .flags = {
-            .avoid_tearing = false,
-        }
-    };
-    display_ = lvgl_port_add_disp_dsi(&disp_cfg, &dpi_cfg);
-    if (display_ == nullptr) {
-        ESP_LOGE(TAG, "Failed to add display");
-        return;
-    }
-
-    if (offset_x != 0 || offset_y != 0) {
-        lv_display_set_offset(display_, offset_x, offset_y);
-    }
 }
 
 LcdDisplay::~LcdDisplay() {
