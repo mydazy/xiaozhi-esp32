@@ -1061,9 +1061,13 @@ public:
         return status_code == 200 || status_code == 204;
     }
 
+    // 控制中心切网走此优雅版（虚分发覆盖基类 Reboot 粗暴版，避免服务端 session 残留）
+    void SwitchNetwork() override { SwitchNetworkType(); }
+
     // 切换网络：优雅断 MQTT/WS → 停 audio → 写 NVS → esp_restart() · 电源复位由 ShutdownHandler 自动接管
     void SwitchNetworkType() {
         auto display = GetDisplay();
+        auto& app = Application::GetInstance();
         Settings net_settings("network", true);  // 复刻基类 SaveNetworkTypeToSettings 逻辑（基类已设 private）
         if (GetNetworkType() == NetworkType::WIFI) {
             net_settings.SetInt("type", 1);  // 1 = ML307
@@ -1072,7 +1076,7 @@ public:
             net_settings.SetInt("type", 0);  // 0 = WIFI
             display->ShowNotification(Lang::Strings::SWITCH_TO_WIFI_NETWORK);
         }
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(1000));   // 留出提示音播放时间
         Application::GetInstance().ResetProtocol();  // 与 EnterDeepSleep 对称：优雅断 MQTT/WS 避免服务端残留 session
         vTaskDelay(pdMS_TO_TICKS(500));              // 等异步 Schedule lambda 完成 close + 析构
         Application::GetInstance().GetAudioService().Stop();
