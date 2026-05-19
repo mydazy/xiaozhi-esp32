@@ -45,7 +45,9 @@ static const char *TAG = "axs5106l_touch";
 #define LONG_PRESS_TIME_US   500000   /* 500ms · 防儿童误触（300→500 与 Apple/iOS 对齐）*/
 #define DOUBLE_CLICK_TIME_US 300000   /* 300ms · iOS / Apple Watch S9 标准 · 双击必须快 */
 #define DOUBLE_CLICK_DIST    80       /* ~10.6mm · Apple 30pt 物理等效 */
-#define CLICK_MIN_FRAMES      1       /* 事件型芯片 INT 只在边沿 latch · 单帧即合法（50ms 时长 + 抖动=0 兜底）*/
+#define CLICK_MIN_FRAMES      2       /* 事件型芯片 INT 只在边沿 latch · 单帧即合法（50ms 时长 + 抖动=0 兜底）*/
+#define SINGLE_FRAME_MAX_TIME_US 200000  /* f==1 时 dur 上限 200ms · 拦截 4G 伪 press（被 RF 拉长的单帧噪声）· f>=2 不受限 */
+#define RF_ACTIVE_EDGE_HINT      3       /*  本次 press 内 INT 边沿 ≥3 视为 RF 活跃 · 单帧 tap 升级要求 2 帧 */
 #define SWIPE_MIN_TIME_US    150000   /* 150ms 不变 */
 #define SWIPE_MIN_FRAMES      4       /* 事件型芯片快滑只采 4-5 帧 · 配 manhattan 20px + 150ms 时长足以区分 */
 #define LONG_PRESS_MIN_FRAMES 30      /* 480ms @ 16ms · 配 LONG_PRESS_TIME 500ms */
@@ -789,9 +791,20 @@ static void recognize_gesture(axs5106l_touch_handle_t self, int16_t x, int16_t y
                                                               : "ok";
         const char *rf_md = (self->rf_storm_threshold == RF_S_STORM_THRESHOLD) ? "S" : "N";
 
+        /* 4G 伪 press 拦截：RF 注入的单帧坐标会被反复 INT 跳变拉长 dur 到 200-400ms，
+         * 但真单帧点击 dur 几乎都 < 150ms（真按 200ms+ 会出多帧或进长按）。
+         * 故 f==1 时收紧 dur 上限到 SINGLE_FRAME_MAX_TIME_US，f>=2 保持原 500ms。*/
+        uint64_t tap_max = (g->sample_count >= 2) ? CLICK_MAX_TIME_US
+                                                  : SINGLE_FRAME_MAX_TIME_US;
+        /* RF 活跃（本 press 边沿密集 或 处于 storm 复发窗）→ 要求 ≥2 帧，
+         * 滤掉 RF 单帧注入的伪 press；RF 安静时保持单帧灵敏（真实极速单击不受影响）。
+         * 注：e≤2 的低边沿伪触摸与真实单击在固件层不可区分，此处无法拦截。*/
+        bool rf_active = (edges >= RF_ACTIVE_EDGE_HINT) ||
+                         (now < self->storm_hot_until_us);
+        uint8_t need_frames = rf_active ? 2 : CLICK_MIN_FRAMES;
         bool tap_ok = (manhattan < CLICK_MAX_MOVE &&
-                       dur >= CLICK_MIN_TIME_US && dur < CLICK_MAX_TIME_US &&
-                       g->sample_count >= CLICK_MIN_FRAMES &&
+                       dur >= CLICK_MIN_TIME_US && dur < tap_max &&
+                       g->sample_count >= need_frames &&
                        !g->jitter_unstable);
         if (!tap_ok) {
             ESP_LOGD(TAG, "tap_ok=0 位移=%d dur=%ums f=%u j=%u unst=%d e=%u rf=%s/%s i2c=%u",
