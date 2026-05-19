@@ -672,10 +672,10 @@ std::string Ota::GetActivationPayload() {
 }
 
 esp_err_t Ota::Activate() {
-    if (!has_activation_challenge_) {
-        ESP_LOGW(TAG, "No activation challenge found");
-        return ESP_FAIL;
-    }
+//    if (!has_activation_challenge_) {
+//        ESP_LOGW(TAG, "No activation challenge found");
+//        return ESP_FAIL;
+//    }
 
     std::string url = GetCheckVersionUrl();
     if (url.back() != '/') {
