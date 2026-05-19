@@ -1535,9 +1535,9 @@ void Application::SetAecMode(AecMode mode) {
         switch (aec_mode_) {
         case kAecOff:
             settings.SetInt("deviceAec", 0);
-            audio_service_.EnableDeviceAec(false);
             Alert(Lang::Strings::RTC_MODE_OFF, "", "", Lang::Sounds::OGG_AEC_OFF);
             vTaskDelay(pdMS_TO_TICKS(2000));
+            audio_service_.EnableDeviceAec(false);
             break;
         case kAecOnServerSide:
             settings.SetInt("deviceAec", 0);
@@ -1546,9 +1546,9 @@ void Application::SetAecMode(AecMode mode) {
             break;
         case kAecOnDeviceSide:
             settings.SetInt("deviceAec", 1);
-            audio_service_.EnableDeviceAec(true);
             Alert(Lang::Strings::RTC_MODE_ON, "", "", Lang::Sounds::OGG_AEC_ON);
             vTaskDelay(pdMS_TO_TICKS(2000));
+            audio_service_.EnableDeviceAec(true);
             break;
         }
 
