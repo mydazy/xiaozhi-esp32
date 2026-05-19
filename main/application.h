@@ -180,6 +180,11 @@ private:
     std::atomic<bool> skip_next_stt_popup_{false};
     int clock_ticks_ = 0;
     int audio_send_fail_count_ = 0;
+    int reconnect_attempts_in_window_ = 0;
+    int64_t reconnect_window_start_us_ = 0;
+    static constexpr int kMaxReconnectInWindow = 3;
+    static constexpr int64_t kReconnectWindowUs = 300LL * 1000 * 1000;
+    std::atomic<bool> user_initiated_close_{false};
     TaskHandle_t activation_task_handle_ = nullptr;
 
 

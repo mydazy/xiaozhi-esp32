@@ -4,11 +4,6 @@
 
 #define TAG "ControlCenter"
 
-// 状态栏小图标走编译期符号（频繁刷新避运行时加载延迟），大图通过 ui_image_manager 运行时加载
-#include "ui_img_paths.h"
-#include "ui_image_manager.h"
-
-// 编译期 lv_image_dsc_t 全局符号声明（实体在 main/assets/icons/*.c · CMakeLists 已 GLOB 编入 SRCS）
 LV_IMG_DECLARE(ui_img_icon_signal_wifi_png);
 LV_IMG_DECLARE(ui_img_icon_signal_4g_png);
 

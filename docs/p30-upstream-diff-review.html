@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>MyDazy P30 vs 上游 xiaozhi-esp32 深度差异评审报告</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a22; --panel2:#1d2230; --line:#2a3142;
+    --fg:#e4e7ef; --muted:#8a93a6; --hi:#ffd166;
+    --keep:#4ade80; --watch:#facc15; --revisit:#f87171; --info:#60a5fa;
+    --tag-bg:#222a3a; --tag-fg:#bfd1ff;
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:14px/1.65 -apple-system,"PingFang SC","Microsoft Yahei","Segoe UI",sans-serif;}
+  .wrap{max-width:1280px;margin:0 auto;padding:32px 28px 80px;}
+  header{padding:24px 28px;border-radius:12px;background:linear-gradient(135deg,#1d2333,#15202e);border:1px solid var(--line);margin-bottom:28px;}
+  header h1{margin:0 0 6px;font-size:22px;letter-spacing:.5px}
+  header .sub{color:var(--muted);font-size:13px}
+  header .stat-row{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:18px}
+  .stat{background:#101622;padding:12px 14px;border-radius:8px;border:1px solid var(--line)}
+  .stat .v{font-size:20px;color:var(--hi);font-weight:600}
+  .stat .l{color:var(--muted);font-size:12px;margin-top:2px}
+  nav{position:sticky;top:0;background:var(--bg);padding:10px 0;border-bottom:1px solid var(--line);margin-bottom:18px;z-index:5;font-size:12.5px;display:flex;flex-wrap:wrap;gap:8px}
+  nav a{color:var(--muted);text-decoration:none;padding:4px 10px;border:1px solid var(--line);border-radius:14px}
+  nav a:hover{color:var(--hi);border-color:var(--hi)}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin-bottom:24px}
+  section h2{margin:0 0 14px;font-size:17px;color:var(--hi);border-left:3px solid var(--hi);padding-left:10px}
+  section h3{margin:18px 0 8px;font-size:14.5px;color:#f5cf86}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+  th,td{border:1px solid var(--line);padding:8px 10px;vertical-align:top;text-align:left}
+  th{background:#101620;color:#cfd4e3;font-weight:600;font-size:12.5px}
+  td code,p code{background:#0d1320;color:#9dd4ff;padding:0 4px;border-radius:3px;font-size:12.5px}
+  .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11.5px;font-weight:600;letter-spacing:.5px}
+  .b-keep{background:rgba(74,222,128,.13);color:var(--keep);border:1px solid rgba(74,222,128,.4)}
+  .b-watch{background:rgba(250,204,21,.13);color:var(--watch);border:1px solid rgba(250,204,21,.4)}
+  .b-revisit{background:rgba(248,113,113,.13);color:var(--revisit);border:1px solid rgba(248,113,113,.4)}
+  .b-info{background:rgba(96,165,250,.12);color:var(--info);border:1px solid rgba(96,165,250,.4)}
+  .tag{display:inline-block;background:var(--tag-bg);color:var(--tag-fg);padding:1px 7px;border-radius:6px;margin-right:4px;font-size:11px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .card h4{margin:0 0 6px;font-size:13.5px;color:#fff}
+  .legend{font-size:12px;color:var(--muted);margin-top:6px}
+  ul{margin:6px 0 6px 18px;padding:0}
+  li{margin:3px 0}
+  .heatbox{display:flex;align-items:center;gap:6px}
+  .heatcell{width:24px;height:18px;border-radius:3px;display:inline-block}
+  blockquote{margin:8px 0;padding:8px 14px;border-left:3px solid var(--info);background:rgba(96,165,250,.05);color:#d6deea;border-radius:0 6px 6px 0;font-size:12.5px}
+  .scale{font-size:11.5px;color:var(--muted)}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;border:1px solid var(--line);font-size:11.5px;margin-right:6px;background:#101622}
+  .small{font-size:12px;color:var(--muted)}
+  details summary{cursor:pointer;color:#cfd4e3;font-size:13px;padding:4px 0}
+  details summary:hover{color:var(--hi)}
+  footer{color:var(--muted);font-size:11.5px;text-align:center;padding-top:18px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>MyDazy P30 / P31 vs 上游 xiaozhi-esp32（main）深度差异评审报告 <span style="font-size:13px;color:#facc15;font-weight:400">· v1.1（已修订）</span></h1>
+  <div class="sub">对比基线：merge-base <code>e77dedb1</code> · 本地 <code>dev</code> 领先 328 commits、落后 70 commits · 报告时间 2026-05-19<br>
+  <span style="color:#facc15">v1.1 修订（同日）：撤回 main/wifi 的 REVISIT 误判 — 上游为 #ifdef 二选一，无法支持运行时配网模式热切换（SwitchConfigMode），本仓重写为商业必备能力，改判 KEEP。</span></div>
+  <div class="stat-row">
+    <div class="stat"><div class="v">1546</div><div class="l">总文件变更</div></div>
+    <div class="stat"><div class="v">~1.17M</div><div class="l">新增行（含 vendor）</div></div>
+    <div class="stat"><div class="v">95</div><div class="l">删除的上游开源板</div></div>
+    <div class="stat"><div class="v">3</div><div class="l">新增自研板（P30-WiFi/P30-4G/P31）</div></div>
+    <div class="stat"><div class="v">9</div><div class="l">新增 vendor 组件</div></div>
+    <div class="stat"><div class="v">12</div><div class="l">差异模块（功能拆分）</div></div>
+  </div>
+</header>
+
+<nav>
+  <a href="#legend">评判口径</a>
+  <a href="#m1">① 板级裁剪</a>
+  <a href="#m2">② 三维心智</a>
+  <a href="#m3">③ 配网体系</a>
+  <a href="#m4">④ 协议双平台</a>
+  <a href="#m5">⑤ 音频管线</a>
+  <a href="#m6">⑥ 业务功能</a>
+  <a href="#m7">⑦ 远程命令</a>
+  <a href="#m8">⑧ OTA 扩展</a>
+  <a href="#m9">⑨ UI 系统层</a>
+  <a href="#m10">⑩ MCP 工具</a>
+  <a href="#m11">⑪ 硬件驱动</a>
+  <a href="#m12">⑫ 字体资源</a>
+  <a href="#heat">风险热力图</a>
+  <a href="#summary">结论与建议</a>
+</nav>
+
+<section id="legend">
+  <h2>评判口径 · 三维基线</h2>
+  <p>本报告以三条基线综合判定每条修改的"必要 / 合理 / 过度"，并出具<strong>保守＞激进</strong>的量产前建议（项目 1 万台呆滞库存教训已沉淀为 <code>CLAUDE.md</code> 铁律）。</p>
+  <div class="grid2">
+    <div class="card">
+      <h4>基线 A · 上游 10 万开发者验证基线</h4>
+      <ul>
+        <li>78/xiaozhi-esp32 已被 10 万以上开发者使用，其原始 <code>wifi_board</code>、<code>wifi_manager</code>、<code>blufi.cpp</code>、<code>websocket_protocol</code>、<code>protocol</code> 抽象都属于<strong>"实战 hardened"</strong>。</li>
+        <li>覆盖率：任何对上游"骨干模块"的整体重写 = 把 10 万人压测过的代码替换成无压测的代码，需要强商业理由（双频、CSI、SoftAP 配网等）。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>基线 B · 项目铁律（CLAUDE.md / 量产纪律）</h4>
+      <ul>
+        <li><strong>不动状态机</strong>：12 态 <code>DeviceState</code> 不新增枚举。</li>
+        <li><strong>不抽基类</strong>：不抽 <code>ActivitySession</code> / <code>SceneNavigator</code>，<strong>第 4 个会话型</strong>出现前不动手。</li>
+        <li><strong>必登记三维取值</strong>：(A: DeviceState) × (B: ActivityType) × (C: SceneType)。</li>
+        <li>main/ 下 <strong>0 裸 xTaskCreate</strong>；PSRAM 栈不放 Core 0。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>基线 C · 商业 SKU 必备</h4>
+      <ul>
+        <li>P30-4G 必需：ML307 模组、GNSS、双网切换。</li>
+        <li>P31 必需：NFC、iBeacon、耳机检测、加速计。</li>
+        <li>三板共有：1.83″ 圆角矩形 284×240、AXS5106L 触摸、SC7A20H 加速计、AEC、Opus、按键交互。</li>
+        <li>商业差异化：教育卡 / GIF 识字、闹钟、番茄钟、待办、Flow 脚本（KPI 拉动）。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>判定标签</h4>
+      <p><span class="badge b-keep">KEEP</span> 商业必需或显著优于上游、应保留。</p>
+      <p><span class="badge b-watch">WATCH</span> 合理但存在边际成本／心智负担／风险点，需观察。</p>
+      <p><span class="badge b-revisit">REVISIT</span> 疑似过度优化、自研重叠上游骨干、应严格回归或回退。</p>
+      <p><span class="badge b-info">INFO</span> 中性陈述（如删除上游不相关板）。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ M1 ============ -->
+<section id="m1">
+  <h2>① 板级裁剪 — 删 95 块上游板，仅留 3 块自研</h2>
+  <p>
+    <span class="pill">596 D · main/boards</span>
+    <span class="pill">3 A · mydazy-*</span>
+    <span class="pill">14 M · boards/common</span>
+    <span class="pill">Kconfig -412 行</span>
+  </p>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td>删除 aipi-lite / atk-dnesp32s3-* / atom* / bread-compact* / df-* / esp-box* / kevin* 等 <strong>95 块开源板</strong>，对应 596 个文件下线；Kconfig.projbuild 由 424 行精简为 12 行</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        项目阶段为"1→量产"，三 SKU 已确定；保留无关板会拖累编译矩阵、增加 Kconfig 误配风险，并污染 release 矩阵。<strong>裁剪正确。</strong>
+        <div class="legend">代价：上游 rebase 时这些目录会持续冲突 — 但因都是删除态，rebase 时 <code>git checkout --ours</code> 即可批量解决，无业务风险。</div>
+      </td>
+    </tr>
+    <tr>
+      <td><code>main/boards/mydazy-p30-wifi/</code>、<code>mydazy-p30-4g/</code>、<code>mydazy-p31/</code> 各 ~1k-1.6k 行 <code>.cc</code>；三板共享外设（AXS5106L 触摸、SC7A20H 加速计）</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        商业 SKU 必备。<strong>但三板 1086+1037+1597=3720 行 <code>.cc</code> 重叠度高</strong>（差异主要在 ML307/GNSS/NFC/耳机的 ifdef）。
+        <div class="legend">建议：当 P32 出现时再抽 <code>mydazy_base_board.cc</code>；现在三块 SKU 写三份反而符合"不抽基类"铁律，<strong>保守＞激进</strong>。</div>
+      </td>
+    </tr>
+    <tr>
+      <td>删除 <code>boards/common/</code>：<code>adc_battery_monitor</code>、<code>afsk_demod</code>、<code>axp2101</code>、<code>blufi.cpp/h</code>（迁到 main/blufi）、<code>esp32_camera</code>、<code>esp_video</code>、<code>knob</code>、<code>nt26_board</code>、<code>press_to_talk_mcp_tool</code>、<code>rndis_board</code>、<code>sleep_timer</code>、<code>sy6970</code></td>
+      <td><span class="badge b-info">INFO</span></td>
+      <td>三 SKU 都不需要电池监测/AFSK/AXP2101/NT26/Camera/RNDIS/SY6970，删除合理。<strong>但 <code>sleep_timer.cc</code> 删除需要确认 power_save_timer 已替代</strong>（已替代 ✓）。</td>
+    </tr>
+    <tr>
+      <td>新增 <code>boards/common/education_mcp_tools.cc/h</code>、<code>ml307_gnss.cc/h</code>、<code>typec_headset.cc/h</code>、<code>power_manager.h</code></td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        ml307_gnss：直接打 AT 命令复用 Modem，零额外硬件，<strong>正确决策</strong>。<br>
+        typec_headset：P31 SKU 必备（CC 引脚检测 + 自适应主从）。<br>
+        education_mcp_tools：教育卡 P0 KPI 拉动项，挂在 MCP 工具集合理。
+      </td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ M2 ============ -->
+<section id="m2">
+  <h2>② 三维心智模型 — 三个 enum 替代散落 flag</h2>
+  <p>
+    <span class="pill">A 新增 · main/activity_type.h</span>
+    <span class="pill">A 新增 · main/scene_type.h</span>
+    <span class="pill">A 新增 · main/audio_source.h</span>
+  </p>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td><code>ActivityType</code>（kNone/kChat/kFlow/kMusic）<br><code>SceneType</code>（8 种，已实现 5/拟新增 3）<br><code>AudioSource</code>（6 种，已实现 3/预留 3）</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        <strong>明确符合"必登记三维取值"铁律</strong>，没有抽基类、只新增 enum + 查询 API <code>GetCurrentActivity()</code> / <code>GetCurrentScene()</code> / <code>GetCurrentAudioSource()</code>。
+        替代了原本散落在多处的 <code>music_player_->IsPlaying()</code>、<code>flow_engine_->IsRunning()</code> 判断，<strong>对状态机零侵入</strong>（12 态 DeviceState 不动）。
+      </td>
+    </tr>
+    <tr>
+      <td>SceneType 预留 <code>kPomodoro / kTodo / kRoleSwitcher</code> 三个值但代码未实现</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        预留 enum 值<strong>不算"过度"但属于"YAGNI 边缘"</strong> — 因为这些值出现在 <code>SceneTypeToString()</code> switch 中，要求每个新值都改两处。
+        <div class="legend">缓解：架构文档已声明"拟新增"，且每个值只是 1 字节 enum，无运行时代价；可保留作为 roadmap 可视化。</div>
+      </td>
+    </tr>
+    <tr>
+      <td>AudioSource 预留 <code>kAlarmBell / kPomodoroBell / kReminder</code> 但当前阶段只用 None/Tts/Mp3</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        和 SceneType 同理。<strong>注意：alarm_ringer.cc 已落地</strong>，AlarmBell 即将真正使用，所以这 3 个预留与 P1 实现是绑定的（不是空头支票）。
+      </td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ M3 ============ -->
+<section id="m3">
+  <h2>③ 配网体系 — main/wifi/ 完整重写 + main/blufi/ BLE + iBeacon</h2>
+  <p>
+    <span class="pill">13 A · main/wifi/</span>
+    <span class="pill">8 A · main/blufi/</span>
+    <span class="pill">M · wifi_board.cc +691/-230</span>
+  </p>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td><code>main/wifi/wifi_station.cc/h</code>：自研多 AP 凭证管理 + 扫描缓存(60s) + 运行时 <code>SetMode(STA/APSTA)</code> 切换<br><code>wifi_ap.cc/h</code>：SoftAP 配网门户 + DNS 劫持<br><code>dns_server.cc/h</code>：Captive Portal DNS<br><code>ssid_manager.cc/h</code>：NVS 凭证持久化<br><code>wifi_csi.cc/h</code>：人体接近检测（默认禁用）<br><code>blufi.cc/h</code>：Controller Init 与 Start 解耦<br>对应 <code>wifi_board.cc</code> 重写 +691/-230，新增 <strong><code>SwitchConfigMode()</code> 配网模式热切换</strong></td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        <strong>评审复核（2026-05-19 修正）</strong>：本条曾被初判为 REVISIT，复核代码事实后改判 <strong>KEEP</strong>。<br>
+        <em>核心证据 — 上游做不到的能力：</em><br>
+        ① 上游 <code>wifi_board.cc</code> 用的是<strong>编译期 #ifdef 二选一</strong>（<code>CONFIG_USE_HOTSPOT_WIFI_PROVISIONING</code> <code>#elif</code> <code>CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING</code>），运行时无法切换。<br>
+        ② 上游 <code>WifiManager</code> 没有 <code>SetMode(STA/APSTA)</code> 运行时切换 API；上游 <code>Blufi</code> 没有 <em>Controller Init</em> 与 <em>Start</em> 解耦的设计——<strong>拆不下来、装不回去</strong>。<br>
+        ③ 本仓 <code>SwitchConfigMode()</code>（wifi_board.cc:208-303）实现 Blufi ↔ SoftAP 真正的<strong>运行时热切换</strong>，关键工程细节：
+        <ul>
+          <li>BLE 控制器初始化触发 flash read → 禁用 cache → LVGL 渲染访问 PSRAM 会阻塞 10+ 秒 → Task WDT；修复用 <code>lvgl_port_lock(1000)</code> 强制 LVGL 暂停渲染等锁，已注释"<em>修复：lvgl_port_lock 强制 LVGL 暂停渲染，让它在等锁而不是在 PSRAM 阻塞</em>"。</li>
+          <li>BLE ↔ WiFi APSTA 共存冲突回避：BLE 启动前强制 <code>SetMode(STA)</code> + 200ms 隔离窗口。</li>
+          <li>切换失败自动降级回原模式（<code>new_mode = old_mode</code> + 重启原模式）。</li>
+          <li>NVS 持久化 <code>wifi.blufi</code> 字段，重启保留用户选择。</li>
+        </ul>
+        <em>商业必备：</em>用户在家中老人 / 残障 / 无智能手机蓝牙能力等场景，可在现场<strong>不重启</strong>切换"蓝牙配网 ↔ 热点配网"，是售后服务的关键能力。<br>
+        <em>仍要注意的工程点（保留观察）：</em><br>
+        ① <code>MAX_SCAN_RETRY=4</code> / <code>SCAN_WAIT_MS=5000</code> 两个魔数是踩坑后的硬编码，建议提到 Settings 可远程下发；<br>
+        ② <code>lvgl_port_lock</code> 超时时仍继续 BLE 初始化（注释自标"有死锁风险"），需要监控期 Crash 日志验证是否触发；<br>
+        ③ 切换状态机 <code>StartConfigMode → StopConfigMode → SwitchConfigMode</code> 的并发安全（防用户连续点击）建议加 mutex / debounce。
+      </td>
+    </tr>
+    <tr>
+      <td><code>main/blufi/blufi.cc/h/blufi_init.c/blufi_security.c</code>：BLE 配网纯数据通道（与凭证验证解耦）<br><code>blufi/ibeacon.cc/h</code>：iBeacon 扫描（仅 P31）</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        上游 <code>blufi.cpp</code> 已删除并迁入 main/blufi/，新加 <code>validator</code> 抽象把"凭证验证"从协议栈剥离，<strong>符合 SRP</strong>。iBeacon 仅 P31 编译，<code>ifdef</code> 收敛得很干净，<strong>属于 SKU 必备</strong>。
+      </td>
+    </tr>
+    <tr>
+      <td>WiFi CSI 默认禁用（NVS <code>csi.enabled=0</code>），远程命令 <code>{"type":"csi","enabled":true}</code> 开启</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        "默认禁用 + 远程下发" 是教科书级的 feature gate，<strong>正确做法</strong>。CSI 在量产期当作"差异化卖点"按需开启，不影响主路径稳定性。
+      </td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ M4 ============ -->
+<section id="m4">
+  <h2>④ 协议层 — 新增 baidu / joyai 双 WebSocket 协议</h2>
+  <p>
+    <span class="pill">A · websocket_baidu_protocol</span>
+    <span class="pill">A · websocket_joyai_protocol</span>
+    <span class="pill">M · websocket_protocol</span>
+    <span class="pill">M · mqtt_protocol</span>
+  </p>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td><code>protocols/websocket_baidu_protocol.cc/h</code>：百度 RTC 大模型互动协议（20ms OPUS 帧、Token 预取、保活 WS）</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        商业上百度通道是<strong>差异化卖点</strong>（与小智官方分流抗依赖单点）。代码结构对齐 <code>websocket_protocol</code> 良好。<br>
+        <strong>风险点</strong>：百度要求 20ms 帧、其它要求 60ms 帧 → 触发 <code>g_opus_frame_duration_ms</code> 全局变量切换 + Encoder 重建 + AFE 重启（见 § 五），<strong>横向耦合较强</strong>。
+      </td>
+    </tr>
+    <tr>
+      <td><code>protocols/websocket_joyai_protocol.cc/h</code>：JoyAI 通道</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>同 baidu。两个新协议都需要后端业务背书；如果 baidu 是主路径、joyai 是 backup，<strong>建议至少其中一个走 "Flag 启用"</strong>而非编译期默认。</td>
+    </tr>
+    <tr>
+      <td><code>Application::SwitchProtocol()</code> — 不重启切平台（关连接 → 重做 OTA → 按新配置重建 protocol，仅 RemoteCmd "reload" 触发）</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        OTA 平台切换刚需。<strong>不依赖重启</strong>对量产远程治理是巨大胜利。已经走 RemoteCmd 通道，<strong>耦合面收敛在 Application + Ota</strong>。
+      </td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ M5 ============ -->
+<section id="m5">
+  <h2>⑤ 音频管线 — Opus 动态帧长 / PLC underrun 补偿 / AEC 噪声门 / Task 重分核</h2>
+  <p>
+    <span class="pill">M · audio_service.cc +246</span>
+    <span class="pill">M · audio_service.h +58/-26</span>
+    <span class="pill">M · audio_codec.cc +21</span>
+    <span class="pill">M · afe_wake_word</span>
+    <span class="pill">M · custom_wake_word</span>
+  </p>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td>引入全局 <code>g_opus_frame_duration_ms</code> + <code>SetFrameDuration()</code>，运行时切换帧长（60→20ms 给百度）</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        逻辑上合理 — 不同后端要求不同帧长。<br>
+        <strong>实现代价</strong>：① 引入全局可变状态（一处 extern int）；② 切换时需重建 Encoder + 重启 AFE，<code>SetFrameDuration()</code> 是耗时操作（200-500ms）；③ <code>encoder_mutex_</code> 是新引入的并发同步面。
+        <blockquote>建议：① 在<strong>协议建链前</strong>由 protocol_factory 写入 g_opus_frame_duration_ms，避免运行中切换；② 切换路径加保护：只能在 <code>kIdle</code> 状态发生，违反则 abort。</blockquote>
+      </td>
+    </tr>
+    <tr>
+      <td>PLC underrun 补偿：playback_queue 低水位时主动合成 PLC 帧 + 末样本 fade-out（<code>kMaxUnderrunPlcFrames=3</code>、<code>kPlaybackLowWatermark=2</code>）</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        弱网 jitter 补偿，效果直接（用户感知"卡顿少"）。常量做了三阶段：阶段1 真包→ 阶段2 PLC合成→ 阶段3 静音fade-out，<strong>设计深度优于上游</strong>。<br>
+        <strong>判定关键</strong>：注释中写明 "consecutive_underrun_plc_ 超过 3 帧不再尝试" — 没有无限补偿；统计字段已挂在 <code>DebugStatistics</code>，<strong>具备可观测性</strong>。
+      </td>
+    </tr>
+    <tr>
+      <td>AEC 后软件增益 + 噪声门：<code>kNoiseGateRmsSq = 100 * 200</code>（RMS 200 ≈ -44 dBFS）</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        提升远场拾音质量的实用补丁，<strong>但增益值是硬编码常量</strong>。<br>
+        建议：把 <code>aec_gain_linear()</code> 暴露到 Codec 已经做了 — 这条 OK；<code>kNoiseGateRmsSq</code> 应做成 Settings 可调（量产线上不同环境噪底差异大）。
+      </td>
+    </tr>
+    <tr>
+      <td>FreeRTOS task 重分核（2026-04-29）：opus_codec 留 Core 0 / audio_input + AEC Feed 移 Core 1 / 14 处任意 Core 漂移修正为 0；audio_input、audio_output 优先级 P8→P10</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        <strong>方向完全正确</strong>。已在 CLAUDE.md / docs/p30-architecture.md § 四登记并复测：解决了 Task WDT reboot；优先级抬到 P10 高于 LVGL P5 是正确的实时性决策。
+        <div class="legend">代价：LVGL 30→25 fps，但人眼无感知 — 用 UI 流畅度换音频稳定，<strong>量产期正确权衡</strong>。</div>
+      </td>
+    </tr>
+    <tr>
+      <td>替换 codec 矩阵：删 es8311 / es8374 / es8388 / es8389 / dummy_audio_codec，新增 es7111_audio_codec</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>三 SKU 用的就是 ES7111，删除其他 codec 与板级裁剪一致。</td>
+    </tr>
+    <tr>
+      <td>删除 <code>esp_wake_word</code>，保留 afe_wake_word（默认）+ custom_wake_word；远程命令 <code>{"type":"wakeword","mode":"afe|custom"}</code> 切换</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>esp_wake_word 已被 espressif 标记 deprecated。AFE 是 espressif 官方推荐，custom 给定制需求。<strong>正确</strong>。</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ M6 ============ -->
+<section id="m6">
+  <h2>⑥ 业务功能新增 — Flow / Alarm / Pomodoro / Music / Edu</h2>
+  <p>
+    <span class="pill">A · flow_engine</span>
+    <span class="pill">A · alarm_manager + alarm_ringer</span>
+    <span class="pill">A · pomodoro_manager</span>
+    <span class="pill">A · music_player</span>
+    <span class="pill">A · edu_scene_pool</span>
+    <span class="pill">A · device_state_event</span>
+  </p>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td><code>flow_engine.cc/h</code>：通用流程引擎（原 LiveCompanion 改名），HTTP 拉 JSON 脚本顺序播放 TTS/TTAI，支持高优先级用户打断后恢复</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        命名遵循 CLAUDE.md "Flow 双层命名"（类名 <code>FlowEngine</code> + enum <code>ActivityType::kFlow</code>）。<br>
+        保留远程命令 <code>live_companion.start</code> 兼容字段，<strong>不会破坏已发货设备</strong>。<br>
+        <strong>无基类抽 — 即使后续要拆 ScriptProvider，仍是文件级而非状态机级</strong>，符合铁律。
+      </td>
+    </tr>
+    <tr>
+      <td><code>alarm_manager.cc/h</code>：8 固定槽位 + NVS 持久化 + 每秒 CLOCK_TICK 触发；<code>audio/alarm_ringer.cc/h</code> 铃声播放</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>P1 KPI 拉动项。槽位固定为 8，<strong>避免动态分配</strong>，量产期稳定性优先。AddAlarmAuto 加了原子分配防 GetId→Add 竞争 — <strong>有踩坑后的工程经验</strong>。</td>
+    </tr>
+    <tr>
+      <td><code>pomodoro_manager.cc/h</code>：番茄钟（esp_timer，不进 ActivityType 因属于"后台服务型"）</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>正确地把 Pomodoro 归类为"后台服务型"，<strong>不入侵 ActivityType enum</strong> — 符合三维心智模型的入选标准。</td>
+    </tr>
+    <tr>
+      <td><code>audio/music_player.cc/h</code>：MP3 流式播放（独占音频，CloseAudioChannel 实现）；对应 vendor <code>components/mydazy__esp_mp3_player/</code></td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>属于 <code>ActivityType::kMusic</code>，<strong>登记上墙</strong>了。封装在 components 内，对 main/ 干净。</td>
+    </tr>
+    <tr>
+      <td><code>edu_scene_pool.cc/h</code>：教育卡场景池</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        CLAUDE.md 注明 "教育卡 P0、依赖服务端 schema、4-6 周"。<strong>代码先落地、服务端 schema 未定</strong>是抽象提前的迹象。<br>
+        <strong>风险</strong>：服务端真定型时若 schema 不同，<code>edu_scene_pool</code> 现有数据结构可能要返工。<br>
+        建议：把 edu_scene_pool 标"feature_flag=off"，等服务端联调通过再 OTA 启用。
+      </td>
+    </tr>
+    <tr>
+      <td><code>device_state_event.cc/h</code>：DeviceState 状态变化事件订阅（替代上游单一 callback）</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        多订阅者模式合理（Auto Chat、UI、LED 等多模块订阅）。<br>
+        <strong>风险</strong>：发布订阅模式增加心智 — 谁在订阅、订阅 ordering 是否影响最终行为。建议保留事件溯源日志（一行 ESP_LOGI 即可）。
+      </td>
+    </tr>
+    <tr>
+      <td><code>Application::RequestAutoChatOnIdle()</code> + <code>ScheduleDelayedWake()</code> + <code>delayed_wake_timer_</code></td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        把"开机自动对话"从 board 的 vTaskDelay+ToggleChat <strong>改成 state listener 在首次进 Idle 时触发</strong> — 这是上游 board 内部 hack 的清理，<strong>正解</strong>。CLAUDE.md 已把 "欢迎音自动 ToggleChatState" 列为待修项，这一改动正是该项的实现。
+      </td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ M7 ============ -->
+<section id="m7">
+  <h2>⑦ 远程命令通道 — RemoteCmd 25+ 命令字</h2>
+  <p>
+    <span class="pill">A · remote_cmd.cc/h</span>
+    <span class="pill">协议字段 type=custom · payload.message=JSON</span>
+  </p>
+  <p>
+    支持命令：<code>reboot</code> / <code>update/ota</code> / <code>reconnect</code> / <code>wakeup</code> / <code>tts</code> / <code>ttai</code> /
+    <code>volume</code> / <code>gain</code> / <code>download</code> / <code>audio_debug</code> / <code>reload</code> / <code>sleep</code> /
+    <code>flow</code> / <code>stt_url</code> / <code>music_play/stop/pause/resume</code> / <code>update_prompt</code> /
+    <code>mic_calibrate</code> / <code>wakeword</code> / <code>csi</code> 等。
+  </p>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td>把 25+ 远程命令收口在 <code>RemoteCmd</code> 一个类，回避把它们散落到 Application / Board / Protocol</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        <strong>典型的"上游 rebase 友好"实现</strong> — CLAUDE.md 明确"新增模块尽量挂在 RemoteCmd / MCP Tool 中，不动 Application 主结构"，本模块完全符合。<br>
+        25+ 命令字数量稍多但结构清晰（OnXxx 方法 + Handle 路由），<strong>易于上游 cherry-pick</strong>。
+      </td>
+    </tr>
+    <tr>
+      <td><code>stt_url</code> 命令：把 STT 文本异步 POST 到外部地址</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        私有云回灌通道。<strong>注意</strong>：POST 频率高时可能产生 OTA HTTP task 与该任务的资源争抢。<br>
+        建议：① 限频；② 失败重试上限；③ 与 OTA / Activation HTTP 共用线程池。
+      </td>
+    </tr>
+    <tr>
+      <td><code>update_prompt</code>：教育卡动态切换 system prompt（<code>model_type=2 视觉 / 0 聊天 / 空 prompt 恢复默认</code>）</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        多模态 prompt 切换属于教育卡 P0 必备。<strong>风险</strong>：prompt 是字符串而非枚举，<code>model_type</code> 用 int 是好的，但 prompt 长度无上限会带来 BLE/WS 帧大小风险。建议设上限 4 KB。
+      </td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ M8 ============ -->
+<section id="m8">
+  <h2>⑧ OTA 扩展 — Switch / ReportStatus / Download / PostToOta</h2>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td><code>Ota::RequestSwitch(type, data)</code>：NFC/iBeacon/自定义触发智能体切换</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        P31 NFC 业务的必备入口。POST 到 <code>OTA_URL/switch</code>，调用后由后端推下新的智能体配置；触发回到 <code>SwitchProtocol()</code> 闭环，<strong>架构完整</strong>。
+      </td>
+    </tr>
+    <tr>
+      <td><code>Ota::ReportStatus()</code>：设备状态主动上报</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>SaaS 设备治理必备。</td>
+    </tr>
+    <tr>
+      <td><code>Ota::Download(url, max_size, buffer, size)</code>：通用 PSRAM HTTP GET</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        通用下载工具方法，封装在 Ota 类内（而非独立 <code>HttpDownloader</code>）<strong>有点别扭</strong>但实用。<br>
+        风险：max_size 没有默认值需调用方传入 — 容易出现 0 或 -1 导致越界。建议：① 加默认上限 1 MB；② 改名 <code>Ota::HttpGet</code> 更直白。
+      </td>
+    </tr>
+    <tr>
+      <td>OTA 类 +343 行，包含动态图片下载、状态上报、协议切换</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        Ota 类正在<strong>成为"杂烩"</strong>。建议：当业务下载需求确定后，把 Download 拆到独立 <code>HttpUtil</code>，<code>Ota</code> 回到"固件升级 + 激活"主线。
+      </td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ M9 ============ -->
+<section id="m9">
+  <h2>⑨ UI 系统层 — UiDisplay + ControlCenter</h2>
+  <p>
+    <span class="pill">A · ui_display.cc/h</span>
+    <span class="pill">A · ui/widgets/control_center.cc</span>
+    <span class="pill">A · ui/resources/ui_image_manager</span>
+    <span class="pill">A · ui/theme/ui_config.h</span>
+    <span class="pill">M · lcd_display.cc/h +多</span>
+  </p>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td>新增类层次 <code>Display → LvglDisplay → LcdDisplay → SpiLcdDisplay → UiDisplay</code>，承载时钟主屏 / 配网 QR / 激活页 / Chat / Player / ControlCenter 共 5+ 场景，全部由 SceneType enum 调度</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        架构注释明确写 "不拆子类"，符合 CLAUDE.md "不抽 SceneNavigator 基类（LVGL screen 已经是 Scene 抽象）"铁律。<strong>正解</strong>。
+      </td>
+    </tr>
+    <tr>
+      <td>CMakeLists.txt 显式注释屏蔽 <code>ui_image_manager.cc</code> + <code>control_center.cc</code>：<br><em>"// [量产稳定期] 暂屏蔽 main/display/ui 整套依赖 ... 待基础功能稳定后恢复"</em></td>
+      <td><span class="badge b-revisit">REVISIT</span></td>
+      <td>
+        <strong>这是非常清晰的自我标注</strong>：代码已写但量产期不编。CLAUDE.md "硬件事实速查"却说 "ControlCenter <strong>已完整实现</strong>（main/display/control_center.cc 6 宫格）" — <strong>文档与代码不一致</strong>。<br>
+        建议：① 立刻在 docs/p30-architecture.md 修正 ControlCenter 状态为"已实现但量产期未编"；② 给个明确"恢复时机"判据（如版本 2.3.x、灰度池 >5%、Crash 率 < x）。
+      </td>
+    </tr>
+    <tr>
+      <td>UI 资源大量新增：<code>ui_img_paths.h</code>、<code>ui_image_manager.cc</code>、<code>ui_config.h</code>、<code>main/assets/icons/*</code>、<code>main/assets/twemoji_64/*</code>、<code>main/assets/image/*</code></td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>商业差异化必要资源。资源量大但走 partition table V2，<strong>不占内部 flash 主区</strong>。</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ M10 ============ -->
+<section id="m10">
+  <h2>⑩ MCP 工具 — 加锁 + Education Tools</h2>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td><code>mcp_server.cc</code> +403/-178：大幅重构（含 <code>mutable std::mutex tools_mutex_</code> 保护 tools_）</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>
+        上游 mcp_server 的 tools_ 是非线程安全的 vector；本仓 20+ 工具并发注册会引发数据竞争。<strong>加 mutex 是合理修复</strong>。<br>
+        <strong>风险</strong>：mutex 颗粒度需要复测 — 工具调用持锁时间不能太长，否则会卡 protocol 处理。
+      </td>
+    </tr>
+    <tr>
+      <td><code>boards/common/education_mcp_tools.cc</code>：教育场景 MCP 工具集</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>与 edu_scene_pool 同理，依赖服务端 schema 联调。</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ M11 ============ -->
+<section id="m11">
+  <h2>⑪ 硬件驱动 vendor 化（9 个 components）</h2>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td><code>components/78__esp-ml307/</code>（4G Modem）<br><code>components/78__xiaozhi-fonts/</code>（字体）<br><code>components/espressif__esp-sr/</code>（语音识别）</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>上游官方组件，vendored 是为了锁版本防 idf_component_manager 远端漂移。</td>
+    </tr>
+    <tr>
+      <td><code>components/mydazy__esp_sc7a20h/</code> 加速计<br><code>components/mydazy__esp_mp3_player/</code> MP3<br><code>components/esp_lcd_touch_axs5106l/</code> 触摸<br><code>components/esp_nfc_ws1850s/</code> NFC（P31）<br><code>components/mydazy__i2c_bus_worker/</code> I2C 总线<br><code>components/mydazy__codec_ctrl_i2c/</code> codec 控制</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>三 SKU 必备驱动。<strong>建议：</strong>把 mydazy__ 前缀的组件后续推到 espressif 组件库或独立仓，<strong>避免主仓臃肿</strong>。</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ M12 ============ -->
+<section id="m12">
+  <h2>⑫ 字体与资源 — 切到 font_maru/font_deng + 大量本地化 ogg</h2>
+  <table>
+    <tr><th style="width:24%">具体修改</th><th style="width:11%">判定</th><th>分析与推演</th></tr>
+    <tr>
+      <td>BUILTIN_TEXT_FONT 由 <code>font_puhui_14_1</code> 改为 <code>font_maru_common_20_4</code><br>BUILTIN_ICON_FONT 由 <code>font_awesome_14_1</code> 改为 <code>font_awesome_20_4</code><br>EMOTE_RESOLUTION 由 <code>320_240</code> 改为 <code>284_240</code></td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>三 SKU 屏 1.83″ 圆角矩形 <strong>284×240</strong>，字体由 14px 升级 20px 匹配屏分辨率。<strong>正确</strong>。</td>
+    </tr>
+    <tr>
+      <td>新增 23+ 个本地化 ogg：<code>aec_off/on</code> / <code>audio_test</code> / <code>ble_config</code> / <code>charge</code> / <code>connect/disconnect</code> / <code>factory_reset</code> / <code>network_4g/wifi</code> / <code>power_off</code> / <code>reboot</code> / <code>shutdown</code> / <code>volume_max/min</code> / <code>wakeup</code> ...</td>
+      <td><span class="badge b-keep">KEEP</span></td>
+      <td>商业产品本地化必备，<strong>体验差异化</strong>。</td>
+    </tr>
+    <tr>
+      <td>新增字体 <code>font_deng_48_4 / font_deng_88_4 / font_edu_48 / font_maru_*</code> 共 8 个</td>
+      <td><span class="badge b-watch">WATCH</span></td>
+      <td>
+        字体数量多 → flash 占用大。建议：① 落位表（哪个字体用于哪个 Scene）；② 是否能压成 1-2 个综合字体降存储。
+      </td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ Heat Map ============ -->
+<section id="heat">
+  <h2>风险热力图 · 12 模块综合</h2>
+  <p class="scale">列 → 必要性 / 风险 / 心智负担 / 回退难度 / 与上游 rebase 友好度（绿=低风险/好；黄=中；红=高）</p>
+  <table>
+    <tr><th>模块</th><th>必要性</th><th>风险</th><th>心智负担</th><th>回退难度</th><th>rebase 友好度</th><th>综合</th></tr>
+    <tr><td>① 板级裁剪</td>           <td>🟢 高</td><td>🟢 低</td><td>🟢 低</td><td>🟢 易</td><td>🟢 高</td><td><span class="badge b-keep">KEEP</span></td></tr>
+    <tr><td>② 三维心智 enum</td>      <td>🟢 高</td><td>🟢 低</td><td>🟡 中</td><td>🟢 易</td><td>🟢 高</td><td><span class="badge b-keep">KEEP</span></td></tr>
+    <tr><td>③ 配网体系</td>            <td>🟢 高</td><td>🟡 中</td><td>🟡 中</td><td>🔴 难</td><td>🔴 低</td><td><span class="badge b-keep">KEEP</span>（运行时热切换 · 上游做不到）</td></tr>
+    <tr><td>④ 协议双平台</td>          <td>🟢 高</td><td>🟡 中</td><td>🟡 中</td><td>🟡 中</td><td>🟡 中</td><td><span class="badge b-watch">WATCH</span></td></tr>
+    <tr><td>⑤ 音频管线</td>            <td>🟢 高</td><td>🟡 中</td><td>🟡 中</td><td>🟡 中</td><td>🟡 中</td><td><span class="badge b-keep">KEEP</span> (核心) + <span class="badge b-watch">WATCH</span> (帧长切换)</td></tr>
+    <tr><td>⑥ 业务功能</td>            <td>🟢 高</td><td>🟡 中</td><td>🟡 中</td><td>🟢 易</td><td>🟢 高</td><td><span class="badge b-keep">KEEP</span> · edu_pool <span class="badge b-watch">WATCH</span></td></tr>
+    <tr><td>⑦ RemoteCmd</td>            <td>🟢 高</td><td>🟢 低</td><td>🟡 中</td><td>🟢 易</td><td>🟢 高</td><td><span class="badge b-keep">KEEP</span></td></tr>
+    <tr><td>⑧ OTA 扩展</td>             <td>🟢 高</td><td>🟡 中</td><td>🟡 中</td><td>🟡 中</td><td>🟡 中</td><td><span class="badge b-watch">WATCH</span></td></tr>
+    <tr><td>⑨ UI 系统层</td>            <td>🟢 高</td><td>🟡 中</td><td>🟡 中</td><td>🟡 中</td><td>🟡 中</td><td><span class="badge b-keep">KEEP</span> · ControlCenter <span class="badge b-revisit">REVISIT</span></td></tr>
+    <tr><td>⑩ MCP 工具</td>             <td>🟢 高</td><td>🟢 低</td><td>🟢 低</td><td>🟢 易</td><td>🟢 高</td><td><span class="badge b-keep">KEEP</span></td></tr>
+    <tr><td>⑪ 硬件驱动 vendor</td>      <td>🟢 高</td><td>🟢 低</td><td>🟢 低</td><td>🟢 易</td><td>🟢 高</td><td><span class="badge b-keep">KEEP</span></td></tr>
+    <tr><td>⑫ 字体与资源</td>           <td>🟢 高</td><td>🟢 低</td><td>🟢 低</td><td>🟢 易</td><td>🟢 高</td><td><span class="badge b-keep">KEEP</span></td></tr>
+  </table>
+</section>
+
+<!-- ============ Summary ============ -->
+<section id="summary">
+  <h2>结论与建议</h2>
+
+  <h3>1. 大盘判定</h3>
+  <p>本次差异<strong>整体合理性高、量产化纪律执行良好</strong>。三大铁律（不动状态机 / 不抽基类 / 必登记三维取值）实际落地基本到位 —— 12 态 DeviceState 未被新增，三维 enum 正确登记，<code>ActivitySession</code> / <code>SceneNavigator</code> 基类没有被冒进抽象。上游 rebase 友好度方面，新增模块（<code>RemoteCmd</code>、<code>FlowEngine</code>、<code>AlarmManager</code>、<code>PomodoroManager</code>、<code>MusicPlayer</code>）几乎都挂在<strong>新文件</strong>，对 <code>Application</code> 的"侵入"控制在 +504 行（多为 API 暴露）。</p>
+
+  <h3>2. "过度优化"候选（按风险降序 · 已剔除原 main/wifi 误判）</h3>
+
+  <blockquote>
+    <strong>评审修订（2026-05-19）：</strong>原报告把 <em>main/wifi/ 完整重写</em> 列为最高风险的过度优化候选，<strong>判定有误，已撤回</strong>。<br>
+    复核事实：上游 <code>wifi_board.cc</code> 用编译期 <code>#ifdef</code> 二选一，<strong>不存在</strong> Blufi ↔ SoftAP 运行时热切换的能力；<code>WifiManager</code> / <code>Blufi</code> 也未提供 Controller Init 与 Start 解耦的接口。本仓 <code>SwitchConfigMode()</code> 是商业必备能力（家中老人 / 残障 / 无蓝牙智能手机现场切换配网方式），属于<strong>不得不重写</strong>的骨干替换，已改判 KEEP（见 § ③）。
+  </blockquote>
+
+  <div class="card" style="border-color:rgba(248,113,113,.4)">
+    <h4>① <span class="badge b-revisit">REVISIT</span> ControlCenter / UI Image Manager 已写未编</h4>
+    <p>CMakeLists.txt 明确注释屏蔽 <code>ui_image_manager.cc</code> + <code>control_center.cc</code>，但 <code>CLAUDE.md</code> 和 <code>docs/p30-architecture.md</code> 中却写 "ControlCenter <strong>已完整实现</strong>"。<strong>文档与代码漂移</strong>是量产期的隐性陷阱。<br>
+    <strong>建议</strong>：① 立刻修订文档为"已实现，量产期未编译"；② 给"恢复编译"明确触发条件（如版本 2.3.x、灰度 5%、Crash 率 < 阈值）；③ 否则建议 git revert 删除该路径，待重启时按新需求重写（这是"代码先于需求"的典型，1 万台呆滞库存的教训正出于此）。</p>
+  </div>
+
+  <div class="card" style="border-color:rgba(250,204,21,.4);margin-top:10px">
+    <h4>② <span class="badge b-watch">WATCH</span> OPUS 全局帧长动态切换 + AEC 后增益硬编码</h4>
+    <p>百度协议要求 20ms 帧、其它要求 60ms 帧，引入 <code>g_opus_frame_duration_ms</code> 全局变量 + <code>SetFrameDuration()</code>（耗时 200-500ms，重启 AFE）。逻辑合理但<strong>切换路径未保护</strong>，可能在非 Idle 态被调用引发音频中断。<br>
+    <strong>建议</strong>：① 切换收口到 <code>protocol_factory</code>，仅在建链前调用；② 强制 <code>SetFrameDuration()</code> 在 <code>kIdle</code> 态执行，违反则 abort；③ <code>kNoiseGateRmsSq</code> 改为 Settings 可调。</p>
+  </div>
+
+  <h3>3. 三个 "看上去不必要、但实际正解" 的修改</h3>
+  <ul>
+    <li><strong>三维 enum + 查询 API</strong>：表面看像抽象提前，实际是 CLAUDE.md 铁律的精确落地，是<strong>替代散落 IsXxx flag 的成本最低办法</strong>。✅</li>
+    <li><strong>FlowEngine 改名</strong>：保留 <code>live_companion.start</code> 命令字段做向后兼容，<strong>已发货设备零影响</strong>。✅</li>
+    <li><strong>FreeRTOS task 双核重平衡</strong>：opus_codec 必须留 Core 0、audio_input + AEC Feed 必须 Core 1，已通过测试解决 Task WDT reboot。<strong>方向完全正确</strong>，是有踩坑实证的硬核工程修复。✅</li>
+  </ul>
+
+  <h3>4. 量产前 Top-5 必做项</h3>
+  <table>
+    <tr><th style="width:8%">序</th><th style="width:32%">事项</th><th style="width:14%">归属模块</th><th>验收口径</th></tr>
+    <tr><td>1</td><td>给 <code>SwitchConfigMode()</code> 加 debounce + mutex（防用户连续点击）；监控 <code>lvgl_port_lock</code> 超时日志</td><td>③ 配网体系</td><td>连点 5 次不死锁；超时日志接入 Crash 监控</td></tr>
+    <tr><td>2</td><td>把 <code>SCAN_WAIT_MS</code> / <code>MAX_SCAN_RETRY</code> / <code>kNoiseGateRmsSq</code> 三个魔数提到 Settings 远程下发</td><td>③ 配网体系 + ⑤ 音频管线</td><td>NVS 字段就位；RemoteCmd 可下发</td></tr>
+    <tr><td>3</td><td>修订 docs 中 "ControlCenter 已完整实现" 描述为"已实现但量产期未编"，明确恢复编译触发条件</td><td>⑨ UI 系统层</td><td>doc/code 同步</td></tr>
+    <tr><td>4</td><td>给 <code>SetFrameDuration()</code> 加 kIdle 态守卫</td><td>⑤ 音频管线</td><td>非 Idle 调用直接 abort，单测覆盖</td></tr>
+    <tr><td>5</td><td>把 <code>edu_scene_pool</code> 标 feature_flag=off，等服务端 schema 联调</td><td>⑥ 业务功能</td><td>NVS 默认 off；远程命令可开</td></tr>
+  </table>
+
+  <h3>5. 与上游 rebase 友好度自检</h3>
+  <p>上游近 70 个 commit 落后中，本仓的差异已经做到了"<strong>新增挂新文件</strong>"的纪律性 — 唯二的高耦合点是 <code>main/wifi/wifi_board.cc</code> 重写 +691/-230 与 <code>main/audio/audio_service.cc</code> +246 行修改。<strong>wifi_board.cc 因为承载配网模式热切换，注定无法 fast-forward</strong>，rebase 时需要逐 commit 重放（约 5-10 个语义提交）；其他模块基本是 fast-forward。</p>
+</section>
+
+<footer>
+  报告基于 <code>git diff xiaozhi/main...HEAD</code> 静态分析，结合 <code>docs/p30-architecture.md</code>、<code>docs/p30-architecture-review.md</code> 与 <code>CLAUDE.md</code> 三大文档源交叉验证。<br>
+  生成时间 2026-05-19 · 适用版本 MyDazy P30-WiFi / P30-4G / P31 · ESP-IDF 5.5
+</footer>
+
+</div>
+</body>
+</html>

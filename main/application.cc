@@ -373,8 +373,9 @@ void Application::Run() {
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
                     if (++audio_send_fail_count_ >= 100) {
-                        ESP_LOGW(TAG, "Audio send 连续失败 100 帧 → CloseAudioChannel");
+                        ESP_LOGW(TAG, "Audio send 连续失败 100 帧 → 退出对话");
                         audio_send_fail_count_ = 0;
+                        SetDeviceState(kDeviceStateIdle);
                         if (protocol_) protocol_->CloseAudioChannel();
                     }
                     break;
@@ -694,6 +695,7 @@ void Application::InitializeProtocol() {
     
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+        user_initiated_close_.store(false);  // 通道新开 → 清残留退出意图，防下次弱网掉线被误判
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
@@ -706,14 +708,54 @@ void Application::InitializeProtocol() {
         // 弱网保护：Listening/Speaking 中断线 → 后台重连 3 次（500/1000/1500ms 退避）
         auto state_at_close = GetDeviceState();
         if (state_at_close == kDeviceStateListening || state_at_close == kDeviceStateSpeaking) {
-            ESP_LOGW(TAG, "Audio channel closed in %s, attempt reconnect",
-                     state_at_close == kDeviceStateListening ? "Listening" : "Speaking");
+            // 用户主动单击退出：不重连，直接回 Idle 主屏时钟（标志一次性消费）
+            if (user_initiated_close_.exchange(false)) {
+                ESP_LOGI(TAG, "用户主动退出对话 → 回 Idle（跳过弱网重连）");
+                reconnect_attempts_in_window_ = 0;
+                Schedule([this]() {
+                    Board::GetInstance().GetDisplay()->SetChatMessage("system", "");
+                    SetDeviceState(kDeviceStateIdle);
+                });
+                return;
+            }
+            // 防死循环：60s 窗口内重连成功又立刻被 close 累计 > 阈值，
+            // 判定为服务端拒绝/goodbye 循环（非偶发弱网），停止重连切 Idle，避免烧电发热
+            int64_t now_us = esp_timer_get_time();
+            // 窗口锚定在本轮第一次重连：仅当窗口真正过期才重置，
+            // 不再用「距上次重连间隔」判定（否则 ~60s 周期 goodbye 每轮清零，永不触发）
+            if (reconnect_attempts_in_window_ == 0 ||
+                now_us - reconnect_window_start_us_ > kReconnectWindowUs) {
+                reconnect_attempts_in_window_ = 0;
+                reconnect_window_start_us_ = now_us;
+            }
+            if (++reconnect_attempts_in_window_ > kMaxReconnectInWindow) {
+                ESP_LOGW(TAG, "%.0fs 内重连 %d 次仍被 close（服务端拒绝/goodbye 循环）→ 退出对话",
+                         (now_us - reconnect_window_start_us_) / 1e6,
+                         reconnect_attempts_in_window_);
+                reconnect_attempts_in_window_ = 0;
+                Schedule([this]() {
+                    Board::GetInstance().GetDisplay()->SetChatMessage("system", "");
+                    SetDeviceState(kDeviceStateIdle);
+                });
+                return;
+            }
+            ESP_LOGW(TAG, "Audio channel closed in %s, attempt reconnect (%d/%d in window)",
+                     state_at_close == kDeviceStateListening ? "Listening" : "Speaking",
+                     reconnect_attempts_in_window_, kMaxReconnectInWindow);
             Schedule([this]() {
-                SetDeviceState(kDeviceStateConnecting);
                 for (int attempt = 1; attempt <= 3; ++attempt) {
                     vTaskDelay(pdMS_TO_TICKS(attempt * 500));
                     ESP_LOGI(TAG, "Reconnect attempt %d/3", attempt);
-                    if (protocol_->OpenAudioChannel()) {
+                    // [TEMP-HEAP-PROBE] 抓重连 TLS 握手内部 RAM 谷底，根因定位后删除
+                    ESP_LOGW(TAG, "[PROBE] pre-OpenAudioChannel  INT free=%u min=%u",
+                             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+                    bool ok = protocol_->OpenAudioChannel();
+                    ESP_LOGW(TAG, "[PROBE] post-OpenAudioChannel INT free=%u min=%u ok=%d",
+                             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                             ok);
+                    if (ok) {
                         ESP_LOGI(TAG, "Reconnected on attempt %d", attempt);
                         SetListeningMode(kListeningModeManualStop);
                         return;
@@ -948,6 +990,9 @@ void Application::HandleToggleChatEvent() {
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
     } else if (state == kDeviceStateListening) {
+        // 用户主动单击退出对话：标记意图，OnAudioChannelClosed 据此直接回 Idle，
+        // 不触发弱网重连保护（否则在 Listening 态被误判为弱网掉线而死循环重连）
+        user_initiated_close_.store(true);
         protocol_->CloseAudioChannel();
     }
 }

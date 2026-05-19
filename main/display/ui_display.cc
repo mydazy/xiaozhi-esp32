@@ -17,6 +17,7 @@
 #include "board.h"
 #include "assets.h"
 #include "lvgl_theme.h"
+#include "ui/widgets/control_center.h"
 
 #include <cstring>
 #include <string>
@@ -822,6 +823,61 @@ void UiDisplay::OnQrClicked(lv_event_t* e) {
     } else {
         self->qr_last_click_us_ = now;
     }
+}
+
+// ============================================================
+// 控制中心（下拉手势触发，懒加载）· 接口可调用，触发器留给 board / RemoteCmd
+// ============================================================
+
+void UiDisplay::EnsureControlCenter() {
+    if (control_center_) return;
+    auto* screen = lv_screen_active();
+    if (!screen) return;
+
+    control_center_ = std::make_unique<ControlCenter>(screen, LV_HOR_RES, LV_VER_RES);
+    control_center_->Hide();
+
+    auto& app = Application::GetInstance();
+    auto& board = Board::GetInstance();
+
+    control_center_->SetExitCallback([this]() { HideControlCenter(); });
+
+    control_center_->SetVolumeCallback([&board](int v) {
+        if (auto* codec = board.GetAudioCodec()) codec->SetOutputVolume(v);
+    });
+    control_center_->SetBrightnessCallback([&board](int v) {
+        if (auto* bk = board.GetBacklight()) bk->SetBrightness(v);
+    });
+    control_center_->SetAecCallback([&app](bool on) {
+        app.SetAecMode(on ? kAecOnDeviceSide : kAecOff);
+    });
+    // TODO(产品决策): "休眠"语义未定 —— UI 标签为"5分钟/无"暗示自动休眠定时器，
+    control_center_->SetSleepCallback([](bool on) {
+        ESP_LOGI(TAG, "休眠: %s", on ? "ON" : "OFF");
+    });
+    // TODO(产品决策): 切网 API 已就位（Board::CanSwitchNetwork/SwitchNetwork →
+    control_center_->SetNetworkCallback([](int mode) {
+        ESP_LOGI(TAG, "网络切换: %s", mode == 0 ? "WiFi" : "4G");
+    });
+}
+
+void UiDisplay::ShowControlCenter() {
+    DisplayLockGuard lock(this);
+    EnsureControlCenter();
+    if (!control_center_) return;
+    auto& board = Board::GetInstance();
+    if (auto* codec = board.GetAudioCodec()) control_center_->SetVolume(codec->output_volume());
+    if (auto* bk = board.GetBacklight())     control_center_->SetBrightness(bk->brightness());
+    control_center_->Show();
+}
+
+void UiDisplay::HideControlCenter() {
+    DisplayLockGuard lock(this);
+    if (control_center_) control_center_->Hide();
+}
+
+bool UiDisplay::IsControlCenterVisible() const {
+    return control_center_ && control_center_->IsVisible();
 }
 
 // ============================================================

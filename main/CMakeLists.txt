@@ -24,10 +24,7 @@ set(SOURCES "audio/audio_codec.cc"
             "display/lvgl_display/jpg/image_to_jpeg.cpp"
             "display/lvgl_display/jpg/jpeg_to_image.c"
             "display/ui_display.cc"
-            # [量产稳定期] 暂屏蔽 main/display/ui 整套依赖（ui_image_manager / control_center / ui_config / ui_img_paths）
-            # 待基础功能稳定后恢复
-            # "display/ui/resources/ui_image_manager.cc"
-            # "display/ui/widgets/control_center.cc"
+            "display/ui/widgets/control_center.cc"
             "protocols/protocol.cc"
             "protocols/mqtt_protocol.cc"
             "protocols/websocket_protocol.cc"
@@ -136,12 +133,11 @@ else()
 endif()
 list(APPEND SOURCES ${BOARD_SOURCES})
 
-# 后续逐个 UI 功能重构时，把对应图标显式追加到此列表 + 在 .cc 加 LV_IMG_DECLARE。
-# [量产稳定期] control_center.cc 已暂屏蔽，配套图标也一并下线
-# list(APPEND SOURCES
-#     "assets/icons/ui_img_icon_signal_wifi_png.c"     # 状态栏 WiFi 图标 (control_center.cc:91)
-#     "assets/icons/ui_img_icon_signal_4g_png.c"       # 状态栏 4G 图标 (control_center.cc:297)
-# )
+# control_center.cc 用到的编译期 LV_IMG 符号实体
+list(APPEND SOURCES
+    "assets/icons/ui_img_icon_signal_wifi_png.c"     # 状态栏 WiFi 图标 (control_center.cc:91)
+    "assets/icons/ui_img_icon_signal_4g_png.c"       # 状态栏 4G 图标 (control_center.cc:297)
+)
 
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)

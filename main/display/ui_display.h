@@ -7,8 +7,7 @@
 #include <functional>
 #include <atomic>
 
-// [量产稳定期] ControlCenter 已下线，恢复时取消注释 forward decl 与 unique_ptr 字段
-// class ControlCenter;
+class ControlCenter;
 
 /**
  * UiDisplay — 带交互式 UI 的 LCD 显示（仅 mydazy-p30-4g / mydazy-p31 使用）
@@ -88,9 +87,9 @@ public:
 
     void SetEmotion(const char* emotion) override;
     void SetChatMessage(const char* role, const char* content) override;
-    void ShowControlCenter() {}
-    void HideControlCenter() {}
-    bool IsControlCenterVisible() const { return false; }
+    void ShowControlCenter();
+    void HideControlCenter();
+    bool IsControlCenterVisible() const;
 
     // 显示教育卡（overlay 模式，单一两行布局 · 不分类）
     //   main: 主秀大字（56 默认 / 48 EN 兜底 · 自动判定 CJK/英文）
@@ -175,7 +174,11 @@ private:
     std::atomic<uint32_t> font_request_next_{0};
     std::atomic<uint32_t> font_request_active_{0};
 
+    std::unique_ptr<ControlCenter> control_center_;
+
     // ===== 内部方法 =====
+    void EnsureControlCenter();             // 懒创建 ControlCenter + 绑定 6 个回调
+
     void CreateClockPage();
     void UpdateClockTime();
     void EnsureDisplayFonts();          // cbin 字体延迟加载（assets 就绪后）

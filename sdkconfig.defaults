@@ -155,6 +155,17 @@ CONFIG_ESP_WIFI_ENABLE_SAE_PK=n
 CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=n
 # CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA is not set
 
+# R17 · 静态 TX buffer 数 16 → 8 · 释放 ~12.8 KB INT（2026-05-19）
+# 背景：R4 误判——SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y 时 IDF Kconfig 强制 STATIC TX
+#       (esp_wifi/Kconfig: DYNAMIC depends on !TRY_ALLOCATE_WIFI_LWIP)，
+#       DYNAMIC 永不生效，25.6 KB 静态 TX 必在内部 RAM。真正杠杆是数量不是类型。
+# 依据：连接地址固定单一（CONFIG_OTA_URL），仅 1 条常驻 WS + 偶发 OTA 下载，
+#       Opus 双工 ≤60 kbps，16 个（IDF 通用默认，为高吞吐 UDP 设计）严重过配。
+# 兜底：CACHE_TX_BUFFER_NUM=32（PSRAM）在静态池耗尽时吸收溢出 TX 帧——
+#       此即该 cache 池的设计用途，降静态池属其设计内行为，非激进。
+# 验证（物理动作）：真机 OTA 固件下载 + 弱网音频上行回归，确认无 TX 饥饿丢帧。
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+
 # P30 P0a-2 · NimBLE role 裁剪（2026-04-29）· 释放 ~5-8 KB INT + Flash
 # BluFi 配网只需要 PERIPHERAL + BROADCASTER + GATT_SERVER（设备作为外设被手机连接）
 # 关掉：CENTRAL（设备主动连别人）/ OBSERVER（被动扫描）/ GATT_CLIENT（读别人的 GATT）
