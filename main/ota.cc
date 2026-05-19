@@ -365,6 +365,7 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
     auto network = Board::GetInstance().GetNetwork();
     auto http = network->CreateHttp(0);
     http->SetTimeout(90000);
+    http->SetExpectBinary(true);   // 固件大文件 → binary 高吞吐
     if (!http->Open("GET", firmware_url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         return false;
@@ -439,6 +440,7 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
             // Range 重连（仅接受 206 · 主流 OSS/Nginx 都支持，不支持则继续重试）
             http = network->CreateHttp(0);
             http->SetTimeout(90000);
+            http->SetExpectBinary(true);   // 固件续传 → binary 高吞吐
             http->SetHeader("Range", "bytes=" + std::to_string(total_read) + "-");
             if (!http->Open("GET", firmware_url) || http->GetStatusCode() != 206) {
                 ESP_LOGE(TAG, "Resume failed (status=%d)", http ? http->GetStatusCode() : -1);
@@ -537,9 +539,6 @@ bool Ota::StartUpgrade(std::function<void(int progress, size_t speed)> callback)
     return Upgrade(firmware_url_, callback);
 }
 
-// 通用 HTTP GET → PSRAM 缓冲下载（用于动态 GIF/PNG 等小资源）
-// 与 Upgrade 不同：不做 Range 续传（小文件重传成本低），不做 WdtGuard（下载快），
-// 不做 esp_ota_*（写到 PSRAM 而非 flash partition）。
 bool Ota::Download(const std::string& url, size_t max_size,
                    uint8_t** buffer, size_t* size) {
     *buffer = nullptr;
@@ -562,6 +561,7 @@ bool Ota::Download(const std::string& url, size_t max_size,
 
         auto http = network->CreateHttp(0);
         http->SetTimeout(15000);
+        http->SetExpectBinary(true);
         if (!http->Open("GET", url)) {
             ESP_LOGE(TAG, "Download: HTTP open failed");
             continue;

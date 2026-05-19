@@ -353,7 +353,7 @@ private:
             .on_wake         = &OnTouchWake,
             .on_click        = &OnTouchClick,
             .on_double_click = &OnTouchDoubleClick,
-            /* on_swipe / on_long_press 不需要 · NULL */
+            .on_swipe        = &OnTouchSwipe,        /* 下滑唤起控制中心 · 上滑收回 */
         };
         if (axs5106l_touch_init(&cfg, &touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏硬件初始化失败");
@@ -365,9 +365,16 @@ private:
         static_cast<MyDazyP30_4GBoard*>(ctx)->WakeUp();
     }
 
+    // 控制中心可见时：点击交给 LVGL 处理其内部控件，不触发业务唤醒/打断
+    static bool ControlCenterAbsorbs() {
+        auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
+        return ui && ui->IsControlCenterVisible();
+    }
+
     static void OnTouchClick(int16_t /*x*/, int16_t y, void *ctx) {
         auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
         self->WakeUp();
+        if (ControlCenterAbsorbs()) return;
         if (y < 36) return;        // 状态栏交给 LVGL
         self->HandleTouchSingleClick();
     }
@@ -375,8 +382,25 @@ private:
     static void OnTouchDoubleClick(int16_t /*x*/, int16_t y, void *ctx) {
         auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
         self->WakeUp();
+        if (ControlCenterAbsorbs()) return;
         if (y < 36) return;
         self->HandleTouchDoubleClick();
+    }
+
+    // 竖向下滑唤起控制中心 · 上滑收回（横滑忽略，交还业务）
+    static void OnTouchSwipe(int16_t dx, int16_t dy, void *ctx) {
+        int adx = dx < 0 ? -dx : dx;
+        int ady = dy < 0 ? -dy : dy;
+        if (adx >= ady) return;                 // 横滑不处理
+        auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
+        self->WakeUp();
+        auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
+        if (!ui) return;
+        if (dy > 0) {
+            if (!ui->IsControlCenterVisible()) ui->ShowControlCenter();
+        } else {
+            if (ui->IsControlCenterVisible()) ui->HideControlCenter();
+        }
     }
 
     void InitializeTouch() {
@@ -559,7 +583,6 @@ private:
         Application::GetInstance().ResetProtocol();
         vTaskDelay(pdMS_TO_TICKS(500));  // 等异步 Schedule lambda 完成 close + 析构
 
-        // 优雅释放 4G PPP（必须在 ResetProtocol 之后、断电前 — 此时 4G 仍可用）
         GracefulShutdownModem();
 
         if (enable_gyro_wakeup) ArmGyroWakeup();         // EXT1 · 必须在音频断电之前
@@ -577,14 +600,10 @@ private:
         AlarmManager::GetInstance().ConfigureTimerWakeup();
 
         ESP_LOGI(TAG, "准备进入深度睡眠");
-        // 让 AUDIO_PWR_EN=0 引发的瞬态机械振动衰减（>100ms 实测充裕）·
-        // LIR_INT1=0 后即使瞬态振动也不会留 latch，只要静下来 INT1 自动回 HIGH。
         vTaskDelay(pdMS_TO_TICKS(200));
 
         ResetAllGpiosForSleep();
 
-        // 主动关机：sleep 前先等用户松手，确保 GPIO 高电平 sleep
-        // 否则 esp_deep_sleep_start 后 EXT0 会被用户仍按着的手指立即触发 → 循环唤醒
         if (!enable_gyro_wakeup) {
             gpio_config_t boot_in = {
                 .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
@@ -802,11 +821,6 @@ private:
         WakeUp();
     }
 
-    // ========================================================
-    // 状态上报（仅唤醒事件触发：进省电前 PowerSaveTimer::OnEnterSleepMode 调一次）
-    // 字段拼装 / idle / music 防御全部在 Ota::ReportStatus()，板级仅负责调用时机。
-    // ========================================================
-
     void ReportStatus() {
         Application::GetInstance().Schedule([]() {
             Ota ota; ota.ReportStatus();
@@ -859,14 +873,11 @@ private:
 
 public:
     MyDazyP30_4GBoard() :
-        // 当前量产线路板未扩展 GPIO6 DTR；下版硬件改板后改用 MODEM_DTR_GPIO 即可。
-        // GracefulShutdownModem 内部用 AT+CFUN=4 优雅释放（不依赖 DTR 硬件连接）。
         DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 1),
         boot_button_(BOOT_BUTTON_GPIO, false, 800, 400),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
 
-        // 注册重启钩子：任何 esp_restart() 调用前自动断 LDO 复位 LCD（OTA 升级 / 出厂复位 / 网络切换 / 双击恢复出厂等所有路径）
         esp_register_shutdown_handler(ShutdownHandler);
 
         InitializeGpio();
@@ -874,8 +885,6 @@ public:
         InitializeI2c();
         InitializeSpi();
         InitializeDisplay();
-        // 推迟触屏初始化 · 让 LCD 先出画面 + 给 ML307 modem AT 启动空出 I²C 总线 ·
-        // 触屏 I²C 探测 / 固件升级判断是最敏感环节 · 避开 4G modem 启动期 RF 干扰
         vTaskDelay(pdMS_TO_TICKS(500));
         PrepareTouchHardware();
         InitializeTouch();
@@ -883,18 +892,10 @@ public:
         InitializePowerManager();
         InitializePowerSaveTimer();
         InitializeButtons();
-
-        // 触发 audio_codec_ 懒构造（codec 必须在 ApplyDefaultSettings 写音量前就绪）
         GetAudioCodec();
-
         ApplyDefaultSettings();
-
-        // 注册板专属 MCP 工具（教育卡 show_stroke/show_card）— 必须在 Display 初始化之后
-        // 修复 BUG：v32 之前 P30-4G 完全没注册 show_stroke，导致 LLM 看不到工具 → 用户感知"识字 GIF 不工作"
         InitializeTools();
-
         ESP_LOGI(TAG, "MyDazy P30 4G 初始化完成 (ES8311+ES7210, 支持4G、电源管理、触摸屏)");
-
         StartWelcomeTask();
 
         // ── WiFi 模式短期 hack：临时启动 ML307 → AT+CFUN=4 飞行模式 → 释放 ──
@@ -928,10 +929,6 @@ public:
     // MCP 工具注册（板专属能力）— 通用工具由 McpServer::AddCommonTools 自动注册
     void InitializeTools() {
         auto& mcp = McpServer::GetInstance();
-        // 教育卡 MCP 工具集：show_stroke 笔画 GIF + show_card 教育卡
-        // 4G/WiFi 两种网络模式下都开启 show_stroke：
-        //   完整性校验四重防护（1KB min + GIF89a/87a magic + 末字节 0x3B Trailer + Schedule state 守护）
-        //   弱网失败时端侧自动弹大字 EduCard 兜底，不会显示脏帧或崩溃
         RegisterEducationMcpTools(mcp, dynamic_cast<UiDisplay*>(GetDisplay()));
     }
 

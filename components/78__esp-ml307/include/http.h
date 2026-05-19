@@ -21,6 +21,9 @@ public:
     // 设置 Keep-Alive
     virtual void SetKeepAlive(bool enable) = 0;
 
+    // 期望大数据量传输（OTA 固件/资源下载）→ 启用 binary 高吞吐模式。
+    virtual void SetExpectBinary(bool enable) { (void)enable; }
+
     // 打开 HTTP 连接并发送请求
     virtual bool Open(const std::string& method, const std::string& url) = 0;
 

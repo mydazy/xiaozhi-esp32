@@ -27,6 +27,7 @@ public:
     void SetHeader(const std::string& key, const std::string& value) override;
     void SetContent(std::string&& content) override;
     void SetKeepAlive(bool enable) override;
+    void SetExpectBinary(bool enable) override { expect_binary_ = enable; }
     bool Open(const std::string& method, const std::string& url) override;
     void Close() override;
     int Read(char* buffer, size_t buffer_size) override;
@@ -67,7 +68,7 @@ private:
     bool response_chunked_ = false;
     bool keep_alive_ = false;
 
-    // Patch B · HTTP Binary Receive Mode（来自 189 v3.5.3 验证版）
+    bool expect_binary_ = false;
     bool binary_receive_ = false;
     bool headers_fetched_ = false;
     size_t body_consumed_ = 0;

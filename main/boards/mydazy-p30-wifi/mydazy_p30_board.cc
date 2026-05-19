@@ -359,6 +359,7 @@ private:
             .on_wake         = &OnTouchWake,
             .on_click        = &OnTouchClick,
             .on_double_click = &OnTouchDoubleClick,
+            .on_swipe        = &OnTouchSwipe,        /* 下滑唤起控制中心 · 上滑收回 */
         };
         if (axs5106l_touch_init(&cfg, &touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏硬件初始化失败");
@@ -370,10 +371,17 @@ private:
         static_cast<MyDazyP30_WifiBoard*>(ctx)->WakeUp();
     }
 
-    // 状态栏（y<36）交给 LVGL · 单击/双击直接业务（量产期不接 swipe / long_press）
+    // 控制中心可见时：点击交给 LVGL 处理其内部控件，不触发业务唤醒/打断
+    static bool ControlCenterAbsorbs() {
+        auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
+        return ui && ui->IsControlCenterVisible();
+    }
+
+    // 状态栏（y<36）交给 LVGL · 单击/双击直接业务 · 下滑唤起控制中心
     static void OnTouchClick(int16_t /*x*/, int16_t y, void *ctx) {
         auto* self = static_cast<MyDazyP30_WifiBoard*>(ctx);
         self->WakeUp();
+        if (ControlCenterAbsorbs()) return;
         if (y < 36) return;
         self->HandleTouchSingleClick();
     }
@@ -381,8 +389,25 @@ private:
     static void OnTouchDoubleClick(int16_t /*x*/, int16_t y, void *ctx) {
         auto* self = static_cast<MyDazyP30_WifiBoard*>(ctx);
         self->WakeUp();
+        if (ControlCenterAbsorbs()) return;
         if (y < 36) return;
         self->HandleTouchDoubleClick();
+    }
+
+    // 竖向下滑唤起控制中心 · 上滑收回（横滑忽略，交还业务）
+    static void OnTouchSwipe(int16_t dx, int16_t dy, void *ctx) {
+        int adx = dx < 0 ? -dx : dx;
+        int ady = dy < 0 ? -dy : dy;
+        if (adx >= ady) return;                 // 横滑不处理
+        auto* self = static_cast<MyDazyP30_WifiBoard*>(ctx);
+        self->WakeUp();
+        auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
+        if (!ui) return;
+        if (dy > 0) {
+            if (!ui->IsControlCenterVisible()) ui->ShowControlCenter();
+        } else {
+            if (ui->IsControlCenterVisible()) ui->HideControlCenter();
+        }
     }
 
     void InitializeTouch() {

@@ -316,7 +316,6 @@ private:
 
     void PrepareTouchHardware() {
         // Phase 1: LCD 启动前 · GPIO + 升级 + chip_id 校验
-        // swipe 控制中心暂未启用（UiDisplay ShowMenu/IsBrainInfoVisible 待暴露）
         axs5106l_touch_config_t cfg = {
             .worker          = i2c_worker_,
             .rst_gpio        = TOUCH_RST_NUM,
@@ -327,6 +326,7 @@ private:
             .cb_ctx          = this,
             .on_wake         = &OnTouchWake,
             .on_click        = &OnTouchClick,
+            .on_swipe        = &OnTouchSwipe,        /* 下滑唤起控制中心 · 上滑收回 */
         };
         if (axs5106l_touch_init(&cfg, &touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏硬件初始化失败");
@@ -346,11 +346,18 @@ private:
         static_cast<MyDazyP31Board*>(ctx)->WakeUp();
     }
 
+    // 控制中心可见时：点击交给 LVGL 处理其内部控件，不触发业务唤醒/打断
+    static bool ControlCenterAbsorbs() {
+        auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
+        return ui && ui->IsControlCenterVisible();
+    }
+
     // 单击业务：MP3 → 停播 · Idle → 唤醒对话 · Speaking → 打断
     // P31 主菜单（ShowMenu/IsBrainInfoVisible）依赖 UiDisplay 待暴露 · 暂走通用唤醒路径
     static void OnTouchClick(int16_t /*x*/, int16_t /*y*/, void *ctx) {
         auto* self = static_cast<MyDazyP31Board*>(ctx);
         self->WakeUp();
+        if (ControlCenterAbsorbs()) return;
 
         if (MusicPlayer::GetInstance().IsPlaying()) {
             MusicPlayer::GetInstance().Stop();
@@ -365,6 +372,22 @@ private:
             app.ToggleChatState();
         } else if (state == kDeviceStateSpeaking) {
             app.AbortSpeaking(kAbortReasonNone);
+        }
+    }
+
+    // 竖向下滑唤起控制中心 · 上滑收回（横滑忽略，交还业务）
+    static void OnTouchSwipe(int16_t dx, int16_t dy, void *ctx) {
+        int adx = dx < 0 ? -dx : dx;
+        int ady = dy < 0 ? -dy : dy;
+        if (adx >= ady) return;                 // 横滑不处理
+        auto* self = static_cast<MyDazyP31Board*>(ctx);
+        self->WakeUp();
+        auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
+        if (!ui) return;
+        if (dy > 0) {
+            if (!ui->IsControlCenterVisible()) ui->ShowControlCenter();
+        } else {
+            if (ui->IsControlCenterVisible()) ui->HideControlCenter();
         }
     }
 

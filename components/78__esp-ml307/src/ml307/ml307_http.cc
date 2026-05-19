@@ -292,17 +292,20 @@ bool Ml307Http::Open(const std::string& method, const std::string& url) {
         content_ = std::nullopt;
     }
 
-    // Patch B · 编码协商：发送方仍 HEX（避免发送侧 0xFF 等控制字符干扰 AT），接收方优先 Binary
-    // ML307R 老固件不支持 binary（encoding=1,0）时 SendCommand 返回 false，回退到 HEX 模式（吞吐折半但兼容）
-    command = "AT+MHTTPCFG=\"encoding\"," + std::to_string(http_id_) + ",1,0";
-    if (at_uart_->SendCommand(command)) {
-        binary_receive_ = true;
-        at_uart_->SetHttpBinaryMode(true);
-        ESP_LOGI(TAG, "Binary receive mode enabled (UART raw passthrough)");
+    if (expect_binary_) {
+        command = "AT+MHTTPCFG=\"encoding\"," + std::to_string(http_id_) + ",1,0";
+        if (at_uart_->SendCommand(command)) {
+            binary_receive_ = true;
+            at_uart_->SetHttpBinaryMode(true);
+            ESP_LOGI(TAG, "Binary receive mode enabled (large payload)");
+        } else {
+            command = "AT+MHTTPCFG=\"encoding\"," + std::to_string(http_id_) + ",1,1";
+            at_uart_->SendCommand(command);
+            ESP_LOGW(TAG, "Binary mode unsupported, fallback to HEX (throughput halved)");
+        }
     } else {
         command = "AT+MHTTPCFG=\"encoding\"," + std::to_string(http_id_) + ",1,1";
         at_uart_->SendCommand(command);
-        ESP_LOGW(TAG, "Binary mode unsupported, fallback to HEX (throughput halved)");
     }
 
     // Send request
