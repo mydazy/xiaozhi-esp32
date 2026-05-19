@@ -15,6 +15,7 @@
 #include "audio/music_player.h"
 #include "backlight.h"
 #include "board.h"
+#include "dual_network_board.h"
 #include "assets.h"
 #include "lvgl_theme.h"
 #include "ui/widgets/control_center.h"
@@ -35,13 +36,8 @@ LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_IMG_DECLARE(ui_img_start_logo_png);
 
-// ============================================================
-// 教育卡 v8 启蒙规则 helper（详见 docs/education-card-layout.html）
-// ============================================================
 namespace {
 
-// 判定文本是否含 CJK 汉字（U+4E00-U+9FFF）
-// 用于 ShowEduCard 内 mode 判定：main 含 CJK → PY-mode（汉字主秀），否则 EN-mode（英文主秀）
 inline bool ContainsCjk(const char* text) {
     if (!text) return false;
     while (*text) {
@@ -65,7 +61,6 @@ inline bool ContainsCjk(const char* text) {
     return false;
 }
 
-// UTF-8 字符数（不是 byte 数）—— "猫" 是 1 字（不是 3 byte）
 inline int Utf8CharCount(const char* text) {
     if (!text) return 0;
     int count = 0;
@@ -76,10 +71,6 @@ inline int Utf8CharCount(const char* text) {
     return count;
 }
 
-// 主秀字号选档 + 激活校验
-//   PY-mode (含 CJK): ≤ 4 字 → 56；> 4 跳过
-//   EN-mode:          ≤ 10 字符 → 56；11-12 → 48；> 12 跳过
-// 返回 nullptr 表示跳过激活，调用方保持当前画面
 inline const lv_font_t* PickFont(const char* main_text, bool is_cjk,
                                   const lv_font_t* font_56,
                                   const lv_font_t* font_48) {
@@ -105,9 +96,6 @@ inline const lv_font_t* PickFont(const char* main_text, bool is_cjk,
 
 }  // anonymous namespace
 
-// ============================================================
-// 构造 / 析构
-// ============================================================
 
 UiDisplay::UiDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
                      int width, int height, int offset_x, int offset_y,
@@ -117,21 +105,15 @@ UiDisplay::UiDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t 
 }
 
 UiDisplay::~UiDisplay() {
-    // clock_tick_ 已移除：时间刷新沿用 1Hz CLOCK_TICK → UpdateStatusBar 链路
 }
 
-// ============================================================
-// SetupUI override：先调父类，然后注入 UI 扩展
-// ============================================================
 
 void UiDisplay::SetupUI() {
-    // 0. RAM proxy 初始化（必须在任何 lv_obj_set_style_text_font(&g_text_font, ...) 调用前）
     InitTextFontProxy();
 
     SpiLcdDisplay::SetupUI();
     DisplayLockGuard lock(this);
 
-    // 1. 开机 Logo：替换父类的 FONT_AWESOME_MICROCHIP_AI 为 start_logo 图片
     if (emoji_label_) {
         lv_label_set_text(emoji_label_, "");
         lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
@@ -165,8 +147,6 @@ void InitTextFontProxy() {
     s_text_font_proxy_initialized = true;
 }
 
-// 同名加载约定：cbin 文件名 = BUILTIN_TEXT_FONT 名 + ".bin"。
-// CMakeLists 改主字体名时，build_default_assets.py 和此处自动联动，无需多处同步。
 #define _STR_HELPER(x) #x
 #define _STR(x) _STR_HELPER(x)
 static constexpr const char* kFallbackFontAsset = _STR(BUILTIN_TEXT_FONT) ".bin";
@@ -190,9 +170,6 @@ void UiDisplay::LoadFallbackTextFont() {
     g_text_font.fallback = fallback_text_font_;       // 写 RAM proxy（rodata 主字体不可写）
 }
 
-// ============================================================
-// 子类只 override UpdateStatusBar 用来 1s tick 刷时钟，不再自建 status bar
-// ============================================================
 
 void UiDisplay::UpdateStatusBar(bool update_all) {
     if (active_scene_ == SceneType::kClock) {
@@ -207,10 +184,6 @@ void UiDisplay::UpdateStatusBar(bool update_all) {
         UpdateClockTime();
     }
 }
-
-// ============================================================
-// 时钟主屏（内联实现）
-// ============================================================
 
 namespace {
 // 三段文字以屏幕中心为基准做 y 偏移；x 留 0 = 水平居中。
@@ -761,10 +734,8 @@ void UiDisplay::ShowQrCode(const char* qr_content,
         return lbl;
     };
 
-    // 顶部一行（调用方传什么显什么：配网传"双击切换模式"，激活传"绑定设备"...）
     make_label(top, lv_color_hex(0x333333), LV_ALIGN_TOP_MID, 6);
 
-    // 中央二维码（调用方拼好内容，内部不做格式判断）
 #if CONFIG_LV_USE_QRCODE
     constexpr int kQrSize = 160;
     lv_obj_t* qr = lv_qrcode_create(qr_overlay_);
@@ -777,7 +748,6 @@ void UiDisplay::ShowQrCode(const char* qr_content,
     make_label(qr_content, lv_color_hex(0x333333), LV_ALIGN_CENTER, 0);
 #endif
 
-    // 高亮大字（蓝色，如激活码 / 付款金额）· y=-30（原 -25 上移 5px）
     int bottom_y = -3;
     if (highlight && highlight[0]) {
         make_label(highlight, lv_color_hex(0x2196F3), LV_ALIGN_BOTTOM_MID, -30);
@@ -787,7 +757,6 @@ void UiDisplay::ShowQrCode(const char* qr_content,
     // 底部辅助文字
     make_label(bottom, lv_color_hex(0x999999), LV_ALIGN_BOTTOM_MID, bottom_y, true);
 
-    // QR 页全屏独占，overlay 必须在最前层（避免顶部 top 文字被全局状态栏 36px 遮挡）
     lv_obj_move_foreground(qr_overlay_);
     ESP_LOGI(TAG, "QR页: content=%s top=%s bottom=%s highlight=%s",
              qr_content, top ? top : "", bottom ? bottom : "", highlight ? highlight : "");
@@ -796,8 +765,6 @@ void UiDisplay::ShowQrCode(const char* qr_content,
 void UiDisplay::HideQrCode() {
     DisplayLockGuard lock(this);
     if (qr_overlay_) {
-        // 用 async 删除：与 HideEduCard 同源问题（注册了 OnQrClicked event_cb，
-        // 同步 lv_obj_del 在事件链处理中可能触发 lv_event_mark_deleted 死循环 → Task WDT）
         lv_obj_del_async(qr_overlay_);
         qr_overlay_ = nullptr;
         ESP_LOGI(TAG, "隐藏 QR 页");
@@ -806,7 +773,6 @@ void UiDisplay::HideQrCode() {
     qr_last_click_us_   = 0;
 }
 
-// LVGL click 事件 → 用上次时间戳判定 < 500ms 双击
 void UiDisplay::OnQrClicked(lv_event_t* e) {
     auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
     if (!self || !self->qr_double_click_cb_) return;
@@ -816,7 +782,6 @@ void UiDisplay::OnQrClicked(lv_event_t* e) {
     constexpr uint64_t kDoubleClickWindowUs = 500 * 1000;
 
     if (last != 0 && (now - last) < kDoubleClickWindowUs) {
-        // 拷贝 cb 后调，防止 cb 内部 HideQrCode 把 cb 自己析构
         auto cb = self->qr_double_click_cb_;
         self->qr_last_click_us_ = 0;
         cb();
@@ -824,10 +789,6 @@ void UiDisplay::OnQrClicked(lv_event_t* e) {
         self->qr_last_click_us_ = now;
     }
 }
-
-// ============================================================
-// 控制中心（下拉手势触发，懒加载）· 接口可调用，触发器留给 board / RemoteCmd
-// ============================================================
 
 void UiDisplay::EnsureControlCenter() {
     if (control_center_) return;
@@ -855,10 +816,13 @@ void UiDisplay::EnsureControlCenter() {
     control_center_->SetSleepCallback([](bool on) {
         ESP_LOGI(TAG, "休眠: %s", on ? "ON" : "OFF");
     });
-    // TODO(产品决策): 切网 API 已就位（Board::CanSwitchNetwork/SwitchNetwork →
-    control_center_->SetNetworkCallback([](int mode) {
-        ESP_LOGI(TAG, "网络切换: %s", mode == 0 ? "WiFi" : "4G");
+    control_center_->SetNetworkCallback([](int /*mode*/) {
+        auto& b = Board::GetInstance();
+        if (b.CanSwitchNetwork()) b.SwitchNetwork();
     });
+    if (auto* dnb = dynamic_cast<DualNetworkBoard*>(&board)) {
+        control_center_->SetNetworkMode(dnb->GetNetworkType() == NetworkType::ML307 ? 1 : 0);
+    }
 }
 
 void UiDisplay::ShowControlCenter() {
@@ -880,10 +844,6 @@ bool UiDisplay::IsControlCenterVisible() const {
     return control_center_ && control_center_->IsVisible();
 }
 
-// ============================================================
-// 音乐播放器页（极简：曲名 + Play/Pause 圆按钮 + 时间 + 进度条）
-// ============================================================
-
 void UiDisplay::FormatTime(int ms, char* buf, size_t buf_size) {
     if (ms < 0) ms = 0;
     int total_sec = ms / 1000;
@@ -896,8 +856,6 @@ void UiDisplay::CreatePlayerPage() {
     if (player_container_) return;
     auto* screen = lv_screen_active();
     if (!screen) return;
-
-    // [量产稳定期] 原 `using namespace ScreenConfig;` 已切断，改用本文件匿名 namespace 内联常量
 
     player_container_ = lv_obj_create(screen);
     lv_obj_set_size(player_container_, kScreenWidth, kScreenHeight);
@@ -936,9 +894,6 @@ void UiDisplay::CreatePlayerPage() {
     lv_obj_set_style_text_font(player_play_icon_, &BUILTIN_ICON_FONT, 0);
     lv_obj_set_style_text_color(player_play_icon_, lv_color_hex(kColorTextPrimary), 0);
     lv_obj_center(player_play_icon_);
-    // RF 抗扰核心是 PRESS_LOCK：阻止 swipe drag-into-click（swipe 起点不在按钮上
-    // 即使终点落在按钮也不触发 click）。这一道闸已能挡住实测最常见的假触模式。
-    // CLICKED 单击即响应，保持按钮灵敏度。如真机仍偶发假触，再考虑 LONG_PRESSED。
     lv_obj_add_flag(player_btn_play_, LV_OBJ_FLAG_PRESS_LOCK);
     lv_obj_add_event_cb(player_btn_play_, OnPlayerPlayPauseClicked, LV_EVENT_CLICKED, this);
 
@@ -975,9 +930,6 @@ void UiDisplay::CreatePlayerPage() {
 void UiDisplay::OnPlayerPlayPauseClicked(lv_event_t* e) {
     auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
     if (!self || !self->on_player_pause_toggle_) return;
-    // 关键：LVGL task 上下文 + DisplayLockGuard 已持，直接调 MusicPlayer::Pause →
-    // audio_codec data_if_mutex_ 与 LVGL 锁可能形成顺序倒置（watchdog reset）。
-    // 投到主任务 Schedule 执行，立即返回让 LVGL 释放锁。
     auto cb = self->on_player_pause_toggle_;   // copy std::function 到 lambda capture
     Application::GetInstance().Schedule([cb]() {
         if (cb) cb();
@@ -1079,14 +1031,6 @@ void UiDisplay::SetPlayerPaused(bool paused) {
     is_player_paused_ = paused;
     lv_label_set_text(player_play_icon_, paused ? FONT_AWESOME_PLAY : FONT_AWESOME_PAUSE);
 }
-
-// ============================================================
-// 番茄钟页（参考时钟：88px 倒计时 + 启停圆按钮 · MCP+触屏双入口）
-//   - 88px 倒计时 → 复用 clock_big_font_（font_maru_88_4 · 已为时钟主屏加载）
-//   - 启停按钮   → 与 Player 同款（64×64 圆 · FONT_AWESOME_PLAY/PAUSE · PRESS_LOCK 防假触）
-//   - 触屏点击   → Schedule 到主线程调 PomodoroManager（防 LVGL/timer 锁顺序倒置）
-//   - MCP 控制   → PomodoroManager tick 回调 Schedule 到主线程 → UpdatePomodoro
-// ============================================================
 
 void UiDisplay::FormatPomodoroTime(uint32_t remain_sec, char* buf, size_t buf_size) {
     uint32_t min = remain_sec / 60;
@@ -1226,10 +1170,6 @@ void UiDisplay::UpdatePomodoro(uint32_t remain_sec, bool running) {
     }
 }
 
-// ============================================================
-// 教育卡（单词 / 拼音 / 汉字组词）— overlay 模式（与 QR 同），不占 SceneType
-// 配色：main 金黄 0xFFD54F（三类统一）/ bottom 绿 0x81C784
-// ============================================================
 
 void UiDisplay::OnEduCardClicked(lv_event_t* e) {
     auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
@@ -1237,8 +1177,6 @@ void UiDisplay::OnEduCardClicked(lv_event_t* e) {
     self->HideEduCard();
 }
 
-// 复用单 overlay：仅切 HIDDEN flag，不删除子节点
-// 关键：避免 lv_obj_del 与 label 异步 layout cb 的 race（lv_event_mark_deleted UAF）
 void UiDisplay::HideEduCard() {
     DisplayLockGuard lock(this);
     if (edu_card_overlay_ && !lv_obj_has_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN)) {
@@ -1249,7 +1187,6 @@ void UiDisplay::HideEduCard() {
     }
 }
 
-// 懒创建 overlay + 2 个 label 槽位；后续 ShowEduCard 都复用，仅更新内容
 void UiDisplay::EnsureEduCardOverlay() {
     if (edu_card_overlay_) return;
     auto* screen = lv_screen_active();
@@ -1280,7 +1217,6 @@ void UiDisplay::EnsureEduCardOverlay() {
     edu_main_label_ = make_label();
 }
 
-// 在已有 label 槽上更新内容（无则隐藏该槽）· LV_ALIGN_TOP_MID
 void UiDisplay::UpdateEduRow(lv_obj_t* lbl, const EduRow& row, int y) {
     if (!lbl) return;
     if (!row.text || !row.text[0]) {
@@ -1295,9 +1231,6 @@ void UiDisplay::UpdateEduRow(lv_obj_t* lbl, const EduRow& row, int y) {
     lv_obj_remove_flag(lbl, LV_OBJ_FLAG_HIDDEN);
 }
 
-// 渲染教育卡 overlay（240px 屏高 · 单一两行布局）
-//   main 主秀（56/48）中心居中偏上 20px → main_y = 100 - main_h/2
-//   top 辅助（30/20）在 main 上方间距 20px → top_y = main_y - 20 - top_h
 void UiDisplay::RenderEduCardLayout(const EduRow& top, const EduRow& main_row) {
     DisplayLockGuard lock(this);
     HideQrCode();      // 与 QR overlay 互斥
@@ -1369,14 +1302,10 @@ void UiDisplay::ShowEduCard(const char* main_text, const char* top) {
 
     int main_ls = is_cjk ? 3 : 0;
     int main_h  = (main_font == edu_main_56_font_) ? 56 : 48;
-    // 真实选档结果（56 = 优先 / 48 = 降级；56 ptr null 时这里会显示 48）
     ESP_LOGI(TAG, "[edu] PickFont -> font_h=%d (56_ptr=%p picked=%p · %s降级)",
              main_h, edu_main_56_font_, main_font,
              (edu_main_56_font_ == nullptr) ? "56未加载所以" : (main_font != edu_main_56_font_ ? "宽度超限" : "未"));
 
-    // top 字体自适应（30px 字符集仅含 ASCII+拼音+少量 CJK · 含中文 top 必须降级到 20px 全集字体）
-    //   汉字卡 top=拼音(拉丁) → 30px clock_text_font_
-    //   英文卡 top=中文释义   → 20px g_text_font（fallback 含 GB 2312 全集）
     bool top_is_cjk = top && top[0] && ContainsCjk(top);
     const lv_font_t* top_font = top_is_cjk ? &g_text_font : clock_text_font_;
     int top_h  = top_is_cjk ? 20 : 30;
