@@ -688,7 +688,6 @@ void Application::InitializeProtocol() {
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
         if (GetDeviceState() == kDeviceStateSpeaking) {
-            // 避免弱网时静默丢包导致音节缺失（破音根因 #1）。队列上限 40 帧=2.4s，
             audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
         }
     });
@@ -708,7 +707,6 @@ void Application::InitializeProtocol() {
         // 弱网保护：Listening/Speaking 中断线 → 后台重连 3 次（500/1000/1500ms 退避）
         auto state_at_close = GetDeviceState();
         if (state_at_close == kDeviceStateListening || state_at_close == kDeviceStateSpeaking) {
-            // 用户主动单击退出：不重连，直接回 Idle 主屏时钟（标志一次性消费）
             if (user_initiated_close_.exchange(false)) {
                 ESP_LOGI(TAG, "用户主动退出对话 → 回 Idle（跳过弱网重连）");
                 reconnect_attempts_in_window_ = 0;
@@ -718,20 +716,13 @@ void Application::InitializeProtocol() {
                 });
                 return;
             }
-            // 防死循环：60s 窗口内重连成功又立刻被 close 累计 > 阈值，
-            // 判定为服务端拒绝/goodbye 循环（非偶发弱网），停止重连切 Idle，避免烧电发热
             int64_t now_us = esp_timer_get_time();
-            // 窗口锚定在本轮第一次重连：仅当窗口真正过期才重置，
-            // 不再用「距上次重连间隔」判定（否则 ~60s 周期 goodbye 每轮清零，永不触发）
             if (reconnect_attempts_in_window_ == 0 ||
                 now_us - reconnect_window_start_us_ > kReconnectWindowUs) {
                 reconnect_attempts_in_window_ = 0;
                 reconnect_window_start_us_ = now_us;
             }
             if (++reconnect_attempts_in_window_ > kMaxReconnectInWindow) {
-                ESP_LOGW(TAG, "%.0fs 内重连 %d 次仍被 close（服务端拒绝/goodbye 循环）→ 退出对话",
-                         (now_us - reconnect_window_start_us_) / 1e6,
-                         reconnect_attempts_in_window_);
                 reconnect_attempts_in_window_ = 0;
                 Schedule([this]() {
                     Board::GetInstance().GetDisplay()->SetChatMessage("system", "");
@@ -739,29 +730,16 @@ void Application::InitializeProtocol() {
                 });
                 return;
             }
-            ESP_LOGW(TAG, "Audio channel closed in %s, attempt reconnect (%d/%d in window)",
-                     state_at_close == kDeviceStateListening ? "Listening" : "Speaking",
-                     reconnect_attempts_in_window_, kMaxReconnectInWindow);
+
             Schedule([this]() {
                 for (int attempt = 1; attempt <= 3; ++attempt) {
                     vTaskDelay(pdMS_TO_TICKS(attempt * 500));
-                    ESP_LOGI(TAG, "Reconnect attempt %d/3", attempt);
-                    // [TEMP-HEAP-PROBE] 抓重连 TLS 握手内部 RAM 谷底，根因定位后删除
-                    ESP_LOGW(TAG, "[PROBE] pre-OpenAudioChannel  INT free=%u min=%u",
-                             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
                     bool ok = protocol_->OpenAudioChannel();
-                    ESP_LOGW(TAG, "[PROBE] post-OpenAudioChannel INT free=%u min=%u ok=%d",
-                             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
-                             ok);
                     if (ok) {
-                        ESP_LOGI(TAG, "Reconnected on attempt %d", attempt);
                         SetListeningMode(kListeningModeManualStop);
                         return;
                     }
                 }
-                ESP_LOGW(TAG, "Reconnect 3/3 failed, fall back to Idle");
                 Board::GetInstance().GetDisplay()->SetChatMessage("system", "");
                 SetDeviceState(kDeviceStateIdle);
             });
@@ -991,7 +969,6 @@ void Application::HandleToggleChatEvent() {
         AbortSpeaking(kAbortReasonNone);
     } else if (state == kDeviceStateListening) {
         // 用户主动单击退出对话：标记意图，OnAudioChannelClosed 据此直接回 Idle，
-        // 不触发弱网重连保护（否则在 Listening 态被误判为弱网掉线而死循环重连）
         user_initiated_close_.store(true);
         protocol_->CloseAudioChannel();
     }
@@ -1163,7 +1140,6 @@ void Application::HandleStateChangedEvent() {
     auto led = board.GetLed();
     led->OnStateChanged();
 
-    // UI 页面切换：idle 切时钟主屏，对话/配网切 chat 模式（显示表情/emoji/提示）
     auto* lcd = dynamic_cast<UiDisplay*>(display);
 
     switch (new_state) {
@@ -1238,7 +1214,6 @@ void Application::HandleStateChangedEvent() {
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(false);
-            // 配网模式切到 chat UI 层（隐藏时钟容器），让 Alert 的 SSID/URL 提示可见
             if (auto* lcd = dynamic_cast<UiDisplay*>(display)) {
                 lcd->SwitchToChatMode();
             }
@@ -1355,8 +1330,6 @@ ListeningMode Application::GetDefaultListeningMode() const {
     return aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime;
 }
 
-// 2026-05-13 不重启切换平台 (仅 RemoteCmd "reload" 触发)
-// 流程: 退出对话 → 关连接 → 析构 protocol → 重做 OTA 检查 → 按新配置重建 protocol
 // 升级/激活中拒绝; CheckNewVersion 若发现新固件会自动 upgrade + reboot, 切换流程被自然覆盖也合理
 bool Application::SwitchProtocol() {
     auto state = GetDeviceState();
