@@ -110,7 +110,9 @@ void PowerSaveTimer::WakeUp() {
         ESP_LOGI(TAG, "Exiting power save mode");
         in_sleep_mode_ = false;
 
-        if (cpu_max_freq_ != -1) {
+        // 与 PowerSaveCheck 进入逻辑对称：只有真正降频/关音频过才恢复
+        // 避免在 LVGL/按键任务里同步拿 codec input_dev_mutex_ 导致 24s 卡死
+        if (cpu_max_freq_ < 120) {
             esp_pm_config_t pm_config = {
                 .max_freq_mhz = cpu_max_freq_,
                 .min_freq_mhz = cpu_max_freq_,
@@ -118,13 +120,11 @@ void PowerSaveTimer::WakeUp() {
             };
             esp_pm_configure(&pm_config);
 
-            // 恢复音频输入
             auto codec = Board::GetInstance().GetAudioCodec();
             if (codec) {
                 codec->EnableInput(true);
             }
 
-            // Enable wake word detection
             auto& app = Application::GetInstance();
             auto& audio_service = app.GetAudioService();
             if (is_wake_word_running_) {
