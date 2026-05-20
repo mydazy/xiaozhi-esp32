@@ -11,6 +11,10 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
 
     urc_callback_it_ = at_uart_->RegisterUrcCallback([this](const std::string& command, const std::vector<AtArgumentValue>& arguments) {
         if (command == "MHTTPURC") {
+            if (arguments.size() < 2) {
+                ESP_LOGE(TAG, "MHTTPURC malformed (args=%d)", (int)arguments.size());
+                return;
+            }
             if (arguments[1].int_value == http_id_) {
                 auto& type = arguments[0].string_value;
                 if (type == "header") {
@@ -19,6 +23,10 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
                     body_.clear();
                     body_consumed_ = 0;       // Patch B
                     content_lost_ = false;    // Patch B
+                    if (arguments.size() < 3) {
+                        ESP_LOGE(TAG, "MHTTPURC header missing status (args=%d)", (int)arguments.size());
+                        return;
+                    }
                     status_code_ = arguments[2].int_value;
                     if (arguments.size() >= 5) {
                         if (binary_receive_) {

@@ -32,7 +32,7 @@ Ml307Tcp::Ml307Tcp(std::shared_ptr<AtUart> at_uart, int tcp_id) : at_uart_(at_ua
         } else if (command == "MIPURC" && arguments.size() >= 3) {
             if (arguments[1].int_value == tcp_id_) {
                 if (arguments[0].string_value == "rtcp") {
-                    if (connected_ && stream_callback_) {
+                    if (arguments.size() >= 4 && connected_ && stream_callback_) {
                         stream_callback_(at_uart_->DecodeHex(arguments[3].string_value));
                     }
                 } else if (arguments[0].string_value == "disconn") {

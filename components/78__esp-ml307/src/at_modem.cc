@@ -193,7 +193,7 @@ void AtModem::HandleUrc(const std::string& command, const std::vector<AtArgument
         } else if (arguments.size() >= 2) {
             int state_index = arguments[1].type == AtArgumentValue::Type::Int ? 1 : 0;
             cereg_state_.stat = arguments[state_index].int_value;
-            if (arguments.size() >= state_index + 2) {
+            if ((int)arguments.size() >= state_index + 3) {
                 cereg_state_.tac = arguments[state_index + 1].string_value;
                 cereg_state_.ci = arguments[state_index + 2].string_value;
                 if (arguments.size() >= state_index + 4) {
