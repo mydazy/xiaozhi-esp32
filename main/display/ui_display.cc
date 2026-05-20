@@ -323,8 +323,9 @@ void UiDisplay::SwitchToClockMode() {
     if (active_scene_ == SceneType::kPlayer) return;
     if (active_scene_ == SceneType::kPomodoro) return;
 
-    HideEduCard();   // 状态切换清场，防止教育卡遮挡时钟主屏
-    HideFontGif();   // 同步清 font 状态，防止 GIF 笔画残留
+    if (control_center_) control_center_->Hide();
+    HideEduCard();
+    HideFontGif();
 
     if (!clock_container_) CreateClockPage();
 
@@ -353,6 +354,7 @@ void UiDisplay::SwitchToChatMode() {
     DisplayLockGuard lock(this);
     if (active_scene_ != SceneType::kClock && active_scene_ != SceneType::kPomodoro) return;
 
+    if (control_center_) control_center_->Hide();   // 切场景必关 ControlCenter
     HideEduCard();   // 状态切换清场，防止教育卡遮挡 emoji 表情
     HideFontGif();   // 同步清 font 状态，防止 GIF 笔画残留
 
@@ -961,6 +963,7 @@ void UiDisplay::SwitchToPlayerMode(const char* title) {
     if (!player_container_) CreatePlayerPage();
     if (!player_container_) return;
 
+    if (control_center_) control_center_->Hide();   // 切场景必关 ControlCenter
     HideEduCard();   // 状态切换清场，防止教育卡遮挡 player UI
     HideFontGif();   // 同步清 font 状态，防止 GIF 笔画残留
 
@@ -1119,6 +1122,7 @@ void UiDisplay::SwitchToPomodoroMode(uint32_t remain_sec, bool running) {
     if (!pomodoro_container_) CreatePomodoroPage();
     if (!pomodoro_container_) return;
 
+    if (control_center_) control_center_->Hide();   // 切场景必关 ControlCenter
     HideEduCard();
     HideFontGif();
 
@@ -1275,11 +1279,6 @@ void UiDisplay::ShowAboutPage() {
                 lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
             }
         }
-
-        lv_obj_t* tip = lv_label_create(about_overlay_);
-        lv_label_set_text(tip, "点按任意处返回");
-        lv_obj_set_style_text_color(tip, lv_color_hex(0x888888), 0);
-        lv_obj_align(tip, LV_ALIGN_BOTTOM_MID, 0, -6);
     }
 
     if (about_net_value_) {

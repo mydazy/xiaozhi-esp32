@@ -144,6 +144,7 @@ private:
     Display* display_ = nullptr;
     PowerManager* power_manager_ = nullptr;
     PowerSaveTimer* power_save_timer_ = nullptr;
+    esp_timer_handle_t wake_chat_timer_ = nullptr;
 
     // 触摸屏（mydazy/esp_lcd_touch_axs5106l component）
     axs5106l_touch_handle_t touch_driver_ = nullptr;
@@ -375,7 +376,13 @@ private:
         auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
         self->WakeUp();
         if (ControlCenterAbsorbs()) return;
-        if (y < 36) return;        // 状态栏交给 LVGL
+        if (y < 36) {
+            // 点击顶部状态栏 = 唤起控制中心（与下滑同语义，多一个入口）
+            if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
+                if (!ui->IsControlCenterVisible()) ui->ShowControlCenter();
+            }
+            return;
+        }
         self->HandleTouchSingleClick();
     }
 
@@ -428,8 +435,7 @@ private:
         if (state == kDeviceStateIdle) {
             ESP_LOGI(TAG, "单击唤醒对话");
             app.PlaySound(Lang::Sounds::OGG_WAKEUP);
-            vTaskDelay(pdMS_TO_TICKS(800));
-            app.ToggleChatState();
+            ScheduleWakeChatToggle(800);
         } else if (state == kDeviceStateSpeaking) {
             ESP_LOGI(TAG, "单击打断TTS");
             app.AbortSpeaking(kAbortReasonNone);
@@ -701,8 +707,10 @@ private:
             if (status != kDeviceStateIdle && status != kDeviceStateListening && status != kDeviceStateSpeaking) return;
             if (status == kDeviceStateIdle) {
                 app.PlaySound(Lang::Sounds::OGG_WAKEUP);
-                vTaskDelay(pdMS_TO_TICKS(1500));
-            } else if (status == kDeviceStateListening) {
+                ScheduleWakeChatToggle(1500);
+                return;
+            }
+            if (status == kDeviceStateListening) {
                 app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
             }
             app.ToggleChatState();
@@ -1002,6 +1010,26 @@ public:
         if (power_save_timer_) {
             power_save_timer_->WakeUp();
         }
+    }
+
+    // 异步等提示音播完再 ToggleChatState：避免在 button/LVGL 任务里 vTaskDelay 卡死
+    void ScheduleWakeChatToggle(int delay_ms) {
+        if (!wake_chat_timer_) {
+            const esp_timer_create_args_t args = {
+                .callback = [](void*) {
+                    Application::GetInstance().Schedule([]() {
+                        Application::GetInstance().ToggleChatState();
+                    });
+                },
+                .arg = nullptr,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "wake_chat",
+                .skip_unhandled_events = true,
+            };
+            ESP_ERROR_CHECK(esp_timer_create(&args, &wake_chat_timer_));
+        }
+        esp_timer_stop(wake_chat_timer_);
+        esp_timer_start_once(wake_chat_timer_, (uint64_t)delay_ms * 1000);
     }
 
     static void ShutdownHandler() {
