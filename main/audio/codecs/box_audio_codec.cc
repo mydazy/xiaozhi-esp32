@@ -191,14 +191,14 @@ void BoxAudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_
 }
 
 void BoxAudioCodec::SetOutputVolume(int volume) {
-    std::lock_guard<std::mutex> lock(data_if_mutex_);
+    std::lock_guard<std::mutex> lock(output_dev_mutex_);
     int set_volume = (int)(volume * 0.95);
     ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, set_volume));
     AudioCodec::SetOutputVolume(volume);
 }
 
 void BoxAudioCodec::SetInputGain(float gain) {
-    std::lock_guard<std::mutex> lock(data_if_mutex_);
+    std::lock_guard<std::mutex> lock(input_dev_mutex_);
     input_gain_ = gain;
 
     if (input_enabled_) {
@@ -209,7 +209,7 @@ void BoxAudioCodec::SetInputGain(float gain) {
 }
 
 void BoxAudioCodec::EnableInput(bool enable) {
-    std::lock_guard<std::mutex> lock(data_if_mutex_);
+    std::lock_guard<std::mutex> lock(input_dev_mutex_);
     if (enable == input_enabled_) {
         return;
     }
@@ -233,7 +233,7 @@ void BoxAudioCodec::EnableInput(bool enable) {
 }
 
 void BoxAudioCodec::EnableOutput(bool enable) {
-    std::lock_guard<std::mutex> lock(data_if_mutex_);
+    std::lock_guard<std::mutex> lock(output_dev_mutex_);
     if (enable == output_enabled_) {
         return;
     }
@@ -255,6 +255,7 @@ void BoxAudioCodec::EnableOutput(bool enable) {
 }
 
 int BoxAudioCodec::Read(int16_t* dest, int samples) {
+    std::lock_guard<std::mutex> lock(input_dev_mutex_);   // 与 EnableInput 的 open/close 互斥，防读已释放设备
     if (input_enabled_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(input_dev_, (void*)dest, samples * sizeof(int16_t)));
     }
@@ -262,6 +263,7 @@ int BoxAudioCodec::Read(int16_t* dest, int samples) {
 }
 
 int BoxAudioCodec::Write(const int16_t* data, int samples) {
+    std::lock_guard<std::mutex> lock(output_dev_mutex_);  // 与 EnableOutput 的 open/close 互斥，防写已释放设备
     if (output_enabled_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(output_dev_, (void*)data, samples * sizeof(int16_t)));
     }
@@ -277,7 +279,7 @@ void BoxAudioCodec::CalibrateMicOnce() {
     if (!input_enabled_)  EnableInput(true);
     if (!output_enabled_) EnableOutput(true);
     {
-        std::lock_guard<std::mutex> lk(data_if_mutex_);
+        std::scoped_lock<std::mutex, std::mutex> lk(input_dev_mutex_, output_dev_mutex_);  // 同时碰输入+输出，双锁(scoped_lock 防死锁)
         esp_codec_dev_set_out_vol(output_dev_, 76);
         esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), 15.0f);
     }

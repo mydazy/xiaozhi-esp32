@@ -19,7 +19,9 @@ private:
 
     esp_codec_dev_handle_t output_dev_ = nullptr;
     esp_codec_dev_handle_t input_dev_ = nullptr;
-    std::mutex data_if_mutex_;
+    // 输入、输出各一把锁：使 Read 与 Write 互不阻塞，同时让读写与各自的 open/close 互斥（防 close 期间读写已释放设备崩溃）
+    std::mutex input_dev_mutex_;
+    std::mutex output_dev_mutex_;
 
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din);
 
