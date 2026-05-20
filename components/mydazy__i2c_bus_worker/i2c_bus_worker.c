@@ -395,11 +395,7 @@ esp_err_t i2c_worker_write(
         .write_len  = len,
         .timeout_ms = timeout_ms,
     };
-    if (xSemaphoreTakeRecursive(dev->worker->session_mutex, pdMS_TO_TICKS(timeout_ms + 50)) != pdTRUE)
-        return ESP_ERR_TIMEOUT;
-    esp_err_t ret = submit_and_wait(dev->worker, &op, timeout_ms + 50);
-    xSemaphoreGiveRecursive(dev->worker->session_mutex);
-    return ret;
+    return submit_and_wait(dev->worker, &op, timeout_ms + 50);
 }
 
 esp_err_t i2c_worker_read(
@@ -413,11 +409,7 @@ esp_err_t i2c_worker_read(
         .read_len  = len,
         .timeout_ms = timeout_ms,
     };
-    if (xSemaphoreTakeRecursive(dev->worker->session_mutex, pdMS_TO_TICKS(timeout_ms + 50)) != pdTRUE)
-        return ESP_ERR_TIMEOUT;
-    esp_err_t ret = submit_and_wait(dev->worker, &op, timeout_ms + 50);
-    xSemaphoreGiveRecursive(dev->worker->session_mutex);
-    return ret;
+    return submit_and_wait(dev->worker, &op, timeout_ms + 50);
 }
 
 esp_err_t i2c_worker_write_read(
@@ -436,11 +428,7 @@ esp_err_t i2c_worker_write_read(
         .read_len   = read_len,
         .timeout_ms = timeout_ms,
     };
-    if (xSemaphoreTakeRecursive(dev->worker->session_mutex, pdMS_TO_TICKS(timeout_ms + 50)) != pdTRUE)
-        return ESP_ERR_TIMEOUT;
-    esp_err_t ret = submit_and_wait(dev->worker, &op, timeout_ms + 50);
-    xSemaphoreGiveRecursive(dev->worker->session_mutex);
-    return ret;
+    return submit_and_wait(dev->worker, &op, timeout_ms + 50);
 }
 
 /* ────────────────────────────────────────────────────────────────

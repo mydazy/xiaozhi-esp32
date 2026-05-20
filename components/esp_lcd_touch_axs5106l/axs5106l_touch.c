@@ -76,7 +76,7 @@ static const char *TAG = "axs5106l_touch";
 #define SWIPE_TRAJECTORY_BIAS  20
 
 /* ---------- I2C ---------- */
-#define I2C_TIMEOUT_MS  100
+#define I2C_TIMEOUT_MS  50
 #define I2C_RETRIES     3
 
 /* ------------------------------------------------------------------ */

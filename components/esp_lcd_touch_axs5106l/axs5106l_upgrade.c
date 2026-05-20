@@ -25,7 +25,7 @@ static const uint8_t kFirmwareData[] = {
 #define FIRMWARE_VERSION_OFFSET  0x400
 
 /* I2C transaction parameters. */
-#define I2C_TIMEOUT_MS           100
+#define I2C_TIMEOUT_MS           50
 #define I2C_MAX_RETRIES          3
 
 /* Upgrade-flow parameters. */

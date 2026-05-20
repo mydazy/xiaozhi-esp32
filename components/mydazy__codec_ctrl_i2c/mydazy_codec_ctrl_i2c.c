@@ -17,7 +17,7 @@
 #include "esp_codec_dev_defaults.h"     /* ESP_CODEC_DEV_OK / ESP_CODEC_DEV_* */
 
 #define TAG "MyDazyCodecI2C"
-#define DEFAULT_I2C_TIMEOUT_MS  100
+#define DEFAULT_I2C_TIMEOUT_MS  50
 
 typedef struct {
     audio_codec_ctrl_if_t   base;

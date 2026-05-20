@@ -22,7 +22,7 @@ static const char *TAG = "sc7a20h";
 #define ADDR_7BIT        0x19
 #define I2C_SPEED_HZ     400000
 #define WHO_AM_I_VAL     0x11
-#define I2C_TIMEOUT_MS   100
+#define I2C_TIMEOUT_MS   50
 #define MG_PER_LSB       2          /* ±4g HR 12-bit · 精确整数 */
 #define THS_STEP_MG      32         /* INT1_THS 步长 @ ±4g */
 #define DUR_STEP_MS      10         /* INT1_DURATION 步长 @ ODR 100 Hz */
