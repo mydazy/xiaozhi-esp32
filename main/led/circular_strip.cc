@@ -60,7 +60,7 @@ void CircularStrip::SetAllColor(StripColor color) {
 }
 
 void CircularStrip::SetSingleColor(uint8_t index, StripColor color) {
-    if (index >= max_leds_) return;  // 边界校验，防越界堆写 + 驱动层越界
+    if (index >= max_leds_) return;
     std::lock_guard<std::mutex> lock(mutex_);
     esp_timer_stop(strip_timer_);
     colors_[index] = color;
