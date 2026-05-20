@@ -65,8 +65,8 @@ void Ml307Board::OnNetworkEvent(NetworkEvent event, const std::string& data) {
 }
 
 void Ml307Board::NetworkTask() {
-    // ─── ML307R 模组上电稳定窗口 ────────────────────────────────
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    // ML307R datasheet: VBAT 上电后 UART Active 需 ≥ 10s。
+    vTaskDelay(pdMS_TO_TICKS(8000));
 
     // Notify modem detection started
     OnNetworkEvent(NetworkEvent::ModemDetecting);
@@ -135,8 +135,6 @@ void Ml307Board::NetworkTask() {
 }
 
 void Ml307Board::StartNetwork() {
-    // ─── 系统冷启动电源稳定窗口 ────────────────────────────────────────────
-    vTaskDelay(pdMS_TO_TICKS(1500));
 
     xTaskCreatePinnedToCore([](void* arg) {
         Ml307Board* board = static_cast<Ml307Board*>(arg);

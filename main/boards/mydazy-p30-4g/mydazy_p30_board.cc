@@ -301,12 +301,10 @@ private:
         gpio_set_level(AUDIO_PWR_EN_GPIO, 0);    // 先锁低
         rtc_gpio_hold_dis(AUDIO_PWR_EN_GPIO);    // 再释放 RTC hold（无浮动窗口）
 
-        // ⭐ 500ms 断电：让 ML307R VBAT 大电容（≥470µF）彻底放电，
         vTaskDelay(pdMS_TO_TICKS(500));
         gpio_set_level(AUDIO_PWR_EN_GPIO, 1);
         ESP_LOGI(TAG, "音频电源已启用 (GPIO%d)", AUDIO_PWR_EN_GPIO);
 
-        // 音频芯片上电稳定时间 200ms（ES8311/ES7210 datasheet 建议）
         vTaskDelay(pdMS_TO_TICKS(200));
 
     }

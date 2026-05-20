@@ -719,8 +719,7 @@ private:
                 app.PlaySound(Lang::Sounds::OGG_WAKEUP);
                 ScheduleWakeChatToggle(1500);   // 异步等提示音播完，button task 立即返回
                 return;
-            }
-            if (status == kDeviceStateListening) {
+            }else if (status == kDeviceStateListening) {
                 app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
             }
             app.ToggleChatState();
