@@ -171,6 +171,10 @@ const char* Ml307Board::GetNetworkStateIcon() {
 }
 
 std::string Ml307Board::GetBoardJson() {
+    if (modem_ == nullptr) {
+        // 模组未检出/无 SIM：返回不含蜂窝信息的最小 JSON，避免空指针崩溃
+        return std::string("{\"type\":\"" BOARD_TYPE "\",\"name\":\"" BOARD_NAME "\"}");
+    }
     std::string board_json = std::string("{\"type\":\"" BOARD_TYPE "\",");
     board_json += "\"name\":\"" BOARD_NAME "\",";
     board_json += "\"revision\":\"" + modem_->GetModuleRevision() + "\",";
@@ -248,24 +252,26 @@ std::string Ml307Board::GetDeviceStatusJson() {
         cJSON_AddItemToObject(root, "battery", battery);
     }
 
-    // Network
-    auto network = cJSON_CreateObject();
-    cJSON_AddStringToObject(network, "type", "cellular");
-    cJSON_AddStringToObject(network, "carrier", modem_->GetCarrierName().c_str());
-    int csq = modem_->GetCsq();
-    if (csq == -1) {
-        cJSON_AddStringToObject(network, "signal", "unknown");
-    } else if (csq >= 0 && csq <= 14) {
-        cJSON_AddStringToObject(network, "signal", "very weak");
-    } else if (csq >= 15 && csq <= 19) {
-        cJSON_AddStringToObject(network, "signal", "weak");
-    } else if (csq >= 20 && csq <= 24) {
-        cJSON_AddStringToObject(network, "signal", "medium");
-    } else if (csq >= 25 && csq <= 31) {
-        cJSON_AddStringToObject(network, "signal", "strong");
+    // Network（模组未检出/无 SIM 时跳过，避免空指针崩溃）
+    if (modem_ != nullptr) {
+        auto network = cJSON_CreateObject();
+        cJSON_AddStringToObject(network, "type", "cellular");
+        cJSON_AddStringToObject(network, "carrier", modem_->GetCarrierName().c_str());
+        int csq = modem_->GetCsq();
+        if (csq == -1) {
+            cJSON_AddStringToObject(network, "signal", "unknown");
+        } else if (csq >= 0 && csq <= 14) {
+            cJSON_AddStringToObject(network, "signal", "very weak");
+        } else if (csq >= 15 && csq <= 19) {
+            cJSON_AddStringToObject(network, "signal", "weak");
+        } else if (csq >= 20 && csq <= 24) {
+            cJSON_AddStringToObject(network, "signal", "medium");
+        } else if (csq >= 25 && csq <= 31) {
+            cJSON_AddStringToObject(network, "signal", "strong");
+        }
+        cJSON_AddNumberToObject(network, "csq", csq);
+        cJSON_AddItemToObject(root, "network", network);
     }
-    cJSON_AddNumberToObject(network, "csq", csq);
-    cJSON_AddItemToObject(root, "network", network);
 
     auto json_str = cJSON_PrintUnformatted(root);
     std::string json(json_str);
