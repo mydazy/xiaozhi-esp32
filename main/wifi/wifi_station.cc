@@ -108,11 +108,14 @@ std::vector<wifi_ap_record_t> WifiStation::GetDeduplicatedCache() {
     return result;
 }
 
+// ⚠️ 阻塞 API（03-P1-4）：force_refresh/缓存失效时自旋等待扫描最长 3s。
+// 禁止在 UI/LVGL/event 回调或主循环上下文调用（会卡顿）。UI 侧请走非阻塞的
+// GetDeduplicatedCache() + OnScanComplete() 回调读取缓存。
 std::vector<WifiApRecord> WifiStation::GetMatchedAccessPoints(bool force_refresh) {
     // 如果需要强制刷新或缓存无效，触发扫描
     if (force_refresh || !IsCacheValid()) {
         TriggerScan();
-        // 等待扫描完成（最多3秒）
+        // 等待扫描完成（最多3秒）— 阻塞，见上方警示
         for (int i = 0; i < 30 && is_scanning_; i++) {
             vTaskDelay(pdMS_TO_TICKS(100));
         }

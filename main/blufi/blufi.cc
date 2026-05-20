@@ -494,12 +494,16 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
           [](const std::vector<wifi_ap_record_t> &) { Blufi::OnScanDone(); });
 
       if (!wifi.IsInitialized()) {
-        // WiFi未初始化：Start()内部同步初始化，
-        // WIFI_EVENT_STA_START 事件会自动触发首次扫描，无需手动 TriggerScan
-        ESP_LOGI(TAG, "[2/8] 初始化WiFi（自动触发首次扫描）");
-        wifi.SetScanOnlyMode(true);
+        // WiFi 未初始化：Start() 内部同步初始化整个驱动(esp_netif/esp_wifi_init/start)。
+        // 移到独立任务执行，避免在 NimBLE host task 上下文长时间阻塞 → BLE 事件积压/掉连(03-P1-3)。
+        ESP_LOGI(TAG, "[2/8] 初始化WiFi（异步，自动触发首次扫描）");
         self.scanning_ = true;
-        wifi.Start();
+        xTaskCreatePinnedToCore([](void *arg) {
+          auto &w = WifiStation::GetInstance();
+          w.SetScanOnlyMode(true);
+          w.Start();   // 同步初始化，STA_START 事件会自动触发首次扫描
+          vTaskDelete(NULL);
+        }, "blufi_wifi_init", 4096, nullptr, 5, nullptr, 0);
       } else {
         // WiFi已初始化，手动触发扫描
         ESP_LOGI(TAG, "[2/8] WiFi已就绪，触发扫描");
