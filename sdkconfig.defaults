@@ -80,11 +80,14 @@ CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER=y
 CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
 
 # R5 · 噪声抑制 WebRTC → NSNET2（2026-05-15 激进策略）· 释放 ~8-10 KB INT
-# WebRTC NS：DSP 算法跑 INT RAM；NSNET2：神经网络跑 PSRAM（NPU 加速）
-# 与弱网无关（NS 是麦克风端去噪，不是网络层），破音原因应在 4G 链路而非麦克风
-# 如听感对比 NSNET2 不达标可回滚（cost: 8-10 KB INT）
-CONFIG_SR_NSN_NSNET2=y
-# CONFIG_SR_NSN_WEBRTC is not set
+# NS 神经降噪：2026-05-20 关闭（用户决定，从 sdkconfig 层去掉 NSNET2 模型）
+# 选 WEBRTC（choice 无 NONE 选项）→ 模型分区不含 nsnet → afe_audio_processor.cc 中
+# esp_srmodel_filter(NSNET) 返回 null → ns_init=false → AFE 管线 NS 整段关闭。
+# 因 ns_init=false，WebRTC NS（DSP 算法，否则占 INT RAM）不会被启用，不会反占内部。
+# 收益：省 flash（去掉 nsnet2 模型）+ 省 NSNET2 的 PSRAM；内部 RAM 收益很小（NSNET2 本就在 PSRAM）。
+# 代价：弱噪声环境麦克风端去噪变弱，AEC/AGC/VAD 仍在。如听感不达标可回滚 NSNET2。
+# CONFIG_SR_NSN_NSNET2 is not set
+CONFIG_SR_NSN_WEBRTC=y
 
 # ============================================================
 # P30 P0a-WiFi · WiFi 模式 SRAM 紧急救援（2026-05-15）
