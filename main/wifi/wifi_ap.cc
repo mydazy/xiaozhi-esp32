@@ -556,7 +556,7 @@ void WifiAp::SmartConfigEventHandler(void *arg, esp_event_base_t event_base,
         char ssid[33] = {0}, password[65] = {0};
         memcpy(ssid, evt->ssid, sizeof(evt->ssid));
         memcpy(password, evt->password, sizeof(evt->password));
-        ESP_LOGI(TAG, "SmartConfig: %s", ssid);
+        ESP_LOGD(TAG, "SmartConfig: %s", ssid);  // 脱敏:不在 INFO 级打印 SSID
         // SmartConfig 不经过验证，直接保存凭证
         SsidManager::GetInstance().AddSsid(ssid, password);
 

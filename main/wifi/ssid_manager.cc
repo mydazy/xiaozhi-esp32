@@ -87,7 +87,7 @@ void SsidManager::SaveToNvs() {
 void SsidManager::AddSsid(const std::string& ssid, const std::string& password) {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& item : ssid_list_) {
-        ESP_LOGI(TAG, "compare [%s:%d] [%s:%d]", item.ssid.c_str(), item.ssid.size(), ssid.c_str(), ssid.size());
+        ESP_LOGD(TAG, "compare [%s:%d] [%s:%d]", item.ssid.c_str(), item.ssid.size(), ssid.c_str(), ssid.size());  // 脱敏
         if (item.ssid == ssid) {
             if (item.password == password) {
                 return;

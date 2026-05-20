@@ -927,7 +927,7 @@ WifiConnectResult WifiStation::TryConnect(const std::string& ssid, const std::st
         return result;
     }
 
-    ESP_LOGI(TAG, "TryConnect: %s (timeout: %dms)", ssid.c_str(), timeout_ms);
+    ESP_LOGD(TAG, "TryConnect: %s (timeout: %dms)", ssid.c_str(), timeout_ms);  // 脱敏:不在 INFO 级打印 SSID
 
     // 进入配网连接模式
     try_connect_mode_ = true;
@@ -1026,7 +1026,7 @@ WifiConnectResult WifiStation::TryConnectAndSave(const std::string& ssid, const 
 
     // 成功则保存凭证
     if (result.success) {
-        ESP_LOGI(TAG, "TryConnectAndSave: saving credentials for %s", ssid.c_str());
+        ESP_LOGD(TAG, "TryConnectAndSave: saving credentials for %s", ssid.c_str());  // 脱敏
         SsidManager::GetInstance().AddSsid(ssid, password);
     }
 
