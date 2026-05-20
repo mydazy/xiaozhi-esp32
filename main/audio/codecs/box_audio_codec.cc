@@ -6,6 +6,7 @@
 #include <driver/i2s_tdm.h>
 #include <cmath>
 #include <vector>
+#include <atomic>
 #include "mydazy_codec_ctrl_i2c.h"
 
 #define TAG "BoxAudioCodec"
@@ -287,21 +288,25 @@ void BoxAudioCodec::CalibrateMicOnce() {
     std::vector<int16_t> tone(8000);
     for (size_t i = 0; i < 8000; i++)
         tone[i] = (int16_t)(24000 * std::sin(2.0 * M_PI * 1000 * i / 16000));
-    struct Ctx { BoxAudioCodec* self; std::vector<int16_t>* tone; } ctx{this, &tone};
-
     auto measure = [&]() -> int32_t {
+        // 播放上下文(含完成标志)放本次 measure 栈帧，返回前 join，避免任务悬垂访问失效栈帧
+        struct PlayCtx { BoxAudioCodec* self; std::vector<int16_t>* tone; std::atomic<bool> done; }
+            pctx{this, &tone, {false}};
         xTaskCreate([](void* a) {
-            auto* c = (Ctx*)a;
+            auto* c = (PlayCtx*)a;
             c->self->Write(c->tone->data(), c->tone->size());
+            c->done.store(true);
             vTaskDelete(NULL);
-        }, "calib", 4096, &ctx, 5, NULL);
+        }, "calib", 4096, &pctx, 5, NULL);
         vTaskDelay(pdMS_TO_TICKS(150));
         std::vector<int16_t> rec(3200 * input_channels_);
         Read(rec.data(), rec.size());
         int64_t sum = 0;
         for (size_t i = 0; i < rec.size(); i += input_channels_)
             sum += (int64_t)rec[i] * rec[i];
-        vTaskDelay(pdMS_TO_TICKS(400));
+        // 等播放任务真正结束(最多 2s)再返回：杜绝悬垂访问 pctx + 第二轮 measure 双 calib 任务并发
+        for (int waited = 0; !pctx.done.load() && waited < 2000; waited += 10)
+            vTaskDelay(pdMS_TO_TICKS(10));
         return (int32_t)std::sqrt((double)sum / (rec.size() / input_channels_));
     };
 
