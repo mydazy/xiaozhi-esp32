@@ -324,11 +324,8 @@ esp_err_t axs5106l_touch_attach_lvgl(axs5106l_touch_handle_t self)
     esp_err_t ret = gpio_config(&int_cfg);
     if (ret != ESP_OK) return ret;
 
+    (void)gpio_install_isr_service(0);
     esp_err_t add_ret = gpio_isr_handler_add(self->int_gpio, int_falling_edge_isr, self);
-    if (add_ret == ESP_ERR_INVALID_STATE) {
-        gpio_install_isr_service(0);
-        add_ret = gpio_isr_handler_add(self->int_gpio, int_falling_edge_isr, self);
-    }
     if (add_ret == ESP_OK) {
         self->isr_installed = true;
         self->int_edge_window_start_us = esp_timer_get_time();
@@ -486,7 +483,8 @@ static bool read_register(axs5106l_touch_handle_t self, uint8_t reg, uint8_t *da
 {
     if (self->dev == NULL) return false;
     for (int i = 0; i < I2C_RETRIES; i++) {
-        if (i2c_worker_write_read(self->dev, &reg, 1, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
+        if (i2c_worker_write(self->dev, &reg, 1,   I2C_TIMEOUT_MS) == ESP_OK &&
+            i2c_worker_read (self->dev, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
             self->i2c_err_streak = 0;
             return true;
         }

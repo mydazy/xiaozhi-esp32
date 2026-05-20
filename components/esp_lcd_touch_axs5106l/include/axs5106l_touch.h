@@ -26,9 +26,9 @@
 extern "C" {
 #endif
 
-/* 编译期开关：1=显示触摸轨迹红点 + raw 坐标日志（调试期开启）*/
+/* 编译期开关：1=显示触摸轨迹红点 + raw 坐标日志（调试期开启）· 0=量产关闭 */
 #ifndef AXS5106L_TOUCH_DEBUG_OVERLAY
-#define AXS5106L_TOUCH_DEBUG_OVERLAY 1
+#define AXS5106L_TOUCH_DEBUG_OVERLAY 0
 #endif
 
 /* ========== Public types ========== */
