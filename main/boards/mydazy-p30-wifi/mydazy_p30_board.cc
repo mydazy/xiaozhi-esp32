@@ -200,7 +200,7 @@ private:
             .max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t),
             .flags = SPICOMMON_BUSFLAG_MASTER,
         };
-        ESP_ERROR_CHECK(spi_bus_initialize(DISPLAY_SPI_HOST, &buscfg, SPI_DMA_DISABLED));
+        ESP_ERROR_CHECK(spi_bus_initialize(DISPLAY_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
 
     void HandleWakeupCause() {
@@ -311,8 +311,8 @@ private:
         gpio_set_level(AUDIO_PWR_EN_GPIO, 1);
         ESP_LOGI(TAG, "音频电源已启用 (GPIO%d)", AUDIO_PWR_EN_GPIO);
 
-        // 音频芯片上电稳定时间 200ms（ES8311/ES7210 datasheet 建议）
-        vTaskDelay(pdMS_TO_TICKS(200));
+        // ES8311/ES7210 上电稳定 ≥300ms：消除首次 esp_codec_dev_open 的 I2C INVALID_STATE 偶发 ERROR
+        vTaskDelay(pdMS_TO_TICKS(300));
 
     }
 
