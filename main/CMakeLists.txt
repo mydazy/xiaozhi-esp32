@@ -5,7 +5,6 @@ set(SOURCES "audio/audio_codec.cc"
             "audio/demuxer/ogg_demuxer.cc"
             "audio/codecs/no_audio_codec.cc"
             "audio/codecs/box_audio_codec.cc"
-            "audio/codecs/es7111_audio_codec.cc"
             "audio/processors/audio_debugger.cc"
             "led/single_led.cc"
             "led/circular_strip.cc"
@@ -68,7 +67,6 @@ list(APPEND SOURCES
     "boards/common/power_save_timer.cc"
     "boards/common/education_mcp_tools.cc"
     "boards/common/system_reset.cc"
-    "boards/common/typec_headset.cc"
 )
 list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/common)
 
