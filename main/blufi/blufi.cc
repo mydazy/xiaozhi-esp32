@@ -118,7 +118,6 @@ bool Blufi::Start(const std::string &device_name) {
     return false;
   }
 
-  // ⭐ 修复：检查是否已经在初始化过程中或已初始化
   if (initialized_) {
     if (!advertising_) {
       stopping_ = false;
@@ -133,10 +132,8 @@ bool Blufi::Start(const std::string &device_name) {
   stopping_ = false;
   device_name_ = device_name;
 
-  // 优化: 先扫描WiFi，再启动BLE，避免RF冲突
   auto &wifi = WifiStation::GetInstance();
   if (wifi.IsInitialized()) {
-    // 如果正在扫描，等待完成
     if (wifi.IsScanning()) {
       int wait_count = 0;
       while (wifi.IsScanning() && wait_count < 30) {
@@ -154,7 +151,6 @@ bool Blufi::Start(const std::string &device_name) {
   ble_svc_gap_device_name_set(device_name_.c_str());
 #endif
 
-  // 初始化主机栈和回调（控制器已在 InitializeController() 中初始化）
   static esp_blufi_callbacks_t callbacks = {
       .event_cb = BlufiCallback,
       .negotiate_data_handler = blufi_dh_negotiate_data_handler,
@@ -163,9 +159,6 @@ bool Blufi::Start(const std::string &device_name) {
       .checksum_func = blufi_crc_checksum,
   };
 
-  // ⚠️ 创建 INIT_FINISH 同步信号（BlufiCallback 触发时 give）
-  // 用途：调用方持 lvgl_port_lock 期间，等 NimBLE 异步完成 GATT profile init
-  // 避免释放锁时 NimBLE 还在 flash op，导致 LVGL flush 入队失败 → WDT
   if (init_done_sem_ == nullptr) {
     init_done_sem_ = xSemaphoreCreateBinary();
   } else {
@@ -181,8 +174,6 @@ bool Blufi::Start(const std::string &device_name) {
     return false;
   }
 
-  // ⚠️ 同步等待 INIT_FINISH（NimBLE 异步初始化 GATT profile，flash op 密集）
-  // 超时 3s：正常 < 100ms，超时说明 NimBLE 异常但至少能释放调用方的 LVGL 锁
   if (init_done_sem_ &&
       xSemaphoreTake(init_done_sem_, pdMS_TO_TICKS(3000)) != pdTRUE) {
     ESP_LOGW(TAG, "等待 INIT_FINISH 超时 3s（NimBLE 可能异常）");
@@ -194,8 +185,6 @@ bool Blufi::Start(const std::string &device_name) {
 void Blufi::Stop() {
   ESP_LOGI(TAG, "停止Blufi");
   stopping_ = true;
-
-  // 【P0改进】分别检查和清理，避免资源泄漏
 
   // 1. 清理广播和连接
   if (advertising_) {
@@ -241,7 +230,6 @@ void Blufi::Stop() {
   }
 }
 
-// ============ 接口 ============
 
 void Blufi::SetCredentialValidator(
     std::function<bool(const std::string &ssid, const std::string &password,
@@ -277,12 +265,6 @@ void Blufi::SendData(const char *data, int len) {
 
 bool Blufi::StartAdvertising() {
 #ifdef CONFIG_BT_NIMBLE_ENABLED
-  // ⚠️ 关键修复（2026-04-30）：直接用成员变量 device_name_，不要读 ble_svc_gap_device_name()
-  // 根因：Start() 中 line 155 提前调 ble_svc_gap_device_name_set 时 NimBLE 还没 init，
-  //       随后 esp_blufi_host_and_cb_init → ble_svc_gap_init 用 sdkconfig 默认值 "nimble" 覆盖。
-  //       此处若读 ble_svc_gap_device_name() 拿到的是 "nimble"，导致广播设备名是 "nimble"
-  //       而非 device_name_（"MyDazy-XXXX"），手机搜不到 MyDazy。
-  // 解法：直接传 device_name_，esp_blufi_adv_start_with_name 内部会再次调 set（此时 NimBLE 已 init，生效）
   if (device_name_.empty()) {
     ESP_LOGW(TAG, "BLE设备名为空，跳过广播");
     return false;
@@ -421,13 +403,10 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
     ESP_LOGW(TAG, "[修复] BLE_CONNECT事件丢失，修正连接状态 (event=%d)", event);
     self.ble_connected_ = true;
 
-    // 停止广播（BLE已连接时不应继续广播）
     esp_blufi_adv_stop();
 
-    // 初始化安全层（blufi_security_init已支持多次调用，不会重复初始化）
     blufi_security_init();
 
-    // 补偿 BLE_CONNECT 中的 WiFi 预扫描逻辑
     auto &wifi = WifiStation::GetInstance();
     if (wifi.IsInitialized() && !wifi.IsCacheValid() && !self.scanning_) {
       ESP_LOGW(TAG, "[修复]   → 补偿WiFi预扫描");
@@ -441,7 +420,6 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
   switch (event) {
   case ESP_BLUFI_EVENT_INIT_FINISH:
     ESP_LOGI(TAG, "[1/8] Blufi初始化完成");
-    // ⭐ 关键修复：在profile真正初始化完成后才设置状态
     self.initialized_ = true;
     self.advertising_ = self.StartAdvertising();
     if (!self.advertising_) {
@@ -461,10 +439,6 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
     ESP_LOGI(TAG, "[2/8]   → 初始化安全层");
     blufi_security_init();
 
-    // ⭐ 优化：更新 BLE 连接参数，延长监管超时
-    // 用户浏览 WiFi 列表期间可能 5-60 秒无 BLE 数据交互，
-    // 默认监管超时（iOS ~720ms, Android 5-20s）容易导致断连。
-    // 参考：小米/涂鸦等头部品牌配网均设置 6s 以上监管超时。
 #ifdef CONFIG_BT_NIMBLE_ENABLED
     {
       struct ble_gap_upd_params conn_params = {};
@@ -485,23 +459,19 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
 
     ESP_LOGI(TAG, "[2/8]   → BLE连接建立完成");
 
-    // ⭐ BLE连接后初始化WiFi并预扫描
     {
       auto &wifi = WifiStation::GetInstance();
 
-      // 注册扫描回调（无论WiFi是否已初始化都需要）
       wifi.OnScanComplete(
           [](const std::vector<wifi_ap_record_t> &) { Blufi::OnScanDone(); });
 
       if (!wifi.IsInitialized()) {
-        // WiFi 未初始化：Start() 内部同步初始化整个驱动(esp_netif/esp_wifi_init/start)。
-        // 移到独立任务执行，避免在 NimBLE host task 上下文长时间阻塞 → BLE 事件积压/掉连(03-P1-3)。
         ESP_LOGI(TAG, "[2/8] 初始化WiFi（异步，自动触发首次扫描）");
         self.scanning_ = true;
         xTaskCreatePinnedToCore([](void *arg) {
           auto &w = WifiStation::GetInstance();
           w.SetScanOnlyMode(true);
-          w.Start();   // 同步初始化，STA_START 事件会自动触发首次扫描
+          w.Start();
           vTaskDelete(NULL);
         }, "blufi_wifi_init", 4096, nullptr, 5, nullptr, 0);
       } else {

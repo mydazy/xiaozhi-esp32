@@ -393,13 +393,11 @@ esp_err_t i2c_worker_write(
         .dev = dev,
         .write_data = data,
         .write_len  = len,
-        .timeout_ms = timeout_ms,   /* 全额硬件超时(原砍半致 caller 100→实际 50ms 偏紧) */
+        .timeout_ms = timeout_ms,
     };
-    /* 取会话锁(递归)再入队：使单 op 也尊重 lock_session 持有的多寄存器原子序列(05-P1-2)。
-       持会话的同线程可重入；其它线程的单 op 阻塞至会话释放。 */
     if (xSemaphoreTakeRecursive(dev->worker->session_mutex, pdMS_TO_TICKS(timeout_ms + 50)) != pdTRUE)
         return ESP_ERR_TIMEOUT;
-    esp_err_t ret = submit_and_wait(dev->worker, &op, timeout_ms + 50);  /* 总等待=硬件超时+排队余量 */
+    esp_err_t ret = submit_and_wait(dev->worker, &op, timeout_ms + 50);
     xSemaphoreGiveRecursive(dev->worker->session_mutex);
     return ret;
 }
@@ -413,13 +411,11 @@ esp_err_t i2c_worker_read(
         .dev = dev,
         .read_data = data,
         .read_len  = len,
-        .timeout_ms = timeout_ms,   /* 全额硬件超时(原砍半致 caller 100→实际 50ms 偏紧) */
+        .timeout_ms = timeout_ms,
     };
-    /* 取会话锁(递归)再入队：使单 op 也尊重 lock_session 持有的多寄存器原子序列(05-P1-2)。
-       持会话的同线程可重入；其它线程的单 op 阻塞至会话释放。 */
     if (xSemaphoreTakeRecursive(dev->worker->session_mutex, pdMS_TO_TICKS(timeout_ms + 50)) != pdTRUE)
         return ESP_ERR_TIMEOUT;
-    esp_err_t ret = submit_and_wait(dev->worker, &op, timeout_ms + 50);  /* 总等待=硬件超时+排队余量 */
+    esp_err_t ret = submit_and_wait(dev->worker, &op, timeout_ms + 50);
     xSemaphoreGiveRecursive(dev->worker->session_mutex);
     return ret;
 }
@@ -438,13 +434,11 @@ esp_err_t i2c_worker_write_read(
         .write_len  = write_len,
         .read_data  = read_data,
         .read_len   = read_len,
-        .timeout_ms = timeout_ms,   /* 全额硬件超时(原砍半致 caller 100→实际 50ms 偏紧) */
+        .timeout_ms = timeout_ms,
     };
-    /* 取会话锁(递归)再入队：使单 op 也尊重 lock_session 持有的多寄存器原子序列(05-P1-2)。
-       持会话的同线程可重入；其它线程的单 op 阻塞至会话释放。 */
     if (xSemaphoreTakeRecursive(dev->worker->session_mutex, pdMS_TO_TICKS(timeout_ms + 50)) != pdTRUE)
         return ESP_ERR_TIMEOUT;
-    esp_err_t ret = submit_and_wait(dev->worker, &op, timeout_ms + 50);  /* 总等待=硬件超时+排队余量 */
+    esp_err_t ret = submit_and_wait(dev->worker, &op, timeout_ms + 50);
     xSemaphoreGiveRecursive(dev->worker->session_mutex);
     return ret;
 }
