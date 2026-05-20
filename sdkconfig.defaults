@@ -165,7 +165,9 @@ CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=n
 # 兜底：CACHE_TX_BUFFER_NUM=32（PSRAM）在静态池耗尽时吸收溢出 TX 帧——
 #       此即该 cache 池的设计用途，降静态池属其设计内行为，非激进。
 # 验证（物理动作）：真机 OTA 固件下载 + 弱网音频上行回归，确认无 TX 饥饿丢帧。
-CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+# 2026-05-20 · 8→6 保守再降一档（省 ~3.2KB INT，补 WiFi 对话 min RAM）。
+# 目标 4（再省 ~3.2KB），但需真机验过"无 Encode backpressure 日志 + 上行不丢字"后再下探。
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=6
 
 # P30 P0a-2 · NimBLE role 裁剪（2026-04-29）· 释放 ~5-8 KB INT + Flash
 # BluFi 配网只需要 PERIPHERAL + BROADCASTER + GATT_SERVER（设备作为外设被手机连接）
