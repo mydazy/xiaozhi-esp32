@@ -766,22 +766,8 @@ private:
             }
 #endif
         });
-        // 3 连击：进/退配网（已在配网态 → 退 · 否则进）
-        boot_button_.OnMultipleClick([this]() {
-            auto& app = Application::GetInstance();
-            PauseAudioAndChatBeforeSwitch();
-            if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
-                Settings settings("wifi", true);
-                settings.SetInt("force_ap", 0);
-                app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "退出配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
-                vTaskDelay(pdMS_TO_TICKS(1500));
-                app.Reboot();
-            } else {
-                app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "进入配网", "logo", Lang::Sounds::OGG_BLE_CONFIG);
-                vTaskDelay(pdMS_TO_TICKS(1500));
-                ResetWifiConfiguration();  // 内部 force_ap=1 + skip_welcome=1 + Reboot
-            }
-        }, 3);
+        // 3 连击：进/退配网（控制中心点"切换"按钮走同一路径）
+        boot_button_.OnMultipleClick([this]() { SwitchNetwork(); }, 3);
 
         // 4 连击关机：用户主动关机视角说"再见"，仅按键唤醒（防陀螺仪误开机）
         boot_button_.OnMultipleClick([this]() {
@@ -1013,6 +999,24 @@ public:
     virtual bool IsAutoSleepEnabled() const override {
         Settings settings("status", false);
         return settings.GetInt("deepSleep", 1) != 0;
+    }
+
+    // 控制中心点"切换"按钮 → 进/退配网（与 3 连击同语义）· 提示音内部统一播放
+    virtual bool CanSwitchNetwork() const override { return true; }
+    virtual void SwitchNetwork() override {
+        auto& app = Application::GetInstance();
+        PauseAudioAndChatBeforeSwitch();
+        if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
+            Settings settings("wifi", true);
+            settings.SetInt("force_ap", 0);
+            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "退出配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            app.Reboot();
+        } else {
+            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "进入配网", "logo", Lang::Sounds::OGG_BLE_CONFIG);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            ResetWifiConfiguration();   // 内部 force_ap=1 + skip_welcome=1 + Reboot
+        }
     }
 
     void WakeUp() {

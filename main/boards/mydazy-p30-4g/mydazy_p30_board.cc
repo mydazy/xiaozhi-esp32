@@ -760,17 +760,16 @@ private:
 #endif
         });
         // 3 连击：4G ↔ WiFi ↔ 配网 三态切换
+        // 4G/WiFi 路径的提示音由 SwitchNetworkType 统一播放，这里 Alert 不再带 sound
         boot_button_.OnMultipleClick([this]() {
             auto& app = Application::GetInstance();
             PauseAudioAndChatBeforeSwitch();
             if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
-                app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到4G", "logo", Lang::Sounds::OGG_NETWORK_4G);
-                vTaskDelay(pdMS_TO_TICKS(1500));
-                SwitchNetworkType();
+                app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到4G", "logo", "");
+                SwitchNetworkType();   // 内部播 OGG_NETWORK_4G + 等 1.5s
             } else if (GetNetworkType() == NetworkType::ML307) {
-                app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到WiFi", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
-                vTaskDelay(pdMS_TO_TICKS(1500));
-                SwitchNetworkType();
+                app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到WiFi", "logo", "");
+                SwitchNetworkType();   // 内部播 OGG_NETWORK_WIFI + 等 1.5s
             } else {
                 app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "切换到配网", "logo", Lang::Sounds::OGG_BLE_CONFIG);
                 vTaskDelay(pdMS_TO_TICKS(1500));
@@ -1100,11 +1099,13 @@ public:
         if (GetNetworkType() == NetworkType::WIFI) {
             net_settings.SetInt("type", 1);  // 1 = ML307
             display->ShowNotification(Lang::Strings::SWITCH_TO_4G_NETWORK);
+            app.PlaySound(Lang::Sounds::OGG_NETWORK_4G);
         } else {
             net_settings.SetInt("type", 0);  // 0 = WIFI
             display->ShowNotification(Lang::Strings::SWITCH_TO_WIFI_NETWORK);
+            app.PlaySound(Lang::Sounds::OGG_NETWORK_WIFI);
         }
-        vTaskDelay(pdMS_TO_TICKS(1000));   // 留出提示音播放时间
+        vTaskDelay(pdMS_TO_TICKS(1500));   // 等提示音播完（OGG_NETWORK ~1s + 余量）
         Application::GetInstance().ResetProtocol();  // 与 EnterDeepSleep 对称：优雅断 MQTT/WS 避免服务端残留 session
         vTaskDelay(pdMS_TO_TICKS(500));              // 等异步 Schedule lambda 完成 close + 析构
         Application::GetInstance().GetAudioService().Stop();

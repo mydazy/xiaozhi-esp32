@@ -71,10 +71,10 @@ void ControlCenter::CreateUI() {
     int start_x = (width_ - total_width) / 2;   // (284-249)/2 = 17
     int start_y = (height_ - total_height) / 2; // (240-202)/2 = 19
 
-    // 第一行：网络、打断、休眠
-    // 网络按钮（特殊处理：使用图片而非文字）
+    // 第一行：关于、网络切换、休眠
+    // 网络按钮（特殊处理：使用图片而非文字）· col=1
     {
-        int x = start_x + 0 * (BTN_SIZE + BTN_SPACING_X);
+        int x = start_x + 1 * (BTN_SIZE + BTN_SPACING_X);
         int y = start_y + 0 * (BTN_SIZE + BTN_SPACING_Y + 16);
 
         network_btn_ = lv_button_create(container_);
@@ -106,7 +106,7 @@ void ControlCenter::CreateUI() {
     }
     lv_obj_add_event_cb(network_btn_, OnNetworkClicked, LV_EVENT_CLICKED, this);
 
-    CreateGridButton(1, 0, start_x, start_y, FONT_AWESOME_CIRCLE_INFO, "关于",
+    CreateGridButton(0, 0, start_x, start_y, FONT_AWESOME_CIRCLE_INFO, "关于",
                      &aec_btn_, &aec_icon_, &aec_label_, false, false);
     lv_obj_set_style_text_font(aec_icon_, &BUILTIN_ICON_FONT, 0);
     lv_obj_align(aec_icon_, LV_ALIGN_CENTER, 0, 0);

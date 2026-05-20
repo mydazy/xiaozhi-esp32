@@ -52,7 +52,7 @@ static const char *TAG = "axs5106l_touch";
 #define SWIPE_MIN_FRAMES      4       /* 事件型芯片快滑只采 4-5 帧 · 配 manhattan 20px + 150ms 时长足以区分 */
 #define LONG_PRESS_MIN_FRAMES 30      /* 480ms @ 16ms · 配 LONG_PRESS_TIME 500ms */
 #define JITTER_LIMIT_FOR_TAP 40       /* ~5mm · 容忍儿童手抖 / RF 抖动（20→40）*/
-#define RELEASE_DEBOUNCE  3             /* 连续 N 帧无触摸才报松开 · 量产 v2.2.16 抗扰加严（2→3）*/
+#define RELEASE_DEBOUNCE  2             /* 连续 N 帧无触摸才报松开 ）*/
 #define INT_STORM_WINDOW_US      1000000   /* rolling 1s 边沿计数窗（两档共用）*/
 #define INT_STORM_HOT_WINDOW_US 30000000   /* 30s post-storm 灵敏模式（两档共用）*/
 
