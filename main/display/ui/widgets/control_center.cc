@@ -1,11 +1,13 @@
 #include "control_center.h"
 #include <esp_log.h>
 #include <cstdio>
+#include <font_awesome.h>
 
 #define TAG "ControlCenter"
 
 LV_IMG_DECLARE(ui_img_icon_signal_wifi_png);
 LV_IMG_DECLARE(ui_img_icon_signal_4g_png);
+LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 
 // 颜色定义（iOS 深色主题）
 #define CC_BG_COLOR         lv_color_hex(0x1C1C1E)  // 深灰背景
@@ -104,9 +106,10 @@ void ControlCenter::CreateUI() {
     }
     lv_obj_add_event_cb(network_btn_, OnNetworkClicked, LV_EVENT_CLICKED, this);
 
-    // 该格原 AEC 开关已让位为"关于/设备信息"入口（AEC 仍可经按键/MCP/语音切换）
-    CreateGridButton(1, 0, start_x, start_y, "i", "关于",
-                     &aec_btn_, &aec_icon_, &aec_label_, false, true);  // 中文文字
+    CreateGridButton(1, 0, start_x, start_y, FONT_AWESOME_CIRCLE_INFO, "关于",
+                     &aec_btn_, &aec_icon_, &aec_label_, false, false);
+    lv_obj_set_style_text_font(aec_icon_, &BUILTIN_ICON_FONT, 0);
+    lv_obj_align(aec_icon_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_event_cb(aec_btn_, OnAecClicked, LV_EVENT_CLICKED, this);
 
     CreateGridButton(2, 0, start_x, start_y, "5分", "休眠",

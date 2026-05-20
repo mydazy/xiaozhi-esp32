@@ -818,7 +818,6 @@ void UiDisplay::EnsureControlCenter() {
     control_center_->SetBrightnessCallback([&board](int v) {
         if (auto* bk = board.GetBacklight()) bk->SetBrightness(v);
     });
-    // 原 AEC 格已让位为"关于"入口：收起控制中心 → 弹关于页（AEC 仍可经按键/MCP/语音）
     control_center_->SetAecCallback([this](bool /*unused*/) {
         HideControlCenter();
         ShowAboutPage();
@@ -1248,10 +1247,10 @@ void UiDisplay::ShowAboutPage() {
         const int ROW_Y[5] = {14, 44, 74, 104, 134};
         const uint32_t TXT = 0xA4A6A6, DIV = 0x3A3A3A;
         struct { const char* k; const char* v; } rows[5] = {
+            {"品牌",   "MyDazy"},
             {"型号",   "MYDAZY/P30"},
             {"版本",   ver},
-            {"设备ID", mac.c_str()},
-            {"芯片",   chip.c_str()},
+            {"MAC", mac.c_str()},
             {"网络",   "检测中"},
         };
         for (int i = 0; i < 5; i++) {
@@ -1366,7 +1365,6 @@ void UiDisplay::RenderEduCardLayout(const EduRow& top, const EduRow& main_row) {
     lv_obj_remove_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(edu_card_overlay_);
 
-    // overlay 盖屏，但 bottom_bar（"长按说话"）和 status_bar 必须保留可见
     if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
     if (status_bar_) lv_obj_move_foreground(status_bar_);
 
