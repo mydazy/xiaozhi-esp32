@@ -5,6 +5,7 @@
 #include "settings.h"
 
 #include <esp_log.h>
+#include <chrono>
 #include <esp_mn_iface.h>
 #include <esp_mn_models.h>
 #include <esp_mn_speech_commands.h>
@@ -321,9 +322,12 @@ void CustomWakeWord::EncodeWakeWordData() {
 
 bool CustomWakeWord::GetWakeWordOpus(std::vector<uint8_t>& opus) {
     std::unique_lock<std::mutex> lock(wake_word_mutex_);
-    wake_word_cv_.wait(lock, [this]() {
+    if (!wake_word_cv_.wait_for(lock, std::chrono::seconds(2), [this]() {
         return !wake_word_opus_.empty();
-    });
+    })) {
+        ESP_LOGW(TAG, "GetWakeWordOpus timeout(2s), give up this wake upload");
+        return false;
+    }
     opus.swap(wake_word_opus_.front());
     wake_word_opus_.pop_front();
     return !opus.empty();

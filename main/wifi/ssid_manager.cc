@@ -61,7 +61,11 @@ void SsidManager::LoadFromNvs() {
 
 void SsidManager::SaveToNvs() {
     nvs_handle_t nvs_handle;
-    ESP_ERROR_CHECK(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle));
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open failed: %s, skip SaveToNvs", esp_err_to_name(err));
+        return;
+    }
     for (int i = 0; i < MAX_WIFI_SSID_COUNT; i++) {
         std::string ssid_key = "ssid";
         if (i > 0) {

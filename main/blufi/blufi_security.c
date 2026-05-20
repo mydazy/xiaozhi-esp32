@@ -68,6 +68,12 @@ extern void btc_blufi_report_error(esp_blufi_error_state_t state);
 void blufi_dh_negotiate_data_handler(uint8_t *data, int len, uint8_t **output_data, int *output_len, bool *need_free)
 {
     int ret;
+
+    if (data == NULL || len < 1) {
+        BLUFI_ERROR("%s, invalid dh frame (len=%d)", __func__, len);
+        btc_blufi_report_error(ESP_BLUFI_DH_PARAM_ERROR);
+        return;
+    }
     uint8_t type = data[0];
 
     if (blufi_sec == NULL) {
@@ -78,6 +84,11 @@ void blufi_dh_negotiate_data_handler(uint8_t *data, int len, uint8_t **output_da
 
     switch (type) {
     case SEC_TYPE_DH_PARAM_LEN:
+        if (len < 3) {
+            BLUFI_ERROR("%s, DH_PARAM_LEN too short (len=%d)", __func__, len);
+            btc_blufi_report_error(ESP_BLUFI_DH_PARAM_ERROR);
+            return;
+        }
         blufi_sec->dh_param_len = ((data[1]<<8)|data[2]);
         if (blufi_sec->dh_param) {
             free(blufi_sec->dh_param);
@@ -93,6 +104,11 @@ void blufi_dh_negotiate_data_handler(uint8_t *data, int len, uint8_t **output_da
     case SEC_TYPE_DH_PARAM_DATA:{
         if (blufi_sec->dh_param == NULL) {
             BLUFI_ERROR("%s, blufi_sec->dh_param == NULL", __func__);
+            btc_blufi_report_error(ESP_BLUFI_DH_PARAM_ERROR);
+            return;
+        }
+        if (len < 1 || (uint32_t)(len - 1) < blufi_sec->dh_param_len) {
+            BLUFI_ERROR("%s, DH_PARAM_DATA len=%d < declared %d", __func__, len, blufi_sec->dh_param_len);
             btc_blufi_report_error(ESP_BLUFI_DH_PARAM_ERROR);
             return;
         }

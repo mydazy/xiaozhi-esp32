@@ -321,6 +321,10 @@ void BoxAudioCodec::CalibrateMicOnce() {
     vTaskDelay(pdMS_TO_TICKS(100));
 
     int32_t rms_after = measure();
+    if (rms_expected <= 0) {
+        ESP_LOGW(TAG, "第二轮 RMS=%d (预期=0，跳过偏差校验)", rms_after);
+        return;
+    }
     int diff = (int)(100 * std::abs((double)(rms_after - rms_expected) / rms_expected));
     ESP_LOGW(TAG, "第二轮 RMS=%d (预期 %d 偏差 %d%%) %s",
              rms_after, rms_expected, diff, diff < 20 ? "✅" : "⚠");

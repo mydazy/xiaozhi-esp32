@@ -997,6 +997,9 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
 
     if (!protocol_->IsAudioChannelOpened()) {
         if (!protocol_->OpenAudioChannel()) {
+            ESP_LOGE(TAG, "OpenAudioChannel failed, fallback to Idle");
+            Board::GetInstance().GetDisplay()->SetChatMessage("system", "");
+            SetDeviceState(kDeviceStateIdle);
             return;
         }
     }

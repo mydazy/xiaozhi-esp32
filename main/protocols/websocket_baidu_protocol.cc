@@ -789,7 +789,7 @@ void WebsocketBaiduProtocol::HandleTextMessage(const char* data, size_t len) {
     // 兼容裸 JSON 消息（服务器可能直接发送 {"type":"xxx"} 格式）
     // 如：{"type":"ota"}, {"type":"reboot"} 等
     if (data[0] == '{' && len > 2) {
-        cJSON* json = cJSON_Parse(data);
+        cJSON* json = cJSON_ParseWithLength(data, len);
         if (json) {
             cJSON* type = cJSON_GetObjectItem(json, "type");
             if (cJSON_IsString(type)) {
