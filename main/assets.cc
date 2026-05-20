@@ -1,4 +1,5 @@
 #include "assets.h"
+#include <cstring>   // strnlen
 #include "board.h"
 #include "display.h"
 #include "application.h"
@@ -173,13 +174,19 @@ bool Assets::LvglStrategy::InitializePartition(Assets* assets) {
 
     checksum_valid_ = true;
 
+    size_t partition_size = static_cast<size_t>(assets->partition_->size);
     for (uint32_t i = 0; i < stored_files; i++) {
         auto item = (const mmap_assets_table*)(mmap_root_ + 12 + i * sizeof(mmap_assets_table));
-        auto asset = Asset{
-            .size = static_cast<size_t>(item->asset_size),
-            .offset = static_cast<size_t>(12 + sizeof(mmap_assets_table) * stored_files + item->asset_offset)
-        };
-        assets_[item->asset_name] = asset;
+        size_t off = static_cast<size_t>(12 + sizeof(mmap_assets_table) * stored_files + item->asset_offset);
+        size_t sz = static_cast<size_t>(item->asset_size);
+        // 边界校验：表项偏移+大小须落在分区内，否则跳过（防损坏/篡改资产表越界读）
+        if (off > partition_size || sz > partition_size - off) {
+            ESP_LOGW(TAG, "asset[%lu] offset/size out of partition (off=%u sz=%u), skip", i, (unsigned)off, (unsigned)sz);
+            continue;
+        }
+        // asset_name 可能填满字段无 NUL 终止符，用 strnlen 安全构造 string，避免越界读
+        std::string asset_name(item->asset_name, strnlen(item->asset_name, sizeof(item->asset_name)));
+        assets_[asset_name] = Asset{ .size = sz, .offset = off };
     }
     return checksum_valid_;
 }
@@ -198,6 +205,10 @@ void Assets::LvglStrategy::UnApplyPartition(Assets* assets) {
 bool Assets::LvglStrategy::GetAssetData(Assets* assets, const std::string& name, void*& ptr, size_t& size) {
     auto asset = assets_.find(name);
     if (asset == assets_.end()) {
+        return false;
+    }
+    if (asset->second.size < 2) {
+        ESP_LOGE(TAG, "The asset %s size %u too small", name.c_str(), (unsigned)asset->second.size);
         return false;
     }
     auto data = (const char*)(mmap_root_ + asset->second.offset);
