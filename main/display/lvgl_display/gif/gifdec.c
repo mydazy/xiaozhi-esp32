@@ -60,13 +60,14 @@ gd_open_gif_file(const char * fname)
 }
 
 gd_GIF *
-gd_open_gif_data(const void * data)
+gd_open_gif_data(const void * data, uint32_t data_len)
 {
     gd_GIF gif_base;
     memset(&gif_base, 0, sizeof(gif_base));
 
     bool res = f_gif_open(&gif_base, data, false);
     if(!res) return NULL;
+    gif_base.data_len = data_len;   /* 源缓冲上界，供 f_gif_read/seek 越界保护 */
 
     return gif_open(&gif_base);
 }
@@ -774,6 +775,7 @@ static bool f_gif_open(gd_GIF * gif, const void * path, bool is_file)
     gif->f_rw_p = 0;
     gif->data = NULL;
     gif->is_file = is_file;
+    gif->data_len = 0;
 
     if(is_file) {
         lv_fs_res_t res = lv_fs_open(&gif->fd, path, LV_FS_MODE_RD);
@@ -792,6 +794,12 @@ static void f_gif_read(gd_GIF * gif, void * buf, size_t len)
         lv_fs_read(&gif->fd, buf, len, NULL);
     }
     else {
+        /* 越界保护：截断/损坏 GIF 时不越读源缓冲，填 0 并停在末尾 */
+        if(gif->data_len && (gif->f_rw_p > gif->data_len || len > gif->data_len - gif->f_rw_p)) {
+            memset(buf, 0, len);
+            gif->f_rw_p = gif->data_len;
+            return;
+        }
         memcpy(buf, &gif->data[gif->f_rw_p], len);
         gif->f_rw_p += len;
     }
@@ -808,6 +816,7 @@ static int f_gif_seek(gd_GIF * gif, size_t pos, int k)
     else {
         if(k == LV_FS_SEEK_CUR) gif->f_rw_p += pos;
         else if(k == LV_FS_SEEK_SET) gif->f_rw_p = pos;
+        if(gif->data_len && gif->f_rw_p > gif->data_len) gif->f_rw_p = gif->data_len;  /* 钳到上界 */
         return gif->f_rw_p;
     }
 }
