@@ -301,7 +301,8 @@ private:
         gpio_set_level(AUDIO_PWR_EN_GPIO, 0);    // 先锁低
         rtc_gpio_hold_dis(AUDIO_PWR_EN_GPIO);    // 再释放 RTC hold（无浮动窗口）
 
-        vTaskDelay(pdMS_TO_TICKS(500));
+        // VBAT 放电窗口：USB 持续供电的冷启动场景下，VT3 P-MOS 漏电流 + D2 TVS
+        vTaskDelay(pdMS_TO_TICKS(1000));
         gpio_set_level(AUDIO_PWR_EN_GPIO, 1);
         ESP_LOGI(TAG, "音频电源已启用 (GPIO%d)", AUDIO_PWR_EN_GPIO);
 
