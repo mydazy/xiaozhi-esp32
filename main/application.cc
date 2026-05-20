@@ -1352,21 +1352,35 @@ bool Application::SwitchProtocol() {
         ESP_LOGW(TAG, "Reload refused in state %d", (int)state);
         return false;
     }
-    ESP_LOGI(TAG, "===== Reload: re-fetch OTA + rebuild protocol =====");
-
-    SetDeviceState(kDeviceStateIdle);
-    if (protocol_ && protocol_->IsAudioChannelOpened()) {
-        protocol_->CloseAudioChannel();
-        vTaskDelay(pdMS_TO_TICKS(500));   // 等 OnAudioChannelClosed 走完
+    // 防重入：避免并发两个 reload 任务竞争 protocol_/ota_
+    static std::atomic<bool> reload_running{false};
+    bool expected = false;
+    if (!reload_running.compare_exchange_strong(expected, true)) {
+        ESP_LOGW(TAG, "Reload already in progress");
+        return false;
     }
-    protocol_.reset();
-    vTaskDelay(pdMS_TO_TICKS(200));       // 等 timer/Schedule lambda 排空
 
-    ota_ = std::make_unique<Ota>();
-    CheckNewVersion();                    // 拉服务端最新 MQTT/WS 配置到 NVS
-    InitializeProtocol();                 // 按新配置选 mqtt/ws_xiaozhi/ws_baidu/ws_joyinside
+    ESP_LOGI(TAG, "===== Reload: re-fetch OTA + rebuild protocol (async) =====");
+    SetDeviceState(kDeviceStateIdle);
 
-    ESP_LOGI(TAG, "===== Reload done =====");
+    // 重活(关通道 + CheckNewVersion 弱网可阻塞分钟级 + 重建协议)移到后台任务，
+    // 避免在调用线程/事件循环里阻塞导致 UI 冻结 + 看门狗(04-P1-2)
+    xTaskCreatePinnedToCore([](void* arg) {
+        auto* self = static_cast<Application*>(arg);
+        if (self->protocol_ && self->protocol_->IsAudioChannelOpened()) {
+            self->protocol_->CloseAudioChannel();
+            vTaskDelay(pdMS_TO_TICKS(500));   // 等 OnAudioChannelClosed 走完
+        }
+        self->protocol_.reset();
+        vTaskDelay(pdMS_TO_TICKS(200));       // 等 timer/Schedule lambda 排空
+        self->ota_ = std::make_unique<Ota>();
+        self->CheckNewVersion();              // 拉服务端最新 MQTT/WS 配置到 NVS
+        self->InitializeProtocol();           // 按新配置选 mqtt/ws_xiaozhi/ws_baidu/ws_joyinside
+        ESP_LOGI(TAG, "===== Reload done =====");
+        reload_running.store(false);
+        vTaskDelete(NULL);
+    }, "reload", 8192, this, 5, nullptr, 0);
+
     return true;
 }
 

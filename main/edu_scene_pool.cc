@@ -155,7 +155,11 @@ EduPick EduScenePool::GetRandomWithCount() {
     last_idx_ = idx;
 
     if (call_counts_[idx] < UINT16_MAX) call_counts_[idx]++;
-    SaveCountsToNvs();
+    static int save_pending = 0;
+    if (++save_pending >= 8) {
+        save_pending = 0;
+        SaveCountsToNvs();
+    }
 
     return EduPick{names_[idx], call_counts_[idx]};
 }
