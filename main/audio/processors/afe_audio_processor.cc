@@ -2,12 +2,14 @@
 #include <esp_log.h>
 
 #define PROCESSOR_RUNNING 0x01
+#define PROCESSOR_EXIT    0x02
 
 #define TAG "AfeAudioProcessor"
 
 AfeAudioProcessor::AfeAudioProcessor()
     : afe_data_(nullptr) {
     event_group_ = xEventGroupCreate();
+    task_done_sem_ = xSemaphoreCreateBinary();
 }
 
 void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srmodel_list_t* models_list) {
@@ -53,7 +55,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         afe_config->ns_init = false;
     }
 
-    afe_config->afe_linear_gain = 3.0f;
+    afe_config->afe_linear_gain = 4.0f;
     afe_config->agc_init = true;
     afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
@@ -74,11 +76,22 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         this_->AudioProcessorTask();
         vTaskDelete(NULL);
     }, "audio_communication", 4096, this, 7, NULL, 1);
+    task_created_ = true;
 }
 
 AfeAudioProcessor::~AfeAudioProcessor() {
+    // 先令处理任务退出并 join，再 destroy(afe_data_)，避免 fetch_with_delay 访问已释放句柄(UAF)
+    if (task_created_) {
+        xEventGroupSetBits(event_group_, PROCESSOR_EXIT);
+        if (task_done_sem_) {
+            xSemaphoreTake(task_done_sem_, pdMS_TO_TICKS(2000));
+        }
+    }
     if (afe_data_ != nullptr) {
         afe_iface_->destroy(afe_data_);
+    }
+    if (task_done_sem_ != nullptr) {
+        vSemaphoreDelete(task_done_sem_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -141,9 +154,17 @@ void AfeAudioProcessor::AudioProcessorTask() {
         feed_size, fetch_size);
 
     while (true) {
-        xEventGroupWaitBits(event_group_, PROCESSOR_RUNNING, pdFALSE, pdTRUE, portMAX_DELAY);
+        EventBits_t bits = xEventGroupWaitBits(event_group_,
+            PROCESSOR_RUNNING | PROCESSOR_EXIT, pdFALSE, pdFALSE, portMAX_DELAY);
+        if (bits & PROCESSOR_EXIT) {
+            break;  // 析构请求退出
+        }
 
-        auto res = afe_iface_->fetch_with_delay(afe_data_, portMAX_DELAY);
+        // 有限超时 fetch：让退出请求及时响应，避免析构时仍阻塞在 portMAX_DELAY → UAF
+        auto res = afe_iface_->fetch_with_delay(afe_data_, pdMS_TO_TICKS(100));
+        if (xEventGroupGetBits(event_group_) & PROCESSOR_EXIT) {
+            break;
+        }
         if ((xEventGroupGetBits(event_group_) & PROCESSOR_RUNNING) == 0) {
             continue;
         }
@@ -185,6 +206,10 @@ void AfeAudioProcessor::AudioProcessorTask() {
                 }
             }
         }
+    }
+    // 退出循环后通知析构：本任务已结束，可安全 destroy(afe_data_)
+    if (task_done_sem_ != nullptr) {
+        xSemaphoreGive(task_done_sem_);
     }
 }
 

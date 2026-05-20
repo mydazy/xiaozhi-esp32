@@ -5,6 +5,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/event_groups.h>
+#include <freertos/semphr.h>
 
 #include <string>
 #include <vector>
@@ -31,6 +32,8 @@ public:
 
 private:
     EventGroupHandle_t event_group_ = nullptr;
+    SemaphoreHandle_t task_done_sem_ = nullptr;   // 任务退出握手：析构 set EXIT 后等此 sem 再 destroy
+    bool task_created_ = false;
     const esp_afe_sr_iface_t* afe_iface_ = nullptr;
     esp_afe_sr_data_t* afe_data_ = nullptr;
     std::function<void(std::vector<int16_t>&& data)> output_callback_;

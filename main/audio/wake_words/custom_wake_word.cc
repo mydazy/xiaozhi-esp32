@@ -17,9 +17,14 @@ CustomWakeWord::CustomWakeWord()
 }
 
 CustomWakeWord::~CustomWakeWord() {
-    if (multinet_model_data_ != nullptr && multinet_ != nullptr) {
-        multinet_->destroy(multinet_model_data_);
-        multinet_model_data_ = nullptr;
+    // 先停 Feed 并取其锁后再 destroy，确保没有 detect 正在用 multinet_model_data_(UAF 防护)
+    running_ = false;
+    {
+        std::lock_guard<std::mutex> lock(input_buffer_mutex_);
+        if (multinet_model_data_ != nullptr && multinet_ != nullptr) {
+            multinet_->destroy(multinet_model_data_);
+            multinet_model_data_ = nullptr;
+        }
     }
 
     if (wake_word_encode_task_stack_ != nullptr) {
