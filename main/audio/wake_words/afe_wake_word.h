@@ -4,6 +4,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/event_groups.h>
+#include <freertos/semphr.h>
 
 #include <esp_afe_sr_models.h>
 #include <esp_nsn_models.h>
@@ -42,6 +43,8 @@ private:
     char* wakenet_model_ = NULL;
     std::vector<std::string> wake_words_;
     EventGroupHandle_t event_group_;
+    SemaphoreHandle_t detection_done_sem_ = nullptr;  // 检测任务退出握手：析构 set EXIT 后等此 sem 再 destroy
+    bool detection_task_created_ = false;
     std::function<void(const std::string& wake_word)> wake_word_detected_callback_;
     AudioCodec* codec_ = nullptr;
     std::string last_detected_wake_word_;

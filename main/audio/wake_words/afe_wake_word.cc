@@ -4,6 +4,7 @@
 #include <sstream>
 
 #define DETECTION_RUNNING_EVENT 1
+#define DETECTION_EXIT_EVENT    2
 
 #define TAG "AfeWakeWord"
 
@@ -13,9 +14,17 @@ AfeWakeWord::AfeWakeWord()
       wake_word_opus_() {
 
     event_group_ = xEventGroupCreate();
+    detection_done_sem_ = xSemaphoreCreateBinary();
 }
 
 AfeWakeWord::~AfeWakeWord() {
+    // 先令检测任务退出并等其结束，再 destroy(afe_data_)，避免 fetch_with_delay 访问已释放句柄(UAF)
+    if (detection_task_created_) {
+        xEventGroupSetBits(event_group_, DETECTION_EXIT_EVENT);
+        if (detection_done_sem_) {
+            xSemaphoreTake(detection_done_sem_, pdMS_TO_TICKS(2000));
+        }
+    }
     if (afe_data_ != nullptr) {
         afe_iface_->destroy(afe_data_);
     }
@@ -32,6 +41,9 @@ AfeWakeWord::~AfeWakeWord() {
         esp_srmodel_deinit(models_);
     }
 
+    if (detection_done_sem_ != nullptr) {
+        vSemaphoreDelete(detection_done_sem_);
+    }
     vEventGroupDelete(event_group_);
 }
 
@@ -98,6 +110,7 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
         this_->AudioDetectionTask();
         vTaskDelete(NULL);
     }, "audio_detection", 6144, this, 7, nullptr, 1);
+    detection_task_created_ = true;
 
     return true;
 }
@@ -152,9 +165,17 @@ void AfeWakeWord::AudioDetectionTask() {
         feed_size, fetch_size);
 
     while (true) {
-        xEventGroupWaitBits(event_group_, DETECTION_RUNNING_EVENT, pdFALSE, pdTRUE, portMAX_DELAY);
+        EventBits_t bits = xEventGroupWaitBits(event_group_,
+            DETECTION_RUNNING_EVENT | DETECTION_EXIT_EVENT, pdFALSE, pdFALSE, portMAX_DELAY);
+        if (bits & DETECTION_EXIT_EVENT) {
+            break;  // 析构请求退出
+        }
 
-        auto res = afe_iface_->fetch_with_delay(afe_data_, portMAX_DELAY);
+        // 有限超时 fetch：让退出请求能被及时响应，避免析构时仍阻塞在 portMAX_DELAY → UAF
+        auto res = afe_iface_->fetch_with_delay(afe_data_, pdMS_TO_TICKS(100));
+        if (xEventGroupGetBits(event_group_) & DETECTION_EXIT_EVENT) {
+            break;
+        }
         if (res == nullptr || res->ret_value == ESP_FAIL) {
             continue;
         }
@@ -175,6 +196,10 @@ void AfeWakeWord::AudioDetectionTask() {
                 wake_word_detected_callback_(last_detected_wake_word_);
             }
         }
+    }
+    // 退出循环后通知析构：本任务已结束，可安全 destroy(afe_data_)
+    if (detection_done_sem_ != nullptr) {
+        xSemaphoreGive(detection_done_sem_);
     }
 }
 
