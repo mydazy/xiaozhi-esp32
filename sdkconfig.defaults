@@ -105,10 +105,9 @@ CONFIG_LWIP_IPV6=n
 # CONFIG_LWIP_ND6 is not set
 # CONFIG_LWIP_ESP_MLDV6_REPORT is not set
 
-# R7 · NETIF Loopback 关 · 释放 ~2 KB INT
-# 项目无 127.0.0.1 / localhost 自身回环通信
-CONFIG_LWIP_NETIF_LOOPBACK=n
-# CONFIG_LWIP_NETIF_LOOPBACK is not set
+# NETIF Loopback 开启：esp_http_server 控制 socket(cs_create_ctrl_sock)依赖回环
+# AP 配网模式 web 服务器(WifiAp::httpd_start)必需；代价约 +2KB 内部 RAM
+CONFIG_LWIP_NETIF_LOOPBACK=y
 
 # R8 · TCP 控制块数量适度裁剪（2026-05-15 回退过激 · 6/4 引发 MQTT 频繁 goodbye）
 # 实测教训：6/4 临界，MQTT(1) + WS音频(1) + OTA + HTTP 短连接同时存在时连接被踢
@@ -143,9 +142,8 @@ CONFIG_LWIP_IP_REASS_MAX_PBUFS=3
 CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES=n
 # CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES is not set
 
-# R15 · LWIP loopback pbuf 池缩零 · 释放 ~1-2 KB INT
-# 与 R7 NETIF_LOOPBACK=n 配套（已无回环路径）
-CONFIG_LWIP_LOOPBACK_MAX_PBUFS=0
+# LWIP loopback pbuf 池：回环已启用(httpd 控制 socket)，恢复默认 8
+CONFIG_LWIP_LOOPBACK_MAX_PBUFS=8
 
 # R16 · WPA3 高级特性裁剪 · 释放 ~2-3 KB INT
 # 保留 WPA3_SAE 基础（路由器兼容） + SAE_H2E（hash-to-element 改进握手）
