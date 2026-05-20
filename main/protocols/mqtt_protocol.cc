@@ -355,10 +355,19 @@ void MqttProtocol::ParseServerHello(const cJSON* root) {
         ESP_LOGE(TAG, "UDP is not specified");
         return;
     }
-    udp_server_ = cJSON_GetObjectItem(udp, "server")->valuestring;
-    udp_port_ = cJSON_GetObjectItem(udp, "port")->valueint;
-    auto key = cJSON_GetObjectItem(udp, "key")->valuestring;
-    auto nonce = cJSON_GetObjectItem(udp, "nonce")->valuestring;
+    auto udp_server = cJSON_GetObjectItem(udp, "server");
+    auto udp_port = cJSON_GetObjectItem(udp, "port");
+    auto udp_key = cJSON_GetObjectItem(udp, "key");
+    auto udp_nonce = cJSON_GetObjectItem(udp, "nonce");
+    if (!cJSON_IsString(udp_server) || !cJSON_IsNumber(udp_port) ||
+        !cJSON_IsString(udp_key) || !cJSON_IsString(udp_nonce)) {
+        ESP_LOGE(TAG, "UDP hello missing/invalid server/port/key/nonce");
+        return;
+    }
+    udp_server_ = udp_server->valuestring;
+    udp_port_ = udp_port->valueint;
+    auto key = udp_key->valuestring;
+    auto nonce = udp_nonce->valuestring;
 
     // auto encryption = cJSON_GetObjectItem(udp, "encryption")->valuestring;
     // ESP_LOGI(TAG, "UDP server: %s, port: %d, encryption: %s", udp_server_.c_str(), udp_port_, encryption);
