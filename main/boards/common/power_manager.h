@@ -29,11 +29,12 @@ private:
     uint32_t battery_level_ = 0;
     bool is_charging_ = false;
     bool is_low_battery_ = false;
-    bool is_off_battery_ = false;  // 达到无法开机的标准
+    bool is_off_battery_ = false;
     int ticks_ = 0;
     const int kBatteryAdcInterval = 60;
     const int kBatteryAdcDataCount = 3;
-    const int kLowBatteryLevel = 0;
+    const int kLowBatteryLevel = 5;
+    const int kBatteryShutdownMv = 3400;
 
     adc_oneshot_unit_handle_t adc_handle_;
 
@@ -122,7 +123,11 @@ private:
         int adc_value;
         int voltage;
         
-        ESP_ERROR_CHECK(adc_oneshot_read(adc_handle_, ADC_CHANNEL, &adc_value));
+        esp_err_t adc_ret = adc_oneshot_read(adc_handle_, ADC_CHANNEL, &adc_value);
+        if (adc_ret != ESP_OK) {
+            ESP_LOGW(POWER_MANAGER_TAG, "adc read failed (%s), skip this tick", esp_err_to_name(adc_ret));
+            return;
+        }
         
         // 将 ADC 值添加到队列中
         adc_values_.push_back(adc_value);
@@ -162,8 +167,8 @@ private:
         }
 
         // 计算电压值
-        if (do_calibration1_chan0_) {
-            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle_, average_adc, &voltage));
+        if (do_calibration1_chan0_ &&
+            adc_cali_raw_to_voltage(adc1_cali_chan0_handle_, average_adc, &voltage) == ESP_OK) {
             voltage = voltage * 2;  // 2个1M电阻分压
         }
         else {
@@ -201,7 +206,7 @@ private:
             }
         }
 
-        if(voltage < levels_fd[0].adc && is_charging_ == false){
+        if(voltage < kBatteryShutdownMv && is_charging_ == false){
             is_off_battery_ = true;
         }
         else{

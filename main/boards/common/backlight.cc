@@ -53,7 +53,7 @@ void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
         brightness = 15;
     }
 
-    if (brightness_ == brightness) {
+    if (brightness_.load() == brightness) {
         return;
     }
 
@@ -62,8 +62,8 @@ void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
         settings.SetInt("brightness", brightness);
     }
 
-    target_brightness_ = brightness;
-    step_ = (target_brightness_ > brightness_) ? 1 : -1;
+    target_brightness_.store(brightness);
+    step_.store((brightness > brightness_.load()) ? 1 : -1);
 
     if (transition_timer_ != nullptr) {
         esp_timer_stop(transition_timer_);
@@ -74,15 +74,24 @@ void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
 }
 
 void Backlight::OnTransitionTimer() {
-    if (brightness_ == target_brightness_) {
+    int target = target_brightness_.load();
+    int step = step_.load();
+    int current = brightness_.load();
+
+    if (current == target || step == 0) {
         esp_timer_stop(transition_timer_);
         return;
     }
 
-    brightness_ += step_;
-    SetBrightnessImpl(brightness_);
+    current += step;
+    // 钳制到目标，避免并发改向时越过目标导致 uint8 回绕/亮度震荡/定时器永不停
+    if ((step > 0 && current >= target) || (step < 0 && current <= target)) {
+        current = target;
+    }
+    brightness_.store(static_cast<uint8_t>(current));
+    SetBrightnessImpl(static_cast<uint8_t>(current));
 
-    if (brightness_ == target_brightness_) {
+    if (current == target) {
         esp_timer_stop(transition_timer_);
     }
 }
