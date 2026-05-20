@@ -16,6 +16,7 @@
 #include "backlight.h"
 #include "board.h"
 #include "dual_network_board.h"
+#include "system_info.h"
 #include "assets.h"
 #include "lvgl_theme.h"
 #include "ui/widgets/control_center.h"
@@ -26,6 +27,7 @@
 #include <font_awesome.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_app_desc.h>
 
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 #include <cbin_font.h>
@@ -126,6 +128,14 @@ void UiDisplay::SetupUI() {
         lv_obj_set_style_opa(emoji_box_, LV_OPA_TRANSP, 0);
         lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(emoji_box_, OnFontExitClicked, LV_EVENT_CLICKED, this);
+    }
+
+    if (auto* screen = lv_screen_active()) {
+        boot_brand_label_ = lv_label_create(screen);
+        lv_label_set_text(boot_brand_label_, "MyDazy");
+        lv_obj_set_style_text_color(boot_brand_label_, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_align(boot_brand_label_, LV_ALIGN_CENTER, 0, 70);
+        lv_obj_set_style_opa(boot_brand_label_, LV_OPA_TRANSP, 0);
     }
 
     if (status_label_)       lv_label_set_recolor(status_label_, true);
@@ -798,7 +808,6 @@ void UiDisplay::EnsureControlCenter() {
     control_center_ = std::make_unique<ControlCenter>(screen, LV_HOR_RES, LV_VER_RES);
     control_center_->Hide();
 
-    auto& app = Application::GetInstance();
     auto& board = Board::GetInstance();
 
     control_center_->SetExitCallback([this]() { HideControlCenter(); });
@@ -809,8 +818,10 @@ void UiDisplay::EnsureControlCenter() {
     control_center_->SetBrightnessCallback([&board](int v) {
         if (auto* bk = board.GetBacklight()) bk->SetBrightness(v);
     });
-    control_center_->SetAecCallback([&app](bool on) {
-        app.SetAecMode(on ? kAecOnDeviceSide : kAecOff);
+    // 原 AEC 格已让位为"关于"入口：收起控制中心 → 弹关于页（AEC 仍可经按键/MCP/语音）
+    control_center_->SetAecCallback([this](bool /*unused*/) {
+        HideControlCenter();
+        ShowAboutPage();
     });
     control_center_->SetSleepCallback([](bool on) {
         Board::GetInstance().EnableAutoSleep(on);
@@ -1175,6 +1186,111 @@ void UiDisplay::OnEduCardClicked(lv_event_t* e) {
     auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
     if (!self) return;
     self->HideEduCard();
+}
+
+// ============================================================
+// 关于/设备信息页（参考 P30-V2 brain_info 布局 · 适配 284×240 无滚动 · 内联 overlay）
+// ============================================================
+
+void UiDisplay::OnAboutClicked(lv_event_t* e) {
+    auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
+    if (self) self->HideAboutPage();
+}
+
+void UiDisplay::HideAboutPage() {
+    DisplayLockGuard lock(this);
+    if (about_overlay_ && !lv_obj_has_flag(about_overlay_, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_add_flag(about_overlay_, LV_OBJ_FLAG_HIDDEN);
+        if (status_bar_) lv_obj_move_foreground(status_bar_);
+        ESP_LOGI(TAG, "隐藏关于页");
+    }
+}
+
+void UiDisplay::ShowAboutPage() {
+    DisplayLockGuard lock(this);
+    auto* screen = lv_screen_active();
+    if (!screen) return;
+
+    if (!about_overlay_) {
+        about_overlay_ = lv_obj_create(screen);
+        lv_obj_set_size(about_overlay_, LV_HOR_RES, LV_VER_RES);
+        lv_obj_align(about_overlay_, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_remove_flag(about_overlay_, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_bg_color(about_overlay_, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_opa(about_overlay_, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(about_overlay_, 0, 0);
+        lv_obj_set_style_radius(about_overlay_, 0, 0);
+        lv_obj_set_style_pad_all(about_overlay_, 0, 0);
+        lv_obj_add_flag(about_overlay_, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(about_overlay_, OnAboutClicked, LV_EVENT_CLICKED, this);
+
+        lv_obj_t* title = lv_label_create(about_overlay_);
+        lv_label_set_text(title, "关于设备");
+        lv_obj_set_style_text_color(title, lv_color_white(), 0);
+        lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 12);
+
+        lv_obj_t* card = lv_obj_create(about_overlay_);
+        lv_obj_set_size(card, 256, 168);
+        lv_obj_align(card, LV_ALIGN_CENTER, 0, 6);
+        lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_bg_color(card, lv_color_hex(0x1C1C1C), 0);
+        lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(card, 16, 0);
+        lv_obj_set_style_border_width(card, 0, 0);
+        lv_obj_set_style_pad_all(card, 0, 0);
+        lv_obj_add_flag(card, LV_OBJ_FLAG_EVENT_BUBBLE);  // 点卡片冒泡到 overlay → 返回
+
+        char ver[48];
+        snprintf(ver, sizeof(ver), "V%s", esp_app_get_description()->version);
+        static std::string mac  = SystemInfo::GetMacAddress();
+        static std::string chip = SystemInfo::GetChipModelName();
+
+        const int ROW_Y[5] = {14, 44, 74, 104, 134};
+        const uint32_t TXT = 0xA4A6A6, DIV = 0x3A3A3A;
+        struct { const char* k; const char* v; } rows[5] = {
+            {"型号",   "MYDAZY/P30"},
+            {"版本",   ver},
+            {"设备ID", mac.c_str()},
+            {"芯片",   chip.c_str()},
+            {"网络",   "检测中"},
+        };
+        for (int i = 0; i < 5; i++) {
+            lv_obj_t* k = lv_label_create(card);
+            lv_obj_set_pos(k, 16, ROW_Y[i]);
+            lv_label_set_text(k, rows[i].k);
+            lv_obj_set_style_text_color(k, lv_color_hex(TXT), 0);
+            lv_obj_t* v = lv_label_create(card);
+            lv_obj_align(v, LV_ALIGN_TOP_RIGHT, -16, ROW_Y[i]);
+            lv_label_set_text(v, rows[i].v);
+            lv_obj_set_style_text_color(v, lv_color_hex(TXT), 0);
+            lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
+            if (i == 4) about_net_value_ = v;
+            if (i < 4) {
+                lv_obj_t* d = lv_obj_create(card);
+                lv_obj_set_size(d, 224, 1);
+                lv_obj_align(d, LV_ALIGN_TOP_MID, 0, ROW_Y[i] + 22);
+                lv_obj_remove_flag(d, LV_OBJ_FLAG_SCROLLABLE);
+                lv_obj_set_style_radius(d, 0, 0);
+                lv_obj_set_style_border_width(d, 0, 0);
+                lv_obj_set_style_bg_color(d, lv_color_hex(DIV), 0);
+                lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
+            }
+        }
+
+        lv_obj_t* tip = lv_label_create(about_overlay_);
+        lv_label_set_text(tip, "点按任意处返回");
+        lv_obj_set_style_text_color(tip, lv_color_hex(0x888888), 0);
+        lv_obj_align(tip, LV_ALIGN_BOTTOM_MID, 0, -6);
+    }
+
+    if (about_net_value_) {
+        const char* icon = Board::GetInstance().GetNetworkStateIcon();
+        lv_label_set_text(about_net_value_, (icon && icon[0]) ? "已连接" : "未连接");
+    }
+
+    lv_obj_remove_flag(about_overlay_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(about_overlay_);
+    ESP_LOGI(TAG, "显示关于页");
 }
 
 void UiDisplay::HideEduCard() {

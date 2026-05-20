@@ -70,7 +70,6 @@ list(APPEND SOURCES
     "boards/common/power_save_timer.cc"
     "boards/common/education_mcp_tools.cc"
     "boards/common/system_reset.cc"
-    "boards/common/ml307_gnss.cc"
     "boards/common/typec_headset.cc"
 )
 list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/common)
@@ -97,12 +96,7 @@ set(EMOTE_RESOLUTION "284_240")
 
 # Add board files according to BOARD_TYPE
 # Set default assets if the board uses partition table V2
-if(CONFIG_BOARD_TYPE_MYDAZY_P31)
-    set(BOARD_TYPE "mydazy-p31")
-    set(BUILTIN_TEXT_FONT font_maru_common_20_4)
-    set(BUILTIN_ICON_FONT font_awesome_30_4)
-    set(DEFAULT_EMOJI_COLLECTION twemoji_240)
-elseif(CONFIG_BOARD_TYPE_MYDAZY_P30_4G)
+if(CONFIG_BOARD_TYPE_MYDAZY_P30_4G)
     set(BOARD_TYPE "mydazy-p30-4g")
     set(BUILTIN_TEXT_FONT font_maru_common_20_4)
     set(BUILTIN_ICON_FONT font_awesome_30_4)
@@ -318,7 +312,6 @@ idf_component_register(SRCS ${SOURCES}
                         mbedtls
                         esp_lcd_jd9853
                         esp_lcd_touch_axs5106l
-                        esp_nfc_ws1850s
                         mydazy__esp_mp3_player
                         mydazy__esp_sc7a20h
                         mydazy__i2c_bus_worker          # v3.0+ 共享总线串行化

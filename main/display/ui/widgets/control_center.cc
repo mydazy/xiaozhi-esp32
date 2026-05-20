@@ -104,7 +104,8 @@ void ControlCenter::CreateUI() {
     }
     lv_obj_add_event_cb(network_btn_, OnNetworkClicked, LV_EVENT_CLICKED, this);
 
-    CreateGridButton(1, 0, start_x, start_y, "开", "打断",
+    // 该格原 AEC 开关已让位为"关于/设备信息"入口（AEC 仍可经按键/MCP/语音切换）
+    CreateGridButton(1, 0, start_x, start_y, "i", "关于",
                      &aec_btn_, &aec_icon_, &aec_label_, false, true);  // 中文文字
     lv_obj_add_event_cb(aec_btn_, OnAecClicked, LV_EVENT_CLICKED, this);
 
@@ -134,7 +135,7 @@ void ControlCenter::CreateUI() {
 
     // 设置默认状态
     UpdateButtonStyle(network_btn_, true);   // 网络默认开启
-    UpdateButtonStyle(aec_btn_, true);       // AEC默认开启
+    UpdateButtonStyle(aec_btn_, false);      // "关于"为入口非开关 · 用非激活中性样式
     UpdateButtonStyle(sleep_btn_, true);     // 休眠默认开启
     UpdateVolumeLabel();
     UpdateBrightnessLabel();
@@ -429,15 +430,13 @@ void ControlCenter::OnNetworkClicked(lv_event_t* e) {
     }
 }
 
+// "关于"入口（原 AEC 格）· 非开关：不翻转状态/不改样式，仅触发回调打开关于页
 void ControlCenter::OnAecClicked(lv_event_t* e) {
     auto* self = static_cast<ControlCenter*>(lv_event_get_user_data(e));
     self->HideSlider();
-    self->aec_on_ = !self->aec_on_;
-    self->UpdateButtonStyle(self->aec_btn_, self->aec_on_);
-    self->UpdateAecLabel();
-    ESP_LOGI(TAG, "打断: %s", self->aec_on_ ? "开" : "关");
+    ESP_LOGI(TAG, "打开关于页");
     if (self->aec_callback_) {
-        self->aec_callback_(self->aec_on_);
+        self->aec_callback_(true);   // 复用回调通道 · 参数忽略
     }
 }
 

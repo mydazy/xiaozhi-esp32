@@ -102,6 +102,14 @@ public:
                !lv_obj_has_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
     }
 
+    // 关于/设备信息页（overlay 只读 · 控制中心入口触发 · 点按任意处返回）
+    void ShowAboutPage();
+    void HideAboutPage();
+    bool IsAboutPageActive() const {
+        return about_overlay_ != nullptr &&
+               !lv_obj_has_flag(about_overlay_, LV_OBJ_FLAG_HIDDEN);
+    }
+
     // 笔画 GIF 是否显示中（供 application.cc 教育卡链式弹卡判定·避免 FontGIF 期间空转）
     bool IsFontGifActive() const { return in_font_mode_; }
 
@@ -122,6 +130,12 @@ private:
     lv_obj_t* edu_top_label_    = nullptr;
     lv_obj_t* edu_main_label_   = nullptr;
     static void OnEduCardClicked(lv_event_t* e);
+
+    lv_obj_t* about_overlay_   = nullptr;
+    lv_obj_t* about_net_value_ = nullptr;   // 网络状态值（Show 时刷新）
+    static void OnAboutClicked(lv_event_t* e);
+
+    lv_obj_t* boot_brand_label_ = nullptr;   // 开机品牌字 "MyDazy"（SetupUI 创建）
 
     static void OnFontExitClicked(lv_event_t* e);
 

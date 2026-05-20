@@ -1,6 +1,0 @@
-version: "1.0.0"
-description: "WS1850S NFC reader driver — ISO14443A/B, MIFARE Classic/Ultralight/NTAG, LPCD (Wangjie WS1850S, MFRC522 compatible)"
-targets:
-  - esp32s3
-dependencies:
-  idf: ">=5.3"
