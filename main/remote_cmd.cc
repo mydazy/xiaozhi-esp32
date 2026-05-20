@@ -95,7 +95,7 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "mic_calibrate") == 0) OnMicCalibrate();
     else if (strcmp(type, "download") == 0) OnDownload(msg);
     else if (strcmp(type, "reload") == 0) OnReload();
-    else if (strcmp(type, "live_companion") == 0) OnFlow(msg);
+    else if (strcmp(type, "flow") == 0 || strcmp(type, "live_companion") == 0) OnFlow(msg);  // 兼容两种命名,防 flow 永不命中
     else if (strcmp(type, "music_play") == 0) OnMusicPlay(msg);
     else if (strcmp(type, "music_stop") == 0) OnMusicStop();
     else if (strcmp(type, "music_pause") == 0) OnMusicPause();
