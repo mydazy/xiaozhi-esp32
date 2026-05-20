@@ -56,9 +56,7 @@ bool EspSsl::Connect(const std::string& host, int port) {
 
     connected_ = true;
 
-    // 2026-04-30：开启 TCP keepalive 探针，规避 4G NAT / ISP 中间节点对 idle 连接的老化切连
-    // idle 30s 开始发探针，每 10s 一次，3 次失败判定断连（30+30=60s 内反应）
-    // 比 OSS 默认 ~60s keepalive 更快感知断流，对长 mp3 下载尤其关键
+    // 开启 TCP keepalive 探针，规避 4G NAT / ISP 中间节点对 idle 连接的老化切连
     int sockfd = -1;
     if (esp_tls_get_conn_sockfd(tls_client_, &sockfd) == ESP_OK && sockfd >= 0) {
         int on = 1;

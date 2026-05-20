@@ -21,7 +21,6 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
                     content_lost_ = false;    // Patch B
                     status_code_ = arguments[2].int_value;
                     if (arguments.size() >= 5) {
-                        // Patch B · binary 模式: ParseBinaryHttpHeader 已按长度读取完整 header 文本，无需 hex 解码
                         if (binary_receive_) {
                             ParseResponseHeaders(arguments[4].string_value);
                         } else {
@@ -103,7 +102,6 @@ Ml307Http::Ml307Http(std::shared_ptr<AtUart> at_uart) : at_uart_(at_uart) {
 int Ml307Http::Read(char* buffer, size_t buffer_size) {
     std::unique_lock<std::mutex> lock(mutex_);
 
-    // Patch B · 用 body_consumed_ 偏移量代替反复 erase，减少内存拷贝（189 16KB 阈值优化）
     size_t available = body_.size() - body_consumed_;
 
     if (available == 0) {
@@ -136,7 +134,6 @@ int Ml307Http::Read(char* buffer, size_t buffer_size) {
     std::memcpy(buffer, body_.data() + body_consumed_, bytes_to_read);
     body_consumed_ += bytes_to_read;
 
-    // 累计消费超过 16KB 时回收内存（减少 erase 频率，单次 erase O(n) 改为 16KB 一次）
     if (body_consumed_ > 16384) {
         body_.erase(0, body_consumed_);
         body_consumed_ = 0;

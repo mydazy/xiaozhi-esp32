@@ -52,9 +52,7 @@ bool Ml307AtModem::SendRadioCommandWithRetry(const char* command, const char* de
     return false;
 }
 
-// Patch A · 锁 LTE-only · 频段维持模组默认自动选择（弱网地区不锁 Band 更安全）
 void Ml307AtModem::ConfigureRadioProfile() {
-    // 稳定优先：固定 LTE-only，避免 2G/3G 兜底拖慢注册时间
     SendRadioCommandWithRetry("AT+MRATLIST=\"LTE\"", "Set LTE-only RAT");
 //    SendRadioCommandWithRetry("AT+MBAND=3,1,8", "Lock LTE bands to B1/B3/B8");
 
@@ -86,9 +84,6 @@ void Ml307AtModem::HandleUrc(const std::string& command, const std::vector<AtArg
             }
         }
     } else if (command == "__UART_OVERFLOW__") {
-        // L5-a · UART RX 路径数据丢失 = TCP/WS 流污染。
-        // 强制 network_ready_=false 触发上层 Disconnected → CloseAudioChannel → L6 重连，
-        // 不再 50s 卡死在脏数据上挣扎。
         ESP_LOGE(TAG, "UART overflow → force disconnect (TCP stream corrupted)");
         if (network_ready_) {
             network_ready_ = false;

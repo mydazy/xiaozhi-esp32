@@ -29,9 +29,6 @@ protected:
     void HandleUrc(const std::string& command, const std::vector<AtArgumentValue>& arguments) override;
     void ResetConnections();
 
-    // Patch A · 弱网稳定性增强（来自 189 v3.5.3 验证版）
-    // ConfigureRadioProfile：开机锁 LTE-only（AT+MRATLIST="LTE"），避免弱信号区在 2G/3G 间反复回退
-    // SendRadioCommandWithRetry：AT 命令带重试（默认 2 次 · 1500ms 超时 · 200ms 退避）
     void ConfigureRadioProfile();
     bool SendRadioCommandWithRetry(const char* command, const char* description, int max_attempts = 2);
 };

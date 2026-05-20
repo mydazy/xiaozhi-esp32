@@ -88,8 +88,6 @@ public:
     void EncodeHexAppend(std::string& dest, const char* data, size_t length);
     void DecodeHexAppend(std::string& dest, const char* data, size_t length);
 
-    // HTTP Binary Receive Mode (Patch B · 2026-04-29 · 来自 189 v3.5.3 验证版)
-    // 启用后，rx 解析器识别 +MHTTPURC: "header"/"content" 前缀并按二进制长度直读，
     void SetHttpBinaryMode(bool enabled);
     bool GetHttpBinaryMode() const { return http_binary_mode_count_.load() > 0; }
 
@@ -123,7 +121,6 @@ private:
     std::string rx_buffer_;
     std::mutex rx_buffer_mutex_;  // Mutex to protect rx_buffer_ access
 
-    // HTTP Binary Receive Mode 引用计数（Patch B · 2026-04-29 修引用计数语义）
     std::atomic<int> http_binary_mode_count_{0};
 
     // Callback Functions
@@ -133,7 +130,6 @@ private:
     void ReceiveTask();   // Task for receiving data from DMA queue
     void EventTask();     // Task for parsing response and handling events
     bool ParseResponse();
-    // Binary HTTP URC parsers (Patch B · 在 rx_buffer_mutex_ 持锁期间调用)
     bool ParseBinaryHttpHeader();
     bool ParseBinaryHttpContent();
     bool DetectBaudRate(int timeout_ms = -1);

@@ -1,6 +1,5 @@
 #include "at_modem.h"
 #include "ml307/ml307_at_modem.h"
-// EC801E / NT26K 模组支持已精简（mydazy 三 SKU 全部使用 ML307R · 2026-04-29）
 #include <esp_log.h>
 #include <esp_err.h>
 #include <sstream>
@@ -33,7 +32,6 @@ std::unique_ptr<AtModem> AtModem::Detect(gpio_num_t tx_pin, gpio_num_t rx_pin, g
     std::string response = uart->GetResponse();
     ESP_LOGI(TAG, "Detected modem: %s", response.c_str());
     
-    // 检查响应中的模组型号（mydazy 三 SKU 全部硬绑 ML307R · EC801E/NT26K 已精简）
     if (response.find("ML307") == 0) {
         return std::make_unique<Ml307AtModem>(uart);
     } else {
