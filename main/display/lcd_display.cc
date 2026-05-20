@@ -132,7 +132,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_priority = 5;
-    port_cfg.timer_period_ms = 20;
+    port_cfg.timer_period_ms = 33;
 #if CONFIG_SOC_CPU_CORES_NUM > 1
     port_cfg.task_affinity = 1;
 #endif
@@ -143,8 +143,12 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
+        /* single buffer × 24 行 = 13.6 KB 内部 SRAM · 保 CLAUDE.md 对话 RAM 红线
+         * 满屏 fps 损失 2（vs double=22），换 13.6 KB 内部 SRAM 给音频/4G 关键路径
+         * 不用 width × 12 双 buffer：单 buf 6.8 KB 低于 LVGL 1/10 屏推荐，PNG/圆角渲染有风险
+         * trans_size = 0：esp_lvgl_port lvgl9 不实现此字段（仅 lvgl8 用） */
         .buffer_size = static_cast<uint32_t>(width_ * 24),
-        .double_buffer = true,
+        .double_buffer = false,
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),
         .vres = static_cast<uint32_t>(height_),
@@ -156,8 +160,8 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         },
         .color_format = LV_COLOR_FORMAT_RGB565,
         .flags = {
-            .buff_dma = 0,
-            .buff_spiram = 1,
+            .buff_dma = 1,
+            .buff_spiram = 0,
             .sw_rotate = 0,
             .swap_bytes = 1,
             .full_refresh = 0,
