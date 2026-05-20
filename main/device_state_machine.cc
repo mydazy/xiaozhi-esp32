@@ -112,16 +112,13 @@ bool DeviceStateMachine::CanTransitionTo(DeviceState target) const {
 bool DeviceStateMachine::TransitionTo(DeviceState new_state) {
     DeviceState old_state;
     {
-        // 串行化 load→校验→store，防多任务并发迁移产生非法落地/丢通知(04-P1-3)
         std::lock_guard<std::mutex> lk(transition_mutex_);
         old_state = current_state_.load();
 
-        // No-op if already in the target state
         if (old_state == new_state) {
             return true;
         }
 
-        // Validate transition
         if (!IsValidTransition(old_state, new_state)) {
             ESP_LOGW(TAG, "Invalid state transition: %s -> %s",
                      GetStateName(old_state), GetStateName(new_state));
@@ -134,7 +131,6 @@ bool DeviceStateMachine::TransitionTo(DeviceState new_state) {
     ESP_LOGI(TAG, "State: %s -> %s",
              GetStateName(old_state), GetStateName(new_state));
 
-    // Notify callback（在迁移锁外，避免与 listeners_ 的 mutex_ 嵌套死锁）
     NotifyStateChange(old_state, new_state);
     return true;
 }

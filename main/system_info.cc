@@ -232,13 +232,6 @@ void SystemInfo::PrintHeapStats() {
     char cpu_buf[32] = {0};
     if (has_cpu) snprintf(cpu_buf, sizeof(cpu_buf), " | C0 %lu%% C1 %lu%%", (unsigned long)cpu0, (unsigned long)cpu1);
 
-    // 单行汇总：SRAM 当前/最小 | PSRAM 当前/最小 | 温度 | CPU C0/C1
-    // 日志级别按 SRAM + 温度双阈值判级，取最严重者：
-    //   ERROR : SRAM < 30K (临近 OOM)        | 温度 > 75°C
-    //   WARN  : SRAM < 50K (低于项目红线)    | 温度 > 65°C
-    //   INFO  : 其他
-    // 项目红线（CLAUDE.md）："对话时可用内部 RAM > 60KB"，50K 触发 WARN 提前预警
-    // ESP-IDF 5.5 log 宏要求 format 必须是字面量，因此三分支重复字面量（编译期会去重）
     bool sram_critical = sram_free < 30.0f;
     bool sram_low      = sram_free < 50.0f;
     bool temp_critical = has_temp && temperature > 75.0f;

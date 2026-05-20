@@ -17,7 +17,6 @@ CustomWakeWord::CustomWakeWord()
 }
 
 CustomWakeWord::~CustomWakeWord() {
-    // 先停 Feed 并取其锁后再 destroy，确保没有 detect 正在用 multinet_model_data_(UAF 防护)
     running_ = false;
     {
         std::lock_guard<std::mutex> lock(input_buffer_mutex_);
@@ -104,7 +103,6 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
         ParseWakenetModelConfig();
     }
 
-    // MCP 自定义唤醒词 · NVS text 命中 → action="wake"，其余 action=""（仍识别但不回调）
     {
         Settings s("wakeword", false);
         std::string text = s.GetString("text", "");

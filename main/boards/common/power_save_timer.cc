@@ -110,8 +110,6 @@ void PowerSaveTimer::WakeUp() {
         ESP_LOGI(TAG, "Exiting power save mode");
         in_sleep_mode_ = false;
 
-        // 与 PowerSaveCheck 进入逻辑对称：只有真正降频/关音频过才恢复
-        // 避免在 LVGL/按键任务里同步拿 codec input_dev_mutex_ 导致 24s 卡死
         if (cpu_max_freq_ < 120) {
             esp_pm_config_t pm_config = {
                 .max_freq_mhz = cpu_max_freq_,

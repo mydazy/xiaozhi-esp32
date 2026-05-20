@@ -18,7 +18,6 @@ AfeWakeWord::AfeWakeWord()
 }
 
 AfeWakeWord::~AfeWakeWord() {
-    // 先令检测任务退出并等其结束，再 destroy(afe_data_)，避免 fetch_with_delay 访问已释放句柄(UAF)
     if (detection_task_created_) {
         xEventGroupSetBits(event_group_, DETECTION_EXIT_EVENT);
         if (detection_done_sem_) {
@@ -97,8 +96,7 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
     afe_data_ = afe_iface_->create_from_config(afe_config);
 
   // ============== 设置 Wakenet 检测阈值 ==============
-  // 阈值越低越灵敏 (0.3-0.9, 默认~0.9)
-  float new_threshold = 0.6f; // 更高灵敏度
+  float new_threshold = 0.6f;
   for (size_t i = 0; i < wake_words_.size(); i++) {
     int ret = afe_iface_->set_wakenet_threshold(afe_data_, i, new_threshold);
     ESP_LOGI(TAG, "设置唤醒词[%d] \"%s\" 阈值: %.2f (ret=%d)", (int)i,
@@ -168,10 +166,9 @@ void AfeWakeWord::AudioDetectionTask() {
         EventBits_t bits = xEventGroupWaitBits(event_group_,
             DETECTION_RUNNING_EVENT | DETECTION_EXIT_EVENT, pdFALSE, pdFALSE, portMAX_DELAY);
         if (bits & DETECTION_EXIT_EVENT) {
-            break;  // 析构请求退出
+            break;
         }
 
-        // 有限超时 fetch：让退出请求能被及时响应，避免析构时仍阻塞在 portMAX_DELAY → UAF
         auto res = afe_iface_->fetch_with_delay(afe_data_, pdMS_TO_TICKS(100));
         if (xEventGroupGetBits(event_group_) & DETECTION_EXIT_EVENT) {
             break;
@@ -197,7 +194,6 @@ void AfeWakeWord::AudioDetectionTask() {
             }
         }
     }
-    // 退出循环后通知析构：本任务已结束，可安全 destroy(afe_data_)
     if (detection_done_sem_ != nullptr) {
         xSemaphoreGive(detection_done_sem_);
     }

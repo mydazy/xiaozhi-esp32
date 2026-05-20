@@ -35,7 +35,6 @@ void AudioCodec::Start() {
         output_volume_ = 10;
     }
 
-    // AEC 后增益（dB）持久化值
     aec_gain_db_     = settings.GetFloat("aec_gain", aec_gain_db_);
     aec_gain_linear_ = powf(10.0f, aec_gain_db_ / 20.0f);
 

@@ -23,9 +23,7 @@
 
 #define TAG "LcdDisplay"
 
-// ============================================================
 // TE（Tearing Effect）硬件同步：LCD 控制器在 VSYNC 拉高 TE，主机等 TE 上升沿再推 SPI
-// ============================================================
 static SemaphoreHandle_t s_te_sem = nullptr;
 
 static void IRAM_ATTR te_gpio_isr(void* /*arg*/) {
@@ -200,12 +198,10 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         return;
     }
     lv_display_set_color_format(display_, LV_COLOR_FORMAT_RGB565);
-    // PARTIAL mode + 全屏 buffer：切换页面整屏 dirty 一次 flush；日常只 flush 小 dirty 区
     lv_display_set_buffers(display_, fb1, fb2, fb_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display_, spi_psram_flush_cb);
     lv_display_set_user_data(display_, this);
 
-    // DMA 完成异步回调 → lv_display_flush_ready（不可在 flush_cb 内同步 ready）
     const esp_lcd_panel_io_callbacks_t io_cbs = {
         .on_color_trans_done = on_color_trans_done,
     };
@@ -908,7 +904,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_width(bottom_bar_, LV_HOR_RES);
     lv_obj_set_height(bottom_bar_, LV_SIZE_CONTENT);
     lv_obj_set_style_radius(bottom_bar_, 0, 0);
-    lv_obj_set_style_bg_opa(bottom_bar_, LV_OPA_TRANSP, 0);  // 全透明 · 不挡 emoji/clock 主屏（同 top_bar_ 一致）
+    lv_obj_set_style_bg_opa(bottom_bar_, LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(bottom_bar_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_pad_all(bottom_bar_, lvgl_theme->spacing(4), 0);
     lv_obj_set_style_border_width(bottom_bar_, 0, 0);
@@ -929,7 +925,7 @@ void LcdDisplay::SetupUI() {
     bottom_bar_ = lv_obj_create(screen);
     lv_obj_set_size(bottom_bar_, LV_HOR_RES, text_font->line_height + lvgl_theme->spacing(8));
     lv_obj_set_style_radius(bottom_bar_, 0, 0);
-    lv_obj_set_style_bg_opa(bottom_bar_, LV_OPA_TRANSP, 0);  // 全透明 · 不挡 emoji/clock 主屏（同 top_bar_ 一致）
+    lv_obj_set_style_bg_opa(bottom_bar_, LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(bottom_bar_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_pad_all(bottom_bar_, 0, 0);
     lv_obj_set_style_pad_left(bottom_bar_, lvgl_theme->spacing(4), 0);
@@ -1050,7 +1046,7 @@ void LcdDisplay::ClearChatMessages() {
 #endif
 
 void LcdDisplay::SetEmotion(const char* emotion) {
-    if (emotion == nullptr) emotion = "neutral";   // 防空表情名构造 std::string 崩溃
+    if (emotion == nullptr) emotion = "neutral";
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetEmotion('%s') called before SetupUI() - emotion will not be displayed!", emotion);
     }

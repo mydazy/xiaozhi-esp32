@@ -20,8 +20,8 @@
 #include "lvgl_theme.h"
 #include "lvgl_display.h"
 #include "audio/music_player.h"
-#include "power_manager.h"  // PowerManager::IsChargingGlobal · self.power.get_sleep_mode 用
-#include "assets/lang_config.h"  // Lang::Sounds::OGG_VIBRATION · self.audio.set_wakeword Alert 用
+#include "power_manager.h"
+#include "assets/lang_config.h"
 
 #define TAG "MCP"
 
@@ -45,7 +45,6 @@ void McpServer::AddCommonTools() {
     // **重要** 为了提升响应速度，我们把常用的工具放在前面，利用 prompt cache 的特性。
 
     // Backup the original tools list and restore it after adding the common tools.
-    // 启动期单线程跑 · 这里 move 和末尾 insert 各加一次锁（防御性 · 不和内嵌 AddTool 嵌套）
     std::vector<McpTool*> original_tools;
     {
         std::lock_guard<std::mutex> lk(tools_mutex_);

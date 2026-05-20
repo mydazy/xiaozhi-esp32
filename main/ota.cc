@@ -29,9 +29,6 @@
 #define TAG "Ota"
 
 namespace {
-// 从 server_time JSON 段取 timestamp（UTC 毫秒）写入系统墙钟
-// 单一入口避免 CheckVersion / OnIncomingJson 两处实现漂移（历史 +8h bug 根因）
-// 返回 true = 设置成功（has_server_time_ 应置 true）
 bool ApplyServerUtcTime(cJSON* server_time_obj) {
     if (!cJSON_IsObject(server_time_obj)) return false;
     cJSON* timestamp = cJSON_GetObjectItem(server_time_obj, "timestamp");

@@ -27,7 +27,6 @@ private:
     // 从Settings加载网络类型
     NetworkType LoadNetworkTypeFromSettings(int32_t default_net_type);
     
-    // 保存网络类型到Settings
     void SaveNetworkTypeToSettings(NetworkType type);
 
     // 初始化当前网络类型对应的板卡
@@ -56,7 +55,6 @@ public:
     virtual std::string GetBoardJson() override;
     virtual std::string GetDeviceStatusJson() override;
 
-    // Control Center 接口：双网板支持网络切换
     virtual bool CanSwitchNetwork() const override { return true; }
     virtual void SwitchNetwork() override { SwitchNetworkType(); }
 };

@@ -33,7 +33,6 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_worker, int input_sample_rate, int output
     data_if_ = audio_codec_new_i2s_data(&i2s_cfg);
     assert(data_if_ != NULL);
 
-    // Output (ES8311) — 通过 worker 路由
     mydazy_codec_i2c_cfg_t out_i2c_cfg = {
         .worker       = (i2c_worker_handle_t)i2c_worker,
         .addr         = es8311_addr,
@@ -64,7 +63,6 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_worker, int input_sample_rate, int output
     output_dev_ = esp_codec_dev_new(&dev_cfg);
     assert(output_dev_ != NULL);
 
-    // Input (ES7210) — 通过 worker 路由
     mydazy_codec_i2c_cfg_t in_i2c_cfg = {
         .worker       = (i2c_worker_handle_t)i2c_worker,
         .addr         = es7210_addr,
@@ -272,8 +270,6 @@ int BoxAudioCodec::Write(const int16_t* data, int samples) {
 }
 
 // MIC 灵敏度识别（出厂烧录后首次开机一次性）
-//   基准: vol=80, input=15dB, 1kHz amp=24000 播 500ms, 跳 150ms 录 200ms
-//   公式: input = 15 + 20*log10(3500/RMS), 量化 3dB（>31.5 跳 36 避 33 驱动 bug）
 void BoxAudioCodec::CalibrateMicOnce() {
     ESP_LOGW(TAG, "MIC校准开始 (vol=80 input=15dB tone=1kHz/500ms)");
 
@@ -289,7 +285,6 @@ void BoxAudioCodec::CalibrateMicOnce() {
     for (size_t i = 0; i < 8000; i++)
         tone[i] = (int16_t)(24000 * std::sin(2.0 * M_PI * 1000 * i / 16000));
     auto measure = [&]() -> int32_t {
-        // 播放上下文(含完成标志)放本次 measure 栈帧，返回前 join，避免任务悬垂访问失效栈帧
         struct PlayCtx { BoxAudioCodec* self; std::vector<int16_t>* tone; std::atomic<bool> done; }
             pctx{this, &tone, {false}};
         xTaskCreate([](void* a) {
@@ -304,13 +299,11 @@ void BoxAudioCodec::CalibrateMicOnce() {
         int64_t sum = 0;
         for (size_t i = 0; i < rec.size(); i += input_channels_)
             sum += (int64_t)rec[i] * rec[i];
-        // 等播放任务真正结束(最多 2s)再返回：杜绝悬垂访问 pctx + 第二轮 measure 双 calib 任务并发
         for (int waited = 0; !pctx.done.load() && waited < 2000; waited += 10)
             vTaskDelay(pdMS_TO_TICKS(10));
         return (int32_t)std::sqrt((double)sum / (rec.size() / input_channels_));
     };
 
-    // 第一轮：测基准 RMS，公式反推 input + mic_type + aec
     int32_t rms = std::max(measure(), (int32_t)1);
     float in_raw = 15.0f + 20.0f * std::log10(3500.0f / rms);
     float input_gain = std::max(0.0f, std::min(36.0f,
@@ -327,7 +320,6 @@ void BoxAudioCodec::CalibrateMicOnce() {
     Settings("audio", true).SetInt("mic_type", mic_type);
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 第二轮：用判定后 input 验证等效响度
     int32_t rms_after = measure();
     int diff = (int)(100 * std::abs((double)(rms_after - rms_expected) / rms_expected));
     ESP_LOGW(TAG, "第二轮 RMS=%d (预期 %d 偏差 %d%%) %s",

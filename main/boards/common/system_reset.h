@@ -9,7 +9,6 @@ public:
     void CheckButtons();
 
     // 静态重载 · 业务层运行时复位（9 连击+双击确认 / MCP 远程命令 / 配网超时 等）
-    // force_factory_reset=true 时跳过 GPIO 检查，直接 NVS 全擦 + 3 秒倒计时 esp_restart
     static void CheckButtons(bool force_factory_reset);
 
 private:

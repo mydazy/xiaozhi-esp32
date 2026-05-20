@@ -80,7 +80,6 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
 }
 
 AfeAudioProcessor::~AfeAudioProcessor() {
-    // 先令处理任务退出并 join，再 destroy(afe_data_)，避免 fetch_with_delay 访问已释放句柄(UAF)
     if (task_created_) {
         xEventGroupSetBits(event_group_, PROCESSOR_EXIT);
         if (task_done_sem_) {
@@ -157,10 +156,9 @@ void AfeAudioProcessor::AudioProcessorTask() {
         EventBits_t bits = xEventGroupWaitBits(event_group_,
             PROCESSOR_RUNNING | PROCESSOR_EXIT, pdFALSE, pdFALSE, portMAX_DELAY);
         if (bits & PROCESSOR_EXIT) {
-            break;  // 析构请求退出
+            break;
         }
 
-        // 有限超时 fetch：让退出请求及时响应，避免析构时仍阻塞在 portMAX_DELAY → UAF
         auto res = afe_iface_->fetch_with_delay(afe_data_, pdMS_TO_TICKS(100));
         if (xEventGroupGetBits(event_group_) & PROCESSOR_EXIT) {
             break;
@@ -207,7 +205,6 @@ void AfeAudioProcessor::AudioProcessorTask() {
             }
         }
     }
-    // 退出循环后通知析构：本任务已结束，可安全 destroy(afe_data_)
     if (task_done_sem_ != nullptr) {
         xSemaphoreGive(task_done_sem_);
     }

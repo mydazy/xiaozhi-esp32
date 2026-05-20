@@ -151,14 +151,14 @@ void AudioService::Start() {
         vTaskDelete(NULL);
     }, "audio_output", 2048 * 2, this, 10, &audio_output_task_handle_, 0);
 #else
-    /* Start the audio input task — 同上 · Pin Core 1 P10 */
+    /* Start the audio input task */
     xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
         vTaskDelete(NULL);
     }, "audio_input", 2048 * 2, this, 10, &audio_input_task_handle_, 1);
 
-    /* Start the audio output task — Pin Core 0 P10 */
+    /* Start the audio output task */
     xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioOutputTask();
@@ -196,7 +196,7 @@ void AudioService::Stop() {
         while (eTaskGetState(h) != eDeleted) {
             if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(500)) {
                 ESP_LOGE(TAG, "Stop: %s task exit timeout · handle leaked", name);
-                return;  // 不置 nullptr · Start 会重 create 新 handle · 旧 handle 由 RTOS idle 回收
+                return;
             }
             vTaskDelay(pdMS_TO_TICKS(10));
         }
@@ -487,9 +487,8 @@ void AudioService::OpusCodecTask() {
                         int32_t scale = (int32_t)(n - 1 - i);
                         task->pcm[i] = (int16_t)((int32_t)last_plc_tail_sample_ * scale / denom);
                     }
-                    last_plc_tail_sample_ = 0;  // 仅做一次 fade-out
+                    last_plc_tail_sample_ = 0;
                 }
-                // 阶段 3: 纯静音（task->pcm 已为 0）
             }
 
             if (decoder_sample_rate_ != codec_->output_sample_rate() && output_resampler_ != nullptr) {
@@ -763,7 +762,6 @@ void AudioService::SetFrameDuration(int frame_duration_ms) {
     if (g_opus_frame_duration_ms == frame_duration_ms) return;
     ESP_LOGI(TAG, "SetFrameDuration: %d → %d ms", g_opus_frame_duration_ms, frame_duration_ms);
 
-    // 重建 OPUS encoder · encoder_mutex_ 与 codec task 互斥
     {
         std::lock_guard<std::mutex> lock(encoder_mutex_);
         esp_opus_enc_close(opus_encoder_);
@@ -775,7 +773,6 @@ void AudioService::SetFrameDuration(int frame_duration_ms) {
         encoder_duration_ms_ = frame_duration_ms;
     }
 
-    // AFE 已初始化时重启（耗 200-500ms · WakeNet 重载）
     if (audio_processor_initialized_) {
         bool running = xEventGroupGetBits(event_group_) & AS_EVENT_AUDIO_PROCESSOR_RUNNING;
         if (running) audio_processor_->Stop();
@@ -789,7 +786,6 @@ void AudioService::SetCallbacks(AudioServiceCallbacks& callbacks) {
 }
 
 void AudioService::PlaySound(const std::string_view& ogg) {
-    // 防御：boot 期间 button 回调可能在 Initialize() 之前触发（如开机长按延伸到 iot_button 启动后）
     if (codec_ == nullptr) {
         ESP_LOGW(TAG, "PlaySound called before Initialize, ignored");
         return;

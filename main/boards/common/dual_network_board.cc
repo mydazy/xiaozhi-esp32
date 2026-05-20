@@ -54,7 +54,7 @@ void DualNetworkBoard::SwitchNetworkType() {
         display->ShowNotification(Lang::Strings::SWITCH_TO_WIFI_NETWORK);
         app.PlaySound(Lang::Sounds::OGG_NETWORK_WIFI);
     }
-    vTaskDelay(pdMS_TO_TICKS(1000));   // 留出提示音播放时间后再重启
+    vTaskDelay(pdMS_TO_TICKS(1000));
     app.Reboot();
 }
 

@@ -32,7 +32,7 @@ public:
 
 private:
     EventGroupHandle_t event_group_ = nullptr;
-    SemaphoreHandle_t task_done_sem_ = nullptr;   // 任务退出握手：析构 set EXIT 后等此 sem 再 destroy
+    SemaphoreHandle_t task_done_sem_ = nullptr;
     bool task_created_ = false;
     const esp_afe_sr_iface_t* afe_iface_ = nullptr;
     esp_afe_sr_data_t* afe_data_ = nullptr;

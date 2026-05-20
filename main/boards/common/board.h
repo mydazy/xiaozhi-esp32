@@ -84,12 +84,8 @@ public:
     virtual std::string GetDeviceStatusJson() = 0;
     virtual std::string GetBrandName() { return "MyDazy"; }
     virtual void EnterDeepSleep(bool enable_gyro_wakeup = true) { (void)enable_gyro_wakeup; }
-
-    // ─── Control Center 业务接口（默认空实现） ───
-    // 自动休眠开关：5 min 无操作进入深度睡眠（持久化到 NVS "deepSleep"）
     virtual void EnableAutoSleep(bool enable) { (void)enable; }
     virtual bool IsAutoSleepEnabled() const { return true; }
-    // 网络切换：仅 DualNetworkBoard 子类有效
     virtual bool CanSwitchNetwork() const { return false; }
     virtual void SwitchNetwork() {}
 };
