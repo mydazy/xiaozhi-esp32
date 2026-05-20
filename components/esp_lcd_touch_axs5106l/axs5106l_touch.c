@@ -486,7 +486,6 @@ static bool read_register(axs5106l_touch_handle_t self, uint8_t reg, uint8_t *da
 {
     if (self->dev == NULL) return false;
     for (int i = 0; i < I2C_RETRIES; i++) {
-        // 原子 write+read(repeated-start)，防两条 op 间被其它 I2C 事务插队导致读错寄存器
         if (i2c_worker_write_read(self->dev, &reg, 1, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
             self->i2c_err_streak = 0;
             return true;

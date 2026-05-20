@@ -11,7 +11,6 @@ Ml307Mqtt::Ml307Mqtt(std::shared_ptr<AtUart> at_uart, int mqtt_id) : at_uart_(at
             if (arguments[1].int_value == mqtt_id_) {
                 auto type = arguments[0].string_value;
                 if (type == "conn") {
-                    // 防越界(09-P0-C)："conn",<id>,<error> 需 3 个参数，外层只保证 >=2
                     if (arguments.size() < 3) {
                         ESP_LOGE(TAG, "MQTTURC conn missing error (args=%d)", (int)arguments.size());
                         return;

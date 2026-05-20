@@ -376,7 +376,6 @@ private:
         self->WakeUp();
         if (ControlCenterAbsorbs()) return;
         if (y < 36) {
-            // 点击顶部状态栏 = 唤起控制中心（与下滑同语义，多一个入口）
             if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
                 if (!ui->IsControlCenterVisible()) ui->ShowControlCenter();
             }

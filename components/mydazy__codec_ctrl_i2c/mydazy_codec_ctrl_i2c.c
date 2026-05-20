@@ -42,7 +42,6 @@ static int _open(const audio_codec_ctrl_if_t *ctrl, void *cfg, int cfg_size)
     uint16_t addr_7bit = (c->addr >> 1) & 0x7F;
     uint32_t scl_speed = c->scl_speed_hz ? c->scl_speed_hz : 100000;
 
-    /* 幂等：已注册过则直接视为已打开，避免上游二次 open 重复注册设备泄漏 */
     if (self->dev != NULL) {
         self->is_open = true;
         return ESP_CODEC_DEV_OK;
@@ -53,7 +52,7 @@ static int _open(const audio_codec_ctrl_if_t *ctrl, void *cfg, int cfg_size)
         ESP_LOGE(TAG, "i2c_worker_add_device failed (addr=0x%02X)", addr_7bit);
         return ESP_CODEC_DEV_DRV_ERR;
     }
-    self->is_open = true;   /* open 回调自身负责置位，符合 audio_codec_ctrl_if_t 约定 */
+    self->is_open = true;
     return ESP_CODEC_DEV_OK;
 }
 

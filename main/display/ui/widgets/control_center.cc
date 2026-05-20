@@ -72,7 +72,6 @@ void ControlCenter::CreateUI() {
     int start_y = (height_ - total_height) / 2; // (240-202)/2 = 19
 
     // 第一行：关于、网络切换、休眠
-    // 网络按钮（特殊处理：使用图片而非文字）· col=1
     {
         int x = start_x + 1 * (BTN_SIZE + BTN_SPACING_X);
         int y = start_y + 0 * (BTN_SIZE + BTN_SPACING_Y + 16);
@@ -138,7 +137,7 @@ void ControlCenter::CreateUI() {
 
     // 设置默认状态
     UpdateButtonStyle(network_btn_, true);   // 网络默认开启
-    UpdateButtonStyle(aec_btn_, false);      // "关于"为入口非开关 · 用非激活中性样式
+    UpdateButtonStyle(aec_btn_, false);
     UpdateButtonStyle(sleep_btn_, true);     // 休眠默认开启
     UpdateVolumeLabel();
     UpdateBrightnessLabel();
@@ -433,7 +432,6 @@ void ControlCenter::OnNetworkClicked(lv_event_t* e) {
     }
 }
 
-// "关于"入口（原 AEC 格）· 非开关：不翻转状态/不改样式，仅触发回调打开关于页
 void ControlCenter::OnAecClicked(lv_event_t* e) {
     auto* self = static_cast<ControlCenter*>(lv_event_get_user_data(e));
     self->HideSlider();

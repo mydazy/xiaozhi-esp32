@@ -175,7 +175,6 @@ bool MqttProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
     }
 
     std::string nonce(aes_nonce_);
-    // 用 memcpy 字节搬运，避免对 std::string 缓冲做未对齐 16/32 位写（S3 对齐异常）
     uint16_t nonce_size = htons(packet->payload.size());
     uint32_t nonce_ts = htonl(packet->timestamp);
     uint32_t nonce_seq = htonl(++local_sequence_);

@@ -141,7 +141,7 @@ private:
     Display* display_ = nullptr;
     PowerManager* power_manager_ = nullptr;
     PowerSaveTimer* power_save_timer_ = nullptr;
-    esp_timer_handle_t wake_chat_timer_ = nullptr;   // OnClick/HandleTouchSingleClick 异步等提示音播完
+    esp_timer_handle_t wake_chat_timer_ = nullptr;
 
     // 触摸屏（mydazy/esp_lcd_touch_axs5106l component）
     axs5106l_touch_handle_t touch_driver_ = nullptr;
@@ -378,13 +378,11 @@ private:
         return ui && ui->IsControlCenterVisible();
     }
 
-    // 状态栏（y<36）单击唤起控制中心 · 双击吞掉防误关 · 下滑唤起控制中心
     static void OnTouchClick(int16_t /*x*/, int16_t y, void *ctx) {
         auto* self = static_cast<MyDazyP30_WifiBoard*>(ctx);
         self->WakeUp();
         if (ControlCenterAbsorbs()) return;
         if (y < 36) {
-            // 点击顶部状态栏 = 唤起控制中心（与下滑同语义，多一个入口）
             if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
                 if (!ui->IsControlCenterVisible()) ui->ShowControlCenter();
             }
@@ -397,7 +395,7 @@ private:
         auto* self = static_cast<MyDazyP30_WifiBoard*>(ctx);
         self->WakeUp();
         if (ControlCenterAbsorbs()) return;
-        if (y < 36) return;   // 状态栏双击不做事（防误关刚打开的控制中心）
+        if (y < 36) return;
         self->HandleTouchDoubleClick();
     }
 
@@ -444,7 +442,7 @@ private:
         if (state == kDeviceStateIdle) {
             ESP_LOGI(TAG, "单击唤醒对话");
             app.PlaySound(Lang::Sounds::OGG_WAKEUP);
-            ScheduleWakeChatToggle(800);   // 异步等提示音播完，不阻塞 LVGL 任务
+            ScheduleWakeChatToggle(800);
         } else if (state == kDeviceStateSpeaking) {
             ESP_LOGI(TAG, "单击打断TTS");
             app.AbortSpeaking(kAbortReasonNone);
@@ -717,7 +715,7 @@ private:
             if (status != kDeviceStateIdle && status != kDeviceStateListening && status != kDeviceStateSpeaking) return;
             if (status == kDeviceStateIdle) {
                 app.PlaySound(Lang::Sounds::OGG_WAKEUP);
-                ScheduleWakeChatToggle(1500);   // 异步等提示音播完，button task 立即返回
+                ScheduleWakeChatToggle(1500);
                 return;
             }else if (status == kDeviceStateListening) {
                 app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
@@ -1024,7 +1022,6 @@ public:
         }
     }
 
-    // 异步等提示音播完再 ToggleChatState：避免在 button/LVGL 任务里 vTaskDelay 卡死
     // 连按时 stop + start_once 实现 debounce（以最后一次为准）
     void ScheduleWakeChatToggle(int delay_ms) {
         if (!wake_chat_timer_) {

@@ -174,7 +174,7 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
             };
             int level_idx = battery_level / 20;
             if (level_idx < 0) level_idx = 0;
-            if (level_idx > 5) level_idx = 5;   // levels[] 共 6 项，钳制防越界读
+            if (level_idx > 5) level_idx = 5;
             icon = levels[level_idx];
         }
         DisplayLockGuard lock(this);

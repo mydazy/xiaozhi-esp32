@@ -506,7 +506,7 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
     break;
 
   case ESP_BLUFI_EVENT_REQ_CONNECT_TO_AP: {
-    ESP_LOGD(TAG, "[7/8] 收到WiFi连接请求: %s", self.ssid_.c_str());  // 脱敏:量产 INFO 级不输出 SSID
+    ESP_LOGD(TAG, "[7/8] 收到WiFi连接请求: %s", self.ssid_.c_str());
 
     if (!self.credential_validator_) {
       ESP_LOGE(TAG, "[7/8] 错误: 未设置凭据验证器");
@@ -529,13 +529,12 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
           self.on_success_();
         }
 
-        // 兼容发送 wifi_conn_report（小程序主要靠 JSON 判断成功，这里仅兼容旧流程）
         esp_blufi_extra_info_t info = {};
         info.sta_ssid = (uint8_t *)self.ssid_.c_str();
         info.sta_ssid_len = self.ssid_.length();
         esp_blufi_send_wifi_conn_report(WIFI_MODE_STA, ESP_BLUFI_STA_CONN_SUCCESS,
                                         0, &info);
-        ESP_LOGD(TAG, "[7/8] 配网成功: %s", self.ssid_.c_str());  // 脱敏
+        ESP_LOGD(TAG, "[7/8] 配网成功: %s", self.ssid_.c_str());
       } else {
         // ⭐ 先发 JSON 错误信息，小程序可直接解析显示具体原因
         char err_json[128];
@@ -543,7 +542,6 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
         esp_blufi_send_custom_data((uint8_t *)err_json, strlen(err_json));
         ESP_LOGE(TAG, "[7/8] 配网失败: %s, 已发送错误JSON", error.c_str());
 
-        // 兼容发送 conn_report(FAIL)
         esp_blufi_send_wifi_conn_report(WIFI_MODE_STA, ESP_BLUFI_STA_CONN_FAIL, 0,
                                         nullptr);
       }
@@ -579,7 +577,7 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
         wifi.OnScanComplete(
             [](const std::vector<wifi_ap_record_t> &) { Blufi::OnScanDone(); });
         self.scanning_ = true;
-        wifi.Start();  // STA_START事件会自动触发首次扫描
+        wifi.Start();
         break;
       }
 
@@ -599,7 +597,7 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
 
   case ESP_BLUFI_EVENT_RECV_STA_SSID:
     self.ssid_.assign((char *)param->sta_ssid.ssid, param->sta_ssid.ssid_len);
-    ESP_LOGD(TAG, "[4/8] 收到SSID: %s", self.ssid_.c_str());  // 脱敏
+    ESP_LOGD(TAG, "[4/8] 收到SSID: %s", self.ssid_.c_str());
     break;
 
   case ESP_BLUFI_EVENT_RECV_STA_PASSWD:
@@ -616,7 +614,7 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
   case ESP_BLUFI_EVENT_RECV_CUSTOM_DATA:
     self.binding_code_.assign((char *)param->custom_data.data,
                               param->custom_data.data_len);
-    ESP_LOGD(TAG, "[6/8] 收到绑定码: %s", self.binding_code_.c_str());  // 脱敏:绑定码敏感
+    ESP_LOGD(TAG, "[6/8] 收到绑定码: %s", self.binding_code_.c_str());
     // 保存到 Settings，供 OTA 等模块读取（解耦依赖）
     {
       Settings settings("blufi", true);

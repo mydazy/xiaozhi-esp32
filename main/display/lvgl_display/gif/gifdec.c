@@ -794,7 +794,6 @@ static void f_gif_read(gd_GIF * gif, void * buf, size_t len)
         lv_fs_read(&gif->fd, buf, len, NULL);
     }
     else {
-        /* 越界保护：截断/损坏 GIF 时不越读源缓冲，填 0 并停在末尾 */
         if(gif->data_len && (gif->f_rw_p > gif->data_len || len > gif->data_len - gif->f_rw_p)) {
             memset(buf, 0, len);
             gif->f_rw_p = gif->data_len;

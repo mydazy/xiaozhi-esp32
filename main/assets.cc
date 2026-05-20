@@ -179,12 +179,10 @@ bool Assets::LvglStrategy::InitializePartition(Assets* assets) {
         auto item = (const mmap_assets_table*)(mmap_root_ + 12 + i * sizeof(mmap_assets_table));
         size_t off = static_cast<size_t>(12 + sizeof(mmap_assets_table) * stored_files + item->asset_offset);
         size_t sz = static_cast<size_t>(item->asset_size);
-        // 边界校验：表项偏移+大小须落在分区内，否则跳过（防损坏/篡改资产表越界读）
         if (off > partition_size || sz > partition_size - off) {
             ESP_LOGW(TAG, "asset[%lu] offset/size out of partition (off=%u sz=%u), skip", i, (unsigned)off, (unsigned)sz);
             continue;
         }
-        // asset_name 可能填满字段无 NUL 终止符，用 strnlen 安全构造 string，避免越界读
         std::string asset_name(item->asset_name, strnlen(item->asset_name, sizeof(item->asset_name)));
         assets_[asset_name] = Asset{ .size = sz, .offset = off };
     }

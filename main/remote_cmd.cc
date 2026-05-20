@@ -94,7 +94,6 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "gain") == 0) OnGain(msg);
     else if (strcmp(type, "mic_calibrate") == 0) OnMicCalibrate();
     else if (strcmp(type, "download") == 0) OnDownload(msg);
-    else if (strcmp(type, "reload") == 0) OnReload();
     else if (strcmp(type, "flow") == 0) OnFlow(msg);
     else if (strcmp(type, "music_play") == 0) OnMusicPlay(msg);
     else if (strcmp(type, "music_stop") == 0) OnMusicStop();
@@ -266,16 +265,6 @@ void RemoteCmd::OnDownload(const cJSON* msg) {
             Board::GetInstance().GetDisplay()->SetEmotion(emotion.c_str());
         }
         cJSON_Delete(files_copy);
-    });
-}
-
-// 重新拉 OTA 配置 + 重建 protocol (不重启切换平台)
-// Schedule 派发到主循环串行执行, 避免本 lambda 在 protocol/remote_cmd 重建期间被析构
-void RemoteCmd::OnReload() {
-    ESP_LOGI(TAG, "reload requested");
-    app_->Schedule([app = app_]() {
-        bool ok = app->SwitchProtocol();
-        app->Alert("配置刷新", ok ? "已重新拉取 OTA" : "刷新被拒 (升级/激活中)");
     });
 }
 

@@ -64,7 +64,6 @@ private:
     void OnGain(const cJSON* msg);
     void OnMicCalibrate();
     void OnDownload(const cJSON* msg);
-    void OnReload();
     void OnSleep(const cJSON* msg);
     void OnFlow(const cJSON* msg);
     void OnMusicPlay(const cJSON* msg);

@@ -295,7 +295,6 @@ esp_err_t sc7a20h_shake(sc7a20h_handle_t h,
     if (win < 1)               win = 1;
     if (win > SHAKE_WINDOW_MAX) win = SHAKE_WINDOW_MAX;
 
-    /* 用 int64 计算并钳制：防 uint16² (最大 65535²≈4.29e9) 溢出 int32 为负 → thresh 恒被超过 → 误唤醒 */
     int64_t thresh_sq64 = (int64_t)deviation_mg * (int64_t)deviation_mg;
     h->shake.thresh_sq   = (thresh_sq64 > INT32_MAX) ? INT32_MAX : (int32_t)thresh_sq64;
     h->shake.window      = win;
