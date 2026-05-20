@@ -16,6 +16,7 @@ SsidManager::~SsidManager() {
 }
 
 void SsidManager::Clear() {
+    std::lock_guard<std::mutex> lock(mutex_);
     ssid_list_.clear();
     SaveToNvs();
 }
@@ -84,6 +85,7 @@ void SsidManager::SaveToNvs() {
 }
 
 void SsidManager::AddSsid(const std::string& ssid, const std::string& password) {
+    std::lock_guard<std::mutex> lock(mutex_);
     for (auto& item : ssid_list_) {
         ESP_LOGI(TAG, "compare [%s:%d] [%s:%d]", item.ssid.c_str(), item.ssid.size(), ssid.c_str(), ssid.size());
         if (item.ssid == ssid) {
@@ -104,6 +106,7 @@ void SsidManager::AddSsid(const std::string& ssid, const std::string& password) 
 }
 
 void SsidManager::RemoveSsid(int index) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (index < 0 || index >= ssid_list_.size()) {
         ESP_LOGW(TAG, "Invalid index %d", index);
         return;
@@ -113,6 +116,7 @@ void SsidManager::RemoveSsid(int index) {
 }
 
 void SsidManager::SetDefaultSsid(int index) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (index < 0 || index >= ssid_list_.size()) {
         ESP_LOGW(TAG, "Invalid index %d", index);
         return;
@@ -122,4 +126,9 @@ void SsidManager::SetDefaultSsid(int index) {
     ssid_list_.erase(ssid_list_.begin() + index);
     ssid_list_.insert(ssid_list_.begin(), item);
     SaveToNvs();
+}
+
+std::vector<SsidItem> SsidManager::GetSsidList() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return ssid_list_;
 }
