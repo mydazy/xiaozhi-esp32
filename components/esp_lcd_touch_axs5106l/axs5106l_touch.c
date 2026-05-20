@@ -43,7 +43,7 @@ static const char *TAG = "axs5106l_touch";
 #define CLICK_MIN_TIME_US     50000   /* 50ms · Apple 标准（60→50）*/
 #define CLICK_MAX_MOVE       30       /* ~4mm · 容忍儿童手指落屏微移（20→30）*/
 #define LONG_PRESS_TIME_US   500000   /* 500ms · 防儿童误触（300→500 与 Apple/iOS 对齐）*/
-#define DOUBLE_CLICK_TIME_US 300000   /* 300ms · iOS / Apple Watch S9 标准 · 双击必须快 */
+#define DOUBLE_CLICK_TIME_US 500000   /* 500ms · 实测儿童双击间隔 320~480ms · 300→500 解决"快速双击全被切单击" */
 #define DOUBLE_CLICK_DIST    80       /* ~10.6mm · Apple 30pt 物理等效 */
 #define CLICK_MIN_FRAMES      2       /* 事件型芯片 INT 只在边沿 latch · 单帧即合法（50ms 时长 + 抖动=0 兜底）*/
 #define SINGLE_FRAME_MAX_TIME_US 200000  /* f==1 时 dur 上限 200ms · 拦截 4G 伪 press（被 RF 拉长的单帧噪声）· f>=2 不受限 */
@@ -486,8 +486,8 @@ static bool read_register(axs5106l_touch_handle_t self, uint8_t reg, uint8_t *da
 {
     if (self->dev == NULL) return false;
     for (int i = 0; i < I2C_RETRIES; i++) {
-        if (i2c_worker_write(self->dev, &reg, 1,   I2C_TIMEOUT_MS) == ESP_OK &&
-            i2c_worker_read (self->dev, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
+        // 原子 write+read(repeated-start)，防两条 op 间被其它 I2C 事务插队导致读错寄存器
+        if (i2c_worker_write_read(self->dev, &reg, 1, data, len, I2C_TIMEOUT_MS) == ESP_OK) {
             self->i2c_err_streak = 0;
             return true;
         }

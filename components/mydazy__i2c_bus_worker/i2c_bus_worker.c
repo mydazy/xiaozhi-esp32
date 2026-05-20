@@ -393,9 +393,9 @@ esp_err_t i2c_worker_write(
         .dev = dev,
         .write_data = data,
         .write_len  = len,
-        .timeout_ms = (timeout_ms > 50) ? (timeout_ms / 2) : 50,
+        .timeout_ms = timeout_ms,   /* 全额硬件超时(原砍半致 caller 100→实际 50ms 偏紧) */
     };
-    return submit_and_wait(dev->worker, &op, timeout_ms);
+    return submit_and_wait(dev->worker, &op, timeout_ms + 50);  /* 总等待=硬件超时+排队余量 */
 }
 
 esp_err_t i2c_worker_read(
@@ -407,9 +407,9 @@ esp_err_t i2c_worker_read(
         .dev = dev,
         .read_data = data,
         .read_len  = len,
-        .timeout_ms = (timeout_ms > 50) ? (timeout_ms / 2) : 50,
+        .timeout_ms = timeout_ms,   /* 全额硬件超时(原砍半致 caller 100→实际 50ms 偏紧) */
     };
-    return submit_and_wait(dev->worker, &op, timeout_ms);
+    return submit_and_wait(dev->worker, &op, timeout_ms + 50);  /* 总等待=硬件超时+排队余量 */
 }
 
 esp_err_t i2c_worker_write_read(
@@ -426,9 +426,9 @@ esp_err_t i2c_worker_write_read(
         .write_len  = write_len,
         .read_data  = read_data,
         .read_len   = read_len,
-        .timeout_ms = (timeout_ms > 50) ? (timeout_ms / 2) : 50,
+        .timeout_ms = timeout_ms,   /* 全额硬件超时(原砍半致 caller 100→实际 50ms 偏紧) */
     };
-    return submit_and_wait(dev->worker, &op, timeout_ms);
+    return submit_and_wait(dev->worker, &op, timeout_ms + 50);  /* 总等待=硬件超时+排队余量 */
 }
 
 /* ────────────────────────────────────────────────────────────────
