@@ -24,13 +24,6 @@
 #define TAG "RemoteCmd"
 
 RemoteCmd::RemoteCmd(Application* app) : app_(app) {
-    // 启动时从 NVS 加载 stt_url
-    Settings s("remote_cmd", false);
-    stt_url_ = s.GetString("stt_url");
-    if (!stt_url_.empty()) {
-        ESP_LOGI(TAG, "STT URL loaded: %s", stt_url_.c_str());
-    }
-
     // R1 修：创建延后定时器（reboot/ota/sleep 异步执行，不阻塞 main_loop）
     esp_timer_create_args_t timer_args = {
         .callback = DelayTimerCallback,
@@ -104,7 +97,6 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "download") == 0) OnDownload(msg);
     else if (strcmp(type, "reload") == 0) OnReload();
     else if (strcmp(type, "live_companion") == 0) OnFlow(msg);
-    else if (strcmp(type, "stt_url") == 0) OnSttUrl(msg);
     else if (strcmp(type, "music_play") == 0) OnMusicPlay(msg);
     else if (strcmp(type, "music_stop") == 0) OnMusicStop();
     else if (strcmp(type, "music_pause") == 0) OnMusicPause();
@@ -365,118 +357,6 @@ void RemoteCmd::OnSleep(const cJSON* msg) {
             esp_restart();
         });
     });
-}
-
-void RemoteCmd::OnSttUrl(const cJSON* msg) {
-    auto url_item = cJSON_GetObjectItem(msg, "url");
-    if (!cJSON_IsString(url_item)) {
-        ESP_LOGW(TAG, "stt_url: missing url field");
-        return;
-    }
-
-    std::string url = url_item->valuestring;
-    stt_url_ = url;
-
-    // 持久化到 NVS
-    Settings s("remote_cmd", true);
-    s.SetString("stt_url", url);
-
-    if (url.empty()) {
-        ESP_LOGI(TAG, "STT URL cleared");
-        app_->Schedule([this]() {
-            app_->Alert("STT回调", "已清除", "", "");
-        });
-    } else {
-        ESP_LOGI(TAG, "STT URL set: %s", url.c_str());
-        app_->Schedule([this, url]() {
-            app_->Alert("STT回调", url.c_str(), "", Lang::Sounds::OGG_VIBRATION);
-        });
-    }
-}
-
-void RemoteCmd::PostSttText(const std::string& text) {
-    if (stt_url_.empty() || text.empty()) return;
-
-    // 防止并发 POST（上一个还没完成就跳过）
-    bool expected = false;
-    if (!stt_posting_.compare_exchange_strong(expected, true)) {
-        ESP_LOGW(TAG, "STT POST busy, skip: %.30s", text.c_str());
-        return;
-    }
-
-    std::string url = stt_url_;
-    std::string stt_text = text;
-
-    // 在 PSRAM 后台任务中 POST，不阻塞主线程
-    auto task_func = [](void* param) {
-        auto* args = static_cast<std::tuple<RemoteCmd*, std::string, std::string>*>(param);
-        auto* self = std::get<0>(*args);
-        auto& url = std::get<1>(*args);
-        auto& text = std::get<2>(*args);
-
-        auto& board = Board::GetInstance();
-        std::string mac = SystemInfo::GetMacAddress();
-        std::string client_id = board.GetUuid();
-        std::string user_agent = SystemInfo::GetUserAgent();
-
-        // 构造 JSON body
-        cJSON* body = cJSON_CreateObject();
-        cJSON_AddStringToObject(body, "text", text.c_str());
-        cJSON_AddStringToObject(body, "device_id", mac.c_str());
-        cJSON_AddStringToObject(body, "client_id", client_id.c_str());
-        cJSON_AddNumberToObject(body, "timestamp", (double)(esp_timer_get_time() / 1000));
-        char* json_str = cJSON_PrintUnformatted(body);
-        cJSON_Delete(body);
-
-        if (json_str) {
-            auto network = board.GetNetwork();
-            auto http = network->CreateHttp(0);
-            http->SetHeader("Content-Type", "application/json");
-            http->SetHeader("Device-Id", mac);
-            http->SetHeader("Client-Id", client_id);
-            http->SetHeader("User-Agent", user_agent);
-            http->SetTimeout(5000);
-            http->SetContent(std::string(json_str));
-            cJSON_free(json_str);
-
-            if (http->Open("POST", url)) {
-                int status = http->GetStatusCode();
-                if (status >= 200 && status < 300) {
-                    ESP_LOGI(TAG, "STT POST ok (%d): %.30s", status, text.c_str());
-                } else {
-                    ESP_LOGW(TAG, "STT POST failed (%d): %.30s", status, text.c_str());
-                }
-                http->Close();
-            } else {
-                ESP_LOGW(TAG, "STT POST connect failed: %s", url.c_str());
-            }
-        }
-
-        self->stt_posting_.store(false);
-        delete args;
-        vTaskDelete(nullptr);
-    };
-
-    auto* args = new std::tuple<RemoteCmd*, std::string, std::string>(this, std::move(url), std::move(stt_text));
-    // 🔴 修红线（2026-04-28 P0）：从 PSRAM Core 0 改为 INT Core 1。
-    // 根因：ESP32-S3 cache 与 PSRAM 共享 SPI · NVS/OTA flash op 触发 spi_flash_op_lock()
-    //       会同时禁用两核 cache+PSRAM · PSRAM 栈任务被调度即崩（SP=0x60100000）。
-    // 改动：① MALLOC_CAP_SPIRAM → MALLOC_CAP_INTERNAL ② Core 0 → Core 1（减 Core 0 负担）
-    // 代价：4 KB 内部 RAM 临时占用（HTTP POST 自删后释放）。
-    //
-    // P0c 修：xTaskCreatePinnedToCoreWithCaps（动态 INT alloc）→ xTaskCreateStaticPinnedToCore
-    // 4 KB 静态 BSS 栈 · 减堆碎片 · stt_posting_ atomic_flag 已防重入（buffer 复用安全）
-    constexpr uint32_t kSttPostStackSize = 4096;
-    static StackType_t s_stt_post_stack[kSttPostStackSize / sizeof(StackType_t)];
-    static StaticTask_t s_stt_post_tcb;
-    TaskHandle_t handle = xTaskCreateStaticPinnedToCore(
-        task_func, "stt_post", kSttPostStackSize / sizeof(StackType_t), args,
-        1, s_stt_post_stack, &s_stt_post_tcb, 1);
-    if (handle == nullptr) {
-        ESP_LOGE(TAG, "Failed to create stt_post task");
-        stt_posting_.store(false);
-        delete args;
-    }
 }
 
 void RemoteCmd::OnMusicPlay(const cJSON* msg) {
