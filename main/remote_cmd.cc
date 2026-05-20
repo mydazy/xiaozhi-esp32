@@ -323,6 +323,7 @@ void RemoteCmd::OnFlow(const cJSON* msg) {
         app_->Schedule([this, lc]() {
             const char* state_names[] = {"空闲", "播放中", "等待中", "暂停中"};
             int state_idx = static_cast<int>(lc->GetState());
+            if (state_idx < 0 || state_idx >= 4) state_idx = 0;  // 防 GetState 返回异常值越界读
             char buf[80];
             snprintf(buf, sizeof(buf), "状态: %s | 进度: %d/%d",
                      state_names[state_idx],

@@ -175,9 +175,13 @@ bool MqttProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
     }
 
     std::string nonce(aes_nonce_);
-    *(uint16_t*)&nonce[2] = htons(packet->payload.size());
-    *(uint32_t*)&nonce[8] = htonl(packet->timestamp);
-    *(uint32_t*)&nonce[12] = htonl(++local_sequence_);
+    // 用 memcpy 字节搬运，避免对 std::string 缓冲做未对齐 16/32 位写（S3 对齐异常）
+    uint16_t nonce_size = htons(packet->payload.size());
+    uint32_t nonce_ts = htonl(packet->timestamp);
+    uint32_t nonce_seq = htonl(++local_sequence_);
+    memcpy(&nonce[2], &nonce_size, sizeof(nonce_size));
+    memcpy(&nonce[8], &nonce_ts, sizeof(nonce_ts));
+    memcpy(&nonce[12], &nonce_seq, sizeof(nonce_seq));
 
     std::string encrypted;
     encrypted.resize(aes_nonce_.size() + packet->payload.size());
@@ -259,8 +263,11 @@ bool MqttProtocol::OpenAudioChannel() {
             ESP_LOGE(TAG, "Invalid audio packet type: %x", data[0]);
             return;
         }
-        uint32_t timestamp = ntohl(*(uint32_t*)&data[8]);
-        uint32_t sequence = ntohl(*(uint32_t*)&data[12]);
+        uint32_t ts_raw, seq_raw;
+        memcpy(&ts_raw, &data[8], sizeof(ts_raw));    // memcpy 避免未对齐 32 位读
+        memcpy(&seq_raw, &data[12], sizeof(seq_raw));
+        uint32_t timestamp = ntohl(ts_raw);
+        uint32_t sequence = ntohl(seq_raw);
         if (sequence < remote_sequence_) {
             ESP_LOGW(TAG, "Received audio packet with old sequence: %lu, expected: %lu", sequence, remote_sequence_);
             return;
