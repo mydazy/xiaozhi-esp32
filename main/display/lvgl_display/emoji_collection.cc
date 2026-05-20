@@ -7,6 +7,10 @@
 #define TAG "EmojiCollection"
 
 void EmojiCollection::AddEmoji(const std::string& name, LvglImage* image) {
+    auto it = emoji_collection_.find(name);
+    if (it != emoji_collection_.end()) {
+        delete it->second;   // 覆盖同名键前释放旧 image，防内存泄漏
+    }
     emoji_collection_[name] = image;
 }
 

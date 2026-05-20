@@ -29,6 +29,7 @@ LvglRawImage::~LvglRawImage() {
 
 bool LvglRawImage::IsGif() const {
     auto ptr = (const uint8_t*)image_dsc_.data;
+    if (ptr == nullptr || image_dsc_.data_size < 3) return false;   // 防空/短资产越界读前 3 字节
     return ptr[0] == 'G' && ptr[1] == 'I' && ptr[2] == 'F';
 }
 

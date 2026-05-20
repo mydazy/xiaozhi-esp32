@@ -172,7 +172,10 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
                 FONT_AWESOME_BATTERY_FULL, // 80-99%
                 FONT_AWESOME_BATTERY_FULL, // 100%
             };
-            icon = levels[battery_level / 20];
+            int level_idx = battery_level / 20;
+            if (level_idx < 0) level_idx = 0;
+            if (level_idx > 5) level_idx = 5;   // levels[] 共 6 项，钳制防越界读
+            icon = levels[level_idx];
         }
         DisplayLockGuard lock(this);
         if (battery_label_ != nullptr && battery_icon_ != icon) {
