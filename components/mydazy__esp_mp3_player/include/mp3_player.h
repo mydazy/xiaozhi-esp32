@@ -166,7 +166,7 @@ private:
     static constexpr size_t kPcmRingSize        = 32 * 1024;
     static constexpr size_t kOutputChunkBytes   = 4 * 1024;
     static constexpr size_t kPrebufferThreshold = 32 * 1024;
-    static constexpr int    kHttpTimeoutMs      = 25000;
+    static constexpr int    kHttpTimeoutMs      = 12000;  // 12s：必须 < AbortAndJoin 总等待(22s)，否则卡死时 ring 不回收(01-P1-5)
     static constexpr int    kPauseTimeoutMs     = 50000;
     static constexpr int    kHttpRetryMax       = 5;
     static constexpr int    kPauseCloseConnMs   = 5000;
