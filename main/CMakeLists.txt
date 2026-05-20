@@ -21,8 +21,6 @@ set(SOURCES "audio/audio_codec.cc"
             "display/lvgl_display/lvgl_image.cc"
             "display/lvgl_display/gif/lvgl_gif.cc"
             "display/lvgl_display/gif/gifdec.c"
-            "display/lvgl_display/jpg/image_to_jpeg.cpp"
-            "display/lvgl_display/jpg/jpeg_to_image.c"
             "display/ui_display.cc"
             "display/ui/widgets/control_center.cc"
             "protocols/protocol.cc"
@@ -55,7 +53,7 @@ set(SOURCES "audio/audio_codec.cc"
             "main.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg"
+set(INCLUDE_DIRS "." "display" "display/lvgl_display"
     "audio" "audio/demuxer" "protocols" "blufi" "wifi")
 
 # Add board common files
@@ -258,8 +256,6 @@ file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.ogg)
 if(CONFIG_IDF_TARGET_ESP32)
     list(REMOVE_ITEM SOURCES "audio/codecs/box_audio_codec.cc"
                              "led/gpio_led.cc"
-                             "display/lvgl_display/jpg/image_to_jpeg.cpp"
-                             "display/lvgl_display/jpg/jpeg_to_image.c"
                              "boards/common/ml307_board.cc"
                              "boards/common/dual_network_board.cc"
                              )
@@ -294,7 +290,6 @@ idf_component_register(SRCS ${SOURCES}
                         esp_driver_spi
                         esp_driver_i2c
                         esp_driver_i2s
-                        esp_driver_jpeg
                         esp_driver_ppa
                         esp_app_format
                         app_update
