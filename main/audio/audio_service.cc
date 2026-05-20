@@ -171,7 +171,7 @@ void AudioService::Start() {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->OpusCodecTask();
         vTaskDeleteWithCaps(NULL);
-    }, "opus_codec", 2048 * 12, this, 7, &opus_codec_task_handle_, 0, MALLOC_CAP_SPIRAM);
+    }, "opus_codec", 2048 * 12, this, 7, &opus_codec_task_handle_, 1, MALLOC_CAP_SPIRAM);
 }
 
 void AudioService::Stop() {
