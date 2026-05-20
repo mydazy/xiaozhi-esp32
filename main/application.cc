@@ -695,6 +695,7 @@ void Application::InitializeProtocol() {
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
         user_initiated_close_.store(false);  // 通道新开 → 清残留退出意图，防下次弱网掉线被误判
+        server_initiated_close_.store(false);  // 同上，清服务器主动告别标志
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
@@ -709,6 +710,15 @@ void Application::InitializeProtocol() {
         if (state_at_close == kDeviceStateListening || state_at_close == kDeviceStateSpeaking) {
             if (user_initiated_close_.exchange(false)) {
                 ESP_LOGI(TAG, "用户主动退出对话 → 回 Idle（跳过弱网重连）");
+                reconnect_attempts_in_window_ = 0;
+                Schedule([this]() {
+                    Board::GetInstance().GetDisplay()->SetChatMessage("system", "");
+                    SetDeviceState(kDeviceStateIdle);
+                });
+                return;
+            }
+            if (server_initiated_close_.exchange(false)) {
+                ESP_LOGI(TAG, "服务器主动结束对话 → 回 Idle（跳过弱网重连）");
                 reconnect_attempts_in_window_ = 0;
                 Schedule([this]() {
                     Board::GetInstance().GetDisplay()->SetChatMessage("system", "");

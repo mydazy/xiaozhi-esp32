@@ -118,6 +118,7 @@ public:
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void CloseAudioChannel();
+    void MarkServerInitiatedClose() { server_initiated_close_.store(true); }
     bool SendTextToTts(const std::string& text);   // false = 协议未实现 / channel 未开
     void SendTextToAI(const std::string& text);
     bool SendProtocolText(const std::string& text);
@@ -185,6 +186,7 @@ private:
     static constexpr int kMaxReconnectInWindow = 3;
     static constexpr int64_t kReconnectWindowUs = 300LL * 1000 * 1000;
     std::atomic<bool> user_initiated_close_{false};
+    std::atomic<bool> server_initiated_close_{false};
     TaskHandle_t activation_task_handle_ = nullptr;
 
 

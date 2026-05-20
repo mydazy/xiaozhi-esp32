@@ -119,7 +119,7 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
                 auto alive = alive_;  // Capture alive flag
                 Application::GetInstance().Schedule([this, alive]() {
                     if (*alive) {
-                        // Server initiated goodbye, don't send goodbye back to avoid ping-pong
+                        Application::GetInstance().MarkServerInitiatedClose();
                         CloseAudioChannel(false);
                     }
                 });

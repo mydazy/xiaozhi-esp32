@@ -978,6 +978,7 @@ void WebsocketBaiduProtocol::HandleEvent(const std::string& event) {
                 media_ready_ = false;
                 is_speaking_ = false;
                 StopIdleTimer();
+                Application::GetInstance().MarkServerInitiatedClose();
                 if (on_audio_channel_closed_) on_audio_channel_closed_();
                 ESP_LOGI(TAG, "Idle goodbye complete → audio channel closed");
             });
@@ -1507,12 +1508,11 @@ void WebsocketBaiduProtocol::CheckIdleTimeout() {
                             ESP_LOGI(TAG, "Idle dc cancelled (user resumed during goodbye)");
                             return;
                         }
-                        // 清空残留音频，防止进入待命后扬声器噗噗响
                         Application::GetInstance().GetAudioService().ResetDecoder();
-                        // 只关闭音频通道，不断开 WS（保留推送能力）
                         self->media_ready_ = false;
                         self->is_speaking_ = false;
                         self->StopIdleTimer();
+                        Application::GetInstance().MarkServerInitiatedClose();
                         if (self->on_audio_channel_closed_) self->on_audio_channel_closed_();
                         ESP_LOGI(TAG, "Idle timeout: audio channel closed, WS kept alive");
                     });

@@ -472,6 +472,7 @@ void WebsocketJoeaiProtocol::HandleBinaryMessage(const char* data, size_t len) {
 void WebsocketJoeaiProtocol::HandleErrorMessage(const char* data, size_t len) {
     (void)data; (void)len;
     error_occurred_ = true;
+    Application::GetInstance().MarkServerInitiatedClose();
     if (on_audio_channel_closed_ != nullptr) {
         on_audio_channel_closed_();
     }
