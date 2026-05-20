@@ -164,7 +164,12 @@ void AfeWakeWord::AudioDetectionTask() {
 
         if (res->wakeup_state == WAKENET_DETECTED) {
             Stop();
-            last_detected_wake_word_ = wake_words_[res->wakenet_model_index - 1];
+            int wake_idx = res->wakenet_model_index - 1;
+            if (wake_idx < 0 || wake_idx >= (int)wake_words_.size()) {
+                ESP_LOGW(TAG, "invalid wakenet_model_index %d, skip", res->wakenet_model_index);
+                continue;
+            }
+            last_detected_wake_word_ = wake_words_[wake_idx];
 
             if (wake_word_detected_callback_) {
                 wake_word_detected_callback_(last_detected_wake_word_);

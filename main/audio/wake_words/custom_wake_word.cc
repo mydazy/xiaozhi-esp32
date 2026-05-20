@@ -188,7 +188,12 @@ void CustomWakeWord::Feed(const std::vector<int16_t>& data) {
             for (int i = 0; i < mn_result->num && running_; i++) {
                 ESP_LOGI(TAG, "Custom wake word detected: command_id=%d, string=%s, prob=%f", 
                         mn_result->command_id[i], mn_result->string, mn_result->prob[i]);
-                auto& command = commands_[mn_result->command_id[i] - 1];
+                int cmd_idx = mn_result->command_id[i] - 1;
+                if (cmd_idx < 0 || cmd_idx >= (int)commands_.size()) {
+                    ESP_LOGW(TAG, "invalid command_id %d, skip", mn_result->command_id[i]);
+                    continue;
+                }
+                auto& command = commands_[cmd_idx];
                 if (command.action == "wake") {
                     last_detected_wake_word_ = command.text;
                     running_ = false;
