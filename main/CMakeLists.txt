@@ -257,8 +257,6 @@ file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.ogg)
 # If target chip is ESP32, exclude specific files to avoid build errors
 if(CONFIG_IDF_TARGET_ESP32)
     list(REMOVE_ITEM SOURCES "audio/codecs/box_audio_codec.cc"
-                             "audio/codecs/es8388_audio_codec.cc"
-                             "audio/codecs/es8389_audio_codec.cc"
                              "led/gpio_led.cc"
                              "display/lvgl_display/jpg/image_to_jpeg.cpp"
                              "display/lvgl_display/jpg/jpeg_to_image.c"
