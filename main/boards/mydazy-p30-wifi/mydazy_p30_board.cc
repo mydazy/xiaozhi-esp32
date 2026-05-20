@@ -399,18 +399,15 @@ private:
         self->HandleTouchDoubleClick();
     }
 
-    // 竖向下滑唤起控制中心 · 上滑收回（横滑忽略，交还业务）
+    // 上滑收回控制中心（打开走单击状态栏 · 下滑/横滑不再处理）
     static void OnTouchSwipe(int16_t dx, int16_t dy, void *ctx) {
         int adx = dx < 0 ? -dx : dx;
         int ady = dy < 0 ? -dy : dy;
         if (adx >= ady) return;                 // 横滑不处理
+        if (dy >= 0) return;                    // 下滑不再唤起 ControlCenter
         auto* self = static_cast<MyDazyP30_WifiBoard*>(ctx);
         self->WakeUp();
-        auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
-        if (!ui) return;
-        if (dy > 0) {
-            if (!ui->IsControlCenterVisible()) ui->ShowControlCenter();
-        } else {
+        if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
             if (ui->IsControlCenterVisible()) ui->HideControlCenter();
         }
     }

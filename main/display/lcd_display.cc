@@ -11,49 +11,12 @@
 #include <esp_err.h>
 #include <esp_lvgl_port.h>
 #include <esp_psram.h>
-#include <esp_heap_caps.h>
 #include <cstring>
-#include <driver/gpio.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
 #include <src/misc/cache/lv_cache.h>
-#include <src/display/lv_display_private.h>
 
 #include "board.h"
 
 #define TAG "LcdDisplay"
-
-// TE（Tearing Effect）硬件同步：LCD 控制器在 VSYNC 拉高 TE，主机等 TE 上升沿再推 SPI
-static SemaphoreHandle_t s_te_sem = nullptr;
-
-static void IRAM_ATTR te_gpio_isr(void* /*arg*/) {
-    BaseType_t hpw = pdFALSE;
-    if (s_te_sem) xSemaphoreGiveFromISR(s_te_sem, &hpw);
-    if (hpw) portYIELD_FROM_ISR();
-}
-
-static esp_lcd_panel_handle_t s_flush_panel = nullptr;
-static bool on_color_trans_done(esp_lcd_panel_io_handle_t /*io*/,
-                                esp_lcd_panel_io_event_data_t* /*edata*/,
-                                void* user_ctx) {
-    lv_display_flush_ready(static_cast<lv_display_t*>(user_ctx));
-    return false;
-}
-
-static void spi_psram_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
-    uint32_t px_cnt = lv_area_get_size(area);
-    lv_draw_sw_rgb565_swap(px_map, px_cnt);
-
-    if (s_te_sem) {
-        xSemaphoreTake(s_te_sem, 0);   // 清过期信号
-        xSemaphoreTake(s_te_sem, pdMS_TO_TICKS(20));
-    }
-
-    esp_lcd_panel_draw_bitmap(s_flush_panel,
-                              area->x1, area->y1,
-                              area->x2 + 1, area->y2 + 1, px_map);
-    (void)disp;
-}
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
@@ -175,79 +138,42 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
 #endif
     lvgl_port_init(&port_cfg);
 
-    ESP_LOGI(TAG, "方案X: 自建 display · 全屏双 buf @ PSRAM 64B 对齐");
-    size_t fb_bytes = static_cast<size_t>(width_) * height_ * 2;   // RGB565 全屏
-    size_t fb_alloc = (fb_bytes + 63) & ~static_cast<size_t>(63);  // 64B 向上取整（D-cache line）
-    auto* fb1 = static_cast<uint8_t*>(heap_caps_aligned_alloc(64, fb_alloc, MALLOC_CAP_SPIRAM));
-    auto* fb2 = static_cast<uint8_t*>(heap_caps_aligned_alloc(64, fb_alloc, MALLOC_CAP_SPIRAM));
-    if (!fb1 || !fb2) {
-        ESP_LOGE(TAG, "PSRAM framebuffer alloc 失败 (need 2x%u B)", (unsigned)fb_alloc);
-        if (fb1) heap_caps_free(fb1);
-        if (fb2) heap_caps_free(fb2);
-        return;
-    }
-    ESP_LOGI(TAG, "PSRAM fb: 2x%u B @ %p / %p (内部 RAM 零占用)",
-             (unsigned)fb_alloc, fb1, fb2);
-
-    s_flush_panel = panel_;
-
-    display_ = lv_display_create(width_, height_);
-    if (display_ == nullptr) {
-        ESP_LOGE(TAG, "lv_display_create 失败");
-        heap_caps_free(fb1); heap_caps_free(fb2);
-        return;
-    }
-    lv_display_set_color_format(display_, LV_COLOR_FORMAT_RGB565);
-    lv_display_set_buffers(display_, fb1, fb2, fb_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
-    lv_display_set_flush_cb(display_, spi_psram_flush_cb);
-    lv_display_set_user_data(display_, this);
-
-    const esp_lcd_panel_io_callbacks_t io_cbs = {
-        .on_color_trans_done = on_color_trans_done,
+    ESP_LOGI(TAG, "Adding LCD display");
+    const lvgl_port_display_cfg_t display_cfg = {
+        .io_handle = panel_io_,
+        .panel_handle = panel_,
+        .control_handle = nullptr,
+        .buffer_size = static_cast<uint32_t>(width_ * 24),
+        .double_buffer = true,
+        .trans_size = 0,
+        .hres = static_cast<uint32_t>(width_),
+        .vres = static_cast<uint32_t>(height_),
+        .monochrome = false,
+        .rotation = {
+            .swap_xy = swap_xy,
+            .mirror_x = mirror_x,
+            .mirror_y = mirror_y,
+        },
+        .color_format = LV_COLOR_FORMAT_RGB565,
+        .flags = {
+            .buff_dma = 0,
+            .buff_spiram = 1,
+            .sw_rotate = 0,
+            .swap_bytes = 1,
+            .full_refresh = 0,
+            .direct_mode = 0,
+        },
     };
-    ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(panel_io_, &io_cbs, display_));
+
+    display_ = lvgl_port_add_disp(&display_cfg);
+    if (display_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to add display");
+        return;
+    }
 
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
-}
-
-void SpiLcdDisplay::EnableTearingEffectSync(gpio_num_t te_pin) {
-    if (!display_ || te_pin == GPIO_NUM_NC) {
-        ESP_LOGW(TAG, "EnableTearingEffectSync skip: display=%p te=%d", display_, (int)te_pin);
-        return;
-    }
-    if (s_te_sem) {
-        ESP_LOGW(TAG, "EnableTearingEffectSync already enabled, skip");
-        return;
-    }
-
-    s_te_sem = xSemaphoreCreateBinary();
-    if (!s_te_sem) {
-        ESP_LOGE(TAG, "TE sem create failed");
-        return;
-    }
-
-    gpio_config_t te_conf = {
-        .pin_bit_mask = (1ULL << te_pin),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_POSEDGE,
-    };
-    ESP_ERROR_CHECK(gpio_config(&te_conf));
-
-    esp_err_t isr_svc = gpio_install_isr_service(0);
-    if (isr_svc != ESP_OK && isr_svc != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "gpio_install_isr_service failed: %s, TE 同步禁用",
-                 esp_err_to_name(isr_svc));
-        vSemaphoreDelete(s_te_sem);
-        s_te_sem = nullptr;
-        return;
-    }
-
-    ESP_ERROR_CHECK(gpio_isr_handler_add(te_pin, te_gpio_isr, nullptr));
-    ESP_LOGI(TAG, "TE sync enabled on GPIO%d (JD9853 0x35 已开 TE 输出)", (int)te_pin);
 }
 
 LcdDisplay::~LcdDisplay() {

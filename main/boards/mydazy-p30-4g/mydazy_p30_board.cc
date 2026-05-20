@@ -59,9 +59,6 @@
 
 #define TAG "MyDazyP30_4GBoard"
 
-// EXT0 唤醒时若距上次 sleep < 500ms = 死按延续（硬件极速被触发）· 直接再 sleep
-// 真心开机必然 = 用户松手再按 · 间隔 ≥ 200ms · 实测远超 500ms
-// 用 gettimeofday（POSIX 标准 · ESP-IDF 内部基于 RTC · 跨 deep sleep 持续 · 无组件依赖）
 #include <sys/time.h>
 RTC_DATA_ATTR static uint64_t s_last_sleep_us = 0;
 static constexpr uint64_t kDeadHoldWindowUs = 500 * 1000;
@@ -209,7 +206,6 @@ private:
         switch (wakeup_reason) {
             case ESP_SLEEP_WAKEUP_EXT0:
                 ESP_LOGI(TAG, "从开机键唤醒");
-                // 死按延续兜底：距上次 sleep < 500ms + GPIO 低 → 短路 sleep
                 if (s_last_sleep_us > 0) {
                     uint64_t since_us = NowRtcUs() - s_last_sleep_us;
                     if (since_us < kDeadHoldWindowUs && gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
@@ -314,8 +310,6 @@ private:
         sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 320 /*mg*/, 100 /*ms*/);
         if (!sc7a20h_sensor_) { ESP_LOGE(TAG, "SC7A20H 初始化失败"); return; }
         sc7a20h_shake (sc7a20h_sensor_, 1500, 1000, 4, 1500, &OnShake,  this);
-        // 桌面双击唤醒 — 暂关 · 后续扩展（默认参数 1800/80/400/800）
-        // sc7a20h_strike(sc7a20h_sensor_, 1800,  80, 400, 800, &OnStrike, this);
     }
 
     // 摇一摇 — 日常 AI 互动 · 闹钟响铃中累计 3 次才停（防走路误关）
@@ -392,18 +386,15 @@ private:
         self->HandleTouchDoubleClick();
     }
 
-    // 竖向下滑唤起控制中心 · 上滑收回（横滑忽略，交还业务）
+    // 上滑收回控制中心（打开走单击状态栏 · 下滑/横滑不再处理）
     static void OnTouchSwipe(int16_t dx, int16_t dy, void *ctx) {
         int adx = dx < 0 ? -dx : dx;
         int ady = dy < 0 ? -dy : dy;
         if (adx >= ady) return;                 // 横滑不处理
+        if (dy >= 0) return;                    // 下滑不再唤起 ControlCenter
         auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
         self->WakeUp();
-        auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay());
-        if (!ui) return;
-        if (dy > 0) {
-            if (!ui->IsControlCenterVisible()) ui->ShowControlCenter();
-        } else {
+        if (auto* ui = dynamic_cast<UiDisplay*>(Board::GetInstance().GetDisplay())) {
             if (ui->IsControlCenterVisible()) ui->HideControlCenter();
         }
     }
@@ -659,8 +650,7 @@ private:
         display_ = new UiDisplay(panel_io_, panel_,
                                  DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
                                  DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
-        static_cast<UiDisplay*>(display_)->EnableTearingEffectSync(DISPLAY_LCD_TE);
-        ESP_LOGI(TAG, "UiDisplay 已启用 (时钟 + 配网 + 激活 + 控制中心) + TE 同步");
+        ESP_LOGI(TAG, "UiDisplay 已启用 (时钟 + 配网 + 激活 + 控制中心)");
 #endif
 
         SystemInfo::PrintHeapStats();

@@ -130,14 +130,6 @@ void UiDisplay::SetupUI() {
         lv_obj_add_event_cb(emoji_box_, OnFontExitClicked, LV_EVENT_CLICKED, this);
     }
 
-    if (auto* screen = lv_screen_active()) {
-        boot_brand_label_ = lv_label_create(screen);
-        lv_label_set_text(boot_brand_label_, "MyDazy");
-        lv_obj_set_style_text_color(boot_brand_label_, lv_color_hex(0xFFFFFF), 0);
-        lv_obj_align(boot_brand_label_, LV_ALIGN_CENTER, 0, 70);
-        lv_obj_set_style_opa(boot_brand_label_, LV_OPA_TRANSP, 0);
-    }
-
     if (status_label_)       lv_label_set_recolor(status_label_, true);
     if (notification_label_) lv_label_set_recolor(notification_label_, true);
 
