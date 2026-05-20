@@ -317,7 +317,7 @@ void Blufi::OnScanDone() {
     // 空结果自动重试（最多2次，覆盖RF时分不稳定场景）
     if (self.scan_retry_count_ < 2) {
       self.scan_retry_count_++;
-      ESP_LOGW(TAG, "[3/8] 未扫描到热点，第%d次重试", self.scan_retry_count_);
+      ESP_LOGW(TAG, "[3/8] 未扫描到热点，第%d次重试", self.scan_retry_count_.load());
       self.scanning_ = true;
 
       // 清理上次定时器（atomic exchange · 谁抢到谁释放）
@@ -448,7 +448,8 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
       ESP_LOGW(TAG, "[1/8] 广播启动失败，advertising_=false");
     }
     // ⚠️ 唤醒 Start() 同步等待：GATT profile 和广播已就绪，flash op 结束
-    if (self.init_done_sem_) {
+    // 兜底：Stop() 已置 stopping_ 时不再 give（Stop 先 host_deinit 停回调、再删信号量）
+    if (!self.stopping_ && self.init_done_sem_) {
       xSemaphoreGive(self.init_done_sem_);
     }
     break;
@@ -456,7 +457,7 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
   case ESP_BLUFI_EVENT_BLE_CONNECT:
     self.ble_connected_ = true;
     self.conn_handle_ = param->connect.conn_id;
-    ESP_LOGI(TAG, "[2/8] ✅ 手机BLE已连接 (conn_handle=%d)", self.conn_handle_);
+    ESP_LOGI(TAG, "[2/8] ✅ 手机BLE已连接 (conn_handle=%d)", self.conn_handle_.load());
     ESP_LOGI(TAG, "[2/8]   → 停止广播");
     esp_blufi_adv_stop();
     ESP_LOGI(TAG, "[2/8]   → 初始化安全层");
@@ -516,7 +517,7 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
   case ESP_BLUFI_EVENT_BLE_DISCONNECT:
     ESP_LOGW(TAG, "[8/8] ⚠️ BLE连接已断开");
     ESP_LOGW(TAG, "[8/8]   → 当前状态: ble_connected=%d, stopping=%d",
-             self.ble_connected_, self.stopping_);
+             self.ble_connected_.load(), self.stopping_.load());
     self.ble_connected_ = false;
     self.scanning_ = false;
     self.scan_retry_count_ = 0;
