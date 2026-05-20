@@ -173,7 +173,7 @@ private:
         }
         else {
             voltage = 3600 * 1000 / 4096 * average_adc / 1000;
-            voltage = voltage * 2;  // 同补 1M+1M 分压系数，与校准路径一致（修复 eFuse 未烧机型误判低电关机）
+            voltage = voltage * 2;
         }
 
         // 低于最低值时

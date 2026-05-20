@@ -447,8 +447,6 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
     if (!self.advertising_) {
       ESP_LOGW(TAG, "[1/8] 广播启动失败，advertising_=false");
     }
-    // ⚠️ 唤醒 Start() 同步等待：GATT profile 和广播已就绪，flash op 结束
-    // 兜底：Stop() 已置 stopping_ 时不再 give（Stop 先 host_deinit 停回调、再删信号量）
     if (!self.stopping_ && self.init_done_sem_) {
       xSemaphoreGive(self.init_done_sem_);
     }
@@ -521,7 +519,6 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
     self.ble_connected_ = false;
     self.scanning_ = false;
     self.scan_retry_count_ = 0;
-    // atomic exchange · 防 BLE_DISCONNECT 与 Stop/callback 并发 double-delete
     if (auto h = self.retry_timer_.exchange(nullptr, std::memory_order_acq_rel)) {
       esp_timer_stop(h);
       esp_timer_delete(h);
@@ -544,21 +541,15 @@ void Blufi::BlufiCallback(esp_blufi_cb_event_t event,
       break;
     }
 
-    // ⭐ 立即回复 CONNECTING 状态，让小程序及时更新进度
     esp_blufi_send_wifi_conn_report(WIFI_MODE_STA, ESP_BLUFI_STA_CONNECTING, 0,
                                     nullptr);
 
     // ⭐ 异步执行WiFi连接，避免阻塞NimBLE host task
-    // TryConnectAndSave 最多阻塞10s，超过BLE supervision timeout(6s)会导致
-    // BLE断连，小程序收不到配网结果→显示"配网超时"而实际WiFi已连接成功
-    // Pin Core 0：与 BT controller / WiFi stack 同核 · 避免漂到 Core 1 抢实时音频
     xTaskCreatePinnedToCore([](void *arg) {
       auto &self = Blufi::GetInstance();
       std::string error;
       if (self.credential_validator_(self.ssid_, self.password_, error)) {
         // ⭐ 联动优化：WiFi连接成功后立即发送设备信息JSON
-        // 小程序 chooseWifi.vue 的 handleResult 实际解析 JSON（非 wifi_conn_report）
-        // 先发 JSON 让小程序尽快进入绑定流程，再发冗余 conn_report 作为兼容
         if (self.on_success_) {
           ESP_LOGI(TAG, "[7/8] WiFi连接成功，立即发送设备信息JSON");
           self.on_success_();

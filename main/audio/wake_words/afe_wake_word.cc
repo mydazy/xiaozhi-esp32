@@ -174,10 +174,8 @@ void AfeWakeWord::AudioDetectionTask() {
 }
 
 void AfeWakeWord::StoreWakeWordData(const int16_t* data, size_t samples) {
-    // store audio data to wake_word_pcm_
     std::lock_guard<std::mutex> lock(wake_word_pcm_mutex_);
     wake_word_pcm_.emplace_back(std::vector<int16_t>(data, data + samples));
-    // keep about 2 seconds of data, detect duration is 30ms (sample_rate == 16000, chunksize == 512)
     while (wake_word_pcm_.size() > 2000 / 30) {
         wake_word_pcm_.pop_front();
     }
@@ -228,7 +226,6 @@ void AfeWakeWord::EncodeWakeWordData() {
             esp_audio_enc_in_frame_t in = {};
             esp_audio_enc_out_frame_t out = {};
 
-            // 取出 PCM 快照（与检测任务 StoreWakeWordData 互斥），避免边编码边写 deque 损坏
             std::deque<std::vector<int16_t>> pcm_snapshot;
             {
                 std::lock_guard<std::mutex> lock(this_->wake_word_pcm_mutex_);
@@ -264,8 +261,7 @@ void AfeWakeWord::EncodeWakeWordData() {
                     in_buffer.erase(in_buffer.begin(), in_buffer.begin() + frame_size);
                 }
             }
-            // wake_word_pcm_ 已在上方 swap 取走，无需再 clear
-            // Close encoder
+
             esp_opus_enc_close(encoder_handle);
             auto end_time = esp_timer_get_time();
             ESP_LOGI(TAG, "Encode wake word opus %d packets in %ld ms", packets, (long)((end_time - start_time) / 1000));

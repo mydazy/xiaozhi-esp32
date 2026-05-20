@@ -24,7 +24,6 @@
 #define TAG "RemoteCmd"
 
 RemoteCmd::RemoteCmd(Application* app) : app_(app) {
-    // R1 修：创建延后定时器（reboot/ota/sleep 异步执行，不阻塞 main_loop）
     esp_timer_create_args_t timer_args = {
         .callback = DelayTimerCallback,
         .arg = this,

@@ -90,7 +90,6 @@ void SsidManager::AddSsid(const std::string& ssid, const std::string& password) 
         ESP_LOGI(TAG, "compare [%s:%d] [%s:%d]", item.ssid.c_str(), item.ssid.size(), ssid.c_str(), ssid.size());
         if (item.ssid == ssid) {
             if (item.password == password) {
-                // 凭证未变（重连/重复配网最常见路径）→ 跳过写 NVS，避免 Flash 磨损
                 return;
             }
             ESP_LOGW(TAG, "SSID %s already exists, password changed, update", ssid.c_str());

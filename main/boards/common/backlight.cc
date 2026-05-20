@@ -84,7 +84,6 @@ void Backlight::OnTransitionTimer() {
     }
 
     current += step;
-    // 钳制到目标，避免并发改向时越过目标导致 uint8 回绕/亮度震荡/定时器永不停
     if ((step > 0 && current >= target) || (step < 0 && current <= target)) {
         current = target;
     }

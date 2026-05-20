@@ -53,7 +53,7 @@ private:
     StackType_t* wake_word_encode_task_stack_ = nullptr;
     std::atomic<bool> encode_in_progress_{false};
     std::deque<std::vector<int16_t>> wake_word_pcm_;
-    std::mutex wake_word_pcm_mutex_;   // 守 wake_word_pcm_：检测任务写 vs 编码任务取，防 deque 并发损坏
+    std::mutex wake_word_pcm_mutex_;
     std::deque<std::vector<uint8_t>> wake_word_opus_;
     std::mutex wake_word_mutex_;
     std::condition_variable wake_word_cv_;

@@ -67,7 +67,7 @@ gd_open_gif_data(const void * data, uint32_t data_len)
 
     bool res = f_gif_open(&gif_base, data, false);
     if(!res) return NULL;
-    gif_base.data_len = data_len;   /* 源缓冲上界，供 f_gif_read/seek 越界保护 */
+    gif_base.data_len = data_len;
 
     return gif_open(&gif_base);
 }

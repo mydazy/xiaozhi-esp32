@@ -29,7 +29,7 @@ typedef struct _gd_GIF {
     const char * data;
     uint8_t is_file;
     uint32_t f_rw_p;
-    uint32_t data_len;   /* 内存模式下源数据总长度(字节)；0=文件模式不做上界校验 */
+    uint32_t data_len;
     int32_t anim_start;
     uint16_t width, height;
     uint16_t depth;

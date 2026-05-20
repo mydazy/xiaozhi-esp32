@@ -64,23 +64,17 @@ private:
     std::function<bool(const std::string&, const std::string&, std::string&)> credential_validator_;
 
     // 状态
-    // 跨任务(NimBLE host / esp_timer / 业务)共享 → atomic，保证双核可见性与无撕裂
-    std::atomic<bool> controller_initialized_{false};  // BLE 控制器是否已初始化
-    std::atomic<bool> initialized_{false};             // BLE 主机栈是否已初始化
+    std::atomic<bool> controller_initialized_{false};
+    std::atomic<bool> initialized_{false};
     std::atomic<bool> advertising_{false};
     std::atomic<bool> ble_connected_{false};
     std::atomic<bool> stopping_{false};
     std::atomic<bool> scanning_{false};
-    std::atomic<int> scan_retry_count_{0};       // 扫描空结果重试计数
-    // 重试定时器 · 多路径竞态：Stop / timer callback / OnScanDone 创新 都会 delete
-    // atomic exchange 模式：先 exchange(nullptr) 夺走句柄 · 抢到的负责释放 · 抢不到的跳过
+    std::atomic<int> scan_retry_count_{0};
     std::atomic<esp_timer_handle_t> retry_timer_{nullptr};
 
-    // ⚠️ GATT profile init 同步信号（INIT_FINISH 事件触发时 give）
-    // Start() 持锁等待，避免调用方释放 LVGL 锁时 NimBLE 还在 flash op
     SemaphoreHandle_t init_done_sem_ = nullptr;
 
-    // BLE 连接句柄（用于更新连接参数）
     std::atomic<uint16_t> conn_handle_{0};
 
     // 数据
@@ -89,7 +83,6 @@ private:
     std::string password_;
     std::string binding_code_;
 
-    // BT 静态 RAM 是否已永久释放（ReleaseStaticMem 设置 true，不可逆）
     static bool static_mem_released_;
 };
 
