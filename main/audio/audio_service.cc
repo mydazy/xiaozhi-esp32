@@ -577,12 +577,13 @@ void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
     if (decoder_sample_rate_ == sample_rate && decoder_duration_ms_ == frame_duration) {
         return;
     }
+    // 全程持锁：opus_decoder_ / output_resampler_ / decoder_* 的重建与 OpusCodecTask 的读取互斥，
+    // 避免与 ResetDecoder 等跨线程交错时读到半初始化句柄(01-P1-4/A4)。调用点在 decoder_mutex_ 锁外，无死锁。
     std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
     if (opus_decoder_ != nullptr) {
         esp_opus_dec_close(opus_decoder_);
         opus_decoder_ = nullptr;
     }
-    decoder_lock.unlock();
     esp_opus_dec_cfg_t opus_dec_cfg = OPUS_DEC_CFG(sample_rate, frame_duration);
     auto ret = esp_opus_dec_open(&opus_dec_cfg, sizeof(esp_opus_dec_cfg_t), &opus_decoder_);
     if (opus_decoder_ == nullptr) {
