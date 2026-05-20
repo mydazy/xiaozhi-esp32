@@ -141,10 +141,11 @@ void UiDisplay::SetupUI() {
     if (status_label_)       lv_label_set_recolor(status_label_, true);
     if (notification_label_) lv_label_set_recolor(notification_label_, true);
 
-    // 3. 开机动画
-    StartBootAnimation();
+    if (status_bar_) {
+        lv_obj_add_event_cb(status_bar_, OnStatusBarClicked, LV_EVENT_CLICKED, this);
+    }
 
-    // 4. 文本字体补字 fallback：BUILTIN_TEXT_FONT 仅链入 ~600 常字，
+    StartBootAnimation();
     LoadFallbackTextFont();
 }
 
@@ -1191,13 +1192,14 @@ void UiDisplay::OnEduCardClicked(lv_event_t* e) {
     self->HideEduCard();
 }
 
-// ============================================================
-// 关于/设备信息页（参考 P30-V2 brain_info 布局 · 适配 284×240 无滚动 · 内联 overlay）
-// ============================================================
-
 void UiDisplay::OnAboutClicked(lv_event_t* e) {
     auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
     if (self) self->HideAboutPage();
+}
+
+void UiDisplay::OnStatusBarClicked(lv_event_t* e) {
+    auto* self = static_cast<UiDisplay*>(lv_event_get_user_data(e));
+    if (self && !self->IsControlCenterVisible()) self->ShowControlCenter();
 }
 
 void UiDisplay::HideAboutPage() {
@@ -1245,19 +1247,18 @@ void UiDisplay::ShowAboutPage() {
 
         char ver[48];
         snprintf(ver, sizeof(ver), "V%s", esp_app_get_description()->version);
-        static std::string mac  = SystemInfo::GetMacAddress();
-        static std::string chip = SystemInfo::GetChipModelName();
+        static std::string mac = SystemInfo::GetMacAddress();
 
-        const int ROW_Y[5] = {14, 44, 74, 104, 134};
+        const int ROW_Y[4] = {18, 55, 92, 129};
+        const int DIV_Y[3] = {47, 84, 121};
         const uint32_t TXT = 0xA4A6A6, DIV = 0x3A3A3A;
-        struct { const char* k; const char* v; } rows[5] = {
-            {"品牌",   "MyDazy"},
-            {"型号",   "MYDAZY/P30"},
-            {"版本",   ver},
-            {"MAC", mac.c_str()},
-            {"网络",   "检测中"},
+        struct { const char* k; const char* v; } rows[4] = {
+            {"品牌", "MyDazy"},
+            {"型号", "MyDazy-P30"},
+            {"版本", ver},
+            {"MAC",  mac.c_str()},
         };
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 4; i++) {
             lv_obj_t* k = lv_label_create(card);
             lv_obj_set_pos(k, 16, ROW_Y[i]);
             lv_label_set_text(k, rows[i].k);
@@ -1267,11 +1268,10 @@ void UiDisplay::ShowAboutPage() {
             lv_label_set_text(v, rows[i].v);
             lv_obj_set_style_text_color(v, lv_color_hex(TXT), 0);
             lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
-            if (i == 4) about_net_value_ = v;
-            if (i < 4) {
+            if (i < 3) {
                 lv_obj_t* d = lv_obj_create(card);
                 lv_obj_set_size(d, 224, 1);
-                lv_obj_align(d, LV_ALIGN_TOP_MID, 0, ROW_Y[i] + 22);
+                lv_obj_align(d, LV_ALIGN_TOP_MID, 0, DIV_Y[i]);
                 lv_obj_remove_flag(d, LV_OBJ_FLAG_SCROLLABLE);
                 lv_obj_set_style_radius(d, 0, 0);
                 lv_obj_set_style_border_width(d, 0, 0);
@@ -1279,11 +1279,6 @@ void UiDisplay::ShowAboutPage() {
                 lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
             }
         }
-    }
-
-    if (about_net_value_) {
-        const char* icon = Board::GetInstance().GetNetworkStateIcon();
-        lv_label_set_text(about_net_value_, (icon && icon[0]) ? "已连接" : "未连接");
     }
 
     lv_obj_remove_flag(about_overlay_, LV_OBJ_FLAG_HIDDEN);

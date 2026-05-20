@@ -131,9 +131,9 @@ private:
     lv_obj_t* edu_main_label_   = nullptr;
     static void OnEduCardClicked(lv_event_t* e);
 
-    lv_obj_t* about_overlay_   = nullptr;
-    lv_obj_t* about_net_value_ = nullptr;   // 网络状态值（Show 时刷新）
+    lv_obj_t* about_overlay_ = nullptr;
     static void OnAboutClicked(lv_event_t* e);
+    static void OnStatusBarClicked(lv_event_t* e);   // 单击顶部状态栏唤起控制中心
 
     lv_obj_t* boot_brand_label_ = nullptr;   // 开机品牌字 "MyDazy"（SetupUI 创建）
 
