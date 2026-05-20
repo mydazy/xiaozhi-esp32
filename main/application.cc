@@ -1224,8 +1224,9 @@ void Application::HandleStateChangedEvent() {
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
-                // Only AFE wake word can be detected in speaking mode
-                audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
+                // 通话期（Speaking）不再开唤醒词：SR-AFE 全程保持释放以省内部 RAM，
+                // 打断改用按键/触摸（产品决定：通话中不靠语音词打断，min INT RAM 是 P0 风险）。
+                audio_service_.EnableWakeWordDetection(false);
             }
             audio_service_.ResetDecoder();
             break;
