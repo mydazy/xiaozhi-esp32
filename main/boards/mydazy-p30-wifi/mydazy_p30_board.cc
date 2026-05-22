@@ -1,6 +1,4 @@
 #include "wifi_board.h"
-#include "alarm_manager.h"
-#include "audio/alarm_ringer.h"
 #include "assets/lang_config.h"
 #include "codecs/box_audio_codec.h"
 #include "display/display.h"
@@ -14,6 +12,8 @@
 #include "application.h"
 #include "audio/music_player.h"
 #include "pomodoro_manager.h"
+#include "alarm_manager.h"
+#include "audio/alarm_ringer.h"
 #include "button.h"
 #include "config.h"
 #include "settings.h"
@@ -57,8 +57,6 @@
 
 #define TAG "MyDazyP30_WifiBoard"
 
-// 距上次 sleep < 500ms + GPIO 低 = 死按延续 · 短路再 sleep
-// 用 gettimeofday（POSIX 标准 · ESP-IDF 内部基于 RTC · 跨 deep sleep 持续 · 无组件依赖）
 #include <sys/time.h>
 RTC_DATA_ATTR static uint64_t s_last_sleep_us = 0;
 static constexpr uint64_t kDeadHoldWindowUs = 500 * 1000;
@@ -142,25 +140,13 @@ private:
     PowerManager* power_manager_ = nullptr;
     PowerSaveTimer* power_save_timer_ = nullptr;
     esp_timer_handle_t wake_chat_timer_ = nullptr;
-
-    // 触摸屏（mydazy/esp_lcd_touch_axs5106l component）
     axs5106l_touch_handle_t touch_driver_ = nullptr;
-
-    // 音频编解码器
     BoxAudioCodec* audio_codec_ = nullptr;
 
     bool first_boot_ = false;
 
-    // v2.2.10 删除 Volume± 长按调音 · 字段 vol_*_task_ / vol_*_running_ 一并清理
-
-    // 长按 3s 关机：OnLongPress 触发后直接走 ShutdownOrSleep（提示音=已确认，不可取消）
-    // shutdown_armed_ 仅作 OnLongPress 重入保护
     std::atomic<bool> shutdown_armed_{false};
-
-    // 开机长按 grace（与 4G 板对齐 · 防开机长按 1.5s 后未松手 → 立即被关机长按 3s 抓住）
     std::atomic<bool> boot_hold_grace_active_{false};
-
-    // 恢复出厂设置确认状态
     std::atomic<bool> waiting_factory_reset_confirm_{false};
     uint64_t factory_reset_request_time_ = 0;
 
@@ -175,7 +161,6 @@ private:
             .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
             .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
             .clk_source = I2C_CLK_SRC_DEFAULT,
-            // 提高毛刺过滤阈值（~187ns，原值 7≈87ns）增强 I2C 抗扰
             .glitch_ignore_cnt = 15,
             .intr_priority = 3,
             .trans_queue_depth = 0,
@@ -185,7 +170,6 @@ private:
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
 
-        /* v3.0+: 共享总线串行化 worker（codec×2 / 触摸 / sensor 全部汇入） */
         i2c_worker_config_t wcfg = I2C_WORKER_DEFAULT_CONFIG(i2c_bus_);
         ESP_ERROR_CHECK(i2c_worker_create(&wcfg, &i2c_worker_));
     }
@@ -206,17 +190,17 @@ private:
     void HandleWakeupCause() {
         esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
         esp_reset_reason_t reset_reason = esp_reset_reason();
-        // 诊断日志：同时打印 wakeup_cause + reset_reason，可区分
         ESP_LOGI(TAG, "Boot diag: wakeup_cause=%d, reset_reason=%d", (int)wakeup_reason, (int)reset_reason);
 
         switch (wakeup_reason) {
             case ESP_SLEEP_WAKEUP_EXT0:
                 ESP_LOGI(TAG, "从开机键唤醒");
-                // 死按延续兜底：距上次 sleep < 500ms + GPIO 低 → 短路 sleep
                 if (s_last_sleep_us > 0) {
                     uint64_t since_us = NowRtcUs() - s_last_sleep_us;
                     if (since_us < kDeadHoldWindowUs && gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
                         ESP_LOGW(TAG, "距 sleep %llu ms · 用户未松手 · 短路 sleep", since_us / 1000);
+                        gpio_set_level(AUDIO_PWR_EN_GPIO, 0);
+                        rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
                         s_last_sleep_us = NowRtcUs();
                         esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0);
                         rtc_gpio_pullup_en(BOOT_BUTTON_GPIO);
@@ -249,10 +233,7 @@ private:
         }
     }
 
-    // 开机长按 2 秒检测：返回 true=按够 2 秒可开机，false=未到 2 秒应回深睡
-    // 开机长按阈值 1500ms（v2.2.8 · 2026-05-09 与 4G 板同步）：
-    //   业界儿童设备主流（小天才电话手表 / AirPods Pro 充电盒 ~1.5s），
-    //   仍能防口袋短碰误触，整体黑屏体感从 ~3s 降到 ~2.5s。
+    // 开机长按检测：返回 true=按够阈值可开机，false=未到阈值应回深睡
     bool CheckBootHoldOnWakeup() {
         gpio_config_t io_conf = {
             .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
@@ -293,8 +274,6 @@ private:
         gpio_set_direction(AUDIO_CODEC_PA_PIN, GPIO_MODE_OUTPUT);
         gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
 
-        // P1-4 修复：先 gpio_config(OUTPUT) + 立刻 set_level(0) 锁住低电平，再 hold_dis
-        // 避免 hold_dis 释放后到 gpio_set_level 之间 GPIO 浮动 → LDO 接通毛刺 → LCD GRAM 闪烁
         gpio_config_t output_conf = {
             .pin_bit_mask = (1ULL << AUDIO_PWR_EN_GPIO),
             .mode = GPIO_MODE_OUTPUT,
@@ -306,8 +285,8 @@ private:
         gpio_set_level(AUDIO_PWR_EN_GPIO, 0);    // 先锁低
         rtc_gpio_hold_dis(AUDIO_PWR_EN_GPIO);    // 再释放 RTC hold（无浮动窗口）
 
-        // 软启动音频电源
-        vTaskDelay(pdMS_TO_TICKS(10));
+        // VBAT 放电窗口：USB 持续供电的冷启动场景下，VT3 P-MOS 漏电流 + D2 TVS
+        vTaskDelay(pdMS_TO_TICKS(1000));
         gpio_set_level(AUDIO_PWR_EN_GPIO, 1);
         ESP_LOGI(TAG, "音频电源已启用 (GPIO%d)", AUDIO_PWR_EN_GPIO);
 
@@ -317,12 +296,9 @@ private:
     }
 
     void InitializeSc7a20h() {
-        // 拿起灵敏度 320mg/100ms（P30 系列两板统一 · 量产实测调参历史 256→…→320mg）
         sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 320 /*mg*/, 100 /*ms*/);
         if (!sc7a20h_sensor_) { ESP_LOGE(TAG, "SC7A20H 初始化失败"); return; }
         sc7a20h_shake (sc7a20h_sensor_, 1500, 1000, 4, 1500, &OnShake,  this);
-        // 桌面双击唤醒 — 暂关 · 后续扩展
-        // sc7a20h_strike(sc7a20h_sensor_, 1800,  80, 400, 800, &OnStrike, this);
     }
 
     // 摇一摇 — 日常 AI 互动 · 闹钟响铃中累计 3 次才停（防走路误关）
@@ -355,7 +331,7 @@ private:
             .int_gpio        = TOUCH_INT_NUM,
             .width           = DISPLAY_WIDTH,
             .height          = DISPLAY_HEIGHT,
-            .rf_mode         = AXS5106L_RF_NORMAL,    /* 无 4G 干扰 · 宽容档 */
+            .rf_mode         = AXS5106L_RF_NORMAL,
             .cb_ctx          = this,
             .on_wake         = &OnTouchWake,
             .on_click        = &OnTouchClick,
@@ -414,8 +390,6 @@ private:
 
     void InitializeTouch() {
         if (touch_driver_ == nullptr) return;
-
-        // v4.0 极简：回调通过 cfg 注入，attach 失败仅置空 handle
         if (axs5106l_touch_attach_lvgl(touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏 LVGL attach 失败");
             touch_driver_ = nullptr;
@@ -504,15 +478,12 @@ private:
             GetBacklight()->RestoreBrightness();
         });
         power_save_timer_->OnShutdownRequest([this, deep_sleep_enabled]() {
-            // 充电中：跳过深睡 · 保持时钟可见 + 唤醒词常开（桌钟/夜间充电场景）
             if (PowerManager::IsChargingGlobal()) {
                 ESP_LOGI(TAG, "充电中，跳过深度睡眠 · LCD 保持降亮状态");
                 return;
             }
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
-                // 自动休眠：仅屏幕提示 + 陀螺仪可唤醒（拿起即醒）
-                // 不播提示音 —— 用户没主动操作，夜间/会议中突然响会打扰
                 ShutdownOrSleep("休眠中", "拿起唤醒", "", 1500, true);
             }
         });
@@ -536,9 +507,7 @@ private:
         rtc_gpio_hold_en(AUDIO_PWR_EN_GPIO);
     }
 
-    // 拿起唤醒 arm — 必须在 ShutdownTouchAndAudioForSleep（AUDIO_PWR_EN=0）之前调
-    // 否则失电的 ES8311/ES7210 通过 ESD 二极管把 SDA/SCL 钉死 → INT1_SRC 清 latch 失败
-    // （2026-05-12 量产二阶根因 · 配合驱动 v4.0.1 LIR_INT1=0 双保险锁死秒醒）
+    // 拿起唤醒
     void ArmGyroWakeup() {
         if (!sc7a20h_sensor_) return;
         if (Settings("status", false).GetInt("pickupWake", 1) == 0) return;
@@ -602,14 +571,10 @@ private:
         AlarmManager::GetInstance().ConfigureTimerWakeup();
 
         ESP_LOGI(TAG, "准备进入深度睡眠");
-        // 让 AUDIO_PWR_EN=0 引发的瞬态机械振动衰减（>100ms 实测充裕）·
-        // LIR_INT1=0 后即使瞬态振动也不会留 latch，只要静下来 INT1 自动回 HIGH。
         vTaskDelay(pdMS_TO_TICKS(200));
 
         ResetAllGpiosForSleep();
 
-        // 主动关机：sleep 前先等用户松手，确保 GPIO 高电平 sleep
-        // 否则 esp_deep_sleep_start 后 EXT0 会被用户仍按着的手指立即触发 → 循环唤醒
         if (!enable_gyro_wakeup) {
             gpio_config_t boot_in = {
                 .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
@@ -660,18 +625,12 @@ private:
         display_ = new UiDisplay(panel_io_, panel_,
                                  DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
                                  DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
-        static_cast<UiDisplay*>(display_)->EnableTearingEffectSync(DISPLAY_LCD_TE);
-        ESP_LOGI(TAG, "UiDisplay 已启用 (时钟 + 配网 + 激活 + 控制中心) + TE 同步");
+        ESP_LOGI(TAG, "UiDisplay 已启用 (时钟 + 配网 + 激活 + 控制中心)");
 #endif
 
         SystemInfo::PrintHeapStats();
     }
 
-    // ========================================================
-    // 按键注册（BOOT 全部分支内联在此 · 便于集中阅读 + 4G/WiFi 对照）
-    //   单击 / 双击 / 3-4-9 连击 / 长按 3s 直接关机（提示音=已确认，不可取消）/ 音量
-    //   ※ 深睡按键唤醒长按 1.5s 开机由 CheckBootHoldOnWakeup 在 HandleWakeupCause 处理
-    // ========================================================
     void InitializeButtons() {
         // 开机时 GPIO 仍按下 → 置 grace · OnLongPress 跳过 3s 关机 · OnPressUp 自动清
         if (first_boot_ && gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
@@ -679,7 +638,6 @@ private:
             ESP_LOGI(TAG, "开机长按 grace 已置位");
         }
 
-        // 单击：MP3 播放中先停 + 退 PlayerUI · 仅 Idle/Listening/Speaking 才 ToggleChat
         boot_button_.OnClick([this]() {
             if (TryStopAlarmRinger("button")) return;
             auto& app = Application::GetInstance();
@@ -714,7 +672,7 @@ private:
                 app.PlaySound(Lang::Sounds::OGG_WAKEUP);
                 ScheduleWakeChatToggle(1500);
                 return;
-            }else if (status == kDeviceStateListening) {
+            } else if (status == kDeviceStateListening) {
                 app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
             }
             app.ToggleChatState();
@@ -734,6 +692,7 @@ private:
                 waiting_factory_reset_confirm_.store(false);
                 AbortIfSpeaking();
                 app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
+                vTaskDelay(pdMS_TO_TICKS(1500));
                 RequestServerUnbind();
                 SystemReset::CheckButtons(true);
                 return;
@@ -783,8 +742,6 @@ private:
             }
             if (shutdown_armed_.exchange(true)) return;
             ESP_LOGI(TAG, "长按 3 秒 → 立即播再见音（提示音=松手信号）→ 关机");
-            // 立即播提示音作为"已确认"反馈，用户听到自然松手
-            // EnterDeepSleep 内部兜底等松手 → 保证 sleep 前 GPIO 已 HIGH
             Application::GetInstance().Schedule([this]() {
                 ShutdownOrSleep("再见", "", Lang::Sounds::OGG_REBOOT, 2500, false);
             });
@@ -796,29 +753,12 @@ private:
             }
         });
 
-        // v2.2.10 删除 Volume± 长按调音（与 4G 板对齐）
-        volume_up_button_.OnClick  ([this]() { AdjustVolume(+10); });
-        volume_down_button_.OnClick([this]() { AdjustVolume(-10); });
+        volume_up_button_.OnClick  ([this]() { ApplyVolume(+10); });
+        volume_down_button_.OnClick([this]() { ApplyVolume(-10); });
     }
-
-    // ========================================================
-    // 状态上报
-    // ========================================================
-
-    // 状态上报（仅唤醒事件触发：进省电前 PowerSaveTimer::OnEnterSleepMode 调一次）
-    // 字段拼装 / idle / music 防御全部在 Ota::ReportStatus()，板级仅负责调用时机。
-    void ReportStatus() {
-        Application::GetInstance().Schedule([]() {
-            Ota ota; ota.ReportStatus();
-        });
-    }
-
-    // ========================================================
-    // 音量
-    // ========================================================
 
     // 应用一次音量增量；clamp 到 [0,100] 并刷新状态栏 + 唤醒省电定时器
-    void ApplyVolumeDelta(int delta) {
+    void ApplyVolume(int delta) {
         auto* codec = GetAudioCodec();
         if (!codec) return;
         int v = codec->output_volume() + delta;
@@ -827,13 +767,16 @@ private:
         codec->SetOutputVolume(v);
         char buf[32];
         snprintf(buf, sizeof(buf), "%s %d", Lang::Strings::VOLUME, v);
-        // 改用 ShowNotification（1.5s 自动消失） · clock/player 模式下也能可见
         GetDisplay()->ShowNotification(buf, 1500);
         WakeUp();
     }
 
-    void AdjustVolume(int delta) { ApplyVolumeDelta(delta); }
-    // v2.2.10 删除 StartVolumeTask + VolumeTaskCtx + vol_adjust 后台任务（释放 ~2KB INT 栈）
+    void ReportStatus() {
+        Application::GetInstance().Schedule([]() {
+            Ota ota; ota.ReportStatus();
+        });
+    }
+
 
     // ========================================================
     // 初始化业务逻辑
@@ -878,32 +821,19 @@ private:
                                 "welcome_init", 3072, this, 3, nullptr, 1);
     }
 
-    // ========================================================
-    // MCP 工具注册（板专属能力）— 通用工具由 McpServer::AddCommonTools 自动注册
-    // 详见 docs/mcp-usage.md / docs/custom-board_zh.md
-    // ========================================================
-    void InitializeTools() {
-        auto& mcp = McpServer::GetInstance();
-        // 教育卡 MCP 工具集：show_stroke 笔画 GIF（512KB 直载 + 头尾校验）+ show_card 单词/汉字/拼音三类卡
-        RegisterEducationMcpTools(mcp, dynamic_cast<UiDisplay*>(GetDisplay()));
-    }
-
 public:
     MyDazyP30_WifiBoard() :
         boot_button_(BOOT_BUTTON_GPIO, false, 800, 400),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
 
-        // 注册重启钩子：任何 esp_restart() 调用前自动断 LDO 复位 LCD（OTA 升级 / 出厂复位 / 网络切换 / 双击恢复出厂等所有路径）
         esp_register_shutdown_handler(ShutdownHandler);
 
         InitializeGpio();
-        // 解析唤醒原因（按键开机要求长按 1.5s，否则立即回深睡——不会返回）
         HandleWakeupCause();
         InitializeI2c();
         InitializeSpi();
         InitializeDisplay();
-        // 推迟触屏初始化 · 让 LCD 先出画面 + 给 WiFi 启动空出 I²C 总线 · 避开 RF 干扰
         vTaskDelay(pdMS_TO_TICKS(500));
         PrepareTouchHardware();
         InitializeTouch();
@@ -911,15 +841,8 @@ public:
         InitializePowerManager();
         InitializePowerSaveTimer();
         InitializeButtons();
-
-        // 触发 audio_codec_ 懒构造（codec 必须在 ApplyDefaultSettings 写音量前就绪）
         GetAudioCodec();
-        // 背光开启移至 Application::Initialize（SetupUI 之后），
-        // 避免 LVGL 首帧到达 GRAM 之前打开背光导致的开机白屏闪现。
-
         ApplyDefaultSettings();
-
-        // 注册板专属 MCP 工具（AEC 开关 + 教育卡 show_stroke/show_card）— 必须在 Display 初始化之后
         InitializeTools();
 
         ESP_LOGI(TAG, "MyDazy P30 WiFi 初始化完成 (ES8311+ES7210, 纯WiFi、电源管理、触摸屏)");
@@ -927,13 +850,17 @@ public:
         StartWelcomeTask();
     }
 
-    // Board 实例由 DECLARE_BOARD 单例持有，进程生命周期 = 设备运行周期
-    // → 不写析构（与上游 70+ board 一致）。下电流程由 ShutdownHandler 接管。
+    // MCP 工具注册（板专属能力）— 通用工具由 McpServer::AddCommonTools 自动注册
+    void InitializeTools() {
+        auto& mcp = McpServer::GetInstance();
+        RegisterEducationMcpTools(mcp, dynamic_cast<UiDisplay*>(GetDisplay()));
+    }
+
 
     virtual AudioCodec* GetAudioCodec() override {
         if (audio_codec_ == nullptr) {
             audio_codec_ = new BoxAudioCodec(
-                i2c_worker_,                       /* v3.0+ codec I2C 通过 worker */
+                i2c_worker_,
                 AUDIO_INPUT_SAMPLE_RATE,
                 AUDIO_OUTPUT_SAMPLE_RATE,
                 AUDIO_I2S_GPIO_MCLK,
@@ -995,31 +922,13 @@ public:
         return settings.GetInt("deepSleep", 1) != 0;
     }
 
-    // 控制中心点"切换"按钮 → 进/退配网（与 3 连击同语义）· 提示音内部统一播放
-    virtual bool CanSwitchNetwork() const override { return true; }
-    virtual void SwitchNetwork() override {
-        auto& app = Application::GetInstance();
-        PauseAudioAndChatBeforeSwitch();
-        if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
-            Settings settings("wifi", true);
-            settings.SetInt("force_ap", 0);
-            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "退出配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
-            vTaskDelay(pdMS_TO_TICKS(1500));
-            app.Reboot();
-        } else {
-            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "进入配网", "logo", Lang::Sounds::OGG_BLE_CONFIG);
-            vTaskDelay(pdMS_TO_TICKS(1500));
-            ResetWifiConfiguration();   // 内部 force_ap=1 + skip_welcome=1 + Reboot
-        }
-    }
-
     void WakeUp() {
         if (power_save_timer_) {
             power_save_timer_->WakeUp();
         }
     }
 
-    // 连按时 stop + start_once 实现 debounce（以最后一次为准）
+    // 异步等提示音播完再 ToggleChatState：
     void ScheduleWakeChatToggle(int delay_ms) {
         if (!wake_chat_timer_) {
             const esp_timer_create_args_t args = {

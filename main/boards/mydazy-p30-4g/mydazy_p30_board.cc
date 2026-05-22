@@ -142,21 +142,13 @@ private:
     PowerManager* power_manager_ = nullptr;
     PowerSaveTimer* power_save_timer_ = nullptr;
     esp_timer_handle_t wake_chat_timer_ = nullptr;
-
-    // 触摸屏（mydazy/esp_lcd_touch_axs5106l component）
     axs5106l_touch_handle_t touch_driver_ = nullptr;
-
-    // 音频编解码器
     BoxAudioCodec* audio_codec_ = nullptr;
 
     bool first_boot_ = false;
 
     std::atomic<bool> shutdown_armed_{false};
-
-    // 开机长按 grace 期：注册按键时若 GPIO 仍按下，置 true；首次 PressUp 自动清。
     std::atomic<bool> boot_hold_grace_active_{false};
-
-    // 恢复出厂设置确认状态
     std::atomic<bool> waiting_factory_reset_confirm_{false};
     uint64_t factory_reset_request_time_ = 0;
 
@@ -171,7 +163,6 @@ private:
             .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
             .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
             .clk_source = I2C_CLK_SRC_DEFAULT,
-            // 4G RF 干扰场景下提高毛刺过滤阈值（~187ns，原值 7≈87ns）
             .glitch_ignore_cnt = 15,
             .intr_priority = 3,
             .trans_queue_depth = 0,
@@ -230,7 +221,7 @@ private:
                 break;
             case ESP_SLEEP_WAKEUP_TIMER:
                 ESP_LOGI(TAG, "从定时器唤醒 · 闹钟模式");
-                AlarmManager::MarkTimerWakeup();  // 允许未校时时用 RTC fallback 触发闹钟
+                AlarmManager::MarkTimerWakeup();
                 first_boot_ = true;
                 break;
             default:
@@ -285,7 +276,6 @@ private:
         gpio_set_direction(AUDIO_CODEC_PA_PIN, GPIO_MODE_OUTPUT);
         gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
 
-        // 避免 hold_dis 释放后到 gpio_set_level 之间 GPIO 浮动 → LDO 接通毛刺 → LCD GRAM 闪烁
         gpio_config_t output_conf = {
             .pin_bit_mask = (1ULL << AUDIO_PWR_EN_GPIO),
             .mode = GPIO_MODE_OUTPUT,
@@ -343,7 +333,7 @@ private:
             .int_gpio        = TOUCH_INT_NUM,
             .width           = DISPLAY_WIDTH,
             .height          = DISPLAY_HEIGHT,
-            .rf_mode         = AXS5106L_RF_STRICT,     /* 4G 共线 · 加严 storm/debounce/guard */
+            .rf_mode         = AXS5106L_RF_STRICT,
             .cb_ctx          = this,
             .on_wake         = &OnTouchWake,
             .on_click        = &OnTouchClick,
@@ -490,7 +480,6 @@ private:
             GetBacklight()->RestoreBrightness();
         });
         power_save_timer_->OnShutdownRequest([this, deep_sleep_enabled]() {
-            // 充电中跳过深睡 · 软省电（OnEnterSleepMode 降亮）仍生效防发烫
             if (PowerManager::IsChargingGlobal()) {
                 ESP_LOGI(TAG, "充电中，跳过深度睡眠 · LCD 保持降亮状态");
                 return;
@@ -568,7 +557,7 @@ private:
 
         ESP_LOGI(TAG, "停止 AudioService（释放 codec / 退出 audio_* 任务）");
         Application::GetInstance().GetAudioService().Stop();
-        vTaskDelay(pdMS_TO_TICKS(100));   // 等任务循环检测 service_stopped_ 后退出
+        vTaskDelay(pdMS_TO_TICKS(100));
 
         if (power_save_timer_) {
             power_save_timer_->SetEnabled(false);
@@ -621,7 +610,6 @@ private:
         esp_deep_sleep_start();
     }
 
-    //   enable_gyro_wakeup=true：陀螺仪可唤醒（自动休眠场景）/ false：仅按键唤醒（按键关机场景）
     void ShutdownOrSleep(const char* title, const char* msg, const std::string_view& sound,
                          int delay_ms, bool enable_gyro_wakeup) {
         auto& app = Application::GetInstance();
@@ -698,8 +686,7 @@ private:
                 app.PlaySound(Lang::Sounds::OGG_WAKEUP);
                 ScheduleWakeChatToggle(1500);
                 return;
-            }
-            if (status == kDeviceStateListening) {
+            } else if (status == kDeviceStateListening) {
                 app.PlaySound(Lang::Sounds::OGG_EXITCHAT);
             }
             app.ToggleChatState();
@@ -719,8 +706,9 @@ private:
                 waiting_factory_reset_confirm_.store(false);
                 AbortIfSpeaking();
                 app.Alert("确认恢复", "开始执行", "logo", Lang::Sounds::OGG_START_RESET);
-                xTaskCreatePinnedToCore(&MyDazyP30_4GBoard::FactoryResetTaskEntry,
-                                        "factory_reset", 6144, nullptr, 3, nullptr, 0);
+                vTaskDelay(pdMS_TO_TICKS(1500));
+                RequestServerUnbind();
+                SystemReset::CheckButtons(true);
                 return;
             }
             // ② 配网态：BLUFI ↔ AP 切换（提示音由 SwitchConfigMode 内部 PlaySound）
@@ -932,7 +920,7 @@ public:
     virtual AudioCodec* GetAudioCodec() override {
         if (audio_codec_ == nullptr) {
             audio_codec_ = new BoxAudioCodec(
-                i2c_worker_,                       /* v3.0+ 通过 worker 串行化 codec I2C */
+                i2c_worker_,
                 AUDIO_INPUT_SAMPLE_RATE,
                 AUDIO_OUTPUT_SAMPLE_RATE,
                 AUDIO_I2S_GPIO_MCLK,
@@ -1000,7 +988,7 @@ public:
         }
     }
 
-    // 异步等提示音播完再 ToggleChatState：避免在 button/LVGL 任务里 vTaskDelay 卡死
+    // 异步等提示音播完再 ToggleChatState：
     void ScheduleWakeChatToggle(int delay_ms) {
         if (!wake_chat_timer_) {
             const esp_timer_create_args_t args = {
@@ -1029,17 +1017,6 @@ public:
         esp_rom_delay_us(500 * 1000);           // 等 22uF 电容放电（shutdown 上下文用 ROM delay 更稳妥）
     }
 
-    // 出厂复位任务（B2 修复）· 9 连击双击确认时由 OnDoubleClick 派发
-    // 任务: Core 0 · stack 6 KB(HTTP+TLS+nvs_erase 用量) · P3 · 一次性 · SystemReset::CheckButtons 内 esp_restart 不返回
-    // 异步化目的: 避免 button 内部 task 同步阻塞 8-9 s 导致 esp_timer 调度冻结 / LVGL 卡死
-    static void FactoryResetTaskEntry(void* /*arg*/) {
-        ESP_LOGI("P30_4G", "factory_reset task: 开始");
-        RequestServerUnbind();             // 最多 1.5s（HTTP timeout）· 失败不阻塞
-        SystemReset::CheckButtons(true);   // 内部: nvs_flash_erase + partition_erase + RestartInSeconds(3) + esp_restart
-        // 兜底: 理论不会执行，因 esp_restart 不返回
-        vTaskDelete(nullptr);
-    }
-
     // 通知服务器解绑设备：mydazy 业务，仅在 9 连击双击确认时使用。失败不阻塞本地擦除。
     static bool RequestServerUnbind() {
         std::string url = CONFIG_OTA_URL;
@@ -1062,9 +1039,7 @@ public:
         http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
         http->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
         http->SetHeader("User-Agent", SystemInfo::GetUserAgent().c_str());
-        // 1.5s 超时（B2 修复：原 5s）· 出厂复位路径已在独立 factory_reset 任务跑
-        // 4G CSQ 差时快速失败，避免阻塞后续 SystemReset::CheckButtons + esp_restart
-        http->SetTimeout(1500);
+        http->SetTimeout(5000);
 
         if (!http->Open("GET", url)) {
             ESP_LOGW("P30_4G", "Failed to connect to server for unbind");

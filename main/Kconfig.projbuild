@@ -6,6 +6,14 @@ config OTA_URL
     help
         The application will access this URL to check for new firmwares and server address.
 
+config ENABLE_RUNTIME_MONITOR
+    bool "Enable runtime heap/temp/CPU monitor (every 10s)"
+    default y
+    help
+        每 10 秒打印 SRAM/PSRAM/温度/CPU 占用调试日志。
+        量产固件请关闭：既去掉日志刷屏，也省去周期性遍历任务表 + 读温度的开销。
+        关闭后 SRAM 过低/温度过高的告警逻辑也一并停止（量产应改由其他机制兜底）。
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE

@@ -533,6 +533,13 @@ static bool check_and_upgrade_firmware(axs5106l_touch_handle_t self)
 /*  LVGL read callback                                                 */
 /* ------------------------------------------------------------------ */
 
+static inline bool lvgl_press_confirmed(axs5106l_touch_handle_t self, uint64_t now)
+{
+    return now > self->gesture.press_time &&
+           (now - self->gesture.press_time) >= CLICK_MIN_TIME_US &&
+           self->gesture.sample_count >= CLICK_MIN_FRAMES;
+}
+
 static void lvgl_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
     axs5106l_touch_handle_t self = (axs5106l_touch_handle_t)lv_indev_get_user_data(indev);
@@ -581,10 +588,14 @@ static void lvgl_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
         self->touch.release_count = 0;
         self->touch.last_x        = x;
         self->touch.last_y        = y;
-        data->point.x = x;
-        data->point.y = y;
-        data->state   = LV_INDEV_STATE_PRESSED;
         recognize_gesture(self, x, y, true);
+        if (lvgl_press_confirmed(self, now)) {
+            data->point.x = x;
+            data->point.y = y;
+            data->state   = LV_INDEV_STATE_PRESSED;
+        } else {
+            data->state   = LV_INDEV_STATE_RELEASED;
+        }
 
 #if AXS5106L_TOUCH_DEBUG_OVERLAY
         if (self->debug_dot != NULL) {
@@ -618,11 +629,13 @@ static void lvgl_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 #if AXS5106L_TOUCH_DEBUG_OVERLAY
             if (self->debug_dot != NULL) lv_obj_add_flag(self->debug_dot, LV_OBJ_FLAG_HIDDEN);
 #endif
-        } else {
-            /* Hold last position during debounce window. */
+        } else if (lvgl_press_confirmed(self, now)) {
+            /* Hold last position during debounce window — 仅当 LVGL 已见过此按压。*/
             data->point.x = self->touch.last_x;
             data->point.y = self->touch.last_y;
             data->state   = LV_INDEV_STATE_PRESSED;
+        } else {
+            data->state   = LV_INDEV_STATE_RELEASED;
         }
     } else {
         data->state = LV_INDEV_STATE_RELEASED;

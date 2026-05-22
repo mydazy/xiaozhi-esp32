@@ -412,10 +412,11 @@ void Application::Run() {
             // 闹钟检查（每秒 · 仅校时后生效 · 内部有防重触发）
             AlarmManager::GetInstance().CheckAndTrigger();
 
-            // Print debug info every 10 seconds
+#if CONFIG_ENABLE_RUNTIME_MONITOR
             if (clock_ticks_ % 10 == 0) {
                 SystemInfo::PrintHeapStats();
             }
+#endif
         }
     }
 }
