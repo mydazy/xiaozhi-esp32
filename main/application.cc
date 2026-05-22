@@ -1143,7 +1143,6 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     SetListeningMode(GetDefaultListeningMode());
 #else
     // Set flag to play popup sound after state changes to listening
-    // (PlaySound here would be cleared by ResetDecoder in EnableVoiceProcessing)
     play_popup_on_listening_ = true;
     SetListeningMode(GetDefaultListeningMode());
 #endif
@@ -1224,9 +1223,7 @@ void Application::HandleStateChangedEvent() {
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
-                // 通话期（Speaking）不再开唤醒词：SR-AFE 全程保持释放以省内部 RAM，
-                // 打断改用按键/触摸（产品决定：通话中不靠语音词打断，min INT RAM 是 P0 风险）。
-                audio_service_.EnableWakeWordDetection(false);
+                audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
             audio_service_.ResetDecoder();
             break;
@@ -1360,7 +1357,6 @@ void Application::Reboot() {
 
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // 关背光避免重启时残留 GRAM 花屏；再切 LDO 让 LCD/音频 CODEC 真正下电复位
     auto& board = Board::GetInstance();
     auto* backlight = board.GetBacklight();
     if (backlight) {
@@ -1432,7 +1428,6 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     if (state == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
 
-        // 跳过下一条 STT 提示音 · 唤醒词音频会被 ASR 识别（与 HandleWakeWordDetectedEvent 对称）
         skip_next_stt_popup_.store(true);
 
         if (!protocol_->IsAudioChannelOpened()) {
@@ -1531,7 +1526,6 @@ void Application::PlaySound(const std::string_view& sound) {
 }
 
 // 说话结束提示音开关 · 持久化到 NVS（audio.stt_popup）
-// MCP 工具 self.audio.set_stt_popup 调用入口
 void Application::SetSttPopupEnabled(bool enabled) {
     stt_popup_enabled_ = enabled;
     Settings audio_settings("audio", true);
@@ -1541,7 +1535,6 @@ void Application::SetSttPopupEnabled(bool enabled) {
 
 void Application::RequestAutoChatOnIdle() {
     auto_chat_pending_.store(true);
-    // 边界：state 已经是 Idle（启动期罕见）→ 立即触发 · 否则 listener 自动响应
     if (state_machine_.GetState() == kDeviceStateIdle && auto_chat_pending_.exchange(false)) {
         ESP_LOGI(TAG, "开机自动对话：当前已 Idle 立即触发 ToggleChat");
         Schedule([this]() { ToggleChatState(); });
