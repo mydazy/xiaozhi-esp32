@@ -88,6 +88,7 @@ public:
     virtual bool IsAutoSleepEnabled() const { return true; }
     virtual bool CanSwitchNetwork() const { return false; }
     virtual void SwitchNetwork() {}
+    virtual void ToggleAecMode() {}
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

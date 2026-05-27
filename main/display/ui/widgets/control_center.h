@@ -30,12 +30,15 @@ public:
     void SetExitCallback(VoidCallback cb) { exit_callback_ = cb; }
     void SetNetworkCallback(NetworkCallback cb) { network_callback_ = cb; }
     void SetAecCallback(ToggleCallback cb) { aec_callback_ = cb; }
+    void SetAecToggleCallback(ToggleCallback cb) { aec_toggle_callback_ = cb; }  // WiFi 版网络槽位作 AEC 开关
     void SetSleepCallback(ToggleCallback cb) { sleep_callback_ = cb; }
     void SetBrightnessCallback(SliderCallback cb) { brightness_callback_ = cb; }
     void SetVolumeCallback(SliderCallback cb) { volume_callback_ = cb; }
 
     // 更新状态（外部调用）
     void SetNetworkMode(int mode);      // 0=WiFi, 1=4G
+    void UseNetworkSlotAsAec(bool initial_on);  // WiFi 版：网络槽位改作 AEC 开关（无 4G 可切）
+    void UpdateNetworkSlotAec(bool on);         // 每次打开时同步 AEC 当前状态（仅 AEC 槽位生效）
     void SetSignalLevel(int level);     // 0-4 信号强度（4G: 0-4格, WiFi: 0-3格）
     void SetAecState(bool on);
     void SetSleepState(bool on);
@@ -84,6 +87,7 @@ private:
     lv_obj_t* network_btn_ = nullptr;
     lv_obj_t* network_icon_ = nullptr;      // 图片控件（显示信号图标）
     lv_obj_t* network_label_ = nullptr;
+    lv_obj_t* aec_state_label_ = nullptr;   // AEC 模式下 network_btn_ 上的"开/关"文字
 
     lv_obj_t* aec_btn_ = nullptr;
     lv_obj_t* aec_icon_ = nullptr;
@@ -112,6 +116,7 @@ private:
 
     // 状态值
     int network_mode_ = 0;          // 0=WiFi, 1=4G
+    bool network_is_aec_ = false;   // true=网络槽位作 AEC 开关（WiFi 版）
     int signal_level_ = 0;          // 0-4 信号强度
     bool aec_on_ = true;
     bool sleep_on_ = true;
@@ -121,6 +126,7 @@ private:
     // 回调
     VoidCallback exit_callback_;
     NetworkCallback network_callback_;
+    ToggleCallback aec_toggle_callback_;   // WiFi 版网络槽位 AEC 开关回调（传入新状态）
     ToggleCallback aec_callback_;
     ToggleCallback sleep_callback_;
     SliderCallback brightness_callback_;

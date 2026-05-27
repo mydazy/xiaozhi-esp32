@@ -704,6 +704,9 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnAudioChannelClosed([this, &board]() {
+        if (shutting_down_.load()) {
+            return;
+        }
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
 
         // 弱网保护：Listening/Speaking 中断线 → 后台重连 3 次（500/1000/1500ms 退避）
@@ -745,6 +748,9 @@ void Application::InitializeProtocol() {
             Schedule([this]() {
                 for (int attempt = 1; attempt <= 3; ++attempt) {
                     vTaskDelay(pdMS_TO_TICKS(attempt * 500));
+                    if (!protocol_) {
+                        return;  // 延迟期间 protocol_ 已被销毁（关机/切网）：放弃重连
+                    }
                     bool ok = protocol_->OpenAudioChannel();
                     if (ok) {
                         SetListeningMode(kListeningModeManualStop);
@@ -1349,6 +1355,7 @@ ListeningMode Application::GetDefaultListeningMode() const {
 
 void Application::Reboot() {
     ESP_LOGI(TAG, "Rebooting...");
+    shutting_down_.store(true);  // 先置位：随后 CloseAudioChannel 触发的回调将跳过弱网重连
     // Disconnect the audio channel
     if (protocol_ && protocol_->IsAudioChannelOpened()) {
         protocol_->CloseAudioChannel();
@@ -1514,8 +1521,6 @@ void Application::SetAecMode(AecMode mode) {
             audio_service_.EnableDeviceAec(true);
             break;
         }
-
-        // If the AEC mode is changed, close the audio channel
         if (protocol_ && protocol_->IsAudioChannelOpened()) {
             protocol_->CloseAudioChannel();
         }
@@ -1543,6 +1548,7 @@ void Application::RequestAutoChatOnIdle() {
 }
 
 void Application::ResetProtocol() {
+    shutting_down_.store(true);
     Schedule([this]() {
         // Close audio channel if opened
         if (protocol_ && protocol_->IsAudioChannelOpened()) {

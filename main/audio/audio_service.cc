@@ -796,6 +796,7 @@ void AudioService::PlaySound(const std::string_view& ogg) {
         ESP_LOGW(TAG, "PlaySound called before Initialize, ignored");
         return;
     }
+    ESP_LOGI(TAG, "PlaySound: %u bytes, output_enabled=%d", (unsigned)ogg.size(), (int)codec_->output_enabled());
     if (!codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);

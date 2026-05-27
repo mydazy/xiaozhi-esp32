@@ -185,6 +185,7 @@ private:
     static constexpr int64_t kReconnectWindowUs = 300LL * 1000 * 1000;
     std::atomic<bool> user_initiated_close_{false};
     std::atomic<bool> server_initiated_close_{false};
+    std::atomic<bool> shutting_down_{false};
     TaskHandle_t activation_task_handle_ = nullptr;
 
 

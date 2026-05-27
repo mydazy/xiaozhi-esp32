@@ -708,16 +708,9 @@ private:
                     }, "config_switch", 4096, nullptr, 3, nullptr, 1);
                 }
                 return;
+            } else {
+                ToggleAecMode();
             }
-#if CONFIG_USE_DEVICE_AEC
-            // ③ 在线态：AEC 模式 toggle
-            if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
-                AbortIfSpeaking();
-                app.SetDeviceState(kDeviceStateIdle);
-                app.SetAecMode(app.GetAecMode() == kAecOff ? kAecOnDeviceSide : kAecOff);
-                WakeUp();
-            }
-#endif
         });
         // 3 连击：进/退配网（控制中心点"切换"按钮走同一路径）
         boot_button_.OnMultipleClick([this]() { SwitchNetwork(); }, 3);
@@ -928,6 +921,40 @@ public:
         }
     }
 
+    // AEC 模式切换：按键双击③ 与控制中心触屏共用同一路径（保证两者行为/提示音一致）
+    void ToggleAecMode() override {
+#if CONFIG_USE_DEVICE_AEC
+        auto& app = Application::GetInstance();
+        auto status = app.GetDeviceState();
+        ESP_LOGI(TAG, "ToggleAecMode: status=%d cur_aec=%d", (int)status, (int)app.GetAecMode());
+        if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
+            AbortIfSpeaking();
+            app.SetDeviceState(kDeviceStateIdle);
+            app.SetAecMode(app.GetAecMode() == kAecOff ? kAecOnDeviceSide : kAecOff);
+            WakeUp();
+        }
+#endif
+    }
+
+    // 控制中心"切换"/3 连击 → 进/退配网（同语义）。
+    // 量产版 65f8dcd0 重构时误删此 override，致三连击落到 Board 空实现、无法进配网，此处恢复。
+    bool CanSwitchNetwork() const override { return true; }
+    void SwitchNetwork() override {
+        auto& app = Application::GetInstance();
+        PauseAudioAndChatBeforeSwitch();
+        if (app.GetDeviceState() == kDeviceStateWifiConfiguring) {
+            Settings settings("wifi", true);
+            settings.SetInt("force_ap", 0);
+            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "退出配网", "logo", Lang::Sounds::OGG_NETWORK_WIFI);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            app.Reboot();
+        } else {
+            app.Alert(Lang::Strings::WIFI_CONFIG_MODE, "进入配网", "logo", Lang::Sounds::OGG_BLE_CONFIG);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            ResetWifiConfiguration();   // 内部 force_ap=1 + skip_welcome=1 + Reboot
+        }
+    }
+
     // 异步等提示音播完再 ToggleChatState：
     void ScheduleWakeChatToggle(int delay_ms) {
         if (!wake_chat_timer_) {
@@ -965,6 +992,11 @@ public:
             return false;
         }
         url += "/reset";
+
+        if (!WifiStation::GetInstance().IsConnected()) {
+            ESP_LOGW("P30_WIFI", "WiFi not connected, skip server unbind");
+            return false;
+        }
 
         auto network = Board::GetInstance().GetNetwork();
         if (!network) {

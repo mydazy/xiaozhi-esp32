@@ -826,6 +826,13 @@ void UiDisplay::EnsureControlCenter() {
     });
     if (auto* dnb = dynamic_cast<DualNetworkBoard*>(&board)) {
         control_center_->SetNetworkMode(dnb->GetNetworkType() == NetworkType::ML307 ? 1 : 0);
+    } else {
+        // WiFi 板无 4G 可切：网络槽位改作 AEC（说话打断）开关
+        auto& app = Application::GetInstance();
+        control_center_->UseNetworkSlotAsAec(app.GetAecMode() != kAecOff);
+        control_center_->SetAecToggleCallback([](bool /*unused*/) {
+            Board::GetInstance().ToggleAecMode();   // 与按键双击③ 共用同一 AEC 切换路径
+        });
     }
     control_center_->SetSleepState(board.IsAutoSleepEnabled());
 }
@@ -837,6 +844,7 @@ void UiDisplay::ShowControlCenter() {
     auto& board = Board::GetInstance();
     if (auto* codec = board.GetAudioCodec()) control_center_->SetVolume(codec->output_volume());
     if (auto* bk = board.GetBacklight())     control_center_->SetBrightness(bk->brightness());
+    control_center_->UpdateNetworkSlotAec(Application::GetInstance().GetAecMode() != kAecOff);
     control_center_->Show();
 }
 

@@ -272,7 +272,9 @@ bool Blufi::StartAdvertising() {
 
   esp_blufi_adv_start_with_name(device_name_.c_str());
 
-  ESP_LOGI(TAG, "[1/8] BLE广播已启动: %s", device_name_.c_str());
+  // 铁证：打印 NimBLE 实际广播用的 GAP 名（必为 device_name_；若手机仍显示别的名即手机缓存）
+  ESP_LOGW(TAG, "[1/8] BLE广播已启动: 设置=%s · NimBLE实际GAP名=%s",
+           device_name_.c_str(), ble_svc_gap_device_name());
   return true;
 #else
   esp_blufi_adv_start();

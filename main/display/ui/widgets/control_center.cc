@@ -290,6 +290,7 @@ void ControlCenter::UpdateButtonStyle(lv_obj_t* btn, bool active) {
 }
 
 void ControlCenter::UpdateNetworkIcon() {
+    if (network_is_aec_) return;
     if (!network_icon_) return;
 
     // 控制中心"切换"按钮只表达"当前是哪种联网方式"，不反映信号强度
@@ -365,6 +366,29 @@ void ControlCenter::SetNetworkMode(int mode) {
     UpdateButtonStyle(network_btn_, true);
 }
 
+void ControlCenter::UseNetworkSlotAsAec(bool initial_on) {
+    network_is_aec_ = true;
+    aec_on_ = initial_on;
+    // 隐藏信号图标（image 控件），改用文字"开/关"
+    if (network_icon_) lv_obj_add_flag(network_icon_, LV_OBJ_FLAG_HIDDEN);
+    if (!aec_state_label_) {
+        aec_state_label_ = lv_label_create(network_btn_);
+        lv_obj_set_style_text_font(aec_state_label_, &BUILTIN_TEXT_FONT, 0);
+        lv_obj_set_style_text_color(aec_state_label_, lv_color_white(), 0);
+        lv_obj_align(aec_state_label_, LV_ALIGN_CENTER, 0, 0);
+    }
+    lv_label_set_text(aec_state_label_, aec_on_ ? "开" : "关");
+    lv_label_set_text(network_label_, "打断");  // 历史 AEC 格下方标签
+    UpdateButtonStyle(network_btn_, aec_on_);
+}
+
+void ControlCenter::UpdateNetworkSlotAec(bool on) {
+    if (!network_is_aec_) return;   // 仅 WiFi 版 AEC 槽位生效（4G 版 no-op）
+    aec_on_ = on;
+    if (aec_state_label_) lv_label_set_text(aec_state_label_, on ? "开" : "关");
+    UpdateButtonStyle(network_btn_, on);
+}
+
 void ControlCenter::SetSignalLevel(int level) {
     signal_level_ = level;
     UpdateNetworkIcon();
@@ -424,6 +448,14 @@ void ControlCenter::OnExitClicked(lv_event_t* e) {
 void ControlCenter::OnNetworkClicked(lv_event_t* e) {
     auto* self = static_cast<ControlCenter*>(lv_event_get_user_data(e));
     self->HideSlider();
+    if (self->network_is_aec_) {
+        self->aec_on_ = !self->aec_on_;
+        lv_label_set_text(self->aec_state_label_, self->aec_on_ ? "开" : "关");
+        self->UpdateButtonStyle(self->network_btn_, self->aec_on_);
+        ESP_LOGI(TAG, "AEC 开关: %s", self->aec_on_ ? "开" : "关");
+        if (self->aec_toggle_callback_) self->aec_toggle_callback_(self->aec_on_);
+        return;
+    }
     self->network_mode_ = (self->network_mode_ + 1) % 2;
     self->UpdateButtonStyle(self->network_btn_, true);
     ESP_LOGI(TAG, "网络模式切换: %s", self->network_mode_ == 0 ? "WiFi" : "4G");

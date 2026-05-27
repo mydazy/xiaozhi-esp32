@@ -1026,6 +1026,19 @@ public:
         }
         url += "/reset";
 
+        auto& board = static_cast<MyDazyP30_4GBoard&>(Board::GetInstance());
+        bool connected = false;
+        if (board.GetNetworkType() == NetworkType::WIFI) {
+            connected = WifiStation::GetInstance().IsConnected();
+        } else {
+            auto& ml307 = static_cast<Ml307Board&>(board.GetCurrentBoard());
+            connected = ml307.GetModem() != nullptr && ml307.GetModem()->network_ready();
+        }
+        if (!connected) {
+            ESP_LOGW("P30_4G", "Network not connected, skip server unbind");
+            return false;
+        }
+
         auto network = Board::GetInstance().GetNetwork();
         if (!network) {
             ESP_LOGW("P30_4G", "Network not available, skip server unbind");
