@@ -300,10 +300,12 @@ private:
     void InitializeSc7a20h() {
         sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 320 /*mg*/, 100 /*ms*/);
         if (!sc7a20h_sensor_) { ESP_LOGE(TAG, "SC7A20H 初始化失败"); return; }
-        sc7a20h_shake (sc7a20h_sensor_, 1500, 1000, 4, 1500, &OnShake,  this);
+        // 摇一摇功能已禁用（产品决策）· 保留 sc7a20h_init 供"拿起唤醒/深睡唤醒"使用
+        // sc7a20h_shake (sc7a20h_sensor_, 1500, 1000, 4, 1500, &OnShake,  this);
     }
 
-    // 摇一摇 — 日常 AI 互动 · 闹钟响铃中累计 3 次才停（防走路误关）
+    // 摇一摇 — 日常 AI 互动（已禁用 · 产品决策 · 恢复时把 #if 0 改回 1 并取消上方 sc7a20h_shake 注释）
+#if 0
     static void OnShake(void* /*ctx*/) {
         Application::GetInstance().Schedule([] {
             if (AlarmRinger::GetInstance().ShakeStop(6)) return;   // 6 次累计才停闹铃（防误关）
@@ -315,6 +317,7 @@ private:
             app.SendTextToAI("摇一摇随机互动");
         });
     }
+#endif
 
     // 桌面双击 — 唤醒屏幕（与触摸唤醒同语义 · 不进 AI 对话）
     static void OnStrike(void* ctx) {
@@ -760,6 +763,19 @@ private:
         boot_button_.OnMultipleClick([this]() {
             ShutdownOrSleep("再见", "", Lang::Sounds::OGG_SHUTDOWN, 2500, false);
         }, 4);
+
+        // 6 连击：手动重新校准 MIC（识别/音量异常时用户自助修复 · 同 remote mic_calibrate：Stop→Calibrate→Start）
+        boot_button_.OnMultipleClick([this]() {
+            AbortIfSpeaking();
+            Application::GetInstance().Alert("重新校准麦克风", "请保持安静约1秒", "logo", "");
+            Application::GetInstance().Schedule([this]() {
+                if (!audio_codec_) return;
+                auto& audio = Application::GetInstance().GetAudioService();
+                audio.Stop();
+                audio_codec_->CalibrateMicOnce();   // 重新测 1kHz/RMS → 写 input_gain + mic_type + aec_gain
+                audio.Start();
+            });
+        }, 6);
 
         // 9 连击进入恢复出厂确认（10s 内再双击确认，超时由 OnClick/OnDoubleClick lambda 自动清）
         boot_button_.OnMultipleClick([this]() {

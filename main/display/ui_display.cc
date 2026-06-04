@@ -1385,6 +1385,8 @@ void UiDisplay::ShowEduCard(const char* main_text, const char* top) {
         return;
     }
 
+    DisplayLockGuard lock(this);
+
     EnsureDisplayFonts();
     ESP_LOGI(TAG, "[edu] font ptrs: 56=%p 48=%p 30=%p 88=%p fb=%p",
              edu_main_56_font_, edu_main_font_, clock_text_font_, clock_big_font_, fallback_text_font_);

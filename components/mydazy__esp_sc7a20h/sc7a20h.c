@@ -171,6 +171,10 @@ static void motion_task_entry(void *arg)
     const TickType_t period = pdMS_TO_TICKS(MOTION_PERIOD_MS);
     const int32_t gravity_sq = 1000 * 1000;
 
+    int16_t prev_x = 0, prev_y = 0, prev_z = 0;
+    int  same_streak = 0;
+    bool data_dead   = false;
+
     for (;;) {
         vTaskDelayUntil(&last_wake, period);
 
@@ -181,6 +185,25 @@ static void motion_task_entry(void *arg)
         int32_t mag_sq = (int32_t)x * x + (int32_t)y * y + (int32_t)z * z;
         int32_t dev    = mag_sq - gravity_sq;
         if (dev < 0) dev = -dev;
+
+        /* 死值兜底判定 */
+        if (x == prev_x && y == prev_y && z == prev_z) {
+            if (same_streak < 20) same_streak++;
+        } else {
+            same_streak = 0;
+            prev_x = x; prev_y = y; prev_z = z;
+        }
+        if (same_streak >= 20) {
+            if (!data_dead) {
+                data_dead = true;
+                ESP_LOGE(TAG, "传感器数据卡死(x=%d y=%d z=%d 持续不变)→ 暂停摇一摇/双击，数据恢复后自动解除", x, y, z);
+            }
+            continue;  /* 数据无效 · 不喂判定 · 不触发 */
+        }
+        if (data_dead) {
+            data_dead = false;
+            ESP_LOGW(TAG, "传感器数据已恢复变化 → 恢复摇一摇/双击");
+        }
 
         int64_t now_us = esp_timer_get_time();
         update_shake (&d->shake,  dev, now_us);
@@ -233,6 +256,9 @@ sc7a20h_handle_t sc7a20h_init(i2c_worker_handle_t worker,
 
     /* 10 寄存器原子序列 — 防音频/触摸 ISR 中途插入 */
     i2c_worker_lock_session(worker, 200);
+
+    write_reg(d, REG_CTRL_REG5, 0x80);            /* BOOT=1 · reboot memory content */
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     write_reg(d, REG_CTRL_REG1, 0x00);            /* power-down · 配置前必先 down */
     vTaskDelay(pdMS_TO_TICKS(10));

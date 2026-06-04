@@ -115,7 +115,7 @@ WebsocketBaiduProtocol::WebsocketBaiduProtocol() {
     license_key_ = baidu_settings.GetString("license_key", "759877c9b68b4aa082cc05390be0cea9");
 
     Settings aec_settings("aecMode", false);
-    has_local_aec_ = (aec_settings.GetInt("aec", 0) == 1);
+    has_local_aec_ = (aec_settings.GetInt("deviceAec", 0) == 1);
     aec_cfg_ = has_local_aec_ ? &kBaiduAecOn : &kBaiduAecOff;
     ESP_LOGI(TAG, "===== %s =====", aec_cfg_->mode_name);
     ESP_LOGI(TAG, "  dfda=%d  cloud_auto_int=%d  tts_end_delay=%dms",

@@ -109,7 +109,7 @@ Application::Application() {
 #error "CONFIG_USE_DEVICE_AEC and CONFIG_USE_SERVER_AEC cannot be enabled at the same time"
 #elif CONFIG_USE_DEVICE_AEC
     Settings settings("aecMode", false);
-    aec_mode_ = (AecMode)settings.GetInt("deviceAec", 1);
+    aec_mode_ = (AecMode)settings.GetInt("deviceAec", 0);
 #elif CONFIG_USE_SERVER_AEC
     aec_mode_ = kAecOnServerSide;
 #else

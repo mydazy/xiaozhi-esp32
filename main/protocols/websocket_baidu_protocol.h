@@ -50,7 +50,7 @@ struct BaiduAecConfig {
     const char* mode_name;       // 日志标签
 };
 
-// AEC ON (NVS aecMode.aec=1): 全双工 + 云端 VAD 打断 + 50ms 末尾延迟 (官方推荐最低)
+// AEC ON (NVS aecMode.deviceAec=1): 全双工 + 云端 VAD 打断 + 50ms 末尾延迟 (官方推荐最低)
 static constexpr BaiduAecConfig kBaiduAecOn = {
     /* full_duplex          */ true,
     /* cloud_auto_int       */ true,
@@ -60,7 +60,7 @@ static constexpr BaiduAecConfig kBaiduAecOn = {
     /* mode_name            */ "AEC-ON (full-duplex, cloud-VAD interrupt)"
 };
 
-// AEC OFF (NVS aecMode.aec=0 · P30 当前默认): 半双工 + 唤醒词打断 + 150ms 末尾延迟
+// AEC OFF (NVS aecMode.deviceAec=0 · P30 当前默认): 半双工 + 唤醒词打断 + 150ms 末尾延迟
 static constexpr BaiduAecConfig kBaiduAecOff = {
     /* full_duplex          */ false,
     /* cloud_auto_int       */ false,

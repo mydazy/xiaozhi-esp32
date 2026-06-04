@@ -217,6 +217,18 @@ esp_err_t Ota::CheckVersion() {
         ESP_LOGI(TAG, "No websocket section found!");
     }
 
+    // 百度 license_key 下发 + NVS 缓存
+    cJSON *license_key = cJSON_GetObjectItem(root, "license_key");
+    if (cJSON_IsString(license_key) && license_key->valuestring && license_key->valuestring[0]) {
+        Settings settings("baidu", true);
+        if (settings.GetString("license_key") != license_key->valuestring) {
+            settings.SetString("license_key", license_key->valuestring);
+            ESP_LOGI(TAG, "license_key updated from OTA");
+        } else {
+            ESP_LOGI(TAG, "license_key unchanged (cached)");
+        }
+    }
+
     has_server_time_ = ApplyServerUtcTime(cJSON_GetObjectItem(root, "server_time"));
     if (!has_server_time_) {
         ESP_LOGW(TAG, "No server_time section found!");
@@ -527,6 +539,11 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
         ESP_LOGE(TAG, "Failed to set boot partition: %s", esp_err_to_name(err));
         return false;
     }
+
+    // 每次 OTA 升级后清除 MIC 校准（NVS audio/mic_type=0）→ 新固件首次开机自动重新校准。
+    // 新固件可能调整音频增益/AEC 曲线，旧校准值未必匹配，强制重校保证识别质量。
+    Settings("audio", true).SetInt("mic_type", 0);
+    ESP_LOGI(TAG, "OTA 升级：已清除 MIC 校准，新固件开机将自动重校");
 
     ESP_LOGI(TAG, "Firmware upgrade successful");
     return true;

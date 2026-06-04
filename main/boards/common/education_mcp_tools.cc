@@ -236,6 +236,8 @@ void RegisterEducationMcpTools(McpServer& mcp, UiDisplay* ui, bool include_strok
                 return std::string("ERR: top too long");
             }
             Application::GetInstance().Schedule([ui, main_t, top]() {
+                auto state = Application::GetInstance().GetDeviceState();
+                if (state != kDeviceStateSpeaking && state != kDeviceStateListening) return;
                 ui->ShowEduCard(main_t.c_str(), top.c_str());
             });
             return std::string("OK");
