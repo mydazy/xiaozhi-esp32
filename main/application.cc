@@ -688,7 +688,9 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        if (GetDeviceState() == kDeviceStateSpeaking) {
+        // B3: 用 tts_streaming_(tts"start"时同步置位)替代异步的 Speaking 状态——防 start 的
+        // Schedule 切 Speaking 尚未执行时，紧随的首批音频帧被丢(现场"有字幕无声")
+        if (tts_streaming_.load()) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
         }
     });
@@ -781,11 +783,13 @@ void Application::InitializeProtocol() {
             auto state = cJSON_GetObjectItem(root, "state");
             if (!cJSON_IsString(state)) { return; }
             if (strcmp(state->valuestring, "start") == 0) {
+                tts_streaming_.store(true);  // B3: 同步置位(在 Schedule 切 Speaking 之前)，首批音频帧不被丢
                 Schedule([this]() {
                     aborted_ = false;
                     SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
+                tts_streaming_.store(false);  // B3: TTS 流结束，之后到达的音频帧丢弃
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
@@ -1258,6 +1262,7 @@ void Application::Schedule(std::function<void()>&& callback) {
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
+    tts_streaming_.store(false);  // B3: 打断 TTS → 在途音频帧丢弃，不"该停不停"
     if (protocol_) {
         protocol_->SendAbortSpeaking(reason);
     }

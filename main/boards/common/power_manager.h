@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <functional>
+#include <atomic>
 
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -23,18 +24,23 @@ private:
     inline static PowerManager* instance_ = nullptr; //hsf
     std::function<void(bool)> on_charging_status_changed_;
     std::function<void(bool)> on_low_battery_status_changed_;
+    std::function<void()> on_shutdown_request_;  // 运行期过放→请求关机（板级体内切主线程）
 
     gpio_num_t charging_pin_ = GPIO_NUM_NC;
     std::vector<uint16_t> adc_values_;
     uint32_t battery_level_ = 0;
-    bool is_charging_ = false;
+    std::atomic<bool> is_charging_{false};  // esp_timer 写/主线程读(关机前 IsCharging 二次确认)，atomic 防 data race
     bool is_low_battery_ = false;
     bool is_off_battery_ = false;
+    int off_battery_streak_ = 0;            // 连续过放确认计数（防 ADC 抖动误关）
+    bool shutdown_requested_ = false;       // 一次性哨兵（防多关机源二次触发）
+    std::atomic<bool> ready_{false};        // 发布栅栏：回调注入 + Start() 后才允许触发关机
     int ticks_ = 0;
     const int kBatteryAdcInterval = 60;
     const int kBatteryAdcDataCount = 3;
     const int kLowBatteryLevel = 5;
     const int kBatteryShutdownMv = 3400;
+    const int kBatteryRecoverMv = 3450;     // 迟滞：回升到此值才解除过放（防 3400 附近抖动反复触发）
 
     adc_oneshot_unit_handle_t adc_handle_;
 
@@ -208,12 +214,20 @@ private:
 
         if(voltage < kBatteryShutdownMv && is_charging_ == false){
             is_off_battery_ = true;
+            if (off_battery_streak_ < 1000) off_battery_streak_++;
         }
-        else{
+        else if (voltage >= kBatteryRecoverMv || is_charging_) {
             is_off_battery_ = false;
+            off_battery_streak_ = 0;
+        }
+        // 迟滞带 [3400,3450) 非充电：保持 is_off_battery_ / streak 不变
+        // 运行期过放闭环：连续确认 N 次 + 一次性哨兵 + 主线程回调关机（板级二次确认未充电）
+        if (ready_.load() && off_battery_streak_ >= 3 && !shutdown_requested_ && on_shutdown_request_) {
+            shutdown_requested_ = true;
+            on_shutdown_request_();
         }
 
-        ESP_LOGI("PowerManager", "charging: %u, ADC value: %d average: %ld level: %ld, Cali Voltage: %d mV", is_charging_, adc_value, average_adc, battery_level_, voltage);
+        ESP_LOGI("PowerManager", "charging: %u, ADC value: %d average: %ld level: %ld, Cali Voltage: %d mV", is_charging_.load(), adc_value, average_adc, battery_level_, voltage);
 
     }
 
@@ -241,7 +255,7 @@ public:
             .skip_unhandled_events = true,
         };
         ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle_));
-        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 1000000));
+        // 定时器改由 Start() 启动（板级注入回调后），防构造期回调未就绪的撕裂读 UB
 
         // 初始化 ADC
         adc_oneshot_unit_init_cfg_t init_config = {
@@ -317,6 +331,23 @@ public:
 
     void OnChargingStatusChanged(std::function<void(bool)> callback) {
         on_charging_status_changed_ = callback;
+    }
+
+    // 注入运行期过放关机回调（板级负责切主线程 + 二次确认未充电）
+    void OnShutdownRequest(std::function<void()> callback) {
+        on_shutdown_request_ = callback;
+    }
+
+    // 充电时复位过放守卫，防充放电循环后保护永久哑火
+    void ResetOffBatteryGuard() {
+        off_battery_streak_ = 0;
+        shutdown_requested_ = false;
+    }
+
+    // 板级注入完所有回调后调用：启用过放触发 + 启动周期检测
+    void Start() {
+        ready_.store(true);
+        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 1000000));
     }
 
     bool IsOffBatteryLevel(){

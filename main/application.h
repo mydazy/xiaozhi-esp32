@@ -186,6 +186,7 @@ private:
     std::atomic<bool> user_initiated_close_{false};
     std::atomic<bool> server_initiated_close_{false};
     std::atomic<bool> shutting_down_{false};
+    std::atomic<bool> tts_streaming_{false};  // B3: TTS 流期间(start→stop/abort)，覆盖 SetDeviceState(Speaking) 异步切换窗口，防首批音频帧被丢(有字幕无声)
     TaskHandle_t activation_task_handle_ = nullptr;
 
 

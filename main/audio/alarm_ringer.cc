@@ -75,7 +75,7 @@ void AlarmRinger::Start(const std::string& message, Kind kind) {
     const int first_vol = (kind == Kind::kReminder)
         ? reminder_mode::kVolStep1
         : alarm_mode::kVolStage0Pct;
-    if (codec && first_vol >= 0) codec->SetOutputVolume(first_vol);
+    if (codec && first_vol >= 0) codec->SetOutputVolumeTransient(first_vol);
     app.PlaySound(Lang::Sounds::OGG_VIBRATION);
     if (kind == Kind::kReminder) DispatchWakeWord();
 
@@ -125,7 +125,7 @@ void AlarmRinger::OnTick() {
             return;
         }
         int vol = (ring_count_ == 1) ? reminder_mode::kVolStep2 : reminder_mode::kVolStep3;
-        if (codec) codec->SetOutputVolume(vol);
+        if (codec) codec->SetOutputVolumeTransient(vol);
         app.PlaySound(Lang::Sounds::OGG_VIBRATION);
         ring_count_++;
         DispatchWakeWord();
@@ -139,7 +139,7 @@ void AlarmRinger::OnTick() {
                   : (s == 1) ? alarm_mode::kVolStage1Pct
                   :            alarm_mode::kVolStage2Pct;
     if (codec && saved_volume_ > 0 && s <= alarm_mode::kAiStep) {
-        codec->SetOutputVolume(pct);
+        codec->SetOutputVolumeTransient(pct);
     }
     if (s < alarm_mode::kAiStep) {
         app.PlaySound(Lang::Sounds::OGG_VIBRATION);
@@ -194,7 +194,7 @@ void AlarmRinger::Stop(const char* reason) {
     // 恢复原音量
     if (saved_volume_ >= 0) {
         auto* codec = Board::GetInstance().GetAudioCodec();
-        if (codec) codec->SetOutputVolume(saved_volume_);
+        if (codec) codec->SetOutputVolumeTransient(saved_volume_);
         saved_volume_ = -1;
     }
 

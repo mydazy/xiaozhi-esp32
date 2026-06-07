@@ -20,6 +20,7 @@ public:
     virtual ~AudioCodec();
     
     virtual void SetOutputVolume(int volume);
+    void SetOutputVolumeTransient(int volume);  // C2: 临时音量(闹钟响铃)应用硬件但不落NVS，防响铃中断电污染开机音量
     virtual void SetInputGain(float gain);
     virtual void SetAecGain(float db);
     virtual void EnableInput(bool enable);
@@ -55,6 +56,7 @@ protected:
     int input_channels_ = 1;
     int output_channels_ = 1;
     int output_volume_ = 80;
+    bool suppress_persist_ = false;  // C2: SetOutputVolumeTransient 期间抑制写 NVS
     float input_gain_ = 15.0;
     float aec_gain_db_     = 9.0f;
     float aec_gain_linear_ = 2.0f;

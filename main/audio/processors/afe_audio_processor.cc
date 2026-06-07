@@ -70,6 +70,10 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
 
     afe_iface_ = esp_afe_handle_from_config(afe_config);
     afe_data_ = afe_iface_->create_from_config(afe_config);
+    if (afe_data_ == nullptr) {
+        ESP_LOGE(TAG, "AFE create_from_config 失败(PSRAM不足)，不创建处理任务");
+        return;  // task_created_ 保持 false，析构安全；GetFeedSize 等已有 nullptr 兜底
+    }
 
     xTaskCreatePinnedToCore([](void* arg) {
         auto this_ = (AfeAudioProcessor*)arg;
@@ -211,6 +215,7 @@ void AfeAudioProcessor::AudioProcessorTask() {
 }
 
 void AfeAudioProcessor::EnableDeviceAec(bool enable) {
+    if (afe_data_ == nullptr) return;  // S1: AFE 创建失败后 afe_data_=nullptr，与 GetFeedSize/Feed 兜底一致
     if (enable) {
 #if CONFIG_USE_DEVICE_AEC
         afe_iface_->disable_vad(afe_data_);

@@ -45,8 +45,16 @@ void AudioCodec::SetOutputVolume(int volume) {
     output_volume_ = volume;
     ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
     
+    if (suppress_persist_) return;  // C2: 临时音量(闹钟响铃)不落 NVS
     Settings settings("audio", true);
     settings.SetInt("output_volume", output_volume_);
+}
+
+// C2: 临时改音量(闹钟响铃等)，应用硬件但不写 NVS——防响铃中途断电/重启后 NVS 残留临时大音量
+void AudioCodec::SetOutputVolumeTransient(int volume) {
+    suppress_persist_ = true;
+    SetOutputVolume(volume);   // virtual → 子类应用硬件；基类因 suppress_persist_ 跳过写 NVS
+    suppress_persist_ = false;
 }
 
 void AudioCodec::SetInputGain(float gain) {
