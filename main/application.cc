@@ -654,48 +654,45 @@ void Application::InitializeProtocol() {
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
     // 初始化远程命令处理器和直播伴侣
-    // 加守卫: SwitchProtocol() 触发重新 InitializeProtocol 时, remote_cmd_/flow_engine_
-    // 不能重建 — 切换由 remote_cmd_::OnProtoSwitch 触发, 重建会让 lambda 自我析构 UB
     if (!remote_cmd_) remote_cmd_ = std::make_unique<RemoteCmd>(this);
     if (!flow_engine_) flow_engine_ = std::make_unique<FlowEngine>(this);
 
+    std::shared_ptr<Protocol> p;
     if (ota_->HasMqttConfig()) {
-        protocol_ = std::make_unique<MqttProtocol>();
+        p = std::make_shared<MqttProtocol>();
     } else if (ota_->HasWebsocketConfig()) {
         Settings ws_settings("websocket", false);
         std::string ws_url = ws_settings.GetString("url", "");
         if (ws_url.find("bcelive") != std::string::npos) {
             ESP_LOGI(TAG, "Using Baidu BRTC WebSocket protocol");
-            protocol_ = std::make_unique<WebsocketBaiduProtocol>();
+            p = std::make_shared<WebsocketBaiduProtocol>();
         } else if (ws_url.find("joyinside") != std::string::npos) {
             ESP_LOGI(TAG, "Using JoyAI WebSocket protocol");
-            protocol_ = std::make_unique<WebsocketJoeaiProtocol>();
+            p = std::make_shared<WebsocketJoeaiProtocol>();
         } else {
-            protocol_ = std::make_unique<WebsocketProtocol>();
+            p = std::make_shared<WebsocketProtocol>();
         }
     } else {
         ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
-        protocol_ = std::make_unique<MqttProtocol>();
+        p = std::make_shared<MqttProtocol>();
     }
 
-    protocol_->OnConnected([this]() {
+    p->OnConnected([this]() {
         DismissAlert();
     });
 
-    protocol_->OnNetworkError([this](const std::string& message) {
+    p->OnNetworkError([this](const std::string& message) {
         last_error_message_ = message;
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
     });
     
-    protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        // B3: 用 tts_streaming_(tts"start"时同步置位)替代异步的 Speaking 状态——防 start 的
-        // Schedule 切 Speaking 尚未执行时，紧随的首批音频帧被丢(现场"有字幕无声")
+    p->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
         if (tts_streaming_.load()) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
         }
     });
     
-    protocol_->OnAudioChannelOpened([this, codec, &board]() {
+    p->OnAudioChannelOpened([this, codec, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
         user_initiated_close_.store(false);  // 通道新开 → 清残留退出意图，防下次弱网掉线被误判
         server_initiated_close_.store(false);  // 同上，清服务器主动告别标志
@@ -705,7 +702,7 @@ void Application::InitializeProtocol() {
         }
     });
     
-    protocol_->OnAudioChannelClosed([this, &board]() {
+    p->OnAudioChannelClosed([this, &board]() {
         if (shutting_down_.load()) {
             return;
         }
@@ -772,7 +769,7 @@ void Application::InitializeProtocol() {
         });
     });
     
-    protocol_->OnIncomingJson([this, display](const cJSON* root) {
+    p->OnIncomingJson([this, display](const cJSON* root) {
         // Parse JSON data
         auto type = cJSON_GetObjectItem(root, "type");
         if (!cJSON_IsString(type)) {
@@ -783,13 +780,13 @@ void Application::InitializeProtocol() {
             auto state = cJSON_GetObjectItem(root, "state");
             if (!cJSON_IsString(state)) { return; }
             if (strcmp(state->valuestring, "start") == 0) {
-                tts_streaming_.store(true);  // B3: 同步置位(在 Schedule 切 Speaking 之前)，首批音频帧不被丢
+                tts_streaming_.store(true);
                 Schedule([this]() {
                     aborted_ = false;
                     SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
-                tts_streaming_.store(false);  // B3: TTS 流结束，之后到达的音频帧丢弃
+                tts_streaming_.store(false);
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
@@ -804,8 +801,6 @@ void Application::InitializeProtocol() {
                 if (cJSON_IsString(text)) {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
                     std::string sentence = text->valuestring;
-
-                    // AI 对话被动学习：[main_top] → 自动弹教育卡（严格单卡 · 两行布局）
                     if (auto hit = ExtractEduCard(sentence); hit.has_value()) {
                         ESP_LOGI(TAG, "EduCard auto-trigger: %s", hit->main.c_str());
                         TriggerEduCard(std::move(*hit));
@@ -877,9 +872,11 @@ void Application::InitializeProtocol() {
     });
 
     // 按 protocol 切 OPUS 帧长（百度 20 / 其它 60）
-    audio_service_.SetFrameDuration(protocol_->client_frame_duration());
+    audio_service_.SetFrameDuration(p->client_frame_duration());
 
-    protocol_->Start();
+    // A-1: 回调全注册在 p 上后，原子发布——别的任务此刻起 atomic_load 到的是完整对象
+    std::atomic_store(&protocol_, p);
+    p->Start();
 }
 
 void Application::ShowActivationCode(const std::string& code, const std::string& message) {
@@ -961,7 +958,7 @@ void Application::HandleToggleChatEvent() {
     MusicPlayer::GetInstance().Stop();
 
     auto state = GetDeviceState();
-
+    
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;
@@ -1005,6 +1002,10 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
     if (GetDeviceState() != kDeviceStateConnecting) {
         return;
     }
+
+    // Switch to performance mode before connecting to reduce latency
+    auto& board = Board::GetInstance();
+    board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
 
     if (!protocol_->IsAudioChannelOpened()) {
         if (!protocol_->OpenAudioChannel()) {
@@ -1133,6 +1134,10 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
         return;
     }
 
+    // Switch to performance mode before connecting to reduce latency
+    auto& board = Board::GetInstance();
+    board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+
     if (!protocol_->IsAudioChannelOpened()) {
         if (!protocol_->OpenAudioChannel()) {
             audio_service_.EnableWakeWordDetection(true);
@@ -1235,6 +1240,8 @@ void Application::HandleStateChangedEvent() {
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
+            } else {
+                audio_service_.EnableWakeWordDetection(false);
             }
             audio_service_.ResetDecoder();
             break;
@@ -1365,7 +1372,7 @@ void Application::Reboot() {
     if (protocol_ && protocol_->IsAudioChannelOpened()) {
         protocol_->CloseAudioChannel();
     }
-    protocol_.reset();
+    std::atomic_store(&protocol_, std::shared_ptr<Protocol>{});  // A-1: Reboot 原子置空
     audio_service_.Stop();
 
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -1560,7 +1567,7 @@ void Application::ResetProtocol() {
             protocol_->CloseAudioChannel();
         }
         // Reset protocol
-        protocol_.reset();
+        std::atomic_store(&protocol_, std::shared_ptr<Protocol>{});  // A-1: 同 Reboot，原子置空
     });
 }
 
