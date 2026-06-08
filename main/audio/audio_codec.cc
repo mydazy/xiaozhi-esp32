@@ -45,7 +45,7 @@ void AudioCodec::SetOutputVolume(int volume) {
     output_volume_ = volume;
     ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
     
-    if (suppress_persist_) return;  // C2: 临时音量(闹钟响铃)不落 NVS
+    if (suppress_persist_) return;
     Settings settings("audio", true);
     settings.SetInt("output_volume", output_volume_);
 }
