@@ -31,7 +31,6 @@ public:
     void OnWakeWordDetected(std::function<void(const std::string& wake_word)> callback);
     void Start();
     void Stop();
-    // 通话期释放 AFE 实例 + 退检测任务，回收内部 RAM；保留共享模型与同步对象，可被 Initialize 重建。
     void Release();
     bool IsInitialized() const { return afe_data_ != nullptr; }
     size_t GetFeedSize();

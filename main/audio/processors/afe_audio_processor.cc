@@ -41,7 +41,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     
     afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_HIGH_PERF);
     afe_config->aec_mode = AEC_MODE_VOIP_HIGH_PERF;
-    afe_config->vad_mode = VAD_MODE_1;
+    afe_config->vad_mode = VAD_MODE_0;
     afe_config->vad_min_noise_ms = 100;
     if (vad_model_name != nullptr) {
         afe_config->vad_model_name = vad_model_name;
@@ -70,6 +70,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
 
     afe_iface_ = esp_afe_handle_from_config(afe_config);
     afe_data_ = afe_iface_->create_from_config(afe_config);
+    afe_config_free(afe_config);
     if (afe_data_ == nullptr) {
         ESP_LOGE(TAG, "AFE create_from_config 失败(PSRAM不足)，不创建处理任务");
         return;  // task_created_ 保持 false，析构安全；GetFeedSize 等已有 nullptr 兜底
@@ -215,7 +216,7 @@ void AfeAudioProcessor::AudioProcessorTask() {
 }
 
 void AfeAudioProcessor::EnableDeviceAec(bool enable) {
-    if (afe_data_ == nullptr) return;  // S1: AFE 创建失败后 afe_data_=nullptr，与 GetFeedSize/Feed 兜底一致
+    if (afe_data_ == nullptr) return;
     if (enable) {
 #if CONFIG_USE_DEVICE_AEC
         afe_iface_->disable_vad(afe_data_);

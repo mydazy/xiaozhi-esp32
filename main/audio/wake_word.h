@@ -21,7 +21,6 @@ public:
     virtual void EncodeWakeWordData() = 0;
     virtual bool GetWakeWordOpus(std::vector<uint8_t>& opus) = 0;
     virtual const std::string& GetLastDetectedWakeWord() const = 0;
-    // 释放底层引擎实例以回收内部 RAM（通话期调用）。默认 no-op；AFE 子类真正释放并可被 Initialize 重建。
     virtual void Release() {}
 };
 

@@ -61,7 +61,6 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
         ESP_LOGE(TAG, "Failed to initialize wakenet model");
         return false;
     }
-    // 支持 Release() 后重建：清空上次的唤醒词列表，避免重复 push_back
     wake_words_.clear();
     wakenet_model_ = NULL;
     for (int i = 0; i < models_->num; i++) {
@@ -98,6 +97,7 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
 
     afe_iface_ = esp_afe_handle_from_config(afe_config);
     afe_data_ = afe_iface_->create_from_config(afe_config);
+    afe_config_free(afe_config);
 
   // ============== 设置 Wakenet 检测阈值 ==============
   float new_threshold = 0.6f;
@@ -136,9 +136,6 @@ void AfeWakeWord::Stop() {
 }
 
 void AfeWakeWord::Release() {
-    // 通话期回收内部 RAM：退出检测任务 + 销毁 afe_data_（含其内部 AEC/WakeNet 缓冲与 6KB 检测任务栈）。
-    // 保留 models_（与 AudioProcessor 共享，绝不在此 deinit）、event_group_/sem，供后续 Initialize() 重建。
-    // 故意不动唤醒词编码任务资源（PSRAM 栈 + 极小内部 buffer），避免与进行中的 EncodeWakeWordData 竞态。
     if (detection_task_created_) {
         xEventGroupSetBits(event_group_, DETECTION_EXIT_EVENT);
         if (detection_done_sem_) {
@@ -148,7 +145,6 @@ void AfeWakeWord::Release() {
     }
     {
         std::lock_guard<std::mutex> lock(input_buffer_mutex_);
-        // 先清 RUNNING：确保任何并发 Feed() 在锁内重检时看到非运行态，不再触碰即将销毁的 afe_data_
         xEventGroupClearBits(event_group_, DETECTION_RUNNING_EVENT);
         if (afe_data_ != nullptr) {
             afe_iface_->destroy(afe_data_);
@@ -156,7 +152,6 @@ void AfeWakeWord::Release() {
         }
         input_buffer_.clear();
     }
-    // 清 EXIT 位，使下次 Initialize() 创建的新检测任务能正常 WaitBits
     xEventGroupClearBits(event_group_, DETECTION_EXIT_EVENT);
 }
 
