@@ -550,7 +550,9 @@ bool AtUart::ParseBinaryHttpContent() {
 
 void AtUart::HandleUrc(const std::string& command, const std::vector<AtArgumentValue>& arguments) {
     if (command == "CME ERROR") {
-        cme_error_code_ = arguments[0].int_value;
+        // 09-P0-D: 模组下发 "+CME ERROR:"(冒号后无错误码,弱网/异常应答常见)时 arguments 为空,
+        // 原裸读 arguments[0] 越界(UB)。先判空,空码记 0。
+        cme_error_code_ = arguments.empty() ? 0 : arguments[0].int_value;
         xEventGroupSetBits(event_group_handle_, AT_EVENT_COMMAND_ERROR);
         return;
     }
