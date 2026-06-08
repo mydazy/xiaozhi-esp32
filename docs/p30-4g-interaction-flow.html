@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyDazy P30-4G · 交互流程架构图</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c2330; --line:#2b3340;
+    --ink:#e6edf3; --sub:#9aa7b4; --muted:#6b7886;
+    --idle:#3b82f6; --listen:#22c55e; --speak:#f59e0b; --connect:#a855f7;
+    --config:#06b6d4; --sleep:#64748b; --danger:#ef4444; --alarm:#ec4899;
+    --accent:#ffb454; --ok:#34d399;
+    --chip:#222c3a;
+    font-synthesis:none;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6;font-size:15px;}
+  .wrap{max-width:1180px;margin:0 auto;padding:32px 22px 80px;}
+  header.top{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:8px;}
+  .brand{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .brand .dot{width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#ff7a59);box-shadow:0 0 14px var(--accent)}
+  h1{font-size:25px;margin:0;font-weight:700;letter-spacing:.3px}
+  .meta{color:var(--sub);font-size:13px;margin-top:8px}
+  .meta code{background:var(--chip);padding:2px 7px;border-radius:5px;color:#cdd9e5;font-size:12.5px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0 4px;font-size:12.5px;color:var(--sub)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+  h2{font-size:19px;margin:42px 0 6px;padding-left:12px;border-left:4px solid var(--accent);}
+  h2 small{color:var(--muted);font-weight:400;font-size:13px;margin-left:8px}
+  h3{font-size:15.5px;color:#cdd9e5;margin:24px 0 10px}
+  p.lead{color:var(--sub);margin:6px 0 18px;max-width:880px}
+  .grid{display:grid;gap:14px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:860px){.g3,.g2{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .card h4{margin:0 0 8px;font-size:14.5px;display:flex;align-items:center;gap:8px}
+  .card ul{margin:6px 0 0;padding-left:18px;color:var(--sub);font-size:13px}
+  .card li{margin:3px 0}
+  .tag{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--chip);color:#bcd;font-weight:600}
+  /* SVG diagram container */
+  .diagram{background:linear-gradient(180deg,#11161d,#0f141a);border:1px solid var(--line);border-radius:14px;padding:8px;overflow-x:auto}
+  svg{display:block;min-width:760px}
+  .node-label{font:600 13px/1.2 -apple-system,"PingFang SC",sans-serif;fill:#fff}
+  .node-sub{font:400 10.5px -apple-system,"PingFang SC",sans-serif;fill:rgba(255,255,255,.82)}
+  .edge{stroke:#4a5666;stroke-width:1.6;fill:none;marker-end:url(#arrow)}
+  .edge.hot{stroke:var(--accent);stroke-width:2}
+  .edge-label{font:600 10.5px -apple-system,"PingFang SC",sans-serif;fill:#cdd9e5}
+  .edge-label.bg{fill:#0e1116;stroke:#0e1116;stroke-width:6;paint-order:stroke}
+  /* tables */
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--sub);font-weight:600;background:var(--panel2);position:sticky}
+  td code{background:var(--chip);padding:1px 6px;border-radius:4px;color:#e6c07b;font-size:12px}
+  .pill{font-size:11px;font-weight:700;padding:2px 9px;border-radius:6px;color:#0e1116}
+  .p-idle{background:var(--idle)}.p-listen{background:var(--listen)}.p-speak{background:var(--speak)}
+  .p-connect{background:var(--connect)}.p-config{background:var(--config)}.p-sleep{background:var(--sleep);color:#fff}
+  .p-alarm{background:var(--alarm)}.p-danger{background:var(--danger);color:#fff}
+  /* review findings */
+  .finding{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:10px;padding:13px 16px;margin:10px 0}
+  .finding .h{font-weight:700;font-size:14px;margin-bottom:4px;display:flex;gap:8px;align-items:center}
+  .finding p{margin:4px 0 0;color:var(--sub);font-size:13px}
+  .sev{font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:5px}
+  .sev.r{background:#3a1a1f;color:#ff8d8d;border:1px solid #5b2530}
+  .sev.y{background:#3a341a;color:#ffd97a;border:1px solid #5b4f25}
+  .sev.g{background:#163127;color:#7be0b3;border:1px solid #235241}
+  .sev.b{background:#16273a;color:#8fc4ff;border:1px solid #244a6b}
+  .footer{margin-top:50px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  .kbd{display:inline-block;background:var(--chip);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 7px;font-size:12px;color:#cdd9e5;font-weight:600}
+  .note{font-size:12.5px;color:var(--muted);margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>MyDazy P30-4G · 固件交互流程架构图</h1>
+    </div>
+    <div class="meta">
+      源文件 <code>main/boards/mydazy-p30-4g/mydazy_p30_board.cc</code>（1104 行）+ <code>config.h</code>　·
+      板型 <code>MyDazyP30_4GBoard : DualNetworkBoard</code>　·　芯片 ESP32-S3 + ML307R(4G) + ES8311/ES7210　·
+      生成日期 2026-05-20
+    </div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--idle)"></i>Idle 待机</span>
+      <span><i class="sw" style="background:var(--connect)"></i>Connecting 连接中</span>
+      <span><i class="sw" style="background:var(--listen)"></i>Listening 聆听</span>
+      <span><i class="sw" style="background:var(--speak)"></i>Speaking 说话</span>
+      <span><i class="sw" style="background:var(--config)"></i>WifiConfiguring 配网</span>
+      <span><i class="sw" style="background:var(--sleep)"></i>DeepSleep 深睡</span>
+      <span><i class="sw" style="background:var(--alarm)"></i>Alarm 闹钟覆盖层</span>
+    </div>
+  </header>
+
+  <p class="lead">
+    这台设备是面向儿童的 AI 语音硬件。其交互核心是一台 <b>设备状态机</b>（<code>device_state.h</code> 共 11 个枚举态，本板实际驱动其中 5 个），
+    被四类<b>物理输入源</b>（按键手势 / 触摸手势 / 摇一摇 / 拿起）驱动状态流转；之上叠加一层<b>闹钟响铃</b>最高优先级，
+    以及 MP3 播放 / 番茄钟两个活动态。再外层是一套贯穿<b>电源域</b>（共享 LDO）的开机—运行—睡眠—关机生命周期。下图按"输入源 → 状态机 → 电源生命周期"三层展开。
+  </p>
+
+  <!-- ============ 1. 功能全景 ============ -->
+  <h2>一、功能全景 <small>构造函数初始化顺序 + 能力模块</small></h2>
+  <div class="grid g3">
+    <div class="card">
+      <h4>🔧 硬件初始化 <span class="tag">构造顺序</span></h4>
+      <ul>
+        <li>注册 <code>ShutdownHandler</code>（防 POP）</li>
+        <li><code>InitializeGpio</code>：背光关→PA高→LDO 时序上电</li>
+        <li><code>HandleWakeupCause</code>：判定唤醒源/首启</li>
+        <li>I2C(worker 串行化) → SPI → 显示(JD9853)</li>
+        <li>触摸(AXS5106L) → 加速度计(SC7A20H)</li>
+        <li>电源管理 → 省电定时器 → 按键</li>
+        <li>音频编解码 → 默认设置 → MCP 工具</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>🎛️ 输入源 <span class="tag">4 类</span></h4>
+      <ul>
+        <li>BOOT 键(GPIO0)：单/双/3/4/9 连击 + 长按</li>
+        <li>音量键(GPIO42/45)：±10</li>
+        <li>触摸：单击/双击/上滑唤起控制中心</li>
+        <li>摇一摇(SC7A20H)：随机 AI / 停闹钟</li>
+        <li>拿起(陀螺仪 EXT1)：深睡唤醒</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>🔋 电源 / 睡眠 <span class="tag">头号红线</span></h4>
+      <ul>
+        <li>共享 LDO <code>AUDIO_PWR_EN(GPIO9)</code>：音频+4G+LCD</li>
+        <li>开机长按 1.5s 确认 / dead-hold 短路</li>
+        <li>低电告警 / 极低电强制关机</li>
+        <li>省电：120s 降亮 → 300s 深睡(充电跳过)</li>
+        <li>深睡三唤醒源：EXT0 键 / EXT1 陀螺 / TIMER 闹钟</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>📶 双网络 <span class="tag">DualNetwork</span></h4>
+      <ul>
+        <li>4G(ML307R) ↔ WiFi 双栈</li>
+        <li>3 连击：4G ↔ WiFi ↔ 配网 三态轮转</li>
+        <li>优雅切网：断 MQTT/WS→停音频→重启</li>
+        <li>WiFi 模式 hack：ML307 进飞行模式省电</li>
+        <li>出厂复位：通知服务端 <code>/reset</code> 解绑</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>🧩 活动 / 覆盖层 <span class="tag">AudioSource</span></h4>
+      <ul>
+        <li>闹钟 <code>AlarmRinger</code>：最高优先级覆盖</li>
+        <li>MP3 <code>MusicPlayer</code>：Player UI 独占暂停键</li>
+        <li>番茄钟 <code>PomodoroManager</code></li>
+        <li>任意输入先停闹钟，不进对话</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>🖥️ 显示 / MCP <span class="tag">UI + 工具</span></h4>
+      <ul>
+        <li><code>UiDisplay</code>：时钟+配网+激活+控制中心</li>
+        <li>或 <code>EmoteDisplay</code>(表情包模式)</li>
+        <li>状态栏(y&lt;36)单击 → 控制中心</li>
+        <li>MCP：教育工具 + 通用工具自动注册</li>
+        <li>控制中心切网走优雅 <code>SwitchNetwork()</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ 2. 核心：状态机流转 ============ -->
+  <h2>二、核心交互状态机 <small>输入源 → 状态流转（在线对话主回路）</small></h2>
+  <p class="lead">
+    <b>Idle 是中枢。</b>所有唤醒最终落到 <code>ToggleChatState()</code> 推进 Idle→Connecting→Listening；
+    打断回路把 Speaking/Listening 拉回 Idle。注意提示音被设计成"松手信号"，唤醒经
+    <code>ScheduleWakeChatToggle()</code> 异步等播完再 Toggle，避免在按键/LVGL 任务里阻塞。
+  </p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 980 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="设备状态机流转图">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#4a5666"/>
+      </marker>
+      <marker id="arrowHot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#ffb454"/>
+      </marker>
+    </defs>
+
+    <!-- nodes -->
+    <!-- DeepSleep -->
+    <g>
+      <rect x="20" y="200" width="150" height="62" rx="12" fill="#3a4250"/>
+      <text class="node-label" x="95" y="226" text-anchor="middle">DeepSleep</text>
+      <text class="node-sub" x="95" y="244" text-anchor="middle">深度睡眠 / 关机</text>
+    </g>
+    <!-- Starting -->
+    <g>
+      <rect x="230" y="40" width="150" height="58" rx="12" fill="#475569"/>
+      <text class="node-label" x="305" y="64" text-anchor="middle">Starting</text>
+      <text class="node-sub" x="305" y="82" text-anchor="middle">上电 / 唤醒启动</text>
+    </g>
+    <!-- WifiConfiguring -->
+    <g>
+      <rect x="20" y="40" width="150" height="58" rx="12" fill="#06b6d4"/>
+      <text class="node-label" x="95" y="64" text-anchor="middle">WifiConfiguring</text>
+      <text class="node-sub" x="95" y="82" text-anchor="middle">配网(BLUFI/AP)</text>
+    </g>
+    <!-- Idle (hub) -->
+    <g>
+      <rect x="415" y="200" width="160" height="64" rx="14" fill="#3b82f6" stroke="#ffb454" stroke-width="2.2"/>
+      <text class="node-label" x="495" y="227" text-anchor="middle">Idle ★ 中枢</text>
+      <text class="node-sub" x="495" y="245" text-anchor="middle">待机 · 等待唤醒</text>
+    </g>
+    <!-- Connecting -->
+    <g>
+      <rect x="640" y="80" width="150" height="58" rx="12" fill="#a855f7"/>
+      <text class="node-label" x="715" y="104" text-anchor="middle">Connecting</text>
+      <text class="node-sub" x="715" y="122" text-anchor="middle">建立 channel</text>
+    </g>
+    <!-- Listening -->
+    <g>
+      <rect x="820" y="200" width="140" height="62" rx="12" fill="#22c55e"/>
+      <text class="node-label" x="890" y="226" text-anchor="middle">Listening</text>
+      <text class="node-sub" x="890" y="244" text-anchor="middle">聆听用户</text>
+    </g>
+    <!-- Speaking -->
+    <g>
+      <rect x="640" y="330" width="150" height="60" rx="12" fill="#f59e0b"/>
+      <text class="node-label" x="715" y="355" text-anchor="middle">Speaking</text>
+      <text class="node-sub" x="715" y="373" text-anchor="middle">TTS 播报</text>
+    </g>
+
+    <!-- edges -->
+    <!-- sleep -> starting (wake) -->
+    <path class="edge hot" marker-end="url(#arrowHot)" d="M120,200 C150,120 190,90 230,75"/>
+    <text class="edge-label bg" x="150" y="135">EXT0 键1.5s</text>
+    <text class="edge-label" x="150" y="135">EXT0 键1.5s</text>
+    <text class="edge-label" x="150" y="150">EXT1 拿起 · TIMER 闹钟</text>
+
+    <!-- starting -> idle -->
+    <path class="edge hot" marker-end="url(#arrowHot)" d="M340,98 C400,140 450,170 480,198"/>
+    <text class="edge-label bg" x="395" y="150">首启欢迎音</text>
+    <text class="edge-label" x="395" y="150">首启欢迎音</text>
+
+    <!-- starting -> wificonfig -->
+    <path class="edge" d="M230,69 L172,69"/>
+    <text class="edge-label" x="178" y="60">未配网</text>
+
+    <!-- idle -> connecting (wake chat) -->
+    <path class="edge hot" marker-end="url(#arrowHot)" d="M560,205 C610,170 630,150 660,138"/>
+    <text class="edge-label bg" x="565" y="170">唤醒→Toggle</text>
+    <text class="edge-label" x="565" y="170">唤醒→Toggle</text>
+    <text class="edge-label" x="565" y="185">单击/触摸/摇一摇</text>
+
+    <!-- connecting -> listening -->
+    <path class="edge" d="M775,135 C840,160 860,178 875,196"/>
+    <text class="edge-label" x="828" y="160">channel 就绪</text>
+
+    <!-- connecting -> idle (button abort) -->
+    <path class="edge" d="M660,118 C600,150 560,180 558,200"/>
+    <text class="edge-label bg" x="585" y="135">按键打断</text>
+    <text class="edge-label" x="585" y="135">按键打断</text>
+
+    <!-- listening <-> speaking (toggle) -->
+    <path class="edge" d="M858,260 C820,300 780,320 770,330"/>
+    <text class="edge-label" x="800" y="300">Toggle</text>
+    <!-- speaking -> listening -->
+    <path class="edge" d="M790,345 C850,320 880,290 888,264"/>
+    <text class="edge-label bg" x="852" y="318">续听</text>
+    <text class="edge-label" x="852" y="318">续听</text>
+
+    <!-- listening -> idle (double click / button) -->
+    <path class="edge" d="M820,235 C700,250 620,240 577,234"/>
+    <text class="edge-label bg" x="660" y="228">双击退出 / 按键</text>
+    <text class="edge-label" x="660" y="228">双击退出 / 按键</text>
+
+    <!-- speaking -> idle (abort) -->
+    <path class="edge hot" marker-end="url(#arrowHot)" d="M640,360 C580,330 545,290 525,266"/>
+    <text class="edge-label bg" x="545" y="330">单击/双击打断 TTS</text>
+    <text class="edge-label" x="545" y="330">单击/双击打断 TTS</text>
+
+    <!-- idle -> deepsleep (shutdown/timer) -->
+    <path class="edge" d="M415,245 C300,270 220,260 172,248"/>
+    <text class="edge-label bg" x="270" y="285">长按3s / 4连击 / 300s无操作</text>
+    <text class="edge-label" x="270" y="285">长按3s / 4连击 / 300s无操作</text>
+
+    <!-- self loop idle: shake random AI shown above via idle->connecting -->
+  </svg>
+  </div>
+  <p class="note">★ 实线=普通流转，<span style="color:var(--accent)">橙线=高频热路径</span>。Speaking/Listening 的"打断"是儿童最熟悉的退出心智，双击触摸 = 直接回 Idle 并播 exitchat 音。</p>
+
+  <!-- ============ 3. 输入源 → 动作矩阵 ============ -->
+  <h2>三、输入源 → 动作映射矩阵 <small>同一物理动作在不同状态/活动下语义不同</small></h2>
+
+  <h3>BOOT 键（GPIO0 · 多功能手势）</h3>
+  <table>
+    <thead><tr><th style="width:130px">手势</th><th>条件 / 状态</th><th>动作</th></tr></thead>
+    <tbody>
+      <tr><td><span class="kbd">单击</span></td><td>闹钟响铃</td><td>停闹钟（优先，不进对话）</td></tr>
+      <tr><td><span class="kbd">单击</span></td><td>番茄钟活动 / MP3 播放</td><td>停番茄钟 / 打断 MP3 并退 Player UI</td></tr>
+      <tr><td><span class="kbd">单击</span></td><td><span class="pill p-connect">Connecting</span></td><td>打断握手 → CloseAudioChannel + 兜底回 Idle（防卡死）</td></tr>
+      <tr><td><span class="kbd">单击</span></td><td><span class="pill p-idle">Idle</span></td><td>播唤醒音 → <code>ScheduleWakeChatToggle(1500)</code></td></tr>
+      <tr><td><span class="kbd">单击</span></td><td><span class="pill p-listen">Listening</span> / <span class="pill p-speak">Speaking</span></td><td>ToggleChatState（Listening 先播 exitchat 音）</td></tr>
+      <tr><td><span class="kbd">双击</span></td><td>9 连击后 10s 内</td><td>确认恢复出厂 → 异步 <code>FactoryResetTask</code></td></tr>
+      <tr><td><span class="kbd">双击</span></td><td><span class="pill p-config">WifiConfiguring</span></td><td>BLUFI ↔ AP 配网模式切换（atomic_flag 防重入）</td></tr>
+      <tr><td><span class="kbd">双击</span></td><td>在线态（需 <code>CONFIG_USE_DEVICE_AEC</code>）</td><td>AEC 回声消除模式 toggle</td></tr>
+      <tr><td><span class="kbd">3 连击</span></td><td>任意</td><td>网络三态轮转：4G ↔ WiFi ↔ 配网（切前停 MP3+断对话）</td></tr>
+      <tr><td><span class="kbd">4 连击</span></td><td>任意</td><td>关机"再见"（仅按键唤醒，防陀螺仪误开机）</td></tr>
+      <tr><td><span class="kbd">9 连击</span></td><td>任意</td><td>进入恢复出厂确认窗口（10s 内双击确认）</td></tr>
+      <tr><td><span class="kbd">长按 3s</span></td><td>非开机 grace 期</td><td>播再见音(=松手信号) → 关机（<code>shutdown_armed_</code> 防重入）</td></tr>
+      <tr><td><span class="kbd">长按 3s</span></td><td>开机 grace 期</td><td>忽略（开机长按不应触发关机）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>触摸（AXS5106L · RF_STRICT 抗 4G 干扰）<span class="tag" style="margin-left:8px">触屏不参与停闹钟（防戳屏误关）</span></h3>
+  <table>
+    <thead><tr><th style="width:130px">手势</th><th>条件 / 状态</th><th>动作</th></tr></thead>
+    <tbody>
+      <tr><td><span class="kbd">任意触摸</span></td><td>—</td><td>先 <code>WakeUp()</code> 喂省电定时器</td></tr>
+      <tr><td><span class="kbd">单击</span></td><td>控制中心可见</td><td>交给 LVGL 控件，不触发业务</td></tr>
+      <tr><td><span class="kbd">单击</span></td><td>y &lt; 36（顶部状态栏）</td><td>呼出控制中心</td></tr>
+      <tr><td><span class="kbd">单击</span></td><td>MP3 播放</td><td>忽略（暂停由屏幕中央 LVGL 按钮独占）</td></tr>
+      <tr><td><span class="kbd">单击</span></td><td><span class="pill p-idle">Idle</span></td><td>播唤醒音 → <code>ScheduleWakeChatToggle(800)</code></td></tr>
+      <tr><td><span class="kbd">单击</span></td><td><span class="pill p-speak">Speaking</span></td><td>打断 TTS</td></tr>
+      <tr><td><span class="kbd">双击</span></td><td><span class="pill p-listen">Listening</span> / <span class="pill p-speak">Speaking</span></td><td>退出对话 → Idle + 播 exitchat 音</td></tr>
+      <tr><td><span class="kbd">上滑 ↑</span></td><td>控制中心可见</td><td>收回控制中心（横滑/下滑不处理）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>运动传感器（SC7A20H 三轴加速度计）</h3>
+  <table>
+    <thead><tr><th style="width:130px">事件</th><th>条件 / 状态</th><th>动作</th></tr></thead>
+    <tbody>
+      <tr><td><span class="kbd">摇一摇</span></td><td>闹钟响铃</td><td>累计 6 次才停闹铃（防走路误关）</td></tr>
+      <tr><td><span class="kbd">摇一摇</span></td><td><span class="pill p-idle">Idle</span> / <span class="pill p-listen">Listening</span></td><td>播 popup 音 → <code>SendTextToAI("摇一摇随机互动")</code></td></tr>
+      <tr><td><span class="kbd">拿起</span></td><td>深睡中（EXT1）</td><td>陀螺仪唤醒开机（可在控制中心关闭 pickupWake）</td></tr>
+      <tr><td><span class="kbd">OnStrike</span></td><td><i>已定义未挂载</i></td><td>预留：停闹钟 / 唤醒屏幕（当前仅 OnShake 注册）</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 4. 电源生命周期 ============ -->
+  <h2>四、电源 / 睡眠生命周期 <small>共享 LDO(GPIO9) 贯穿全程 · 本项目头号风险区</small></h2>
+  <div class="diagram">
+  <svg viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="电源生命周期">
+    <defs></defs>
+    <!-- DeepSleep -->
+    <g><rect x="30" y="150" width="150" height="60" rx="12" fill="#3a4250"/>
+      <text class="node-label" x="105" y="176" text-anchor="middle">DeepSleep</text>
+      <text class="node-sub" x="105" y="194" text-anchor="middle">~5mA · 三源待唤醒</text></g>
+    <!-- Wake gate -->
+    <g><rect x="245" y="40" width="190" height="74" rx="12" fill="#475569"/>
+      <text class="node-label" x="340" y="66" text-anchor="middle">HandleWakeupCause</text>
+      <text class="node-sub" x="340" y="84" text-anchor="middle">EXT0 键 → 查长按1.5s</text>
+      <text class="node-sub" x="340" y="99" text-anchor="middle">dead-hold 500ms 短路回睡</text></g>
+    <!-- Boot init -->
+    <g><rect x="245" y="155" width="190" height="64" rx="12" fill="#3b82f6"/>
+      <text class="node-label" x="340" y="181" text-anchor="middle">上电时序 + 初始化</text>
+      <text class="node-sub" x="340" y="199" text-anchor="middle">LDO拉低1s放电→拉高→驱动</text></g>
+    <!-- Running -->
+    <g><rect x="510" y="155" width="160" height="64" rx="12" fill="#22c55e"/>
+      <text class="node-label" x="590" y="181" text-anchor="middle">Running</text>
+      <text class="node-sub" x="590" y="199" text-anchor="middle">对话/活动/省电监控</text></g>
+    <!-- PowerSave -->
+    <g><rect x="510" y="40" width="160" height="64" rx="12" fill="#64748b"/>
+      <text class="node-label" x="590" y="66" text-anchor="middle">省电降亮</text>
+      <text class="node-sub" x="590" y="84" text-anchor="middle">120s 亮度15 + 上报状态</text></g>
+    <!-- Shutdown seq -->
+    <g><rect x="740" y="155" width="210" height="64" rx="12" fill="#a855f7"/>
+      <text class="node-label" x="845" y="181" text-anchor="middle">EnterDeepSleep 序列</text>
+      <text class="node-sub" x="845" y="199" text-anchor="middle">停音频→断MQTT→CFUN=4→armEXT1</text></g>
+    <!-- ShutdownHandler -->
+    <g><rect x="740" y="270" width="210" height="60" rx="12" fill="#ef4444"/>
+      <text class="node-label" x="845" y="295" text-anchor="middle">ShutdownHandler(防POP)</text>
+      <text class="node-sub" x="845" y="313" text-anchor="middle">PA静音→断LDO→等电容放电</text></g>
+    <!-- LowBatt -->
+    <g><rect x="510" y="270" width="160" height="60" rx="12" fill="#b45309"/>
+      <text class="node-label" x="590" y="295" text-anchor="middle">极低电</text>
+      <text class="node-sub" x="590" y="313" text-anchor="middle">强制关机</text></g>
+
+    <defs>
+      <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#4a5666"/></marker>
+    </defs>
+    <g fill="none" stroke="#4a5666" stroke-width="1.6">
+      <path marker-end="url(#ar2)" d="M180,170 C205,150 220,120 245,95"/>
+      <path marker-end="url(#ar2)" d="M340,114 L340,153"/>
+      <path marker-end="url(#ar2)" d="M435,187 L508,187"/>
+      <path marker-end="url(#ar2)" d="M590,155 L590,106"/>
+      <path marker-end="url(#ar2)" d="M670,180 L738,182"/>
+      <path marker-end="url(#ar2)" d="M845,219 L845,268"/>
+      <path marker-end="url(#ar2)" d="M740,300 C400,330 230,270 165,212"/>
+      <path marker-end="url(#ar2)" d="M590,219 L590,268"/>
+    </g>
+    <g class="edge-label">
+      <text x="150" y="120">键1.5s/拿起/闹钟</text>
+      <text x="445" y="178">就绪</text>
+      <text x="600" y="135">120s 无操作</text>
+      <text x="675" y="172">长按/4连击/300s</text>
+      <text x="858" y="248">esp_restart 也走此</text>
+      <text x="300" y="255">断 LDO 复位 → 回深睡/重启</text>
+    </g>
+  </svg>
+  </div>
+  <p class="note">充电中 <b>跳过深睡</b> 但保持降亮（防发烫）。<code>ShutdownHandler</code> 是注册到 IDF 的关机钩子：无论关机、出厂复位还是切网 <code>esp_restart()</code> 都会经过它统一断 LDO，确保 LCD/音频/4G 三者硬复位干净。</p>
+
+  <!-- ============ 5. 三轮评审 ============ -->
+  <h2>五、三轮评审结论 <small>正确性 → 并发/边缘 → 电源域红线</small></h2>
+
+  <h3>第 1 轮 · 流程正确性</h3>
+  <div class="finding"><div class="h"><span class="sev g">OK</span>Idle 作为唯一中枢，所有唤醒收敛到 ToggleChatState</div>
+    <p>按键 / 触摸 / 摇一摇三条唤醒路径，最终都通过 <code>ScheduleWakeChatToggle()</code> 异步推进，把"等提示音播完"和"状态切换"解耦，避免在 button/LVGL 任务里 <code>vTaskDelay</code> 卡死。设计自洽。</p></div>
+  <div class="finding"><div class="h"><span class="sev b">观察</span><code>OnStrike</code> 已定义但未挂载</div>
+    <p>桌面双击(敲击)回调 <code>OnStrike</code> 写了"停闹钟 / 唤醒屏幕"逻辑，但 <code>InitializeSc7a20h</code> 只注册了 <code>sc7a20h_shake(...&OnShake...)</code>，没有注册 strike。属预留或被摇一摇取代的死代码——建议确认意图，要么挂载要么删除以免误导。</p></div>
+  <div class="finding"><div class="h"><span class="sev g">OK</span>Connecting 打断有兜底</div>
+    <p>按键打断握手时先 <code>CloseAudioChannel()</code>（靠回调切 Idle），又额外 <code>Schedule</code> 一个兜底：若 channel 未真打开、回调不触发，则强制 <code>SetDeviceState(Idle)</code>，防止永久卡在"连接中"。考虑周到。</p></div>
+
+  <h3>第 2 轮 · 并发与边缘场景</h3>
+  <div class="finding"><div class="h"><span class="sev g">OK</span>三处原子防重入</div>
+    <p><code>shutdown_armed_.exchange(true)</code> 防长按重复触发关机；<code>boot_hold_grace_active_</code> 防开机长按被误判成 3s 关机；配网切换用 <code>atomic_flag test_and_set</code> 防双任务。均符合 <code>~/.claude/rules</code> "多核共享用 std::atomic" 红线。</p></div>
+  <div class="finding"><div class="h"><span class="sev y">留意</span>出厂复位 10s 窗口依赖手动清理</div>
+    <p><code>waiting_factory_reset_confirm_</code> 的超时（10s）在 OnClick/OnDoubleClick lambda 里惰性判断清除，没有独立定时器。若 9 连击后用户既不双击也不再点任何键，标志会一直挂着直到下次按键——非 bug，但状态不会自动复位。可接受（下次任意点击即清）。</p></div>
+  <div class="finding"><div class="h"><span class="sev y">留意</span>dead-hold 短路窗口仅 500ms</div>
+    <p>从 sleep 到再次按键 &lt; 500ms 且仍按住 → 判定"用户没松手"直接回深睡，防误开机。窗口偏短但配合开机长按 1.5s 双保险，逻辑成立。RTC 变量 <code>s_last_sleep_us</code> 用 <code>RTC_DATA_ATTR</code> 跨深睡保持，正确。</p></div>
+
+  <h3>第 3 轮 · 电源域红线（CLAUDE.md 头号风险）</h3>
+  <div class="finding"><div class="h"><span class="sev g">OK</span>开关机时序严防 LCD 闪烁与喇叭 POP</div>
+    <p>开机：LDO 先锁低 → 再释放 RTC hold（消除浮动窗口）→ 1s VBAT 放电 → 拉高，避免冷启动毛刺。关机：<code>ShutdownHandler</code> 先 PA 静音 20ms → 断 LDO → RTC hold 穿越 restart → 等 22µF 电容放电。两端都在守电源毛刺红线。</p></div>
+  <div class="finding"><div class="h"><span class="sev b">观察</span>共享 LDO 是单点：音频+4G+LCD 同生共死</div>
+    <p><code>AUDIO_PWR_EN(GPIO9)</code> 一脚控制三大耗电件，断电即三者硬复位。当前靠它实现"无独立复位脚"的复位，但也意味着任何一路异常只能整组断电。代码已在注释标注 <code>TODO 下版加 ML307 独立电源(VT4 栅极)</code>，与硬件演进对齐。属设计约束而非缺陷。</p></div>
+  <div class="finding"><div class="h"><span class="sev g">OK</span>深睡前优雅释放 4G/网络，避免服务端残留 session</div>
+    <p><code>EnterDeepSleep</code> 与 <code>SwitchNetworkType</code> 对称：都先 <code>ResetProtocol()</code> 优雅断 MQTT/WS，再 <code>AT+CFUN=4</code> 释放 PPP/RRC（等 800ms），最后才断音频电源。顺序正确——必须在 I²C/音频断电之前 arm 陀螺仪 EXT1，代码注释明确标了这条依赖。</p></div>
+
+  <div class="footer">
+    本图基于源码静态分析生成，覆盖 <code>mydazy_p30_board.cc</code> 全部 1104 行 + <code>config.h</code> + <code>device_state.h</code>。
+    评审分级沿用项目缺陷分级（P0必崩/P1高频/P2偶发/P3潜在）。本轮未发现 P0/P1，标注以"观察/留意"为主。
+    生成器：board-flow-diagram skill · MyDazy 固件工程线。
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WiFi vs 4G 启动全链路 · 内部 RAM 占用对比</title>
+<style>
+  :root{
+    --bg:#0f1419; --card:#1a2230; --card2:#212c3d; --line:#2e3a4d;
+    --txt:#e6edf3; --mut:#9fb0c3; --accent:#4ea1ff; --wifi:#5ac8fa; --g4:#ffb454;
+    --shared:#7ee787; --warn:#ff7b72; --ok:#3fb950;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:-apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;
+       line-height:1.6;padding:28px 18px 60px}
+  .wrap{max-width:1180px;margin:0 auto}
+  h1{font-size:25px;margin:0 0 4px;letter-spacing:.5px}
+  .sub{color:var(--mut);font-size:13.5px;margin-bottom:22px}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--mut);
+          background:var(--card);border:1px solid var(--line);border-radius:10px;
+          padding:10px 14px;margin-bottom:22px}
+  .badge{display:inline-block;border-radius:5px;padding:1px 7px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .b-cfg{background:rgba(126,231,135,.16);color:#7ee787}
+  .b-code{background:rgba(78,161,255,.16);color:#5ac8fa}
+  .b-est{background:rgba(255,180,84,.16);color:#ffb454}
+
+  .verdict{background:linear-gradient(135deg,#16202e,#1d2a3c);border:1px solid var(--line);
+           border-left:4px solid var(--accent);border-radius:12px;padding:16px 20px;margin-bottom:26px}
+  .verdict h2{margin:0 0 8px;font-size:16px;color:#fff}
+  .verdict p{margin:6px 0;font-size:14px;color:var(--txt)}
+  .verdict b{color:var(--g4)}
+
+  .totals{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:26px}
+  .tcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;text-align:center}
+  .tcard .lab{font-size:13px;color:var(--mut);margin-bottom:6px}
+  .tcard .num{font-size:30px;font-weight:700;letter-spacing:.5px}
+  .tcard .unit{font-size:14px;color:var(--mut);font-weight:500}
+  .tcard.wifi{border-top:3px solid var(--wifi)}
+  .tcard.g4{border-top:3px solid var(--g4)}
+  .tcard.peak{border-top:3px solid var(--warn)}
+  .tcard small{display:block;color:var(--mut);font-size:11.5px;margin-top:6px}
+
+  h2.sec{font-size:17px;margin:30px 0 12px;padding-left:10px;border-left:4px solid var(--accent)}
+  table{width:100%;border-collapse:collapse;background:var(--card);border-radius:10px;overflow:hidden;
+        font-size:13.5px;margin-bottom:8px}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--card2);color:var(--mut);font-weight:600;font-size:12.5px}
+  td.ram{font-weight:700;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:none}
+  .col-wifi th{border-top:3px solid var(--wifi)}
+  .col-g4 th{border-top:3px solid var(--g4)}
+  .col-sh th{border-top:3px solid var(--shared)}
+  .foot-note{color:var(--mut);font-size:12.5px;margin:4px 0 0}
+  .tag{font-size:11px;color:var(--mut)}
+  .pos{color:var(--warn)}
+  .neg{color:var(--ok)}
+  .src{color:var(--mut);font-size:11.5px}
+  .peakbox{background:var(--card);border:1px solid var(--warn);border-radius:12px;padding:4px 0 0}
+  .peakbox .hd{padding:12px 16px;color:#ffb4ab;font-weight:600;font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>WiFi vs 4G 启动全链路 · 内部 RAM 占用对比</h1>
+  <div class="sub">mydazy-p30-v31 · DualNetworkBoard（同固件双栈，运行时只激活一种）· 仅统计 ESP32-S3 <b>内部 RAM</b>（SRAM，对话红线 &gt;60KB）· 生成于 2026-05-20</div>
+
+  <div class="legend">
+    <span>数据来源：</span>
+    <span><span class="badge b-cfg">配置实测</span> 直接来自 sdkconfig / 代码常量</span>
+    <span><span class="badge b-code">代码佐证</span> 来自代码注释或运行实测值</span>
+    <span><span class="badge b-est">工程估算</span> 基于 ESP-IDF 经验值，需真机校准</span>
+  </div>
+
+  <div class="verdict">
+    <h2>一句话结论</h2>
+    <p><b>4G 模式 ESP32 内部 RAM 占用大约只有 WiFi 模式的一半。</b>原因是 4G 走 ML307 模组（AT 指令），把 TCP/IP 协议栈和 TLS 加解密整体卸载到了<b>模组芯片自己的内存</b>里——ESP32 这边只剩一个 UART 串口缓冲和两个解析任务。WiFi 模式则要在 ESP32 上自己跑 WiFi 驱动 + LWIP 协议栈 + 片上 TLS，是吃内部 RAM 的大头。</p>
+    <p>对产品的含义：<b>WiFi 版的内部 RAM 比 4G 版紧张</b>，尤其是<b>配网那一刻</b>（蓝牙 + WiFi 同时开），实测可用内部 RAM 会跌到 ~57KB、踩穿 60KB 红线——这也是代码里"配网成功后必须重启一次"的根本原因。4G 版没有这个配网峰值问题。</p>
+  </div>
+
+  <div class="totals">
+    <div class="tcard wifi">
+      <div class="lab">WiFi 模式 · 联网稳态</div>
+      <div class="num">~60<span class="unit"> KB</span></div>
+      <small>WiFi 独有增量（握手峰值再 +~9KB）</small>
+    </div>
+    <div class="tcard g4">
+      <div class="lab">4G 模式 · 联网稳态</div>
+      <div class="num">~28<span class="unit"> KB</span></div>
+      <small>4G 独有增量（TLS/socket 在模组芯片）</small>
+    </div>
+    <div class="tcard peak">
+      <div class="lab">WiFi 配网瞬间 · 临时峰值</div>
+      <div class="num">~57<span class="unit"> KB 余量</span></div>
+      <small>BLE+WiFi 并存，逼近 60KB 红线</small>
+    </div>
+  </div>
+  <p class="foot-note">※ 上方"稳态"指标是各模式<b>相对共有基线的额外占用</b>（独有部分）。共有基线（音频/显示/系统）两种模式相同，见下表第一组，不计入差异。</p>
+
+  <!-- ============ 共有 ============ -->
+  <h2 class="sec">① 共有：两种模式都要占（系统基线，不构成差异）</h2>
+  <table class="col-sh">
+    <tr><th style="width:32%">组件</th><th style="width:16%">内部 RAM</th><th style="width:14%">来源</th><th>说明</th></tr>
+    <tr><td>FreeRTOS 内核 + idle/timer/ipc 任务栈</td><td class="ram">~7 KB</td><td><span class="badge b-cfg">配置实测</span></td><td>idle 1536 + timer 2048 + ipc 1280 + isr 1536（sdkconfig）</td></tr>
+    <tr><td>main 主任务栈</td><td class="ram">8 KB</td><td><span class="badge b-cfg">配置实测</span></td><td>ESP_MAIN_TASK_STACK_SIZE=8192</td></tr>
+    <tr><td>esp_timer 任务 + system_event 任务</td><td class="ram">~7.5 KB</td><td><span class="badge b-cfg">配置实测</span></td><td>3584 + 4096</td></tr>
+    <tr><td>音频链路（codec / AFE 唤醒 / I2S DMA / opus）</td><td class="ram">~30–45 KB</td><td><span class="badge b-est">工程估算</span></td><td>I2S DMA 缓冲必须内部 RAM；唤醒词模型大部分在 PSRAM；opus 栈在 PSRAM</td></tr>
+    <tr><td>LVGL + UI + 显示帧缓冲</td><td class="ram">~5–8 KB</td><td><span class="badge b-est">工程估算</span></td><td>帧缓冲主要在 PSRAM，控制结构在内部</td></tr>
+    <tr><td>SPIRAM 内部预留（保 DMA/内部分配）</td><td class="ram">64 KB</td><td><span class="badge b-cfg">配置实测</span></td><td>SPIRAM_MALLOC_RESERVE_INTERNAL=65536，安全垫不可动</td></tr>
+  </table>
+  <p class="foot-note">共有基线不影响 WiFi/4G 对比，但它压低了"可用内部 RAM"的起点——这正是为什么剩下的网络增量必须精打细算。</p>
+
+  <!-- ============ WiFi 独有 ============ -->
+  <h2 class="sec" style="border-color:var(--wifi)">② WiFi 模式独有（4G 模式完全不占）</h2>
+  <table class="col-wifi">
+    <tr><th style="width:32%">组件</th><th style="width:16%">内部 RAM</th><th style="width:14%">来源</th><th>说明</th></tr>
+    <tr><td>esp_wifi 驱动 + PHY/MAC 工作内存</td><td class="ram pos">~35 KB</td><td><span class="badge b-est">工程估算</span></td><td>WiFi 连接态的库静态 + 运行内存，4G 模式 WifiBoard 根本不创建 → 全省</td></tr>
+    <tr><td>WiFi 静态 TX 缓冲（DMA，必须内部）</td><td class="ram pos">~12.8 KB</td><td><span class="badge b-cfg">配置实测</span></td><td>STATIC_TX_BUFFER_NUM=8 × ~1.6KB</td></tr>
+    <tr><td>WiFi 静态 RX 缓冲（DMA，必须内部）</td><td class="ram pos">~4.8 KB</td><td><span class="badge b-cfg">配置实测</span></td><td>STATIC_RX_BUFFER_NUM=3 × ~1.6KB</td></tr>
+    <tr><td>LWIP 协议栈内部部分（TCPIP 任务 + 邮箱）</td><td class="ram pos">~4 KB</td><td><span class="badge b-cfg">配置实测</span></td><td>TCPIP_TASK_STACK=3072；pbuf/堆已靠 SPIRAM_TRY_ALLOCATE 走 PSRAM</td></tr>
+    <tr><td>片上 mbedTLS（TLS 加解密缓冲）</td><td class="ram pos">稳态 ~3 KB / 握手峰值 ~12 KB</td><td><span class="badge b-code">代码佐证</span></td><td>DYNAMIC_BUFFER=y：握手时长到上限，平时缩回；大缓冲多落 PSRAM，小块落内部</td></tr>
+    <tr><td style="color:var(--mut)">（动态 RX / cache TX 缓冲）</td><td class="ram" style="color:var(--mut)">0（PSRAM）</td><td><span class="badge b-cfg">配置实测</span></td><td>SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y → 走 PSRAM，不占内部</td></tr>
+    <tr><td><b>WiFi 独有合计</b></td><td class="ram pos"><b>~60 KB</b><br><span class="tag">握手峰值 ~70 KB</span></td><td></td><td><b>这是 WiFi 版内部 RAM 紧张的主因</b></td></tr>
+  </table>
+
+  <!-- ============ 4G 独有 ============ -->
+  <h2 class="sec" style="border-color:var(--g4)">③ 4G 模式独有（WiFi 模式完全不占）</h2>
+  <table class="col-g4">
+    <tr><th style="width:32%">组件</th><th style="width:16%">内部 RAM</th><th style="width:14%">来源</th><th>说明</th></tr>
+    <tr><td>ML307 UART 接收 ring 缓冲</td><td class="ram pos">8 KB</td><td><span class="badge b-cfg">配置实测</span></td><td>AT_UART_RX_BUFFER_SIZE=8192（at_uart.h），UART 驱动 ring 在内部 RAM</td></tr>
+    <tr><td>modem_receive 任务栈</td><td class="ram pos">6 KB</td><td><span class="badge b-cfg">配置实测</span></td><td>2048×3，Core 0，消费 UART 事件队列</td></tr>
+    <tr><td>modem_event 任务栈</td><td class="ram pos">6 KB</td><td><span class="badge b-cfg">配置实测</span></td><td>2048×3，Core 0，解析 AT 响应 + 派发 URC</td></tr>
+    <tr><td>AtModem rx_buffer_ + 解析缓冲</td><td class="ram pos">~2–4 KB</td><td><span class="badge b-est">工程估算</span></td><td>std::string 动态，短包为主，小块落内部</td></tr>
+    <tr><td>活动连接 receive 任务（按需）</td><td class="ram pos">~4–8 KB</td><td><span class="badge b-cfg">配置实测</span></td><td>tcp_receive 4096 / ssl_receive 4096 / mqtt 4096，开几条连接占几个</td></tr>
+    <tr><td style="color:var(--ok)"><b>不占：TCP/IP 协议栈</b></td><td class="ram neg">0</td><td><span class="badge b-code">代码佐证</span></td><td>由 ML307 模组芯片承担（AT socket）</td></tr>
+    <tr><td style="color:var(--ok)"><b>不占：TLS 加解密</b></td><td class="ram neg">0</td><td><span class="badge b-code">代码佐证</span></td><td>由模组完成（AT+MSSLCFG），ESP32 不跑 mbedTLS 数据通道</td></tr>
+    <tr><td><b>4G 独有合计</b></td><td class="ram pos"><b>~26–32 KB</b></td><td></td><td><b>约为 WiFi 独有的一半</b></td></tr>
+  </table>
+  <p class="foot-note">代价不在 ESP32 内部 RAM，而在：模组芯片自身功耗/成本、TLS 由模组实现（4G 数据通道默认<b>不校验证书</b>，已与你确认接受）。</p>
+
+  <!-- ============ 配网临时 ============ -->
+  <h2 class="sec" style="border-color:var(--warn)">④ 配网临时峰值（仅 WiFi 模式存在 · 单独计算）</h2>
+  <div class="peakbox">
+    <div class="hd">⚠ 这是全程内部 RAM 最紧张的一刻，且 4G 模式完全没有</div>
+    <table>
+      <tr><th style="width:32%">组件</th><th style="width:16%">内部 RAM</th><th style="width:14%">来源</th><th>说明</th></tr>
+      <tr><td>BT 静态 .bss/.data（控制器固件 + 协议栈）</td><td class="ram pos">30–50 KB</td><td><span class="badge b-code">代码佐证</span></td><td>wifi_board.cc:421 注释明写；配网完调 Blufi::ReleaseStaticMem() 释放</td></tr>
+      <tr><td>BLE 控制器运行内存（内部 RAM，无法走 PSRAM）</td><td class="ram pos">随 MAX_ACT=2</td><td><span class="badge b-cfg">配置实测</span></td><td>已压到地板 MAX_ACT=2、ACL=8；NimBLE host 走 PSRAM</td></tr>
+      <tr><td>叠加效果：BLE + WiFi + 提示音并存</td><td class="ram pos">可用内部 RAM 跌到 <b>~57 KB</b></td><td><span class="badge b-code">代码佐证</span></td><td>wifi_board.cc:464-469 注释明写，已踩穿 60KB 红线</td></tr>
+    </table>
+  </div>
+  <p class="foot-note" style="margin-top:10px">现状缓解措施（代码已实现）：① BLUFI 模式下 WiFi 延迟到手机连上 BLE 才初始化，错开峰值；② 配网成功后<b>主动重启一次</b>，让 BLE 静态内存彻底释放、RAM 干净后再走 OTA/MQTT；③ 没进配网就直连成功时，立即 ReleaseStaticMem() 释放 30–50KB。<b>结论：配网峰值已被"延迟初始化 + 配网后重启"两招压住，但它仍是 WiFi 版唯一逼近红线的场景，量产前应作为重点压测项。</b></p>
+
+  <!-- ============ 速查 ============ -->
+  <h2 class="sec">⑤ 一图速查：谁占谁不占</h2>
+  <table>
+    <tr><th style="width:40%">子系统</th><th style="width:20%">WiFi 模式</th><th style="width:20%">4G 模式</th><th>归属</th></tr>
+    <tr><td>esp_wifi 驱动 + PHY/MAC</td><td class="pos">~35 KB</td><td class="neg">0</td><td><span class="tag">WiFi 独有</span></td></tr>
+    <tr><td>WiFi 静态 TX/RX DMA 缓冲</td><td class="pos">~17.6 KB</td><td class="neg">0</td><td><span class="tag">WiFi 独有</span></td></tr>
+    <tr><td>LWIP TCP/IP 协议栈</td><td class="pos">~4 KB（内部）</td><td class="neg">0（模组承担）</td><td><span class="tag">WiFi 独有</span></td></tr>
+    <tr><td>片上 mbedTLS（TLS 加解密）</td><td class="pos">~3–12 KB</td><td class="neg">0（模组承担）</td><td><span class="tag">WiFi 独有</span></td></tr>
+    <tr><td>ML307 UART ring + 收发任务</td><td class="neg">0</td><td class="pos">~20 KB</td><td><span class="tag">4G 独有</span></td></tr>
+    <tr><td>AT socket / 连接任务</td><td class="neg">0</td><td class="pos">~6–12 KB</td><td><span class="tag">4G 独有</span></td></tr>
+    <tr><td>BLE 蓝牙配网（含 BT 静态内存）</td><td class="pos">30–50 KB（临时）</td><td class="neg">0（4G 不配网）</td><td><span class="tag">WiFi 独有·临时</span></td></tr>
+    <tr><td>音频 / 显示 / 系统基线</td><td>相同</td><td>相同</td><td><span class="tag">共有</span></td></tr>
+  </table>
+
+  <p class="foot-note" style="margin-top:24px;border-top:1px solid var(--line);padding-top:14px">
+    <b>口径说明：</b>所有数字均为 ESP32-S3 <b>内部 RAM（SRAM）</b>占用，不含 PSRAM。带 <span class="badge b-est">工程估算</span> 的项（WiFi 驱动、音频链路）需用 <code>heap_caps_get_free_size(MALLOC_CAP_INTERNAL)</code> 在真机分模式各测一轮校准，本表给的是量级而非精确值。<span class="badge b-cfg">配置实测</span> / <span class="badge b-code">代码佐证</span> 两类为硬数据。<br>
+    <b>建议下一步：</b>出一版带内部 RAM/栈高水位监控的固件，分别在 WiFi 联网态、4G 联网态、WiFi 配网态各跑一轮，把估算项落成真值——这是把本表从"量级对比"升级为"量产基线"的唯一可靠途径。
+  </p>
+
+</div>
+</body>
+</html>
