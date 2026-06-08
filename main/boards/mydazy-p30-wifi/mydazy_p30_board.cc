@@ -210,7 +210,7 @@ private:
                 first_boot_ = true;
                 if (!CheckBootHoldOnWakeup()) {
                     ESP_LOGI(TAG, "开机长按未达 1.5 秒，立即回深睡");
-                    EnterDeepSleep(false);  // 不会返回 · 砍 gyro 唤醒：防长按不足回深睡后又被震动唤醒
+                    EnterDeepSleep(true);  // 不会返回
                 }
                 break;
             case ESP_SLEEP_WAKEUP_EXT1:
@@ -301,16 +301,10 @@ private:
         sc7a20h_shake (sc7a20h_sensor_, 1500, 1000, 4, 1500, &OnShake,  this);
     }
 
-    // 摇一摇 — 日常 AI 互动 · 闹钟响铃中累计 3 次才停（防走路误关）
+    // 摇一摇 — 仅用于闹钟摇停（日常摇→AI互动已砍 · 走路/拿起易误触发 · 两板统一）
     static void OnShake(void* /*ctx*/) {
         Application::GetInstance().Schedule([] {
-            if (AlarmRinger::GetInstance().ShakeStop(6)) return;   // 6 次累计才停闹铃（防误关）
-            auto& app = Application::GetInstance();
-            auto state = app.GetDeviceState();
-            if (state != kDeviceStateIdle && state != kDeviceStateListening) return;
-            app.PlaySound(Lang::Sounds::OGG_POPUP);
-            ESP_LOGI(TAG, "shake → AI");
-            app.SendTextToAI("摇一摇随机互动");
+            AlarmRinger::GetInstance().ShakeStop(6);   // 6 次累计才停闹铃（防误关）；非响铃时 ShakeStop 直接返回，无副作用
         });
     }
 
@@ -503,7 +497,7 @@ private:
             }
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
-                ShutdownOrSleep("休眠中", "按键唤醒", "", 1500, false);  // 砍陀螺仪深睡唤醒(E1/E2/G1根因:夜间震动误开机)，只留按键(EXT0)/闹钟(RTC)唤醒
+                ShutdownOrSleep("休眠中", "拿起唤醒", "", 1500, true);
             }
         });
 
@@ -795,9 +789,14 @@ private:
     // ========================================================
 
     void ApplyDefaultSettings() {
-        // C1 修复：移除"音量<50 强制回写 80%"——它会把用户主动设的低音量(如40%)在每次
-        // 开机/切网时冲回 80%(现场反馈"低音量不保存")。键不存在时音量读取处 GetInt 默认值
-        // 已兜底；键存在则尊重用户设置(含低音量)。
+        // 音量范围修正（50-100）
+        Settings audio_settings("audio", true);
+        constexpr int DEFAULT_VOLUME = 50;
+        int original_volume = audio_settings.GetInt("output_volume", DEFAULT_VOLUME);
+        if (original_volume < 30) {
+            audio_settings.SetInt("output_volume", DEFAULT_VOLUME);
+            ESP_LOGI(TAG, "检测到音量%d小于50，自动调整为%d", original_volume, DEFAULT_VOLUME);
+        }
         // 默认使用蓝牙配网
         Settings wifi_settings("wifi", true);
         wifi_settings.SetInt("blufi", 1);
