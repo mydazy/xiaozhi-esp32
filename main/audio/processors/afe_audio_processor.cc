@@ -172,8 +172,10 @@ void AfeAudioProcessor::AudioProcessorTask() {
             continue;
         }
         if (res == nullptr || res->ret_value == ESP_FAIL) {
+            // fetch 超时拿空(每句进 listening 时 Start+warmup 瞬间 feed 未跟上)是预期瞬态、非真错误——
+            // 降 DEBUG，量产 INFO 下不再每句刷 "Error code: -1"。真正异常仍可在 DEBUG 级查看。
             if (res != nullptr) {
-                ESP_LOGI(TAG, "Error code: %d", res->ret_value);
+                ESP_LOGD(TAG, "AFE fetch no data (ret=%d, warmup/transient)", res->ret_value);
             }
             continue;
         }
