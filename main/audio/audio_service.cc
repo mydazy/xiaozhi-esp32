@@ -705,12 +705,18 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         // 先清 RUNNING 位停掉 AudioInputTask 喂入，再 Stop
         xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
         wake_word_->Stop();
-        // 通话期彻底释放 SR-AFE 引擎以回收内部 RAM（含 6KB 检测任务栈 + AEC/WakeNet 内部缓冲）；
-        // 下次 EnableWakeWordDetection(true) 会重建。仅对 AFE 生效，Custom 唤醒词 Release 为 no-op 维持原状。
-        if (IsAfeWakeWord()) {
-            wake_word_->Release();
-            wake_word_initialized_ = false;
-        }
+    }
+}
+
+void AudioService::ReleaseWakeWord() {
+    if (!wake_word_) {
+        return;
+    }
+    xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
+    wake_word_->Stop();
+    if (IsAfeWakeWord() && wake_word_initialized_) {
+        wake_word_->Release();
+        wake_word_initialized_ = false;
     }
 }
 
