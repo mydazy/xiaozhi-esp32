@@ -869,7 +869,8 @@ private:
         }
 
         if (app.GetDeviceState() != kDeviceStateWifiConfiguring && self->first_boot_) {
-            app.RequestAutoChatOnIdle();
+            // 关闭开机联网默认自动对话(产品决策)：开机只播欢迎音，由用户喊唤醒词/按键发起对话
+            // app.RequestAutoChatOnIdle();
             app.PlaySound(Lang::Sounds::OGG_WELCOME);
         }
         vTaskDelete(NULL);
@@ -883,7 +884,7 @@ private:
 
 public:
     MyDazyP30_4GBoard() :
-        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 1),
+        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 0),  // 出厂默认 WiFi(0)；原默认 4G/ML307(1)。仅首次出厂(NVS无type)生效，已配网设备保留用户选择
         boot_button_(BOOT_BUTTON_GPIO, false, 800, 400),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
