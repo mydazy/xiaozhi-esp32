@@ -327,7 +327,8 @@ private:
             .int_gpio        = TOUCH_INT_NUM,
             .width           = DISPLAY_WIDTH,
             .height          = DISPLAY_HEIGHT,
-            .rf_mode         = AXS5106L_RF_STRICT,
+            .rf_mode         = (GetNetworkType() == NetworkType::WIFI)
+                                   ? AXS5106L_RF_NORMAL : AXS5106L_RF_STRICT,
             .cb_ctx          = this,
             .on_wake         = &OnTouchWake,
             .on_click        = &OnTouchClick,
