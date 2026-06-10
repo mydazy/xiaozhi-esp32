@@ -1089,7 +1089,9 @@ void Application::HandleWakeWordDetectedEvent() {
     ESP_LOGI(TAG, "Wake word detected: %s (state: %d)", wake_word.c_str(), (int)state);
 
     if (state == kDeviceStateIdle) {
+#if CONFIG_SEND_WAKE_WORD_DATA
         audio_service_.EncodeWakeWord();
+#endif
         auto wake_word = audio_service_.GetLastWakeWord();
 
         // 跳过下一条 STT 提示音 · 避免唤醒词音频被 ASR 识别后立刻响（唤醒已有 OGG_WAKEUP 提示）
@@ -1114,12 +1116,13 @@ void Application::HandleWakeWordDetectedEvent() {
         if (state == kDeviceStateListening) {
             protocol_->SendStartListening(GetDefaultListeningMode());
             audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
+            audio_service_.PlaySound(Lang::Sounds::OGG_WAKEUP);
             // Re-enable wake word detection as it was stopped by the detection itself
             audio_service_.EnableWakeWordDetection(true);
         } else {
-            // Play popup sound and start listening again
+            // 唤醒词打断 TTS：进听音后播 wakeup.ogg 作为打断反馈（时序机制与 popup 相同）
             play_popup_on_listening_ = true;
+            wakeup_sound_on_listening_ = true;
             SetListeningMode(GetDefaultListeningMode());
         }
     } else if (state == kDeviceStateActivating) {
@@ -1151,17 +1154,13 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     while (auto packet = audio_service_.PopWakeWordPacket()) {
         protocol_->SendAudio(std::move(packet));
     }
-    // Set the chat state to wake word detected
+#endif
+    // 通知协议层唤醒（baidu: 发固定问候触发 AI 回应; xiaozhi: detect 消息）· 不上送唤醒词音频
     protocol_->SendWakeWordDetected(wake_word);
 
     // Set flag to play popup sound after state changes to listening
     play_popup_on_listening_ = true;
     SetListeningMode(GetDefaultListeningMode());
-#else
-    // Set flag to play popup sound after state changes to listening
-    play_popup_on_listening_ = true;
-    SetListeningMode(GetDefaultListeningMode());
-#endif
 }
 
 void Application::HandleStateChangedEvent() {
@@ -1227,7 +1226,9 @@ void Application::HandleStateChangedEvent() {
             // Play popup sound after ResetDecoder (in EnableVoiceProcessing) has been called
             if (play_popup_on_listening_) {
                 play_popup_on_listening_ = false;
-                audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
+                audio_service_.PlaySound(wakeup_sound_on_listening_ ? Lang::Sounds::OGG_WAKEUP
+                                                                    : Lang::Sounds::OGG_POPUP);
+                wakeup_sound_on_listening_ = false;
             }
             break;
         case kDeviceStateSpeaking:
@@ -1446,8 +1447,9 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     auto state = GetDeviceState();
 
     if (state == kDeviceStateIdle) {
+#if CONFIG_SEND_WAKE_WORD_DATA
         audio_service_.EncodeWakeWord();
-
+#endif
         skip_next_stt_popup_.store(true);
 
         if (!protocol_->IsAudioChannelOpened()) {

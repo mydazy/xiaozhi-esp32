@@ -1370,7 +1370,8 @@ void WebsocketBaiduProtocol::SendFunctionCallResult(
 void WebsocketBaiduProtocol::SendWakeWordDetected(const std::string& wake_word) {
     // 直播/音乐播放中唤醒：跳过问候语，避免打断直播内容
     if (!is_playing_music_) {
-        SendTextToAI(wake_word.empty() ? "你好" : wake_word);
+        // 不把唤醒词字面值（"搭子精灵"等）当用户消息上送——AI 会把它当问题回应；固定用问候语触发
+        SendTextToAI("你好");
     }
     greeting_sent_ = true;
     UpdateActivityTime();
