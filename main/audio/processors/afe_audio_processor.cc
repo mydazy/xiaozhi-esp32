@@ -41,7 +41,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     
     afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_HIGH_PERF);
     afe_config->aec_mode = AEC_MODE_VOIP_HIGH_PERF;
-    afe_config->vad_mode = VAD_MODE_0;
+    afe_config->vad_mode = VAD_MODE_1;
     afe_config->vad_min_noise_ms = 100;
     if (vad_model_name != nullptr) {
         afe_config->vad_model_name = vad_model_name;
@@ -55,7 +55,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         afe_config->ns_init = false;
     }
 
-    afe_config->afe_linear_gain = 4.0f;
+    afe_config->afe_linear_gain = 3.0f;
     afe_config->agc_init = true;
     afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
@@ -73,7 +73,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     afe_config_free(afe_config);
     if (afe_data_ == nullptr) {
         ESP_LOGE(TAG, "AFE create_from_config 失败(PSRAM不足)，不创建处理任务");
-        return;  // task_created_ 保持 false，析构安全；GetFeedSize 等已有 nullptr 兜底
+        return;
     }
 
     xTaskCreatePinnedToCore([](void* arg) {
@@ -172,8 +172,6 @@ void AfeAudioProcessor::AudioProcessorTask() {
             continue;
         }
         if (res == nullptr || res->ret_value == ESP_FAIL) {
-            // fetch 超时拿空(每句进 listening 时 Start+warmup 瞬间 feed 未跟上)是预期瞬态、非真错误——
-            // 降 DEBUG，量产 INFO 下不再每句刷 "Error code: -1"。真正异常仍可在 DEBUG 级查看。
             if (res != nullptr) {
                 ESP_LOGD(TAG, "AFE fetch no data (ret=%d, warmup/transient)", res->ret_value);
             }
