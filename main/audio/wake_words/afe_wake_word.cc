@@ -99,14 +99,6 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
     afe_data_ = afe_iface_->create_from_config(afe_config);
     afe_config_free(afe_config);
 
-  // ============== 设置 Wakenet 检测阈值 ==============
-  float new_threshold = 0.6f;
-  for (size_t i = 0; i < wake_words_.size(); i++) {
-    int ret = afe_iface_->set_wakenet_threshold(afe_data_, i, new_threshold);
-    ESP_LOGI(TAG, "设置唤醒词[%d] \"%s\" 阈值: %.2f (ret=%d)", (int)i,
-             wake_words_[i].c_str(), new_threshold, ret);
-  }
-
     xTaskCreatePinnedToCore([](void* arg) {
         auto this_ = (AfeWakeWord*)arg;
         this_->AudioDetectionTask();
@@ -133,6 +125,10 @@ void AfeWakeWord::Stop() {
         afe_iface_->reset_buffer(afe_data_);
     }
     input_buffer_.clear();
+#if !CONFIG_SEND_WAKE_WORD_DATA
+    std::lock_guard<std::mutex> pcm_lock(wake_word_pcm_mutex_);
+    std::deque<std::vector<int16_t>>().swap(wake_word_pcm_);
+#endif
 }
 
 void AfeWakeWord::Release() {
