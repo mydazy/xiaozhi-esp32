@@ -15,8 +15,8 @@
 |------|---------------|------------|
 | 音频 DAC | ES8311 (I2C) | ES7111 (纯 I2S) |
 | 音频驱动 | BoxAudioCodec | Es7111AudioCodec |
-| 音频电源 | GPIO_9 | GPIO_15 |
-| 充电检测 | GPIO_21 | GPIO_44 |
+| 音频电源 | GPIO_9 | GPIO_9（网表实证，原表 GPIO_15 有误） |
+| 充电检测 | GPIO_21 | GPIO_44（GPIO44=U0RXD 复用，控制台仅日志输出） |
 | TE 引脚 | GPIO_40 | NC |
 | Type-C 耳机 | 无 | 有 |
 | NFC | 无 | WS1850S |

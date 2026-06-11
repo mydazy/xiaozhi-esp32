@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>P30 产线测试指导书 v1.0</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px;
+         color: #222; line-height: 1.55; padding: 24px; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 22px; text-align: center; margin-bottom: 4px; }
+  .sub { text-align: center; color: #666; font-size: 12px; margin-bottom: 16px; }
+  h2 { font-size: 17px; background: #1a4f8b; color: #fff; padding: 6px 12px;
+       margin: 22px 0 10px; border-radius: 4px; page-break-after: avoid; }
+  h3 { font-size: 14px; margin: 12px 0 6px; color: #1a4f8b; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; page-break-inside: avoid; }
+  th, td { border: 1px solid #bbb; padding: 6px 8px; vertical-align: top; text-align: left; }
+  th { background: #e8eef6; font-size: 13px; white-space: nowrap; }
+  .num { width: 28px; text-align: center; font-weight: bold; }
+  .chk { width: 64px; text-align: center; font-size: 18px; white-space: nowrap; }
+  .std { color: #0a7a2f; }
+  .fail { color: #c0392b; }
+  .head-table td { border: 1px solid #bbb; height: 30px; }
+  .head-table .lbl { background: #e8eef6; width: 90px; font-weight: bold; }
+  .note { background: #fff7e0; border: 1px solid #e6c860; border-radius: 4px;
+          padding: 8px 12px; margin: 10px 0; font-size: 13px; }
+  .danger { background: #fdecea; border-color: #e0a0a0; }
+  .small { font-size: 12px; color: #555; }
+  .sign { margin-top: 26px; display: flex; gap: 40px; }
+  .sign div { flex: 1; border-top: 1px solid #888; padding-top: 6px; text-align: center; }
+  @media print {
+    body { padding: 8mm; font-size: 12px; }
+    h2 { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .pagebreak { page-break-before: always; }
+  }
+</style>
+</head>
+<body>
+
+<h1>P30 设备产线测试指导书</h1>
+<div class="sub">版本 v1.0 · 2026-06-11 · 适用固件 ≥2.2.22 · 浏览器打开 → 打印 → 另存为 PDF</div>
+
+<table class="head-table">
+<tr><td class="lbl">设备 SN</td><td></td><td class="lbl">机型</td><td>☐ WiFi 版　☐ 4G 版</td></tr>
+<tr><td class="lbl">测试日期</td><td></td><td class="lbl">操作员</td><td></td></tr>
+</table>
+
+<div class="note">
+<b>使用说明</b>：第一部分<b>每台必测</b>（约 6 分钟/台），按顺序做，每项合格打 ✓，不合格打 ✗ 并在备注写现象。
+任何一项 ✗ → 该机放入不良品区，<b>不得流入下一道工序</b>。第二部分为<b>每批抽测</b>（每批抽 3~5 台）。
+</div>
+
+<h2>第一部分 · 每台必测（流水线工位）</h2>
+
+<h3>A. 开机与屏幕</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准（看什么）</th><th class="chk">✓ / ✗</th><th>备注</th></tr>
+<tr><td class="num">1</td>
+  <td>看屏幕外观：贴膜下有无气泡、划痕、坏点</td>
+  <td class="std">屏幕干净无划痕；<span class="fail">开机瞬间不出现整屏红色/花屏（出现=立即隔离整批屏，通知主管）</span></td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">2</td>
+  <td><b>长按</b>电源键 <b>2 秒</b>开机（按住别松手，短按是不开机的）</td>
+  <td class="std">5 秒内屏幕点亮、有开机声音</td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">3</td>
+  <td>第一次开机会"哔"一声（这是麦克风自动校准，正常现象），听完等开机完成</td>
+  <td class="std">"哔"一声后正常进入下一步，不卡住、不重启</td>
+  <td>☐</td><td></td></tr>
+</table>
+
+<h3>B. 联网与激活（按机型二选一）</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th><th>备注</th></tr>
+<tr><td class="num">4a</td>
+  <td><b>4G 版</b>：装好测试用流量卡再开机，<b>什么都不用操作</b></td>
+  <td class="std">开机后<b>直接</b>开始联网（屏幕出现信号图标）→ 2 分钟内出现绑定二维码。<span class="fail">若出现"WiFi 配网二维码"= 产线烧录漏写网络配置，整批停线报主管！</span></td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">4b</td>
+  <td><b>WiFi 版</b>：屏幕出现二维码后，用产线测试手机扫码，连产线测试 WiFi</td>
+  <td class="std">手机按提示操作后设备自动重启并联网成功</td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">5</td>
+  <td>等屏幕出现绑定二维码，用产线测试微信号扫码绑定</td>
+  <td class="std">绑定成功，设备进入时钟界面</td>
+  <td>☐</td><td></td></tr>
+</table>
+
+<h3>C. 语音功能（核心，认真测）</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th><th>备注</th></tr>
+<tr><td class="num">6</td>
+  <td>距离设备 <b>1 米</b>，正常说话音量喊"<b>搭子精灵</b>"，共喊 3 次（每次等它回应完）</td>
+  <td class="std">至少 <b>3 次中响应 2 次</b>（有提示音并进入聆听）</td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">7</td>
+  <td>唤醒后问一句："今天星期几"</td>
+  <td class="std">10 秒内有语音回答，声音清晰<span class="fail">无破音、无电流嘶嘶声</span></td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">8</td>
+  <td><b>打断测试</b>：先让它讲故事（说"给我讲个故事"），它讲的时候喊"搭子精灵"</td>
+  <td class="std">能打断：它停止讲话并"叮"一声重新听你说</td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">9</td>
+  <td><b>自说自话检查</b>：问它"你叫什么名字"，听它完整回答（回答里会带"搭子精灵"四个字）</td>
+  <td class="std">它能<b>完整说完</b>自己的名字，<span class="fail">不会说到一半自己停下来进入聆听（= 自己打断自己，记录后报主管）</span></td>
+  <td>☐</td><td></td></tr>
+</table>
+
+<h3>D. 按键与触摸</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th><th>备注</th></tr>
+<tr><td class="num">10</td>
+  <td>按音量 + 键 2 次、音量 − 键 2 次</td>
+  <td class="std">每按一次音量条变化一次，提示音大小跟着变</td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">11</td>
+  <td>手指<b>点一下</b>屏幕中央</td>
+  <td class="std">"叮"一声进入对话；<b>双击</b>屏幕能退出对话</td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">12</td>
+  <td>点屏幕<b>顶部状态栏</b>打开控制中心，逐个点 6 个按钮看反应，再上滑收起</td>
+  <td class="std">点哪个亮哪个，<span class="fail">没有"点 A 响 B"（点错位）现象</span></td>
+  <td>☐</td><td></td></tr>
+</table>
+
+<h3>E. 电池与充电</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th><th>备注</th></tr>
+<tr><td class="num">13</td>
+  <td>看屏幕右上角电量数字</td>
+  <td class="std">显示 20%~100% 之间的合理数字（不是 0% 也不是一直 100%）</td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">14</td>
+  <td>插入充电线 10 秒，再拔掉</td>
+  <td class="std">插上出现充电图标，拔掉图标消失</td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">15</td>
+  <td>接电脑串口看开机日志（工装自动检查），搜索"<b>ADC 无 eFuse 校准</b>"红色字样</td>
+  <td class="std">没有这行红字 = 合格。<span class="fail">出现 = 该机记录 SN 单独放"待校准"区（能用但电量不准）</span></td>
+  <td>☐</td><td></td></tr>
+</table>
+
+<h3>F. 关机（最后一步）</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th><th>备注</th></tr>
+<tr><td class="num">16</td>
+  <td>长按电源键关机，听到"再见"后等屏幕熄灭，再<b>长按 2 秒</b>确认能重新开机，然后再次关机</td>
+  <td class="std">能正常关机 + 能再开机</td>
+  <td>☐</td><td></td></tr>
+<tr><td class="num">17</td>
+  <td><b>仅 4G 版</b>：关机后接电流表测静态电流（工装位），等 1 分钟读数</td>
+  <td class="std"><b>≤ 8mA</b> 合格。<span class="fail">读到 20mA 以上 = 4G 模块没进省电模式，✗ 并报主管</span></td>
+  <td>☐</td><td></td></tr>
+</table>
+
+<div class="note danger">
+<b>不良品处理</b>：任何 ✗ 的机器 → 贴红色标签写明项号和现象 → 放不良品区 → 当天汇总报质检主管。
+<b>4a 出现 WiFi 二维码、1 出现红屏、17 电流超标</b>这三种情况是批次性问题，发现 1 台立即停线上报。
+</div>
+
+<div class="pagebreak"></div>
+
+<h2>第二部分 · 每批抽测（压力测试，每批抽 3~5 台）</h2>
+
+<table class="head-table">
+<tr><td class="lbl">批次号</td><td></td><td class="lbl">抽测台数</td><td></td><td class="lbl">SN 列表</td><td></td></tr>
+</table>
+
+<h3>P1. 连续对话老化（4 小时）—— 考内存与稳定性</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th></tr>
+<tr><td class="num">1</td>
+  <td>用音箱循环播放"唤醒词+问题"录音（每 2 分钟一轮），设备 1 米内，连续 <b>4 小时</b>。期间接串口记录日志</td>
+  <td class="std">全程不死机、不重启、不变哑；日志里 min_free 内存值始终 <b>&gt; 60000</b>（工装脚本自动判）</td>
+  <td>☐</td></tr>
+</table>
+
+<h3>P2. 整夜待机老化（12 小时）</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th></tr>
+<tr><td class="num">2</td>
+  <td>满电不插电，时钟界面放置过夜（12 小时），不操作</td>
+  <td class="std">第二天：设备已自动休眠（黑屏）、长按能唤醒、电量下降 <b>&lt; 15%</b>、期间没有自己出声/自己亮屏</td>
+  <td>☐</td></tr>
+</table>
+
+<h3>P3. 充电过夜（8 小时）—— 考安全</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th></tr>
+<tr><td class="num">3</td>
+  <td>插充电器充 8 小时（模拟用户睡前充电），旁边放温度计</td>
+  <td class="std">外壳不烫手（<b>&lt; 45℃</b>）、电池不鼓包、充满后充电图标正确；<span class="fail">期间设备半夜自己说话的，记录上报（误唤醒问题）</span></td>
+  <td>☐</td></tr>
+</table>
+
+<h3>P4. 开关机循环（50 次）</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th></tr>
+<tr><td class="num">4</td>
+  <td>"长按开机 → 等进时钟界面 → 长按关机"算 1 次，连续做 <b>50 次</b>（或用工装自动做）</td>
+  <td class="std">50 次全部正常开机进系统，无卡死、无花屏、无开机后变哑</td>
+  <td>☐</td></tr>
+</table>
+
+<h3>P5. 弱信号压力（30 分钟）—— 考卡死</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th></tr>
+<tr><td class="num">5</td>
+  <td>把设备放到信号弱的位置（金属柜里/屏蔽箱，信号图标 1 格），每 2 分钟对话一次，持续 30 分钟</td>
+  <td class="std">对话可以失败（提示网络不好），但<b>按键和触摸必须一直有反应</b>，<span class="fail">不允许出现按了没反应超过 30 秒的"假死"</span></td>
+  <td>☐</td></tr>
+</table>
+
+<h3>P6. 闹钟可靠性</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th></tr>
+<tr><td class="num">6</td>
+  <td>对它说"20 分钟后提醒我喝水"，然后不操作让它自动熄屏，等 20 分钟</td>
+  <td class="std">到点<b>准时响铃</b>（设备保持运行等闹钟是正常设计），按一下按键能停</td>
+  <td>☐</td></tr>
+<tr><td class="num">7</td>
+  <td>对它说"明天早上 7 点叫我"（跨深睡场景），关灯放置过夜</td>
+  <td class="std">第二天 7 点前后 <b>2 分钟内</b>响铃</td>
+  <td>☐</td></tr>
+</table>
+
+<h3>P7. 反复插拔充电（20 次）</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th></tr>
+<tr><td class="num">8</td>
+  <td>快速插拔充电线 20 次（约 2 秒一次）</td>
+  <td class="std">充电图标正确跟随，电量数字不乱跳（如 80%→30%→90%），设备不重启</td>
+  <td>☐</td></tr>
+</table>
+
+<h3>P8. 升级测试（每批 1 台）</h3>
+<table>
+<tr><th class="num">#</th><th>怎么做</th><th>合格标准</th><th class="chk">✓ / ✗</th></tr>
+<tr><td class="num">9</td>
+  <td>刷上一个旧版本固件 → 开机联网让它自动升级 → 升级中<b>故意拔一次网</b>（关路由器 10 秒再开）</td>
+  <td class="std">升级最终完成并重启进新版本；版本号正确；升级后所有第一部分 A~F 快测一遍通过；<span class="fail">不允许升级后变回旧版本</span></td>
+  <td>☐</td></tr>
+</table>
+
+<div class="note">
+<b>抽测判定</b>：抽测 5 台中 <b>1 台不合格 → 加抽 5 台</b>；加抽再有不合格 → 该批次整批冻结，报质量负责人。
+P1/P2 的串口日志文件按"批次号_SN_日期"命名归档保存 6 个月（售后追溯用）。
+</div>
+
+<h2>测试结论</h2>
+<table>
+<tr>
+  <td style="width:50%">每台必测结果：☐ 全部合格　☐ 不合格 ___ 项（项号：_______）</td>
+  <td>抽测结果：☐ 通过　☐ 加抽　☐ 批次冻结</td>
+</tr>
+</table>
+
+<div class="sign">
+  <div>操作员签名 / 日期</div>
+  <div>质检员签名 / 日期</div>
+  <div>主管签名 / 日期</div>
+</div>
+
+<p class="small" style="margin-top:18px">
+依据：docs/audit/全模块量产评审_RAM排查_2026-06-10.md · 现场反馈 18 条（A1 红屏/C1 音量/D3 唤醒/E3 续航/G1 扰民等）·
+PM 量产放行评审。合格线对应固件 ≥2.2.22。文档更新需经固件负责人确认。
+</p>
+
+</body>
+</html>

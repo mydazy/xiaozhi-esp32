@@ -26,6 +26,40 @@
 #define TAG "MCP"
 
 static std::atomic<int> g_preview_inflight_{0};
+
+#include "assets.h"
+#include <cJSON.h>
+
+// 读资产分区词表，返回可选唤醒名 JSON 数组（强制带拼音）：
+// [{"text":"小精灵","pinyin":"xiao jing ling"}]；无词表返回 []
+static std::string GetWakewordOptionsJson() {
+    void* ptr = nullptr;
+    size_t size = 0;
+    if (!Assets::GetInstance().GetAssetData("index.json", ptr, size) || !ptr) return "[]";
+    cJSON* root = cJSON_ParseWithLength(static_cast<char*>(ptr), size);
+    if (!root) return "[]";
+    std::string out = "[";
+    cJSON* mn = cJSON_GetObjectItem(root, "multinet_model");
+    cJSON* cmds = mn ? cJSON_GetObjectItem(mn, "commands") : nullptr;
+    if (cJSON_IsArray(cmds)) {
+        for (int i = 0; i < cJSON_GetArraySize(cmds); i++) {
+            cJSON* c = cJSON_GetArrayItem(cmds, i);
+            cJSON* t = cJSON_GetObjectItem(c, "text");
+            cJSON* p = cJSON_GetObjectItem(c, "command");
+            if (cJSON_IsString(t) && cJSON_IsString(p)) {
+                if (out.size() > 1) out += ",";
+                out += "{\"text\":\"";
+                out += t->valuestring;
+                out += "\",\"pinyin\":\"";
+                out += p->valuestring;
+                out += "\"}";
+            }
+        }
+    }
+    cJSON_Delete(root);
+    out += "]";
+    return out;
+}
 static constexpr int kPreviewMaxInflight = 2;
 
 McpServer::McpServer() {
@@ -105,16 +139,21 @@ void McpServer::AddCommonTools() {
 
     // 唤醒词配置 · mode=afe 回归默认 · mode=custom + text 启用自定义（须在 MultiNet 词表内 · 重启生效）
     AddTool("self.audio.set_wakeword",
-        "改唤醒词。mode='afe' 恢复默认；mode='custom' 启用自定义（text 必填，须在词表里）。重启生效。",
+        "给设备起名/改唤醒词。用户说『给你起个名字/换个名字』时调用："
+        "mode='custom'+text=名字；名单（get_wakeword.available）外的新名字必须同传 pinyin"
+        "（小写空格分隔，如 du du）。mode='afe' 恢复默认。"
+        "成功后设备 8 秒自动重启，立即用一句话告别（如『我去变身啦』）。",
         PropertyList({
             Property("mode", kPropertyTypeString),
-            Property("text", kPropertyTypeString, "")
+            Property("text", kPropertyTypeString, ""),
+            Property("pinyin", kPropertyTypeString, "")
         }),
         [](const PropertyList& properties) -> ReturnValue {
             std::string mode = properties["mode"].value<std::string>();
             std::string text = properties["text"].value<std::string>();
-            // 守卫：写 NVS 前全部校验。custom 在缺命令词模型的机器上重启后唤醒会初始化
-            // 失败（设备"变聋"），服务端一次误调用就会全网翻车——必须在这里拒绝。
+            std::string pinyin = properties["pinyin"].value<std::string>();
+            // 守卫：写 NVS 前全部校验。custom 在缺命令词模型/词表外名字的机器上重启后
+            // 唤醒会初始化失败或永远叫不应（设备"变聋"），服务端一次误调用就会翻车。
             if (mode != "afe" && mode != "custom") {
                 return std::string("{\"success\":false,\"error\":\"mode 仅支持 afe/custom\"}");
             }
@@ -125,23 +164,53 @@ void McpServer::AddCommonTools() {
                 if (text.empty()) {
                     return std::string("{\"success\":false,\"error\":\"custom 模式必须提供 text\"}");
                 }
+                std::string options = GetWakewordOptionsJson();
+                bool in_preset = options.find("\"text\":\"" + text + "\"") != std::string::npos;
+                if (!in_preset) {
+                    // 名单外新名字：必须带合法拼音（小写字母+单空格，2~30 字符）才放行动态词条
+                    bool pinyin_ok = pinyin.size() >= 2 && pinyin.size() <= 30 && pinyin.front() != ' ' && pinyin.back() != ' ';
+                    int syllables = pinyin_ok ? 1 : 0;
+                    for (size_t i = 0; pinyin_ok && i < pinyin.size(); i++) {
+                        char ch = pinyin[i];
+                        if (ch == ' ') syllables++;
+                        if (!((ch >= 'a' && ch <= 'z') || (ch == ' ' && pinyin[i-1] != ' '))) pinyin_ok = false;
+                    }
+                    if (!pinyin_ok || syllables < 2 || syllables > 4) {
+                        return std::string("{\"success\":false,\"error\":\"名字需 2-4 个字，并附小写空格分隔拼音\",\"available\":") + options + "}";
+                    }
+                }
             }
             Settings s("wakeword", true);
             s.SetString("mode", mode);
             s.SetString("text", text);
+            s.SetString("pinyin", pinyin);
+            if (mode == "custom") {
+                Settings aec("aecMode", true);
+                aec.SetInt("deviceAec", 1);
+            }
             Application::GetInstance().Schedule([]() {
-                Application::GetInstance().Alert("唤醒词已更新", "重启后生效", "", Lang::Sounds::OGG_VIBRATION);
+                Application::GetInstance().Alert("唤醒词已更新", "8秒后自动重启", "", Lang::Sounds::OGG_VIBRATION);
             });
-            return std::string("{\"success\":true,\"mode\":\"") + mode + "\",\"text\":\"" + text + "\"}";
+            xTaskCreate([](void*) {
+                vTaskDelay(pdMS_TO_TICKS(8000));
+                Application::GetInstance().Reboot();
+                vTaskDelete(NULL);
+            }, "ww_reboot", 4096, nullptr, 3, nullptr);
+            return std::string("{\"success\":true,\"mode\":\"") + mode + "\",\"text\":\"" + text +
+                   (mode == "custom"
+                        ? "\",\"aec_auto_on\":true,\"tip\":\"自定义名只用于唤醒；我说话时打断请直接开口，或喊搭子精灵\""
+                        : "\"") +
+                   ",\"auto_reboot_in_sec\":8}";
         });
 
     AddTool("self.audio.get_wakeword",
-        "查当前唤醒词配置。",
+        "查唤醒词配置与可选名字名单 available。",
         PropertyList(),
         [](const PropertyList&) -> ReturnValue {
             Settings s("wakeword", false);
             return std::string("{\"mode\":\"") + s.GetString("mode", "afe") +
-                   "\",\"text\":\"" + s.GetString("text", "") + "\"}";
+                   "\",\"text\":\"" + s.GetString("text", "") +
+                   "\",\"available\":" + GetWakewordOptionsJson() + "}";
         });
 
     AddTool("self.audio_speaker.set_volume",
@@ -500,7 +569,7 @@ void McpServer::ReplyError(int id, const std::string& message) {
 
 void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_only_tools) {
     std::lock_guard<std::mutex> lk(tools_mutex_);
-    const int max_payload_size = 8000;
+    const int max_payload_size = 10000;
     std::string json = "{\"tools\":[";
 
     bool found_cursor = cursor.empty();

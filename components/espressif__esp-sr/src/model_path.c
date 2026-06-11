@@ -303,7 +303,7 @@ srmodel_list_t *srmodel_load(const void *root)
         models->model_data[i] = model_data;
     }
     ESP_LOGI(TAG, "Successfully load srmodels");
-    set_model_base_path(NULL);
+    set_model_base_path("");
     return models;
 }
 

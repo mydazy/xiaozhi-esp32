@@ -256,7 +256,8 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
 void AudioService::AudioInputTask() {
     while (true) {
         EventBits_t bits = xEventGroupWaitBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
-            AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING,
+            AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING |
+            AS_EVENT_WW_INTERRUPT_RUNNING,
             pdFALSE, pdFALSE, portMAX_DELAY);
 
         if (service_stopped_) {
@@ -292,12 +293,16 @@ void AudioService::AudioInputTask() {
         }
 
         /* Feed the wake word and/or audio processor */
-        if (bits & (AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING)) {
+        if (bits & (AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING |
+                    AS_EVENT_WW_INTERRUPT_RUNNING)) {
             int samples = 160; // 10ms
             std::vector<int16_t> data;
             if (ReadAudioData(data, 16000, samples)) {
                 if (bits & AS_EVENT_WAKE_WORD_RUNNING) {
                     wake_word_->Feed(data);
+                }
+                if ((bits & AS_EVENT_WW_INTERRUPT_RUNNING) && interrupt_wake_word_) {
+                    interrupt_wake_word_->Feed(data);
                 }
                 if (bits & AS_EVENT_AUDIO_PROCESSOR_RUNNING) {
                     audio_processor_->Feed(std::move(data));
@@ -687,7 +692,24 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         if (!wake_word_initialized_) {
             if (!wake_word_->Initialize(codec_, models_list_)) {
                 ESP_LOGE(TAG, "Failed to initialize wake word");
-                return;
+                // custom 引擎初始化失败 → 回落 AFE 默认唤醒词，绝不让设备"变聋"
+                bool has_wn = models_list_ &&
+                              esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr;
+                if (!IsAfeWakeWord() && has_wn) {
+                    ESP_LOGE(TAG, "custom 唤醒初始化失败，回落 AFE 默认唤醒词");
+                    wake_word_ = std::make_unique<AfeWakeWord>();
+                    wake_word_->OnWakeWordDetected([this](const std::string& wake_word) {
+                        if (callbacks_.on_wake_word_detected) {
+                            callbacks_.on_wake_word_detected(wake_word);
+                        }
+                    });
+                    if (!wake_word_->Initialize(codec_, models_list_)) {
+                        ESP_LOGE(TAG, "AFE 回落初始化也失败");
+                        return;
+                    }
+                } else {
+                    return;
+                }
             }
             wake_word_initialized_ = true;
         }
@@ -714,7 +736,56 @@ void AudioService::SetWakeWordThreshold(float threshold) {
     }
 }
 
+// custom 唤醒词没有 AEC 前端，TTS 播放中无法可靠检测自定义名——
+// AEC 关闭时的"唤醒词打断"由 wn9(搭子精灵) 专用实例接管（懒创建，仅 custom 模式用到）
+void AudioService::EnableInterruptWakeWord(bool enable) {
+    if (enable) {
+        if (interrupt_wake_word_ == nullptr) {
+            bool has_wn = models_list_ &&
+                          esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr;
+            if (!has_wn) {
+                ESP_LOGW(TAG, "无 wakenet 模型，Speaking 期打断不可用");
+                return;
+            }
+            interrupt_wake_word_ = std::make_unique<AfeWakeWord>();
+            interrupt_wake_word_->OnWakeWordDetected([this](const std::string& wake_word) {
+                if (callbacks_.on_wake_word_detected) {
+                    callbacks_.on_wake_word_detected(wake_word);
+                }
+            });
+        }
+        if (!interrupt_ww_initialized_) {
+            if (!interrupt_wake_word_->Initialize(codec_, models_list_)) {
+                ESP_LOGE(TAG, "打断唤醒词(wn9)初始化失败");
+                return;
+            }
+            interrupt_ww_initialized_ = true;
+            ESP_LOGI(TAG, "打断唤醒词(wn9)就绪：custom 模式 Speaking 期喊'搭子精灵'可打断");
+        }
+        {
+            std::lock_guard<std::mutex> lock(input_resampler_mutex_);
+            if (input_resampler_ != nullptr) {
+                esp_ae_rate_cvt_reset(input_resampler_);
+            }
+        }
+        interrupt_wake_word_->Start();
+        xEventGroupSetBits(event_group_, AS_EVENT_WW_INTERRUPT_RUNNING);
+    } else {
+        if (interrupt_wake_word_ == nullptr) return;
+        xEventGroupClearBits(event_group_, AS_EVENT_WW_INTERRUPT_RUNNING);
+        interrupt_wake_word_->Stop();
+    }
+}
+
 void AudioService::ReleaseWakeWord() {
+    if (interrupt_wake_word_) {
+        xEventGroupClearBits(event_group_, AS_EVENT_WW_INTERRUPT_RUNNING);
+        interrupt_wake_word_->Stop();
+        if (interrupt_ww_initialized_) {
+            static_cast<AfeWakeWord*>(interrupt_wake_word_.get())->Release();
+            interrupt_ww_initialized_ = false;
+        }
+    }
     if (!wake_word_) {
         return;
     }

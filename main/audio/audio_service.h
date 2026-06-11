@@ -55,6 +55,7 @@ extern int g_opus_frame_duration_ms;
 #define AS_EVENT_WAKE_WORD_RUNNING          (1 << 1)
 #define AS_EVENT_AUDIO_PROCESSOR_RUNNING    (1 << 2)
 #define AS_EVENT_PLAYBACK_NOT_EMPTY         (1 << 3)
+#define AS_EVENT_WW_INTERRUPT_RUNNING       (1 << 4)   // custom 模式 Speaking 期 wn9 打断实例
 
 #define AS_OPUS_GET_FRAME_DRU_ENUM(duration_ms)                   \
     ((duration_ms) == 5 ? ESP_OPUS_ENC_FRAME_DURATION_5_MS :      \
@@ -131,6 +132,7 @@ public:
     bool HasMultinetModel();   // 资产分区是否有命令词模型（custom 唤醒词的前提）
 
     void EnableWakeWordDetection(bool enable);
+    void EnableInterruptWakeWord(bool enable);   // custom 模式 Speaking 期：wn9(搭子精灵) 接管打断
     void SetWakeWordThreshold(float threshold);  // 运行时灵敏度（越低越灵敏，0.4~0.9999）
     void ReleaseWakeWord();
     void EnableVoiceProcessing(bool enable);
@@ -154,6 +156,8 @@ private:
     AudioServiceCallbacks callbacks_;
     std::unique_ptr<AudioProcessor> audio_processor_;
     std::unique_ptr<WakeWord> wake_word_;
+    std::unique_ptr<WakeWord> interrupt_wake_word_;  // 仅 custom 模式：Speaking 期打断用 wn9 实例（懒创建）
+    bool interrupt_ww_initialized_ = false;
     std::unique_ptr<AudioDebugger> audio_debugger_;
     void* opus_encoder_ = nullptr;
     void* opus_decoder_ = nullptr;

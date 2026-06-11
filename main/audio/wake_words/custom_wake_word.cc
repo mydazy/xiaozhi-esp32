@@ -113,9 +113,18 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     {
         Settings s("wakeword", false);
         std::string text = s.GetString("text", "");
+        std::string pinyin = s.GetString("pinyin", "");
         if (!text.empty()) {
+            bool matched = false;
             for (auto& c : commands_) {
-                c.action = (c.text == text || c.command == text) ? "wake" : "";
+                if (c.text == text || c.command == text) {
+                    c.action = "wake";
+                    matched = true;
+                }
+            }
+            if (!matched && !pinyin.empty()) {
+                commands_.push_back({pinyin, text, "wake"});
+                ESP_LOGI(TAG, "动态词条: %s (%s)", text.c_str(), pinyin.c_str());
             }
             ESP_LOGI(TAG, "wakeword custom: %s", text.c_str());
         }
@@ -141,14 +150,24 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     multinet_ = esp_mn_handle_from_name(mn_name_);
     multinet_model_data_ = multinet_->create(mn_name_, duration_);
     multinet_->set_det_threshold(multinet_model_data_, threshold_);
+
+    esp_err_t mn_ret = esp_mn_commands_alloc((esp_mn_iface_t*)multinet_, multinet_model_data_);
+    if (mn_ret != ESP_OK && mn_ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "esp_mn_commands_alloc failed: %s", esp_err_to_name(mn_ret));
+        return false;
+    }
     esp_mn_commands_clear();
+    int added = 0;
     for (int i = 0; i < commands_.size(); i++) {
-        esp_mn_commands_add(i + 1, commands_[i].command.c_str());
+        esp_err_t r = esp_mn_commands_add(i + 1, commands_[i].command.c_str());
+        if (r == ESP_OK) added++;
+        else ESP_LOGE(TAG, "commands_add[%d] '%s' failed: %s", i, commands_[i].command.c_str(), esp_err_to_name(r));
     }
     esp_mn_commands_update();
-    
+    ESP_LOGI(TAG, "命令词注册 %d/%d 条 · 阈值=%.2f", added, (int)commands_.size(), threshold_);
+
     multinet_->print_active_speech_commands(multinet_model_data_);
-    return true;
+    return added > 0;
 }
 
 void CustomWakeWord::OnWakeWordDetected(std::function<void(const std::string& wake_word)> callback) {
