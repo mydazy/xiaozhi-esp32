@@ -794,33 +794,46 @@ void UiDisplay::EnsureControlCenter() {
 
     control_center_->SetExitCallback([this]() { HideControlCenter(); });
 
-    control_center_->SetVolumeCallback([&board](int v) {
-        if (auto* codec = board.GetAudioCodec()) codec->SetOutputVolume(v);
-    });
+    // 亮度：纯 PWM 调节（无 NVS 写/无阻塞），可在 LVGL 上下文直调
     control_center_->SetBrightnessCallback([&board](int v) {
         if (auto* bk = board.GetBacklight()) bk->SetBrightness(v);
     });
-    control_center_->SetAecCallback([this](bool /*unused*/) {
+    control_center_->SetAboutCallback([this]() {
         HideControlCenter();
         ShowAboutPage();
     });
+    // 休眠开关写 NVS，调度到主线程，不阻塞 UI
     control_center_->SetSleepCallback([](bool on) {
-        Board::GetInstance().EnableAutoSleep(on);
+        Application::GetInstance().Schedule([on]() {
+            Board::GetInstance().EnableAutoSleep(on);
+        });
     });
-    control_center_->SetNetworkCallback([](int /*mode*/) {
-        auto& b = Board::GetInstance();
-        if (b.CanSwitchNetwork()) b.SwitchNetwork();
+    // 网络（4G版切网/WiFi版进配网，均含重启）：二次确认已在 ControlCenter 内完成，
+    control_center_->SetNetworkCallback([this]() {
+        HideControlCenter();
+        Application::GetInstance().Schedule([]() {
+            auto& b = Board::GetInstance();
+            if (b.CanSwitchNetwork()) b.SwitchNetwork();
+        });
     });
+    // AEC 打断开关：只发请求，切换后以 GetAecMode 真实状态回写 UI（防显示脱钩——
+    control_center_->SetAecToggleCallback([this]() {
+        Application::GetInstance().Schedule([this]() {
+            Board::GetInstance().ToggleAecMode();   // 与物理按键(BOOT)双击③ 走同一个底层切换函数
+            bool on = Application::GetInstance().GetAecMode() != kAecOff;
+            DisplayLockGuard lock(this);
+            if (control_center_) control_center_->SetAecState(on);
+        });
+    });
+
     if (auto* dnb = dynamic_cast<DualNetworkBoard*>(&board)) {
+        // 4G 板：网络按钮 = 切 WiFi/4G；AEC 触屏开关与物理按键(BOOT)双击底层走同一个 ToggleAecMode
         control_center_->SetNetworkMode(dnb->GetNetworkType() == NetworkType::ML307 ? 1 : 0);
     } else {
-        // WiFi 板无 4G 可切：网络槽位改作 AEC（说话打断）开关
-        auto& app = Application::GetInstance();
-        control_center_->UseNetworkSlotAsAec(app.GetAecMode() != kAecOff);
-        control_center_->SetAecToggleCallback([](bool /*unused*/) {
-            Board::GetInstance().ToggleAecMode();   // 与按键双击③ 共用同一 AEC 切换路径
-        });
+        // WiFi 板：网络按钮 = 进配网（同按键三连击语义）
+        control_center_->SetNetworkAsProvision();
     }
+    control_center_->SetAecState(Application::GetInstance().GetAecMode() != kAecOff);
     control_center_->SetSleepState(board.IsAutoSleepEnabled());
 }
 
@@ -829,9 +842,8 @@ void UiDisplay::ShowControlCenter() {
     EnsureControlCenter();
     if (!control_center_) return;
     auto& board = Board::GetInstance();
-    if (auto* codec = board.GetAudioCodec()) control_center_->SetVolume(codec->output_volume());
-    if (auto* bk = board.GetBacklight())     control_center_->SetBrightness(bk->brightness());
-    control_center_->UpdateNetworkSlotAec(Application::GetInstance().GetAecMode() != kAecOff);
+    if (auto* bk = board.GetBacklight()) control_center_->SetBrightness(bk->brightness());
+    control_center_->SetAecState(Application::GetInstance().GetAecMode() != kAecOff);
     control_center_->Show();
 }
 

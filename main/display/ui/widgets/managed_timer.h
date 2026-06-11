@@ -32,11 +32,14 @@ public:
         timer_ = lv_timer_create(cb, period_ms, user_data);
     }
 
-    // 单次触发（自动 repeat_count=1，回调后 LVGL 停止但不删除）
+    // 单次触发
     void CreateOnce(uint32_t delay_ms, lv_timer_cb_t cb, void* user_data) {
         Delete();
         timer_ = lv_timer_create(cb, delay_ms, user_data);
-        if (timer_) lv_timer_set_repeat_count(timer_, 1);
+        if (timer_) {
+            lv_timer_set_repeat_count(timer_, 1);
+            lv_timer_set_auto_delete(timer_, false);
+        }
     }
 
     void Delete() {

@@ -740,15 +740,8 @@ private:
                 }
                 return;
             }
-#if CONFIG_USE_DEVICE_AEC
-            // ③ 在线态：AEC 模式 toggle
-            if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
-                AbortIfSpeaking();
-                app.SetDeviceState(kDeviceStateIdle);
-                app.SetAecMode(app.GetAecMode() == kAecOff ? kAecOnDeviceSide : kAecOff);
-                WakeUp();
-            }
-#endif
+            // ③ 在线态：AEC 模式 toggle（与控制中心触屏共用 ToggleAecMode 路径）
+            ToggleAecMode();
         });
         // 3 连击：4G ↔ WiFi ↔ 配网 三态切换
         // 4G/WiFi 路径的提示音由 SwitchNetworkType 统一播放，这里 Alert 不再带 sound
@@ -1014,6 +1007,21 @@ public:
         if (power_save_timer_) {
             power_save_timer_->WakeUp();
         }
+    }
+
+    // AEC 模式切换的唯一底层入口：物理按键(BOOT)双击③ 和 控制中心触屏开关 都调这里（与 WiFi 板实现一致）
+    void ToggleAecMode() override {
+#if CONFIG_USE_DEVICE_AEC
+        auto& app = Application::GetInstance();
+        auto status = app.GetDeviceState();
+        ESP_LOGI(TAG, "ToggleAecMode: status=%d cur_aec=%d", (int)status, (int)app.GetAecMode());
+        if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
+            AbortIfSpeaking();
+            app.SetDeviceState(kDeviceStateIdle);
+            app.SetAecMode(app.GetAecMode() == kAecOff ? kAecOnDeviceSide : kAecOff);
+            WakeUp();
+        }
+#endif
     }
 
     // 异步等提示音播完再 ToggleChatState：
