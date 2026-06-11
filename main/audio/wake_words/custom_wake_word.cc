@@ -117,14 +117,12 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
         if (!text.empty()) {
             bool matched = false;
             for (auto& c : commands_) {
-                if (c.text == text || c.command == text) {
-                    c.action = "wake";
-                    matched = true;
-                }
+                c.action = (c.text == text || c.command == text) ? "wake" : "";
+                if (c.action == "wake") matched = true;
             }
             if (!matched && !pinyin.empty()) {
                 commands_.push_back({pinyin, text, "wake"});
-                ESP_LOGI(TAG, "动态词条: %s (%s)", text.c_str(), pinyin.c_str());
+                ESP_LOGI(TAG, "自定义词条: %s (%s)", text.c_str(), pinyin.c_str());
             }
             ESP_LOGI(TAG, "wakeword custom: %s", text.c_str());
         }
@@ -157,14 +155,16 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
         return false;
     }
     esp_mn_commands_clear();
-    int added = 0;
+    int added = 0, wake_total = 0;
     for (int i = 0; i < commands_.size(); i++) {
-        esp_err_t r = esp_mn_commands_add(i + 1, commands_[i].command.c_str());
+        if (commands_[i].action != "wake") continue;   // 只注册生效词条：注册=可唤醒，一一对应
+        wake_total++;
+        esp_err_t r = esp_mn_commands_add(i + 1, commands_[i].command.c_str());  // id 保持原索引+1，检测回调映射不变
         if (r == ESP_OK) added++;
         else ESP_LOGE(TAG, "commands_add[%d] '%s' failed: %s", i, commands_[i].command.c_str(), esp_err_to_name(r));
     }
     esp_mn_commands_update();
-    ESP_LOGI(TAG, "命令词注册 %d/%d 条 · 阈值=%.2f", added, (int)commands_.size(), threshold_);
+    ESP_LOGI(TAG, "命令词注册 %d/%d 条 · 阈值=%.2f", added, wake_total, threshold_);
 
     multinet_->print_active_speech_commands(multinet_model_data_);
     return added > 0;

@@ -69,12 +69,17 @@ void Ml307AtModem::HandleUrc(const std::string& command, const std::vector<AtArg
     // Handle Common URC
     AtModem::HandleUrc(command, arguments);
     // Handle ML307 URC
-    if (command == "MIPCALL" && arguments.size() >= 3) {
-        if (arguments[1].int_value == 1) {
-            auto ip = arguments[2].string_value;
-            ESP_LOGI(TAG, "PDP Context %d IP: %s", arguments[0].int_value, ip.c_str());
+    if (command == "MIPCALL" && arguments.size() >= 2) {
+        bool pdp_up = (arguments.size() >= 3) ? (arguments[1].int_value == 1)
+                                              : (arguments[0].int_value == 1);
+        if (pdp_up) {
+            bool was_down = !network_ready_;
             network_ready_ = true;
             xEventGroupSetBits(event_group_handle_, AT_EVENT_NETWORK_READY);
+            ESP_LOGI(TAG, "PDP 在线 (%s)", arguments.back().string_value.c_str());
+            if (was_down && on_network_state_changed_) {
+                on_network_state_changed_(true);
+            }
         }
     } else if (command == "MATREADY") {
         if (network_ready_) {
@@ -90,8 +95,28 @@ void Ml307AtModem::HandleUrc(const std::string& command, const std::vector<AtArg
             if (on_network_state_changed_) {
                 on_network_state_changed_(false);
             }
+            StartNetworkRequery();
         }
     }
+}
+
+void Ml307AtModem::StartNetworkRequery() {
+    if (net_requery_running_.exchange(true)) {
+        return;  // 已有重查任务在跑
+    }
+    xTaskCreate([](void* arg) {
+        auto* self = static_cast<Ml307AtModem*>(arg);
+        for (int i = 0; i < 3 && !self->network_ready_; i++) {
+            vTaskDelay(pdMS_TO_TICKS(2000));  // 等 UART 流稳定再查
+            ESP_LOGI(TAG, "overflow 后重查 PDP 状态 (%d/3)", i + 1);
+            self->at_uart_->SendCommand("AT+MIPCALL?", 2000);
+        }
+        if (!self->network_ready_) {
+            ESP_LOGW(TAG, "重查 3 次 PDP 仍未恢复，等待模组网络事件");
+        }
+        self->net_requery_running_.store(false);
+        vTaskDelete(NULL);
+    }, "net_requery", 3072, this, 3, NULL);
 }
 
 void Ml307AtModem::Reboot() {

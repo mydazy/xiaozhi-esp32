@@ -38,9 +38,6 @@
 
 
 namespace {
-// 唤醒灵敏度双档（值越低越灵敏，esp-sr 范围 0.4~0.9999）：
-// TTS 播放期用灵敏档——自播回声+大音量下检出难，打断可用性优先、误触代价低；
-// 待机/听音用常规档防误唤醒。改值必须真机 A/B 三项：唤醒率/误唤醒/打断率。
 constexpr float kWakeThresholdNormal = 0.60f;
 constexpr float kWakeThresholdInterrupt = 0.45f;
 
@@ -1100,6 +1097,8 @@ void Application::HandleWakeWordDetectedEvent() {
     if (state == kDeviceStateIdle) {
 #if CONFIG_SEND_WAKE_WORD_DATA
         audio_service_.EncodeWakeWord();
+#else
+        audio_service_.PlaySound(Lang::Sounds::OGG_WAKEUP);
 #endif
         auto wake_word = audio_service_.GetLastWakeWord();
 
@@ -1166,8 +1165,9 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     // 通知协议层唤醒（baidu: 发固定问候触发 AI 回应; xiaozhi: detect 消息）· 不上送唤醒词音频
     protocol_->SendWakeWordDetected(wake_word);
 
-    // Set flag to play popup sound after state changes to listening
+#if CONFIG_SEND_WAKE_WORD_DATA
     pending_listening_sound_ = &Lang::Sounds::OGG_POPUP;
+#endif
     SetListeningMode(GetDefaultListeningMode());
 }
 
@@ -1249,8 +1249,6 @@ void Application::HandleStateChangedEvent() {
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
-                // TTS 播放期调灵敏档：自播回声+大音量下检出难，打断可用性优先；
-                // 误触代价低（顶多打断自己的播报），回 Idle/Listening 时恢复常规档
                 audio_service_.SetWakeWordThreshold(kWakeThresholdInterrupt);
             } else {
                 audio_service_.EnableWakeWordDetection(false);
@@ -1310,9 +1308,6 @@ bool Application::SendTextToTts(const std::string& text) {
     }
 
     // 协议适配 fallback 链：
-    //   1. WebsocketBaiduProtocol → 专用 tts 通道直发朗读
-    //   2. MqttProtocol / WebsocketProtocol → 基类 tts 返回 false → fallback ai 通道（LLM 朗读）
-    //   3. 极端兜底：上两条都未实现 → WakeWordInvoke 把 text 作唤醒词触发对话
     if (protocol_->SendTextToTts(text)) {
         return true;
     }
@@ -1460,6 +1455,8 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     if (state == kDeviceStateIdle) {
 #if CONFIG_SEND_WAKE_WORD_DATA
         audio_service_.EncodeWakeWord();
+#else
+        audio_service_.PlaySound(Lang::Sounds::OGG_WAKEUP);
 #endif
         skip_next_stt_popup_.store(true);
 

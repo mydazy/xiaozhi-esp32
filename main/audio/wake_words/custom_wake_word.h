@@ -60,7 +60,6 @@ private:
     StaticTask_t* wake_word_encode_task_buffer_ = nullptr;
     StackType_t* wake_word_encode_task_stack_ = nullptr;
     std::atomic<bool> encode_in_progress_{false};
-    // 唤醒前 2s 录音环形缓冲（PSRAM 固定块，同 AfeWakeWord——deque 版吃内部 RAM 64K）
     static constexpr size_t kWakeWordRingSamples = 32000;  // 2s @ 16kHz mono
     int16_t* wake_word_ring_ = nullptr;                    // PSRAM
     size_t ring_write_ = 0;

@@ -22,8 +22,6 @@ public:
     virtual bool GetWakeWordOpus(std::vector<uint8_t>& opus) = 0;
     virtual const std::string& GetLastDetectedWakeWord() const = 0;
     virtual void Release() {}
-    // 运行时调整检测灵敏度（越低越灵敏，esp-sr 合法范围 0.4~0.9999）。
-    // 用途：TTS 播放期调低换打断检出率，回待机恢复防误唤醒。不支持的引擎忽略。
     virtual void SetDetectThreshold(float threshold) { (void)threshold; }
 };
 

@@ -2,6 +2,7 @@
 #define _ML307_AT_MODEM_H_
 
 #include "at_modem.h"
+#include <atomic>
 #include "tcp.h"
 #include "udp.h"
 #include "http.h"
@@ -31,6 +32,10 @@ protected:
 
     void ConfigureRadioProfile();
     bool SendRadioCommandWithRetry(const char* command, const char* description, int max_attempts = 2);
+
+private:
+    std::atomic<bool> net_requery_running_{false};
+    void StartNetworkRequery();
 };
 
 

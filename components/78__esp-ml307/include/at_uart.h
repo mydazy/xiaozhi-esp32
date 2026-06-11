@@ -29,7 +29,7 @@
 #define UART_NUM                UART_NUM_1
 
 // 标准 driver RX ring buffer 大小
-#define AT_UART_RX_BUFFER_SIZE  8192
+#define AT_UART_RX_BUFFER_SIZE  16384
 
 // RX FIFO 满中断阈值（字节）
 #define AT_UART_RX_FULL_THRESHOLD  64

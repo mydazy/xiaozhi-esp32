@@ -299,6 +299,14 @@ bool MqttProtocol::OpenAudioChannel() {
 
     udp_->Connect(udp_server_, udp_port_);
 
+    if (aes_nonce_.size() >= 16) {
+        std::string punch(aes_nonce_);
+        std::fill(punch.begin() + 2, punch.begin() + 4, '\0');   // payload_len = 0
+        std::fill(punch.begin() + 8, punch.begin() + 16, '\0');  // timestamp / sequence = 0
+        udp_->Send(punch);
+        ESP_LOGI(TAG, "UDP hole punch sent");
+    }
+
     if (on_audio_channel_opened_ != nullptr) {
         on_audio_channel_opened_();
     }
