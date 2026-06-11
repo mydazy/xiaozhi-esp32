@@ -21,6 +21,7 @@ public:
     // 显示/隐藏控制中心
     void Show();
     void Hide();
+    void Raise();   // 可见时重新提顶（对话期间 bottom_bar/status_bar 提顶会压住本面板）
     bool IsVisible() const { return is_visible_; }
     void Toggle() { is_visible_ ? Hide() : Show(); }
 
@@ -67,6 +68,8 @@ private:
     static void OnSliderChanged(lv_event_t* e);
     static void OnSliderTimer(lv_timer_t* timer);
     static void OnNetworkConfirmTimer(lv_timer_t* timer);
+    static void OnButtonPressed(lv_event_t* e);   // 按下诊断：名字+触摸坐标+按钮矩形
+    void AddPressFeedback(lv_obj_t* btn, const char* name);
 
     lv_obj_t* parent_ = nullptr;
     lv_obj_t* container_ = nullptr;
@@ -112,6 +115,7 @@ private:
     int network_mode_ = 0;                  // 0=WiFi, 1=4G
     bool network_is_provision_ = false;     // true=WiFi 版（按钮=进配网）
     bool network_confirm_pending_ = false;  // 网络按钮处于"再点确认"态
+    uint32_t network_confirm_tick_ = 0;     // 进入确认态的 lv_tick（防抖动连击穿透）
     bool aec_on_ = false;
     bool aec_enabled_ = true;
     bool sleep_on_ = true;

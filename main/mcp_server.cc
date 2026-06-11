@@ -189,6 +189,21 @@ void McpServer::AddCommonTools() {
             return r;
         });
 
+    // 拿起唤醒开关（深睡时武装加速度计震动中断）。出厂默认关——
+    // 历史现场投诉：桌面震动→半夜整机重启+大声播联网音（E1/E2/G1/E3），开启需用户明确要求。
+    AddTool("self.power.set_pickup_wake",
+        "开关『拿起唤醒』：深度睡眠中拿起/晃动设备可开机。默认关闭（防桌面震动误唤醒）。"
+        "用户明确说『打开拿起唤醒 / 拿起来就开机』时才调用。下次休眠生效，重启后保留。",
+        PropertyList({
+            Property("enabled", kPropertyTypeBoolean)
+        }),
+        [](const PropertyList& properties) -> ReturnValue {
+            bool enabled = properties["enabled"].value<bool>();
+            Settings s("status", true);
+            s.SetInt("pickupWake", enabled ? 1 : 0);
+            return std::string("{\"success\":true,\"pickup_wake\":") + (enabled ? "true" : "false") + "}";
+        });
+
     // MP3 流式播放 — 云端识别到 MP3 URL 后通过此 tool 让设备播放
     AddTool("self.music.play",
         "播放 MP3 音乐（HTTP/HTTPS 链接）。"

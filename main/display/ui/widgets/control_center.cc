@@ -36,6 +36,7 @@ LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 #define BRIGHTNESS_MIN  15      // 亮度最小值（避免黑屏）
 #define SLIDER_STEP     5       // 滑块调节步进
 #define CONFIRM_TIMEOUT_MS 3000 // 网络二次确认超时（超时自动回退）
+#define CONFIRM_MIN_GAP_MS 600  // 二次确认最小间隔（防触摸抖动连击穿透）
 
 ControlCenter::ControlCenter(lv_obj_t* parent, int width, int height)
     : parent_(parent), width_(width), height_(height) {
@@ -122,6 +123,15 @@ void ControlCenter::CreateUI() {
     lv_obj_set_style_text_font(about_icon_, &BUILTIN_ICON_FONT, 0);
     lv_obj_align(about_icon_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_event_cb(about_btn_, OnAboutClicked, LV_EVENT_CLICKED, this);
+
+    // 按下反馈（白描边 + 日志：名字/触摸坐标/按钮矩形）——定位"点A响B"类触控问题
+    AddPressFeedback(network_btn_, "网络");
+    AddPressFeedback(aec_btn_, "打断");
+    AddPressFeedback(sleep_btn_, "休眠");
+    AddPressFeedback(exit_btn_, "退出");
+    AddPressFeedback(brightness_btn_, "亮度");
+    AddPressFeedback(about_btn_, "关于");
+    lv_obj_add_event_cb(container_, OnButtonPressed, LV_EVENT_PRESSED, (void*)"空白区");
 
     // 滑块区域（悬浮在第一行按钮上方，最后创建以确保在最上层）
     CreateSliderArea();
@@ -332,6 +342,12 @@ void ControlCenter::Show() {
     }
 }
 
+void ControlCenter::Raise() {
+    if (container_ && is_visible_) {
+        lv_obj_move_foreground(container_);
+    }
+}
+
 void ControlCenter::Hide() {
     if (container_) {
         HideSlider();
@@ -395,6 +411,27 @@ void ControlCenter::SetBrightness(int value) {
     }
 }
 
+// ── 按下诊断反馈 ──
+
+void ControlCenter::AddPressFeedback(lv_obj_t* btn, const char* name) {
+    if (!btn) return;
+    // 视觉反馈走按钮自带的按压变暗（LV_OPA_70），仅保留串口按下日志用于排障
+    lv_obj_add_event_cb(btn, OnButtonPressed, LV_EVENT_PRESSED, (void*)name);
+}
+
+void ControlCenter::OnButtonPressed(lv_event_t* e) {
+    auto* name = static_cast<const char*>(lv_event_get_user_data(e));
+    lv_point_t p = {-1, -1};
+    lv_indev_t* indev = lv_indev_active();
+    if (indev) lv_indev_get_point(indev, &p);
+    auto* obj = static_cast<lv_obj_t*>(lv_event_get_target(e));
+    lv_area_t a;
+    lv_obj_get_coords(obj, &a);
+    ESP_LOGI(TAG, "[press] %s · 触点(%d,%d) · 控件区[%d,%d %dx%d]",
+             name, (int)p.x, (int)p.y, (int)a.x1, (int)a.y1,
+             (int)lv_area_get_width(&a), (int)lv_area_get_height(&a));
+}
+
 // ── 事件回调 ──
 
 void ControlCenter::OnExitClicked(lv_event_t* e) {
@@ -413,11 +450,20 @@ void ControlCenter::OnNetworkClicked(lv_event_t* e) {
     if (!self->network_confirm_pending_) {
         // 第一次点击：进入确认态（橙色 + "再点确认"），超时自动回退
         self->network_confirm_pending_ = true;
+        self->network_confirm_tick_ = lv_tick_get();
         lv_obj_set_style_bg_color(self->network_btn_, CC_BTN_WARN_COLOR, 0);
         lv_label_set_text(self->network_label_, "再点确认");
         lv_obj_align_to(self->network_label_, self->network_btn_, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
         self->network_confirm_timer_.CreateOnce(CONFIRM_TIMEOUT_MS, OnNetworkConfirmTimer, self);
         ESP_LOGI(TAG, "网络按钮：等待二次确认 (%s)", self->network_is_provision_ ? "进配网" : "切网络");
+        return;
+    }
+
+    // 防触摸抖动/连击穿透：进入确认态后 600ms 内的点击不算"确认"
+    //（真人二次确认不会快过 600ms；4G RF 触摸抖动的多投递都在 ~200ms 内）
+    if (lv_tick_elaps(self->network_confirm_tick_) < CONFIRM_MIN_GAP_MS) {
+        ESP_LOGW(TAG, "网络按钮：确认间隔过短(%ums)，疑似抖动连击，忽略",
+                 (unsigned)lv_tick_elaps(self->network_confirm_tick_));
         return;
     }
 

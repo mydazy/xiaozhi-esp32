@@ -919,21 +919,28 @@ public:
             xTaskCreatePinnedToCore(
                 [](void* /*arg*/) {
                     int64_t t0 = esp_timer_get_time();
-                    ESP_LOGI(TAG, "[ml307_fmode] WiFi 模式 · 等 ML307 boot 2s 再 Detect");
-                    vTaskDelay(pdMS_TO_TICKS(2000));  // GPIO9 上电后 ML307R 内部 boot ~3s 才响应 AT
-                    int64_t t_wait = (esp_timer_get_time() - t0) / 1000;
-                    ESP_LOGI(TAG, "[ml307_fmode] 开始 Detect (boot 等待 %lldms)", t_wait);
-                    auto modem = AtModem::Detect(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 921600);
-                    int64_t t_detect = (esp_timer_get_time() - t0) / 1000;
-                    if (modem == nullptr) {
-                        ESP_LOGW(TAG, "[ml307_fmode] Detect 失败（总 %lldms）· ML307 仍 ~20-50mA 待机", t_detect);
-                    } else {
-                        ESP_LOGI(TAG, "[ml307_fmode] Detect 成功（总 %lldms）· 发送 AT+CFUN=4", t_detect);
-                        modem->SetFlightMode(true);
-                        vTaskDelay(pdMS_TO_TICKS(500));   // 等飞行模式生效
-                        int64_t t_total = (esp_timer_get_time() - t0) / 1000;
-                        ESP_LOGI(TAG, "[ml307_fmode] 飞行模式生效（总 %lldms）· ML307 → ~5mA 待机", t_total);
-                        modem.reset();   // 释放 UART 资源
+                    ESP_LOGI(TAG, "[ml307_fmode] WiFi 模式 · 等 ML307 boot 8s 再 Detect");
+                    vTaskDelay(pdMS_TO_TICKS(8000));
+                    for (int attempt = 1; attempt <= 3; ++attempt) {
+                        int64_t t_wait = (esp_timer_get_time() - t0) / 1000;
+                        ESP_LOGI(TAG, "[ml307_fmode] 开始 Detect (第%d/3次, %lldms)", attempt, t_wait);
+                        auto modem = AtModem::Detect(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 921600);
+                        int64_t t_detect = (esp_timer_get_time() - t0) / 1000;
+                        if (modem != nullptr) {
+                            ESP_LOGI(TAG, "[ml307_fmode] Detect 成功（总 %lldms）· 发送 AT+CFUN=4", t_detect);
+                            modem->SetFlightMode(true);
+                            vTaskDelay(pdMS_TO_TICKS(500));   // 等飞行模式生效
+                            int64_t t_total = (esp_timer_get_time() - t0) / 1000;
+                            ESP_LOGI(TAG, "[ml307_fmode] 飞行模式生效（总 %lldms）· ML307 → ~5mA 待机", t_total);
+                            modem.reset();   // 释放 UART 资源
+                            break;
+                        }
+                        if (attempt < 3) {
+                            ESP_LOGW(TAG, "[ml307_fmode] Detect 失败（总 %lldms）· 30s 后重试", t_detect);
+                            vTaskDelay(pdMS_TO_TICKS(30000));
+                        } else {
+                            ESP_LOGW(TAG, "[ml307_fmode] Detect 3 次均失败（总 %lldms）· ML307 仍 ~20-50mA 待机，建议重启", t_detect);
+                        }
                     }
                     vTaskDelete(NULL);
                 },

@@ -601,6 +601,8 @@ void UiDisplay::ShowBottomBar() {
     DisplayLockGuard lock(this);
     lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(bottom_bar_);
+    // 控制中心开着时保持其在最顶层（否则字幕条画到控制中心脸上）
+    if (control_center_) control_center_->Raise();
 }
 
 // bottom_bar 隐藏（font 模式让用户聚焦写字 GIF）
@@ -1291,6 +1293,7 @@ void UiDisplay::HideEduCard() {
         lv_obj_add_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
         if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
         if (status_bar_) lv_obj_move_foreground(status_bar_);
+        if (control_center_) control_center_->Raise();   // 控制中心开着时保持最顶层
         ESP_LOGI(TAG, "隐藏教育卡");
     }
 }
