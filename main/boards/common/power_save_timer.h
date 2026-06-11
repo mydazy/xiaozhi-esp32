@@ -16,6 +16,7 @@ public:
     void OnExitSleepMode(std::function<void()> callback);
     void OnShutdownRequest(std::function<void()> callback);
     void WakeUp();
+    bool IsInSleepMode() const { return in_sleep_mode_; }   // 省电降亮中（触摸首触不投递判据）
 
 private:
     void PowerSaveCheck();

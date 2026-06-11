@@ -342,7 +342,11 @@ private:
     }
 
     static void OnTouchWake(void *ctx) {
-        static_cast<MyDazyP30_4GBoard*>(ctx)->WakeUp();
+        auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
+        if (self->power_save_timer_ && self->power_save_timer_->IsInSleepMode() && self->touch_driver_) {
+            axs5106l_touch_swallow_current_press(self->touch_driver_);
+        }
+        self->WakeUp();
     }
 
     // 控制中心可见时：点击交给 LVGL 处理其内部控件，不触发业务唤醒/打断
@@ -817,8 +821,8 @@ private:
             }
         });
 
-        volume_up_button_.OnClick  ([this]() { ApplyVolume(+10); });
-        volume_down_button_.OnClick([this]() { ApplyVolume(-10); });
+        volume_up_button_.OnPressDown  ([this]() { ApplyVolume(+10); });
+        volume_down_button_.OnPressDown([this]() { ApplyVolume(-10); });
     }
 
     // 应用一次音量增量；clamp 到 [0,100] 并刷新状态栏 + 唤醒省电定时器
@@ -873,7 +877,6 @@ private:
         }
 
         if (app.GetDeviceState() != kDeviceStateWifiConfiguring && self->first_boot_) {
-            // 关闭开机联网默认自动对话(产品决策)：开机只播欢迎音，由用户喊唤醒词/按键发起对话
             // app.RequestAutoChatOnIdle();
             app.PlaySound(Lang::Sounds::OGG_WELCOME);
         }

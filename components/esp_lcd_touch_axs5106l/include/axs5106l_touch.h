@@ -92,6 +92,11 @@ esp_err_t axs5106l_touch_attach_lvgl(axs5106l_touch_handle_t h);
 
 
 /// 深睡前调：关 INT ISR + 写 sleep 寄存器（0x19=0x03）· 必须先于 AUDIO_PWR_EN=0
+/* 吞掉当前这次按压（直到抬手都不投递给 LVGL/手势）。
+ * 用途：省电降亮时的"首触只点亮屏幕"——唤醒首帧坐标易被 RF 抖动污染，
+ * 投递会误触按钮。须在 on_wake 回调内同步调用。*/
+void axs5106l_touch_swallow_current_press(axs5106l_touch_handle_t h);
+
 esp_err_t axs5106l_touch_sleep(axs5106l_touch_handle_t h);
 
 /// 浅睡唤醒后调：软复位 + 重开 ISR + 重置 storm 检测（当前三板未用）

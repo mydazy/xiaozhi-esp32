@@ -97,6 +97,7 @@ typedef struct {
     uint64_t int_low_since;
 
     bool     press_pending;
+    bool     swallow;            /* 省电唤醒首触：本次按压不投递（直到抬手） */
     uint64_t last_release_time;  /* 0 = never released yet */
 } touch_state_t;
 
@@ -538,6 +539,13 @@ static bool check_and_upgrade_firmware(axs5106l_touch_handle_t self)
 /*  LVGL read callback                                                 */
 /* ------------------------------------------------------------------ */
 
+void axs5106l_touch_swallow_current_press(axs5106l_touch_handle_t h)
+{
+    if (h == NULL) return;
+    h->touch.swallow = true;
+    ESP_LOGI(TAG, "省电唤醒首触：本次按压只点亮屏幕，不投递");
+}
+
 static inline bool lvgl_press_confirmed(axs5106l_touch_handle_t self, uint64_t now)
 {
     return now > self->gesture.press_time &&
@@ -593,6 +601,11 @@ static void lvgl_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
         self->touch.release_count = 0;
         self->touch.last_x        = x;
         self->touch.last_y        = y;
+        if (self->touch.swallow) {
+            /* 首触吞噬中：不喂手势、不投递 LVGL，等抬手解除 */
+            data->state = LV_INDEV_STATE_RELEASED;
+            return;
+        }
         recognize_gesture(self, x, y, true);
         if (lvgl_press_confirmed(self, now)) {
             data->point.x = x;
@@ -630,7 +643,11 @@ static void lvgl_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
             data->point.x = self->touch.last_x;
             data->point.y = self->touch.last_y;
             data->state   = LV_INDEV_STATE_RELEASED;
-            recognize_gesture(self, 0, 0, false);
+            if (self->touch.swallow) {
+                self->touch.swallow = false;   /* 吞噬结束：下次按压恢复正常投递 */
+            } else {
+                recognize_gesture(self, 0, 0, false);
+            }
 #if AXS5106L_TOUCH_DEBUG_OVERLAY
             if (self->debug_dot != NULL) lv_obj_add_flag(self->debug_dot, LV_OBJ_FLAG_HIDDEN);
 #endif
