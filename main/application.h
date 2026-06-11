@@ -7,6 +7,7 @@
 #include <esp_timer.h>
 
 #include <string>
+#include <string_view>
 #include <mutex>
 #include <deque>
 #include <memory>
@@ -172,8 +173,8 @@ private:
     bool has_server_time_ = false;
     bool aborted_ = false;
     bool assets_version_checked_ = false;
-    bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
-    bool wakeup_sound_on_listening_ = false;  // 唤醒词打断 TTS：进听音后改播 wakeup.ogg（替代 popup.ogg）
+    // 进入 listening 态后待播的提示音（nullptr=不播；正常唤醒=popup，唤醒打断 TTS=wakeup）
+    const std::string_view* pending_listening_sound_ = nullptr;
 
     bool stt_popup_enabled_ = true;
     std::atomic<bool> auto_chat_pending_{false};  // 开机自动对话 pending（A1 · 见 RequestAutoChatOnIdle）

@@ -500,7 +500,8 @@ private:
             }
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
-                ShutdownOrSleep("休眠中", "拿起唤醒", "", 1500, true);
+                bool pickup = Settings("status", false).GetInt("pickupWake", 0) == 1;
+                ShutdownOrSleep("休眠中", pickup ? "拿起唤醒" : "按键唤醒", "", 1500, true);
             }
         });
 
@@ -526,7 +527,7 @@ private:
     // 拿起唤醒
     void ArmGyroWakeup() {
         if (!sc7a20h_sensor_) return;
-        if (Settings("status", false).GetInt("pickupWake", 1) == 0) return;
+        if (Settings("status", false).GetInt("pickupWake", 0) == 0) return;
         esp_err_t r = sc7a20h_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
         if (r != ESP_OK) ESP_LOGW(TAG, "sc7a20h_wakeup failed: %s", esp_err_to_name(r));
     }
@@ -567,6 +568,15 @@ private:
     }
 
     void EnterDeepSleep(bool enable_gyro_wakeup = true) {
+        if (enable_gyro_wakeup) {
+            int next_alarm = AlarmManager::GetInstance().GetSecondsToNextAlarm();
+            if (next_alarm > 0 && next_alarm <= 900) {
+                ESP_LOGW(TAG, "闹钟 %d 秒后到达，放弃本次深睡等闹钟", next_alarm);
+                if (power_save_timer_) power_save_timer_->WakeUp();  // 重置计时，防每秒重试
+                return;
+            }
+        }
+
         ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
 
         ESP_LOGI(TAG, "停止 AudioService（释放 codec / 退出 audio_* 任务）");
@@ -725,7 +735,7 @@ private:
                 SystemReset::CheckButtons(true);
                 return;
             }
-            // ② 配网态：BLUFI ↔ AP 切换（提示音由 SwitchConfigMode 内部 PlaySound）
+            // ② 配网态：物理按键双击 BLUFI ↔ AP 切换（提示音由 SwitchConfigMode 内部 PlaySound；触屏双击不参与）
             if (status == kDeviceStateWifiConfiguring) {
                 static std::atomic_flag switching = ATOMIC_FLAG_INIT;
                 if (!switching.test_and_set()) {

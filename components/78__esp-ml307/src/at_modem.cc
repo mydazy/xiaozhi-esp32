@@ -166,7 +166,6 @@ int AtModem::GetCsq() {
     }
     if (at_uart_->SendCommand("AT+CSQ", 100)) {
         int dbm = (csq_ >= 0 && csq_ <= 31) ? (-113 + csq_ * 2) : 0;
-        ESP_LOGI(TAG, "AT+CSQ 实时查询: CSQ=%d (%ddBm)", csq_, dbm);
     } else {
         ESP_LOGW(TAG, "AT+CSQ failed (busy), use cached csq=%d", csq_);
     }

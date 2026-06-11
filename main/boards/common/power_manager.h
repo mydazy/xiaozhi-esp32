@@ -178,7 +178,14 @@ private:
             voltage = voltage * 2;  // 2个1M电阻分压
         }
         else {
-            voltage = 3600 * 1000 / 4096 * average_adc / 1000;
+            // 08-P0-A：无 eFuse 校准的回退斜率。已校准机实测标定（2026-06-11，
+            // raw=2571 ↔ Cali 4200mV 整机 → 等效 Vref = 2100*4096/2571 ≈ 3346mV）：
+            //   原 3600 → 真实 ~3.16V 才触发 3400 关机阈值（过放，即本 P0）；
+            //   3300   → 真实 ~3.45V 触发（提前 ~50mV，轻微保守侧，采用）；
+            //   3100   → 真实 ~3.67V 就关机（半电关机，过度保守，弃用）。
+            // 单点标定取自满电段，3.4-3.7V 段非线性误差待补一个中低电数据点复核；
+            // 个体 Vref 差异 ±5%，故取 3300 留保守余量；已校准机不走此分支。
+            voltage = 3300 * 1000 / 4096 * average_adc / 1000;
             voltage = voltage * 2;
         }
 
@@ -271,6 +278,11 @@ public:
         ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle_, ADC_CHANNEL, &chan_config));
 
         do_calibration1_chan0_ = AdcCalibrationInit(ADC_UNIT_1, ADC_CHANNEL, ADC_ATTEN_DB_12, &adc1_cali_chan0_handle_);
+        if (!do_calibration1_chan0_) {
+            // 08-P0-A 自检标记：无 eFuse ADC 校准 → 电压走保守 Vref 回退（电量偏低/提早关机=安全侧）。
+            // 正规渠道模组出厂应带校准；产线/产测抽查此日志，命中的机器登记批次并走校准流程。
+            ESP_LOGE(POWER_MANAGER_TAG, "ADC 无 eFuse 校准(08-P0-A)！电压按保守值估算，产线需登记此机");
+        }
 
         CheckBatteryStatus();
         if(is_off_battery_){

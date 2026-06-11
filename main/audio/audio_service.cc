@@ -708,6 +708,12 @@ void AudioService::EnableWakeWordDetection(bool enable) {
     }
 }
 
+void AudioService::SetWakeWordThreshold(float threshold) {
+    if (wake_word_) {
+        wake_word_->SetDetectThreshold(threshold);
+    }
+}
+
 void AudioService::ReleaseWakeWord() {
     if (!wake_word_) {
         return;
@@ -904,6 +910,15 @@ void AudioService::SetModelsList(srmodel_list_t* models_list) {
 bool AudioService::IsAfeWakeWord() {
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
     return wake_word_ != nullptr && dynamic_cast<AfeWakeWord*>(wake_word_.get()) != nullptr;
+#else
+    return false;
+#endif
+}
+
+bool AudioService::HasMultinetModel() {
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
+    return models_list_ != nullptr &&
+           esp_srmodel_filter(models_list_, ESP_MN_PREFIX, NULL) != nullptr;
 #else
     return false;
 #endif

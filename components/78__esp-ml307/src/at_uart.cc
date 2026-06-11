@@ -76,7 +76,9 @@ void AtUart::Initialize() {
     ESP_ERROR_CHECK(uart_driver_install(uart_num_, AT_UART_RX_BUFFER_SIZE, 0, 16, &event_queue_handle_, ESP_INTR_FLAG_IRAM));
     ESP_ERROR_CHECK(uart_param_config(uart_num_, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(uart_num_, tx_pin_, rx_pin_, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    
+
+    uart_set_rx_full_threshold(uart_num_, AT_UART_RX_FULL_THRESHOLD);
+
     // Enable pull-up on RX pin
     gpio_set_pull_mode(rx_pin_, GPIO_PULLUP_ONLY);
 
@@ -250,10 +252,6 @@ bool AtUart::ParseResponse() {
             return true;
         }
 
-        // Patch B · HTTP Binary Receive Mode（来自 189 v3.5.3 验证版）
-        // 必须在 find("\r\n") 之前拦截：binary content 内可能包含 \r\n 字节，
-        // 走默认分支会被截断。仅在引用计数 >0 时启用，默认 0 不改变 HEX 行为。
-        // EC801E 不调 SetHttpBinaryMode，此分支为 dead code 不影响 +QHTTP*/+QIURC 解析。
         const bool binary_active = http_binary_mode_count_.load() > 0;
         if (binary_active && rx_buffer_.size() > 22 &&
             memcmp(rx_buffer_.c_str(), "+MHTTPURC: \"header\"", 19) == 0) {

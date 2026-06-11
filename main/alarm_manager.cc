@@ -73,8 +73,6 @@ void AlarmManager::LoadAlarms() {
     ESP_LOGI(TAG, "闹钟加载完成，占用: 0x%02X", slot_occupied_);
 }
 
-// 持业务锁调用，只改内存 + enqueue，不在此函数内做 NVS 写
-// 真正的 NVS 写由 NvsWorkerTask 消费队列时执行 (DoNvsSaveIn)
 bool AlarmManager::SaveAlarmLocked(const AlarmConfig& alarm) {
     if (alarm.id >= 8) return false;
 
@@ -87,12 +85,17 @@ bool AlarmManager::SaveAlarmLocked(const AlarmConfig& alarm) {
 
     // 2. 异步 enqueue NVS 写
     if (nvs_queue_ == nullptr) {
-        // 降级：队列创建失败（极罕见 boot OOM）· 持锁路径不做同步 NVS（防死锁）
-        // 此时只保住内存态 · 闹钟在重启后会丢 · 上层应感知 nvs_queue_ 创建失败 LOG
         ESP_LOGW(TAG, "NVS 队列不可用，闹钟 %d 仅内存生效 · 重启会丢失", alarm.id);
         return true;
     }
-    AlarmNvsOp op{AlarmNvsOpType::Save, alarm};
+    AlarmNvsOp op{};
+    op.type = AlarmNvsOpType::Save;
+    op.id = alarm.id;
+    op.enabled = alarm.enabled;
+    op.hour = alarm.hour;
+    op.minute = alarm.minute;
+    op.repeat_days = alarm.repeat_days;
+    strlcpy(op.message, alarm.message.c_str(), sizeof(op.message));
     nvs_pending_.fetch_add(1, std::memory_order_acq_rel);
     if (xQueueSend(nvs_queue_, &op, 0) != pdTRUE) {
         nvs_pending_.fetch_sub(1, std::memory_order_acq_rel);
@@ -119,11 +122,10 @@ void AlarmManager::RemoveAlarmLocked(uint8_t id) {
         ESP_LOGW(TAG, "NVS 队列不可用，闹钟 %d 内存清除 · NVS 残留", id);
         return;
     }
-    AlarmNvsOp op{AlarmNvsOpType::Remove, {}};
-    op.alarm.id = id;
+    AlarmNvsOp op{};
+    op.type = AlarmNvsOpType::Remove;
+    op.id = id;
     nvs_pending_.fetch_add(1, std::memory_order_acq_rel);
-    // 队列满时丢弃 remove 影响小 (内存已清, 下次启动 LoadAlarms 读回 NVS 残留
-    // 是退化问题不是安全问题, 下次 Save 会自然覆盖)
     if (xQueueSend(nvs_queue_, &op, 0) != pdTRUE) {
         nvs_pending_.fetch_sub(1, std::memory_order_acq_rel);
     }
@@ -141,7 +143,6 @@ int AlarmManager::FindFreeSlotLocked() const {
 // ============================================================================
 
 bool AlarmManager::AddAlarm(const AlarmConfig& alarm) {
-    // repeat_days 只用 7 bit · 公共 API 防 0xFF 静默 trunc
     if (alarm.id >= 8 || alarm.hour > 23 || alarm.minute > 59 ||
         alarm.repeat_days > 0x7F) {
         ESP_LOGW(TAG, "无效闹钟: id=%d %02d:%02d repeat=0x%02X",
@@ -221,8 +222,6 @@ void AlarmManager::CheckAndTrigger() {
     if (wday < 0 || wday > 6) return;
 
     // 时间门只看 (synced) || (RTC year ≥ 2024)
-    // 删除原 s_timer_wakeup 必要条件 → EXT0 按键开机时 RTC 年份合理就允许触发
-    // 防漏闹钟：用户 06:59:55 按键开机 + NTP 完成需 10s · 否则 7:00 闹钟错过
     if (!s_time_synced.load(std::memory_order_acquire) &&
         ti.tm_year + 1900 < kRtcSanityYear) {
         return;
@@ -236,8 +235,6 @@ void AlarmManager::CheckAndTrigger() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
 
-        // dedup 移入锁内 · last_trigger_time_ 不再锁外裸读
-        // 删除 (now - last) >= 0 子句 · NTP 回拨超 60s 不重复触发
         if (last_trigger_time_ > 0 && (now - last_trigger_time_) < 60) {
             return;
         }
@@ -603,13 +600,17 @@ void AlarmManager::NvsWorkerTask(void* arg) {
         AlarmConfig snapshot[8] = {};
 
         auto apply = [&](const AlarmNvsOp& o) {
-            uint8_t id = o.alarm.id;
-            if (id >= 8) return;
+            if (o.id >= 8) return;
             if (o.type == AlarmNvsOpType::Save) {
-                action[id] = 1;
-                snapshot[id] = o.alarm;
+                action[o.id] = 1;
+                snapshot[o.id].id = o.id;
+                snapshot[o.id].enabled = o.enabled;
+                snapshot[o.id].hour = o.hour;
+                snapshot[o.id].minute = o.minute;
+                snapshot[o.id].repeat_days = o.repeat_days;
+                snapshot[o.id].message = o.message;  // char[] → string 深拷贝，接收侧自有内存
             } else {  // Remove
-                action[id] = 2;
+                action[o.id] = 2;
             }
         };
         apply(op);
@@ -640,8 +641,6 @@ void AlarmManager::NvsWorkerTask(void* arg) {
             self->nvs_pending_.store(0, std::memory_order_release);
         }
     }
-    // 注：当前实现 nvs_worker_running_ 永远 true · while 永不退出 · 此处 vTaskDelete 不可达
-    // 保留 atomic 字段方便未来 shutdown 时优雅退出（写 false + 等任务消亡）
 }
 
 // 兜底：阻塞等 worker drain 完所有排队写（OTA/关机/深睡前调用）

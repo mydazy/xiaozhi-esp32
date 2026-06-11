@@ -113,6 +113,19 @@ void McpServer::AddCommonTools() {
         [](const PropertyList& properties) -> ReturnValue {
             std::string mode = properties["mode"].value<std::string>();
             std::string text = properties["text"].value<std::string>();
+            // 守卫：写 NVS 前全部校验。custom 在缺命令词模型的机器上重启后唤醒会初始化
+            // 失败（设备"变聋"），服务端一次误调用就会全网翻车——必须在这里拒绝。
+            if (mode != "afe" && mode != "custom") {
+                return std::string("{\"success\":false,\"error\":\"mode 仅支持 afe/custom\"}");
+            }
+            if (mode == "custom") {
+                if (!Application::GetInstance().GetAudioService().HasMultinetModel()) {
+                    return std::string("{\"success\":false,\"error\":\"本机未烧录命令词模型，无法自定义唤醒词，已保持当前设置\"}");
+                }
+                if (text.empty()) {
+                    return std::string("{\"success\":false,\"error\":\"custom 模式必须提供 text\"}");
+                }
+            }
             Settings s("wakeword", true);
             s.SetString("mode", mode);
             s.SetString("text", text);

@@ -38,6 +38,12 @@
 
 
 namespace {
+// 唤醒灵敏度双档（值越低越灵敏，esp-sr 范围 0.4~0.9999）：
+// TTS 播放期用灵敏档——自播回声+大音量下检出难，打断可用性优先、误触代价低；
+// 待机/听音用常规档防误唤醒。改值必须真机 A/B 三项：唤醒率/误唤醒/打断率。
+constexpr float kWakeThresholdNormal = 0.60f;
+constexpr float kWakeThresholdInterrupt = 0.45f;
+
 struct EduCard {
     std::string main;   // 主秀：汉字（≤4 字）/ 英文单词（≤12 字符）
     std::string top;    // 辅助：拼音 / 中文释义
@@ -575,6 +581,9 @@ void Application::CheckNewVersion() {
     const int MAX_RETRY = 10;
     int retry_count = 0;
     int retry_delay = 10; // Initial retry delay in seconds
+
+    // 升级后首启必须先标记本固件有效（幂等，仅 PENDING_VERIFY 时生效）：
+    ota_->MarkCurrentVersionValid();
 
     auto& board = Board::GetInstance();
     while (true) {
@@ -1121,8 +1130,7 @@ void Application::HandleWakeWordDetectedEvent() {
             audio_service_.EnableWakeWordDetection(true);
         } else {
             // 唤醒词打断 TTS：进听音后播 wakeup.ogg 作为打断反馈（时序机制与 popup 相同）
-            play_popup_on_listening_ = true;
-            wakeup_sound_on_listening_ = true;
+            pending_listening_sound_ = &Lang::Sounds::OGG_WAKEUP;
             SetListeningMode(GetDefaultListeningMode());
         }
     } else if (state == kDeviceStateActivating) {
@@ -1159,7 +1167,7 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     protocol_->SendWakeWordDetected(wake_word);
 
     // Set flag to play popup sound after state changes to listening
-    play_popup_on_listening_ = true;
+    pending_listening_sound_ = &Lang::Sounds::OGG_POPUP;
     SetListeningMode(GetDefaultListeningMode());
 }
 
@@ -1182,6 +1190,7 @@ void Application::HandleStateChangedEvent() {
 //            display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
+            audio_service_.SetWakeWordThreshold(kWakeThresholdNormal);  // 回待机恢复常规档防误唤醒
             if (lcd) {
                 auto& pm = PomodoroManager::GetInstance();
                 if (pm.IsActive()) {
@@ -1205,7 +1214,7 @@ void Application::HandleStateChangedEvent() {
             if (lcd) lcd->SwitchToChatMode();
 
             // Make sure the audio processor is running
-            if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {
+            if (pending_listening_sound_ != nullptr || !audio_service_.IsAudioProcessorRunning()) {
                 if (listening_mode_ == kListeningModeAutoStop) {
                     audio_service_.WaitForPlaybackQueueEmpty();
                 }
@@ -1218,17 +1227,16 @@ void Application::HandleStateChangedEvent() {
 #ifdef CONFIG_WAKE_WORD_DETECTION_IN_LISTENING
             // Enable wake word detection in listening mode (configured via Kconfig)
             audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
+            audio_service_.SetWakeWordThreshold(kWakeThresholdNormal);  // 听音期常规档，防灵敏档残留
 #else
             // Disable wake word detection in listening mode
             audio_service_.EnableWakeWordDetection(false);
 #endif
             
-            // Play popup sound after ResetDecoder (in EnableVoiceProcessing) has been called
-            if (play_popup_on_listening_) {
-                play_popup_on_listening_ = false;
-                audio_service_.PlaySound(wakeup_sound_on_listening_ ? Lang::Sounds::OGG_WAKEUP
-                                                                    : Lang::Sounds::OGG_POPUP);
-                wakeup_sound_on_listening_ = false;
+            // Play pending sound after ResetDecoder (in EnableVoiceProcessing) has been called
+            if (pending_listening_sound_ != nullptr) {
+                audio_service_.PlaySound(*pending_listening_sound_);
+                pending_listening_sound_ = nullptr;
             }
             break;
         case kDeviceStateSpeaking:
@@ -1241,6 +1249,9 @@ void Application::HandleStateChangedEvent() {
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
+                // TTS 播放期调灵敏档：自播回声+大音量下检出难，打断可用性优先；
+                // 误触代价低（顶多打断自己的播报），回 Idle/Listening 时恢复常规档
+                audio_service_.SetWakeWordThreshold(kWakeThresholdInterrupt);
             } else {
                 audio_service_.EnableWakeWordDetection(false);
             }

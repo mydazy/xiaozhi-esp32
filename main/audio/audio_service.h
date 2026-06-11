@@ -128,8 +128,10 @@ public:
     bool IsWakeWordRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_WAKE_WORD_RUNNING; }
     bool IsAudioProcessorRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_AUDIO_PROCESSOR_RUNNING; }
     bool IsAfeWakeWord();
+    bool HasMultinetModel();   // 资产分区是否有命令词模型（custom 唤醒词的前提）
 
     void EnableWakeWordDetection(bool enable);
+    void SetWakeWordThreshold(float threshold);  // 运行时灵敏度（越低越灵敏，0.4~0.9999）
     void ReleaseWakeWord();
     void EnableVoiceProcessing(bool enable);
     void EnableAudioTesting(bool enable);

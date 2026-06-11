@@ -25,9 +25,15 @@ enum class AlarmNvsOpType : uint8_t {
     Save,
     Remove,
 };
+// 必须保持 POD：xQueueSend 按字节 memcpy，含 std::string 会在发送方 op 析构后悬垂
 struct AlarmNvsOp {
     AlarmNvsOpType type;
-    AlarmConfig alarm;   // Save: 完整配置; Remove: 仅 id 有效
+    uint8_t id = 0;          // Save: 完整字段; Remove: 仅 id 有效
+    bool enabled = false;
+    uint8_t hour = 0;
+    uint8_t minute = 0;
+    uint8_t repeat_days = 0;
+    char message[31] = {};   // MCP 入口硬限 ≤30 UTF-8 字节，31 容纳 NUL
 };
 
 // 闹钟管理器（单例，线程安全，8 固定槽位，NVS 持久化）
