@@ -7,6 +7,7 @@
 #include <esp_timer.h>
 
 #include <string>
+#include <string_view>
 #include <mutex>
 #include <deque>
 #include <memory>
@@ -155,7 +156,7 @@ private:
 
     std::mutex mutex_;
     std::deque<std::function<void()>> main_tasks_;
-    std::unique_ptr<Protocol> protocol_;
+    std::shared_ptr<Protocol> protocol_;  // A-1: shared_ptr + atomic_load/store 本地拷贝惯例，防 R2/R3 跨任务 UAF
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     DeviceStateMachine state_machine_;
@@ -172,7 +173,8 @@ private:
     bool has_server_time_ = false;
     bool aborted_ = false;
     bool assets_version_checked_ = false;
-    bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
+    // 进入 listening 态后待播的提示音（nullptr=不播；正常唤醒=popup，唤醒打断 TTS=wakeup）
+    const std::string_view* pending_listening_sound_ = nullptr;
 
     bool stt_popup_enabled_ = true;
     std::atomic<bool> auto_chat_pending_{false};  // 开机自动对话 pending（A1 · 见 RequestAutoChatOnIdle）

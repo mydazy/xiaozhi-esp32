@@ -51,6 +51,8 @@ void Blufi::ReleaseStaticMem() {
 
   if (ret == ESP_OK) {
     static_mem_released_ = true;
+    ESP_LOGI(TAG, "BT 静态 RAM 已释放 %u B (internal free %u -> %u)",
+             (unsigned)(free_after - free_before), (unsigned)free_before, (unsigned)free_after);
     ESP_LOGW(TAG, "本次启动不可再启动 BT（进配网必须先 Application::Reboot）");
   } else {
     ESP_LOGE(TAG, "esp_bt_mem_release(BTDM) 失败: %s", esp_err_to_name(ret));

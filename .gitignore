@@ -21,3 +21,6 @@ mmap_generate_*.h
 !.idea/tools/
 .claude/settings.local.json
 .claude/worktrees/
+
+# 现场反馈原始材料（173MB 视频/截图，文字整理已归档 docs/audit/用户反馈问题整理_*.md）
+bug/

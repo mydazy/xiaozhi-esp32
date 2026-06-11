@@ -31,19 +31,20 @@ public:
     void OnWakeWordDetected(std::function<void(const std::string& wake_word)> callback);
     void Start();
     void Stop();
-    // 通话期释放 AFE 实例 + 退检测任务，回收内部 RAM；保留共享模型与同步对象，可被 Initialize 重建。
     void Release();
     bool IsInitialized() const { return afe_data_ != nullptr; }
     size_t GetFeedSize();
     void EncodeWakeWordData();
     bool GetWakeWordOpus(std::vector<uint8_t>& opus);
     const std::string& GetLastDetectedWakeWord() const { return last_detected_wake_word_; }
+    void SetDetectThreshold(float threshold) override;
 
 private:
     srmodel_list_t *models_ = nullptr;
     const esp_afe_sr_iface_t* afe_iface_ = nullptr;
     esp_afe_sr_data_t* afe_data_ = nullptr;
     char* wakenet_model_ = NULL;
+    int wn_model_count_ = 0;   // 加载的 wakenet 模型数（set_wakenet_threshold 索引 1..N）
     std::vector<std::string> wake_words_;
     EventGroupHandle_t event_group_;
     SemaphoreHandle_t detection_done_sem_ = nullptr;
@@ -58,7 +59,12 @@ private:
     StaticTask_t* wake_word_encode_task_buffer_ = nullptr;
     StackType_t* wake_word_encode_task_stack_ = nullptr;
     std::atomic<bool> encode_in_progress_{false};
-    std::deque<std::vector<int16_t>> wake_word_pcm_;
+    // 唤醒前 2s 录音环形缓冲（PSRAM 固定块·一次分配终身复用）
+    // 历史：std::deque<vector> 默认分配器吃内部 RAM 64K 且 Stop 不清 → 破 60K 红线主因
+    static constexpr size_t kWakeWordRingSamples = 32000;  // 2s @ 16kHz mono
+    int16_t* wake_word_ring_ = nullptr;                    // PSRAM
+    size_t ring_write_ = 0;                                // 下一个写入下标
+    size_t ring_filled_ = 0;                               // 有效样本数（≤容量）
     std::mutex wake_word_pcm_mutex_;
     std::deque<std::vector<uint8_t>> wake_word_opus_;
     std::mutex wake_word_mutex_;

@@ -714,7 +714,16 @@ def get_multinet_model_paths(model_names, esp_sr_model_path):
             valid_paths.append(multinet_model_path)
         else:
             print(f"Warning: Multinet model directory not found: {multinet_model_path}")
-    
+
+    # 选了 multinet 必须连带 fst 资源目录：esp_mn_commands_update 的拼音转音素
+    # 要读 fst/commands_cn.txt，缺失会在注册命令词时崩溃（库内 fopen 未判空）
+    if valid_paths:
+        fst_path = os.path.join(esp_sr_model_path, 'multinet_model', 'fst')
+        if os.path.exists(fst_path):
+            valid_paths.append(fst_path)
+        else:
+            print(f"Warning: fst resource directory not found: {fst_path}")
+
     return valid_paths
 
 
@@ -910,11 +919,14 @@ def main():
     wakenet_model_paths = []
     multinet_model_paths = []
     
-    # 1. Only package wakenet models if USE_AFE_WAKE_WORD=y
-    if wake_word_config['use_esp_wake_word'] or wake_word_config['use_afe_wake_word']:
+    # 1. 选中的 wakenet 模型始终打包（含 CUSTOM 档）：
+    #    运行时默认引擎仍是 AFE（NVS wakeword/mode 默认 afe），custom 仅在用户
+    #    起名后切换，且 custom 初始化失败的回落保险也依赖 wakenet 模型在资产中。
+    if (wake_word_config['use_esp_wake_word'] or wake_word_config['use_afe_wake_word']
+            or wake_word_config['use_custom_wake_word']):
         wakenet_model_paths = get_wakenet_model_paths(wakenet_model_names, args.esp_sr_model_path)
     elif wakenet_model_names:
-        print(f"  Note: Found wakenet models {wakenet_model_names} but wake word type is not ESP/AFE, skipping")
+        print(f"  Note: Found wakenet models {wakenet_model_names} but wake word type is not ESP/AFE/CUSTOM, skipping")
     
     # 2. Error check: if USE_CUSTOM_WAKE_WORD=y but no multinet models selected, report error
     if wake_word_config['use_custom_wake_word'] and not multinet_model_names:

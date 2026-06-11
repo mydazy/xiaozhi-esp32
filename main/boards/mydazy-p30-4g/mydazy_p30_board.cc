@@ -212,7 +212,7 @@ private:
                 first_boot_ = true;
                 if (!CheckBootHoldOnWakeup()) {
                     ESP_LOGI(TAG, "开机长按未达 1.5 秒，立即回深睡");
-                    EnterDeepSleep(false);  // 不会返回 · 砍 gyro 唤醒：防长按不足回深睡后又被震动唤醒
+                    EnterDeepSleep(true);  // 不会返回
                 }
                 break;
             case ESP_SLEEP_WAKEUP_EXT1:
@@ -300,24 +300,15 @@ private:
     void InitializeSc7a20h() {
         sc7a20h_sensor_ = sc7a20h_init(i2c_worker_, 320 /*mg*/, 100 /*ms*/);
         if (!sc7a20h_sensor_) { ESP_LOGE(TAG, "SC7A20H 初始化失败"); return; }
-        // 摇一摇功能已禁用（产品决策）· 保留 sc7a20h_init 供"拿起唤醒/深睡唤醒"使用
-        // sc7a20h_shake (sc7a20h_sensor_, 1500, 1000, 4, 1500, &OnShake,  this);
+        sc7a20h_shake (sc7a20h_sensor_, 1500, 1000, 4, 1500, &OnShake,  this);
     }
 
-    // 摇一摇 — 日常 AI 互动（已禁用 · 产品决策 · 恢复时把 #if 0 改回 1 并取消上方 sc7a20h_shake 注释）
-#if 0
+    // 摇一摇 — 仅用于闹钟摇停（日常摇→AI互动已砍 · 走路/拿起易误触发 · 两板统一）
     static void OnShake(void* /*ctx*/) {
         Application::GetInstance().Schedule([] {
-            if (AlarmRinger::GetInstance().ShakeStop(6)) return;   // 6 次累计才停闹铃（防误关）
-            auto& app = Application::GetInstance();
-            auto state = app.GetDeviceState();
-            if (state != kDeviceStateIdle && state != kDeviceStateListening) return;
-            app.PlaySound(Lang::Sounds::OGG_POPUP);
-            ESP_LOGI(TAG, "shake → AI");
-            app.SendTextToAI("摇一摇随机互动");
+            AlarmRinger::GetInstance().ShakeStop(6);   // 6 次累计才停闹铃（防误关）；非响铃时 ShakeStop 直接返回，无副作用
         });
     }
-#endif
 
     // 桌面双击 — 唤醒屏幕（与触摸唤醒同语义 · 不进 AI 对话）
     static void OnStrike(void* ctx) {
@@ -336,7 +327,8 @@ private:
             .int_gpio        = TOUCH_INT_NUM,
             .width           = DISPLAY_WIDTH,
             .height          = DISPLAY_HEIGHT,
-            .rf_mode         = AXS5106L_RF_STRICT,
+            .rf_mode         = (GetNetworkType() == NetworkType::WIFI)
+                                   ? AXS5106L_RF_NORMAL : AXS5106L_RF_STRICT,
             .cb_ctx          = this,
             .on_wake         = &OnTouchWake,
             .on_click        = &OnTouchClick,
@@ -350,7 +342,11 @@ private:
     }
 
     static void OnTouchWake(void *ctx) {
-        static_cast<MyDazyP30_4GBoard*>(ctx)->WakeUp();
+        auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
+        if (self->power_save_timer_ && self->power_save_timer_->IsInSleepMode() && self->touch_driver_) {
+            axs5106l_touch_swallow_current_press(self->touch_driver_);
+        }
+        self->WakeUp();
     }
 
     // 控制中心可见时：点击交给 LVGL 处理其内部控件，不触发业务唤醒/打断
@@ -508,7 +504,8 @@ private:
             }
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
-                ShutdownOrSleep("休眠中", "按键唤醒", "", 1500, false);  // 砍陀螺仪深睡唤醒(E1/E2/G1根因:夜间震动误开机)，只留按键(EXT0)/闹钟(RTC)唤醒
+                bool pickup = Settings("status", false).GetInt("pickupWake", 0) == 1;
+                ShutdownOrSleep("休眠中", pickup ? "拿起唤醒" : "按键唤醒", "", 1500, true);
             }
         });
 
@@ -534,7 +531,7 @@ private:
     // 拿起唤醒
     void ArmGyroWakeup() {
         if (!sc7a20h_sensor_) return;
-        if (Settings("status", false).GetInt("pickupWake", 1) == 0) return;
+        if (Settings("status", false).GetInt("pickupWake", 0) == 0) return;
         esp_err_t r = sc7a20h_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
         if (r != ESP_OK) ESP_LOGW(TAG, "sc7a20h_wakeup failed: %s", esp_err_to_name(r));
     }
@@ -575,6 +572,15 @@ private:
     }
 
     void EnterDeepSleep(bool enable_gyro_wakeup = true) {
+        if (enable_gyro_wakeup) {
+            int next_alarm = AlarmManager::GetInstance().GetSecondsToNextAlarm();
+            if (next_alarm > 0 && next_alarm <= 900) {
+                ESP_LOGW(TAG, "闹钟 %d 秒后到达，放弃本次深睡等闹钟", next_alarm);
+                if (power_save_timer_) power_save_timer_->WakeUp();  // 重置计时，防每秒重试
+                return;
+            }
+        }
+
         ESP_LOGI(TAG, "====== 开始进入深度睡眠流程 ======");
 
         ESP_LOGI(TAG, "停止 AudioService（释放 codec / 退出 audio_* 任务）");
@@ -733,7 +739,7 @@ private:
                 SystemReset::CheckButtons(true);
                 return;
             }
-            // ② 配网态：BLUFI ↔ AP 切换（提示音由 SwitchConfigMode 内部 PlaySound）
+            // ② 配网态：物理按键双击 BLUFI ↔ AP 切换（提示音由 SwitchConfigMode 内部 PlaySound；触屏双击不参与）
             if (status == kDeviceStateWifiConfiguring) {
                 static std::atomic_flag switching = ATOMIC_FLAG_INIT;
                 if (!switching.test_and_set()) {
@@ -748,15 +754,8 @@ private:
                 }
                 return;
             }
-#if CONFIG_USE_DEVICE_AEC
-            // ③ 在线态：AEC 模式 toggle
-            if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
-                AbortIfSpeaking();
-                app.SetDeviceState(kDeviceStateIdle);
-                app.SetAecMode(app.GetAecMode() == kAecOff ? kAecOnDeviceSide : kAecOff);
-                WakeUp();
-            }
-#endif
+            // ③ 在线态：AEC 模式 toggle（与控制中心触屏共用 ToggleAecMode 路径）
+            ToggleAecMode();
         });
         // 3 连击：4G ↔ WiFi ↔ 配网 三态切换
         // 4G/WiFi 路径的提示音由 SwitchNetworkType 统一播放，这里 Alert 不再带 sound
@@ -822,8 +821,8 @@ private:
             }
         });
 
-        volume_up_button_.OnClick  ([this]() { ApplyVolume(+10); });
-        volume_down_button_.OnClick([this]() { ApplyVolume(-10); });
+        volume_up_button_.OnPressDown  ([this]() { ApplyVolume(+10); });
+        volume_down_button_.OnPressDown([this]() { ApplyVolume(-10); });
     }
 
     // 应用一次音量增量；clamp 到 [0,100] 并刷新状态栏 + 唤醒省电定时器
@@ -852,9 +851,14 @@ private:
     // ========================================================
 
     void ApplyDefaultSettings() {
-        // C1 修复：移除"音量<50 强制回写 80%"——它会把用户主动设的低音量(如40%)在每次
-        // 开机/切网时冲回 80%(现场反馈"低音量不保存")。键不存在时音量读取处 GetInt 默认值
-        // 已兜底；键存在则尊重用户设置(含低音量)。
+        // 音量范围修正（50-100）
+        Settings audio_settings("audio", true);
+        constexpr int DEFAULT_VOLUME = 50;
+        int original_volume = audio_settings.GetInt("output_volume", DEFAULT_VOLUME);
+        if (original_volume < 30) {
+            audio_settings.SetInt("output_volume", DEFAULT_VOLUME);
+            ESP_LOGI(TAG, "检测到音量%d小于50，自动调整为%d", original_volume, DEFAULT_VOLUME);
+        }
         // 默认使用蓝牙配网
         Settings wifi_settings("wifi", true);
         wifi_settings.SetInt("blufi", 1);
@@ -873,7 +877,7 @@ private:
         }
 
         if (app.GetDeviceState() != kDeviceStateWifiConfiguring && self->first_boot_) {
-            app.RequestAutoChatOnIdle();
+            // app.RequestAutoChatOnIdle();
             app.PlaySound(Lang::Sounds::OGG_WELCOME);
         }
         vTaskDelete(NULL);
@@ -887,7 +891,7 @@ private:
 
 public:
     MyDazyP30_4GBoard() :
-        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 1),
+        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 0),  // 出厂默认 WiFi(0)；原默认 4G/ML307(1)。仅首次出厂(NVS无type)生效，已配网设备保留用户选择
         boot_button_(BOOT_BUTTON_GPIO, false, 800, 400),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
@@ -918,21 +922,28 @@ public:
             xTaskCreatePinnedToCore(
                 [](void* /*arg*/) {
                     int64_t t0 = esp_timer_get_time();
-                    ESP_LOGI(TAG, "[ml307_fmode] WiFi 模式 · 等 ML307 boot 2s 再 Detect");
-                    vTaskDelay(pdMS_TO_TICKS(2000));  // GPIO9 上电后 ML307R 内部 boot ~3s 才响应 AT
-                    int64_t t_wait = (esp_timer_get_time() - t0) / 1000;
-                    ESP_LOGI(TAG, "[ml307_fmode] 开始 Detect (boot 等待 %lldms)", t_wait);
-                    auto modem = AtModem::Detect(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 921600);
-                    int64_t t_detect = (esp_timer_get_time() - t0) / 1000;
-                    if (modem == nullptr) {
-                        ESP_LOGW(TAG, "[ml307_fmode] Detect 失败（总 %lldms）· ML307 仍 ~20-50mA 待机", t_detect);
-                    } else {
-                        ESP_LOGI(TAG, "[ml307_fmode] Detect 成功（总 %lldms）· 发送 AT+CFUN=4", t_detect);
-                        modem->SetFlightMode(true);
-                        vTaskDelay(pdMS_TO_TICKS(500));   // 等飞行模式生效
-                        int64_t t_total = (esp_timer_get_time() - t0) / 1000;
-                        ESP_LOGI(TAG, "[ml307_fmode] 飞行模式生效（总 %lldms）· ML307 → ~5mA 待机", t_total);
-                        modem.reset();   // 释放 UART 资源
+                    ESP_LOGI(TAG, "[ml307_fmode] WiFi 模式 · 等 ML307 boot 8s 再 Detect");
+                    vTaskDelay(pdMS_TO_TICKS(8000));
+                    for (int attempt = 1; attempt <= 3; ++attempt) {
+                        int64_t t_wait = (esp_timer_get_time() - t0) / 1000;
+                        ESP_LOGI(TAG, "[ml307_fmode] 开始 Detect (第%d/3次, %lldms)", attempt, t_wait);
+                        auto modem = AtModem::Detect(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 921600);
+                        int64_t t_detect = (esp_timer_get_time() - t0) / 1000;
+                        if (modem != nullptr) {
+                            ESP_LOGI(TAG, "[ml307_fmode] Detect 成功（总 %lldms）· 发送 AT+CFUN=4", t_detect);
+                            modem->SetFlightMode(true);
+                            vTaskDelay(pdMS_TO_TICKS(500));   // 等飞行模式生效
+                            int64_t t_total = (esp_timer_get_time() - t0) / 1000;
+                            ESP_LOGI(TAG, "[ml307_fmode] 飞行模式生效（总 %lldms）· ML307 → ~5mA 待机", t_total);
+                            modem.reset();   // 释放 UART 资源
+                            break;
+                        }
+                        if (attempt < 3) {
+                            ESP_LOGW(TAG, "[ml307_fmode] Detect 失败（总 %lldms）· 30s 后重试", t_detect);
+                            vTaskDelay(pdMS_TO_TICKS(30000));
+                        } else {
+                            ESP_LOGW(TAG, "[ml307_fmode] Detect 3 次均失败（总 %lldms）· ML307 仍 ~20-50mA 待机，建议重启", t_detect);
+                        }
                     }
                     vTaskDelete(NULL);
                 },
@@ -1016,6 +1027,21 @@ public:
         if (power_save_timer_) {
             power_save_timer_->WakeUp();
         }
+    }
+
+    // AEC 模式切换的唯一底层入口：物理按键(BOOT)双击③ 和 控制中心触屏开关 都调这里（与 WiFi 板实现一致）
+    void ToggleAecMode() override {
+#if CONFIG_USE_DEVICE_AEC
+        auto& app = Application::GetInstance();
+        auto status = app.GetDeviceState();
+        ESP_LOGI(TAG, "ToggleAecMode: status=%d cur_aec=%d", (int)status, (int)app.GetAecMode());
+        if (status == kDeviceStateIdle || status == kDeviceStateListening || status == kDeviceStateSpeaking) {
+            AbortIfSpeaking();
+            app.SetDeviceState(kDeviceStateIdle);
+            app.SetAecMode(app.GetAecMode() == kAecOff ? kAecOnDeviceSide : kAecOff);
+            WakeUp();
+        }
+#endif
     }
 
     // 异步等提示音播完再 ToggleChatState：

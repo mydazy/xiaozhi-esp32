@@ -1,4 +1,5 @@
 #include "assets.h"
+#include "audio/srmodel_vfs.h"
 #include <cstring>   // strnlen
 #include "board.h"
 #include "display.h"
@@ -99,6 +100,7 @@ bool Assets::LoadSrmodelsFromIndex(Assets* assets, cJSON* root) {
             }
             assets->models_list_ = srmodel_load(static_cast<uint8_t*>(ptr));
             if (assets->models_list_ != nullptr) {
+                RegisterSrmodelVfs(assets->models_list_);   // multinet 文件接口直读 mmap
                 auto& app = Application::GetInstance();
                 app.GetAudioService().SetModelsList(assets->models_list_);
                 if (need_delete_root) {

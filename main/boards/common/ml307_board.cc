@@ -1,5 +1,6 @@
 #include "ml307_board.h"
 
+#include "application.h"
 #include "audio_codec.h"
 #include "display.h"
 
@@ -85,6 +86,7 @@ void Ml307Board::NetworkTask() {
     if (modem_ == nullptr) {
         ESP_LOGE(TAG, "Failed to detect modem after %d retries", MODEM_DETECT_MAX_RETRIES);
         OnNetworkEvent(NetworkEvent::ModemErrorInitFailed);
+        Application::GetInstance().SetDeviceState(kDeviceStateIdle);
         return;
     }
 
@@ -122,6 +124,7 @@ void Ml307Board::NetworkTask() {
 
     if (!modem_->network_ready()) {
         ESP_LOGE(TAG, "Failed to register network after %d retries", NETWORK_REG_MAX_RETRIES);
+        Application::GetInstance().SetDeviceState(kDeviceStateIdle);
         return;
     }
 
@@ -154,13 +157,13 @@ const char* Ml307Board::GetNetworkStateIcon() {
     int csq = modem_->GetCsq();
     if (csq == -1) {
         return FONT_AWESOME_SIGNAL_OFF;
-    } else if (csq >= 0 && csq <= 9) {
+    } else if (csq >= 0 && csq <= 14) {
         return FONT_AWESOME_SIGNAL_WEAK;
-    } else if (csq >= 10 && csq <= 14) {
-        return FONT_AWESOME_SIGNAL_FAIR;
     } else if (csq >= 15 && csq <= 19) {
+        return FONT_AWESOME_SIGNAL_FAIR;
+    } else if (csq >= 20 && csq <= 24) {
         return FONT_AWESOME_SIGNAL_GOOD;
-    } else if (csq >= 20 && csq <= 31) {
+    } else if (csq >= 25 && csq <= 31) {
         return FONT_AWESOME_SIGNAL_STRONG;
     }
 

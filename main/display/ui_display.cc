@@ -488,8 +488,6 @@ void UiDisplay::FontGif(uint8_t* gif_buffer, size_t size, uint32_t request_id) {
     emoji_collection->ReplaceEmoji("font", raw);
     LcdDisplay::SetEmotion("font");                              // 切表情 src（绕守护直调父类）
     if (emoji_box_) {
-        // 🔴 番茄钟/时钟/Player 主屏 emoji_box 被 HIDDEN · FontGif 必须显式解开才能可见
-        //   历史只在 kChat 触发（emoji_box 本就显示）所以没暴露 · 软独占改造后需补
         lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_opa(emoji_box_, LV_OPA_COVER, 0);       // 防 boot fade_out 残留 TRANSP
         lv_obj_move_foreground(emoji_box_);                      // z-order 拉到最前盖住底层
@@ -512,14 +510,6 @@ void UiDisplay::SetEmotion(const char* emotion) {
     LcdDisplay::SetEmotion(emotion);
 }
 
-// font 模式静默丢弃字幕。常规模式下根据文本宽度自适应 long_mode：
-// 单屏容得下 → LONG_WRAP 静态多行；超出 → LONG_SCROLL_CIRCULAR 横向跑马灯。
-// 速度参数 kChatScrollSpeedPps：3-10 岁孩子推荐 ~28 px/s（约 1.4 字/秒）。
-//
-// 🔴 多行文本压平规则：LLM 朗诵诗 / 多段对话含 \n，bottom_bar LV_SIZE_CONTENT 模式
-//   会按 \n 撑高 5-6 行 → 遮挡 emoji_box 表情区。
-//   策略：清洗 \n/\r/\t/连续空格 → 单空格 · 让长文本统一走横向滚动展示。
-//   产品意图：1.83" 小屏 + 孩子辅助字幕，不保留格式，只保留语义。
 void UiDisplay::SetChatMessage(const char* role, const char* content) {
     if (in_font_mode_) {
         ESP_LOGI(TAG, "[chat_msg] dropped (in_font_mode): role=%s len=%d",
@@ -551,13 +541,10 @@ void UiDisplay::SetChatMessage(const char* role, const char* content) {
 
     if (chat_message_label_ && display_content[0]) {
         DisplayLockGuard lock(this);
-        constexpr int kChatScrollSpeedPps = 30;  // pixel/second ≈ 2 字/秒
+        constexpr int kChatScrollSpeedPps = 45;
         const lv_font_t* font = lv_obj_get_style_text_font(chat_message_label_, LV_PART_MAIN);
         if (!font) font = &g_text_font;
 
-        // 用 lv_text_get_size 精确测宽（替代 chars×line_height 的粗估）
-        //   旧逻辑用行高当字宽：CJK ≈ 行高 OK，但 ASCII 实际宽 ≈ 0.5 行高 → 长 ASCII 错走 SCROLL
-        //   现在 LVGL 自己按 cmap 算每个字符精确宽度，混合文本（中英数字标点）都准确
         lv_point_t sz;
         lv_text_get_size(&sz, display_content, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_EXPAND);
         int total_w = sz.x;
@@ -614,6 +601,8 @@ void UiDisplay::ShowBottomBar() {
     DisplayLockGuard lock(this);
     lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(bottom_bar_);
+    // 控制中心开着时保持其在最顶层（否则字幕条画到控制中心脸上）
+    if (control_center_) control_center_->Raise();
 }
 
 // bottom_bar 隐藏（font 模式让用户聚焦写字 GIF）
@@ -807,33 +796,46 @@ void UiDisplay::EnsureControlCenter() {
 
     control_center_->SetExitCallback([this]() { HideControlCenter(); });
 
-    control_center_->SetVolumeCallback([&board](int v) {
-        if (auto* codec = board.GetAudioCodec()) codec->SetOutputVolume(v);
-    });
+    // 亮度：纯 PWM 调节（无 NVS 写/无阻塞），可在 LVGL 上下文直调
     control_center_->SetBrightnessCallback([&board](int v) {
         if (auto* bk = board.GetBacklight()) bk->SetBrightness(v);
     });
-    control_center_->SetAecCallback([this](bool /*unused*/) {
+    control_center_->SetAboutCallback([this]() {
         HideControlCenter();
         ShowAboutPage();
     });
+    // 休眠开关写 NVS，调度到主线程，不阻塞 UI
     control_center_->SetSleepCallback([](bool on) {
-        Board::GetInstance().EnableAutoSleep(on);
+        Application::GetInstance().Schedule([on]() {
+            Board::GetInstance().EnableAutoSleep(on);
+        });
     });
-    control_center_->SetNetworkCallback([](int /*mode*/) {
-        auto& b = Board::GetInstance();
-        if (b.CanSwitchNetwork()) b.SwitchNetwork();
+    // 网络（4G版切网/WiFi版进配网，均含重启）：二次确认已在 ControlCenter 内完成，
+    control_center_->SetNetworkCallback([this]() {
+        HideControlCenter();
+        Application::GetInstance().Schedule([]() {
+            auto& b = Board::GetInstance();
+            if (b.CanSwitchNetwork()) b.SwitchNetwork();
+        });
     });
+    // AEC 打断开关：只发请求，切换后以 GetAecMode 真实状态回写 UI（防显示脱钩——
+    control_center_->SetAecToggleCallback([this]() {
+        Application::GetInstance().Schedule([this]() {
+            Board::GetInstance().ToggleAecMode();   // 与物理按键(BOOT)双击③ 走同一个底层切换函数
+            bool on = Application::GetInstance().GetAecMode() != kAecOff;
+            DisplayLockGuard lock(this);
+            if (control_center_) control_center_->SetAecState(on);
+        });
+    });
+
     if (auto* dnb = dynamic_cast<DualNetworkBoard*>(&board)) {
+        // 4G 板：网络按钮 = 切 WiFi/4G；AEC 触屏开关与物理按键(BOOT)双击底层走同一个 ToggleAecMode
         control_center_->SetNetworkMode(dnb->GetNetworkType() == NetworkType::ML307 ? 1 : 0);
     } else {
-        // WiFi 板无 4G 可切：网络槽位改作 AEC（说话打断）开关
-        auto& app = Application::GetInstance();
-        control_center_->UseNetworkSlotAsAec(app.GetAecMode() != kAecOff);
-        control_center_->SetAecToggleCallback([](bool /*unused*/) {
-            Board::GetInstance().ToggleAecMode();   // 与按键双击③ 共用同一 AEC 切换路径
-        });
+        // WiFi 板：网络按钮 = 进配网（同按键三连击语义）
+        control_center_->SetNetworkAsProvision();
     }
+    control_center_->SetAecState(Application::GetInstance().GetAecMode() != kAecOff);
     control_center_->SetSleepState(board.IsAutoSleepEnabled());
 }
 
@@ -842,9 +844,8 @@ void UiDisplay::ShowControlCenter() {
     EnsureControlCenter();
     if (!control_center_) return;
     auto& board = Board::GetInstance();
-    if (auto* codec = board.GetAudioCodec()) control_center_->SetVolume(codec->output_volume());
-    if (auto* bk = board.GetBacklight())     control_center_->SetBrightness(bk->brightness());
-    control_center_->UpdateNetworkSlotAec(Application::GetInstance().GetAecMode() != kAecOff);
+    if (auto* bk = board.GetBacklight()) control_center_->SetBrightness(bk->brightness());
+    control_center_->SetAecState(Application::GetInstance().GetAecMode() != kAecOff);
     control_center_->Show();
 }
 
@@ -1292,6 +1293,7 @@ void UiDisplay::HideEduCard() {
         lv_obj_add_flag(edu_card_overlay_, LV_OBJ_FLAG_HIDDEN);
         if (bottom_bar_) lv_obj_move_foreground(bottom_bar_);
         if (status_bar_) lv_obj_move_foreground(status_bar_);
+        if (control_center_) control_center_->Raise();   // 控制中心开着时保持最顶层
         ESP_LOGI(TAG, "隐藏教育卡");
     }
 }

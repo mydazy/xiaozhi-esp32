@@ -55,9 +55,8 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         afe_config->ns_init = false;
     }
 
-    afe_config->afe_linear_gain = 4.0f;
-    afe_config->agc_init = true;
-    afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;
+    afe_config->afe_linear_gain = 3.0f;
+    afe_config->agc_init = false;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
 
 #ifdef CONFIG_USE_DEVICE_AEC
@@ -70,9 +69,10 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
 
     afe_iface_ = esp_afe_handle_from_config(afe_config);
     afe_data_ = afe_iface_->create_from_config(afe_config);
+    afe_config_free(afe_config);
     if (afe_data_ == nullptr) {
         ESP_LOGE(TAG, "AFE create_from_config 失败(PSRAM不足)，不创建处理任务");
-        return;  // task_created_ 保持 false，析构安全；GetFeedSize 等已有 nullptr 兜底
+        return;
     }
 
     xTaskCreatePinnedToCore([](void* arg) {
@@ -172,7 +172,7 @@ void AfeAudioProcessor::AudioProcessorTask() {
         }
         if (res == nullptr || res->ret_value == ESP_FAIL) {
             if (res != nullptr) {
-                ESP_LOGI(TAG, "Error code: %d", res->ret_value);
+                ESP_LOGD(TAG, "AFE fetch no data (ret=%d, warmup/transient)", res->ret_value);
             }
             continue;
         }
@@ -215,7 +215,7 @@ void AfeAudioProcessor::AudioProcessorTask() {
 }
 
 void AfeAudioProcessor::EnableDeviceAec(bool enable) {
-    if (afe_data_ == nullptr) return;  // S1: AFE 创建失败后 afe_data_=nullptr，与 GetFeedSize/Feed 兜底一致
+    if (afe_data_ == nullptr) return;
     if (enable) {
 #if CONFIG_USE_DEVICE_AEC
         afe_iface_->disable_vad(afe_data_);

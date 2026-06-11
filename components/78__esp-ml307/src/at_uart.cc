@@ -76,7 +76,9 @@ void AtUart::Initialize() {
     ESP_ERROR_CHECK(uart_driver_install(uart_num_, AT_UART_RX_BUFFER_SIZE, 0, 16, &event_queue_handle_, ESP_INTR_FLAG_IRAM));
     ESP_ERROR_CHECK(uart_param_config(uart_num_, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(uart_num_, tx_pin_, rx_pin_, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    
+
+    uart_set_rx_full_threshold(uart_num_, AT_UART_RX_FULL_THRESHOLD);
+
     // Enable pull-up on RX pin
     gpio_set_pull_mode(rx_pin_, GPIO_PULLUP_ONLY);
 
@@ -141,18 +143,21 @@ void AtUart::ReceiveTask() {
             chunk.resize(available);
             int read_len = uart_read_bytes(uart_num_, chunk.data(), available, pdMS_TO_TICKS(20));
             if (read_len <= 0) break;
+            int64_t t0 = esp_timer_get_time();
             {
                 std::lock_guard<std::mutex> lock(rx_buffer_mutex_);
                 rx_buffer_.append(chunk.data(), read_len);
+            }
+            int64_t lock_ms = (esp_timer_get_time() - t0) / 1000;
+            if (lock_ms > 20) {
+                ESP_LOGW(TAG, "[probe] rx 搬运等锁 %lldms (chunk=%dB, rx_buffer=%uB)",
+                         lock_ms, read_len, (unsigned)rx_buffer_.size());
             }
             xEventGroupSetBits(event_group_handle_, AT_EVENT_PARSE_NEEDED);
             break;
         }
         case UART_FIFO_OVF:
         case UART_BUFFER_FULL: {
-            // RX 路径数据丢失 → TCP/WS 流必然错位（实测 v32 日志：50s 卡死在脏数据上挣扎）。
-            // 立即清 buffer + 触发上层"网络断开"事件让 Ml307AtModem 触发 Disconnected,
-            // 走通 Application::HandleNetworkDisconnectedEvent → CloseAudioChannel → L6 重连。
             ESP_LOGW(TAG, "UART %s, notify upper layer to reconnect",
                      event.type == UART_FIFO_OVF ? "FIFO overflow" : "ring buffer full");
             uart_flush_input(uart_num_);
@@ -180,15 +185,12 @@ void AtUart::ReceiveTask() {
     }
 }
 
-// HTTP Binary Receive Mode 引用计数（Patch B · 2026-04-29 修引用计数语义）
-// 多 Ml307Http 实例并发时（如 MP3 下载 + OTA 上报），原单 bool 会被后退者关掉前进者，
 void AtUart::SetHttpBinaryMode(bool enabled) {
     if (enabled) {
         http_binary_mode_count_.fetch_add(1, std::memory_order_acq_rel);
     } else {
         int prev = http_binary_mode_count_.fetch_sub(1, std::memory_order_acq_rel);
         if (prev <= 0) {
-            // 防御：不应发生（所有 Ml307Http instance Open/Close 配对）
             http_binary_mode_count_.store(0, std::memory_order_release);
             ESP_LOGW(TAG, "SetHttpBinaryMode(false) underflow, clamped to 0");
         }
@@ -196,7 +198,6 @@ void AtUart::SetHttpBinaryMode(bool enabled) {
 }
 
 void AtUart::EventTask() {
-    // 解析任务（低优先级）：从 rx_buffer_ 提取 URC 并派发，与 ReceiveTask 解耦。
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_handle_,
             AT_EVENT_PARSE_NEEDED | AT_EVENT_RI_PIN_INT,
@@ -250,10 +251,6 @@ bool AtUart::ParseResponse() {
             return true;
         }
 
-        // Patch B · HTTP Binary Receive Mode（来自 189 v3.5.3 验证版）
-        // 必须在 find("\r\n") 之前拦截：binary content 内可能包含 \r\n 字节，
-        // 走默认分支会被截断。仅在引用计数 >0 时启用，默认 0 不改变 HEX 行为。
-        // EC801E 不调 SetHttpBinaryMode，此分支为 dead code 不影响 +QHTTP*/+QIURC 解析。
         const bool binary_active = http_binary_mode_count_.load() > 0;
         if (binary_active && rx_buffer_.size() > 22 &&
             memcmp(rx_buffer_.c_str(), "+MHTTPURC: \"header\"", 19) == 0) {
@@ -550,7 +547,9 @@ bool AtUart::ParseBinaryHttpContent() {
 
 void AtUart::HandleUrc(const std::string& command, const std::vector<AtArgumentValue>& arguments) {
     if (command == "CME ERROR") {
-        cme_error_code_ = arguments[0].int_value;
+        // 09-P0-D: 模组下发 "+CME ERROR:"(冒号后无错误码,弱网/异常应答常见)时 arguments 为空,
+        // 原裸读 arguments[0] 越界(UB)。先判空,空码记 0。
+        cme_error_code_ = arguments.empty() ? 0 : arguments[0].int_value;
         xEventGroupSetBits(event_group_handle_, AT_EVENT_COMMAND_ERROR);
         return;
     }

@@ -24,7 +24,6 @@
 
 static const char *TAG = "WifiBoard";
 
-// 智能联网参数（P0：重试 2→4 + 首次 3s→5s · 防弱信号家庭场景频繁误进配网）
 static constexpr int MAX_SCAN_RETRY = 3;        // 最大扫描重试次数（双频开启扫描 1.3s · 2 次太少）
 static constexpr int SCAN_WAIT_MS = 5000;       // 单次扫描等待时间（含扫描 + 连接 buffer）
 static constexpr int CONNECT_TIMEOUT_MS = 10000; // 连接超时
@@ -134,8 +133,6 @@ bool WifiBoard::StartConfigMode(ConfigMode mode, bool is_switch) {
 
         auto& blufi = Blufi::GetInstance();
         blufi.SetCredentialValidator(credential_validator);
-        // 注意：捕获 this 而不是依赖 Board::GetInstance()
-        // DualNetworkBoard 场景下 Board::GetInstance() 返回的不是 WifiBoard
         blufi.OnConfigSuccess([this]() {
             std::string data = Board::GetInstance().GetBoardJson();
             Blufi::GetInstance().SendData(data.c_str(), data.length());
@@ -227,16 +224,11 @@ void WifiBoard::SwitchConfigMode() {
 
     // 2. 切换到蓝牙前，先初始化 BLE 控制器和切换 WiFi 模式
     if (new_mode == ConfigMode::BLUFI) {
-        // 只播音效，不调 Alert（Alert 会在非 LVGL 线程获取 display 锁超时）
         Application::GetInstance().PlaySound(Lang::Sounds::OGG_BLE_CONFIG);
 
-        // 2.1 初始化 BLE 控制器（如果未初始化）
         auto& blufi = Blufi::GetInstance();
         if (!blufi.IsControllerInitialized()) {
             ESP_LOGI(TAG, "[2/5] 初始化 BLE 控制器");
-            // ⚠️ 关键：BLE 控制器初始化涉及 flash read（加载 firmware）→ 禁用 cache
-            // 期间 LVGL 若在渲染，访问 PSRAM buffer 会阻塞 10+ 秒 → taskLVGL 持锁饿死 IDLE1 → Task WDT
-            // 修复：lvgl_port_lock 强制 LVGL 暂停渲染，让它在等锁而不是在 PSRAM 阻塞
             bool lvgl_locked = lvgl_port_lock(1000);  // 1s 获取锁
             if (!lvgl_locked) {
                 ESP_LOGW(TAG, "LVGL 锁超时，仍继续 BLE 初始化（有死锁风险）");
@@ -262,11 +254,9 @@ void WifiBoard::SwitchConfigMode() {
     } else {
         Application::GetInstance().PlaySound(Lang::Sounds::OGG_WIFI_CONFIG);
 
-        // 切换到AP模式：确保WiFi已初始化（BLUFI模式下WiFi可能未启动）
         if (!wifi.IsInitialized()) {
             ESP_LOGI(TAG, "[2/5] 初始化 WiFi（从蓝牙切换）");
             wifi.SetScanOnlyMode(true);
-            // 同理：WiFi 初始化涉及 phy_init flash 读取 → 禁用 cache → LVGL 阻塞
             bool lvgl_locked = lvgl_port_lock(1000);
             if (!lvgl_locked) {
                 ESP_LOGW(TAG, "LVGL 锁超时，仍继续 WiFi 初始化");
@@ -276,7 +266,6 @@ void WifiBoard::SwitchConfigMode() {
             vTaskDelay(pdMS_TO_TICKS(500));
             if (!wifi.IsInitialized()) {
                 ESP_LOGE(TAG, "WiFi 初始化失败，无法切换到 AP 模式");
-                // 回退到蓝牙模式
                 new_mode = old_mode;
             }
         } else {
@@ -308,15 +297,10 @@ void WifiBoard::EnterWifiConfigMode() {
     Settings settings("wifi", true);
     ConfigMode mode = settings.GetInt("blufi", 1) ? ConfigMode::BLUFI : ConfigMode::AP;
 
-    // 【架构优化】BLUFI模式：BLE先广播 → WiFi延迟到BLE连接后
-    // AP模式：WiFi先初始化 → 启动AP热点
-
     if (mode == ConfigMode::BLUFI) {
-        // BLUFI模式：仅初始化BLE，WiFi延迟到BLE_CONNECT回调中
         ESP_LOGI(TAG, "【1/2】初始化 BLE 控制器");
         auto& blufi = Blufi::GetInstance();
         if (!blufi.IsControllerInitialized()) {
-            // ⚠️ 锁 LVGL 避免 BLE firmware flash 加载期间 PSRAM 访问死锁（同 SwitchConfigMode）
             bool lvgl_locked = lvgl_port_lock(1000);
             bool ok = blufi.InitializeController();
             if (lvgl_locked) lvgl_port_unlock();
@@ -384,11 +368,9 @@ void WifiBoard::EnterWifiConfigMode() {
         }
         app.Alert("配网超时", "请重试", "", "");
 
-        // 配网超时，进入深度休眠（避免无WiFi连接下继续启动流程）
         ESP_LOGW(TAG, "配网超时，3秒后进入深度休眠");
         vTaskDelay(pdMS_TO_TICKS(3000));  // 等待提示音播放
         Board::GetInstance().EnterDeepSleep(true);
-        // 不会执行到这里（EnterDeepSleep 内部调用 esp_deep_sleep_start）
     } else {
         ESP_LOGI(TAG, "配网完成");
     }
@@ -418,8 +400,6 @@ void WifiBoard::StartNetwork() {
         wifi_config_mode_ = true;
         EnterWifiConfigMode();
     } else {
-        // WiFi 连通，本次启动肯定不再进配网 → 释放 BT 静态 .bss/.data 约 30-50KB 内部 RAM
-        // （BT 从未 init，直接 release；若后续用户触发进配网会先 esp_restart，安全）
         Blufi::ReleaseStaticMem();
     }
 }
@@ -427,7 +407,6 @@ void WifiBoard::StartNetwork() {
 // ============ 配网成功 ============
 
 void WifiBoard::OnConfigSuccess() {
-    // 防重入：SwitchConfigMode 或多次回调可能同时触发
     if (!config_initialized_) {
         ESP_LOGW(TAG, "配网已停止，忽略重复回调");
         return;
@@ -462,12 +441,6 @@ void WifiBoard::OnConfigSuccess() {
         vTaskDelay(pdMS_TO_TICKS(500));
 
         // 4. 重启设备
-        //    原因：配网期间 BLE + WiFi + 提示音等模块已占用大量 RAM，继续走
-        //    SetDeviceState(idle) → OTA → MQTT 流程时内部 RAM 会跌到 ~57KB，
-        //    触达 60KB 红线；NVS flash op 禁用 cache 时 PSRAM 栈任务
-        //    （opus_codec/cdc_console/audio_detection）会 Double exception
-        //    (SP=0x60100000)。重启后 WiFi 凭证已保存，走正常 SmartConnect
-        //    流程，RAM 干净不会崩溃。
         ESP_LOGI(TAG, "===== 配网成功，重启设备以释放资源 =====");
         self->wifi_config_mode_ = false;
         Application::GetInstance().Reboot();  // 内部 esp_restart() 不返回
@@ -519,8 +492,6 @@ std::string WifiBoard::GetBoardJson() {
 }
 
 void WifiBoard::SetPowerSaveLevel(PowerSaveLevel level) {
-    // MP3 播放期间禁止切回省电模式（弱网下省电会让 HTTP 流频繁超时 → 重试耗尽 → 播放中断）
-    // 由 MusicPlayer::Stop / on_finished 主动恢复 LOW_POWER
     if (level != PowerSaveLevel::PERFORMANCE && MusicPlayer::GetInstance().IsPlaying()) {
         return;
     }

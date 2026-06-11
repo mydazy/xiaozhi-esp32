@@ -76,12 +76,11 @@ void PowerSaveTimer::PowerSaveCheck() {
             }
 
             if (cpu_max_freq_ < 120) {
-                // 深度省电模式：关闭唤醒词检测和音频输入（< 80 MHz）
                 ESP_LOGI(TAG, "深度省电模式：关闭音频，降频至 %d MHz", cpu_max_freq_);
                 auto& audio_service = app.GetAudioService();
                 is_wake_word_running_ = audio_service.IsWakeWordRunning();
                 if (is_wake_word_running_) {
-                    audio_service.EnableWakeWordDetection(false);
+                    audio_service.ReleaseWakeWord();
                     vTaskDelay(pdMS_TO_TICKS(100));
                 }
                 // Disable audio input

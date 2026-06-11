@@ -64,6 +64,7 @@ public:
         timer_ = lv_timer_create(callback, delay_ms, user_data);
         if (timer_) {
             lv_timer_set_repeat_count(timer_, 1);
+            lv_timer_set_auto_delete(timer_, false);
         }
     }
 

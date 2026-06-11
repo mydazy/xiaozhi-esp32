@@ -60,12 +60,16 @@ private:
     StaticTask_t* wake_word_encode_task_buffer_ = nullptr;
     StackType_t* wake_word_encode_task_stack_ = nullptr;
     std::atomic<bool> encode_in_progress_{false};
-    std::deque<std::vector<int16_t>> wake_word_pcm_;
+    static constexpr size_t kWakeWordRingSamples = 32000;  // 2s @ 16kHz mono
+    int16_t* wake_word_ring_ = nullptr;                    // PSRAM
+    size_t ring_write_ = 0;
+    size_t ring_filled_ = 0;
+    std::mutex wake_word_pcm_mutex_;
     std::deque<std::vector<uint8_t>> wake_word_opus_;
     std::mutex wake_word_mutex_;
     std::condition_variable wake_word_cv_;
 
-    void StoreWakeWordData(const std::vector<int16_t>& data);
+    void StoreWakeWordData(const int16_t* data, size_t samples);
     void ParseWakenetModelConfig();
 };
 
