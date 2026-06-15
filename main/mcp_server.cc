@@ -32,6 +32,50 @@ static std::atomic<int> g_preview_inflight_{0};
 
 static constexpr int kPreviewMaxInflight = 2;
 
+// 校验自定义唤醒词：text 须 2-4 个纯中文汉字，pinyin 须同样段数的小写拼音。
+// MultiNet 命令词模型仅支持单语言（本机为中文 CN_MULTINET7），中英混合/英文/标点/表情
+static std::string ValidateCustomWakeword(const std::string& text, const std::string& pinyin) {
+    int han = 0;
+    for (size_t i = 0; i < text.size(); ) {
+        unsigned char b = static_cast<unsigned char>(text[i]);
+        if ((b & 0x80) == 0) {
+            return "唤醒词名字只能用中文，不要带英文字母、数字或符号";
+        }
+        if ((b & 0xF0) != 0xE0 || i + 2 >= text.size()) {
+            return "唤醒词名字只能用 2-4 个中文汉字";
+        }
+        unsigned int cp = ((b & 0x0Fu) << 12) |
+                          ((static_cast<unsigned char>(text[i + 1]) & 0x3Fu) << 6) |
+                          (static_cast<unsigned char>(text[i + 2]) & 0x3Fu);
+        if (cp < 0x4E00 || cp > 0x9FFF) {
+            return "唤醒词名字只能用中文，不要带表情、标点或英文";
+        }
+        han++;
+        i += 3;
+    }
+    if (han < 2 || han > 4) {
+        return "唤醒词名字请用 2-4 个中文汉字";
+    }
+    if (pinyin.empty() || pinyin.front() == ' ' || pinyin.back() == ' ') {
+        return "请为每个字配上小写拼音，用空格分开";
+    }
+    int syllables = 1;
+    for (size_t i = 0; i < pinyin.size(); i++) {
+        char ch = pinyin[i];
+        if (ch == ' ') {
+            if (i == 0 || pinyin[i - 1] == ' ') return "拼音之间只用一个空格分隔";
+            syllables++;
+        } else if (ch < 'a' || ch > 'z') {
+            return "拼音只能用小写字母，每个字之间用空格分开";
+        }
+    }
+    if (syllables != han) {
+        return "拼音段数要和字数一致：" + std::to_string(han) + " 个字就配 " +
+               std::to_string(han) + " 段拼音";
+    }
+    return "";
+}
+
 McpServer::McpServer() {
 }
 
@@ -44,11 +88,6 @@ McpServer::~McpServer() {
 }
 
 void McpServer::AddCommonTools() {
-    // *Important* To speed up the response time, we add the common tools to the beginning of
-    // the tools list to utilize the prompt cache.
-    // **重要** 为了提升响应速度，我们把常用的工具放在前面，利用 prompt cache 的特性。
-
-    // Backup the original tools list and restore it after adding the common tools.
     std::vector<McpTool*> original_tools;
     {
         std::lock_guard<std::mutex> lk(tools_mutex_);
@@ -56,8 +95,6 @@ void McpServer::AddCommonTools() {
     }
     auto& board = Board::GetInstance();
 
-    // Do not add custom tools here.
-    // Custom tools must be added in the board's InitializeTools function.
     // 获取MAC地址工具
     AddTool("self.get_mac_address",
         "获取设备 MAC 地址。",
@@ -109,8 +146,9 @@ void McpServer::AddCommonTools() {
 
     // 唤醒词配置 · mode=afe 回归默认 · mode=custom + text 启用自定义（须在 MultiNet 词表内 · 重启生效）
     AddTool("self.audio.set_wakeword",
-        "起名/改唤醒词：text=新名字(2-4字)+pinyin(小写空格分隔)；text 传空=恢复默认『搭子精灵』。"
-        "成功后设备8秒自动重启，先用一句话告别。",
+        "起名/改唤醒词：text=新名字(2-4个纯中文汉字)+pinyin(每字一段小写拼音、空格分隔、段数=字数)；"
+        "text 传空=恢复默认『搭子精灵』。仅支持中文，调用前先提醒客户名字不能带英文、数字或符号。"
+        "若返回 success=false，把其中 error 原话转告客户、不要重启。成功后设备8秒自动重启，先用一句话告别。",
         PropertyList({
             Property("text", kPropertyTypeString, ""),
             Property("pinyin", kPropertyTypeString, "")
@@ -122,16 +160,10 @@ void McpServer::AddCommonTools() {
                 if (!Application::GetInstance().GetAudioService().HasMultinetModel()) {
                     return std::string("{\"success\":false,\"error\":\"本机未烧录命令词模型，无法自定义唤醒词，已保持当前设置\"}");
                 }
-                // 任意名字统一规则：合法拼音（小写字母+单空格，2-4 音节）
-                bool pinyin_ok = pinyin.size() >= 2 && pinyin.size() <= 30 && pinyin.front() != ' ' && pinyin.back() != ' ';
-                int syllables = pinyin_ok ? 1 : 0;
-                for (size_t i = 0; pinyin_ok && i < pinyin.size(); i++) {
-                    char ch = pinyin[i];
-                    if (ch == ' ') syllables++;
-                    if (!((ch >= 'a' && ch <= 'z') || (ch == ' ' && pinyin[i-1] != ' '))) pinyin_ok = false;
-                }
-                if (!pinyin_ok || syllables < 2 || syllables > 4) {
-                    return std::string("{\"success\":false,\"error\":\"名字需 2-4 个字，并附小写空格分隔拼音\"}");
+                // 重启前先校验：纯中文 2-4 字 + 同段数拼音。不合法直接回拒、不写设置、不重启。
+                std::string err = ValidateCustomWakeword(text, pinyin);
+                if (!err.empty()) {
+                    return std::string("{\"success\":false,\"error\":\"") + err + "\"}";
                 }
             }
             Settings s("wakeword", true);

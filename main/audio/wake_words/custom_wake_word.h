@@ -43,6 +43,7 @@ private:
     esp_mn_iface_t* multinet_ = nullptr;
     model_iface_data_t* multinet_model_data_ = nullptr;
     srmodel_list_t *models_ = nullptr;
+    bool owns_models_ = false;   // true=自己 esp_srmodel_init 出来的，析构才 deinit；传入的共享列表不归我管
     char* mn_name_ = nullptr;
     std::string language_ = "cn";
     int duration_ = 3000;

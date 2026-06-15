@@ -334,8 +334,8 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
     lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);  // Overlap with top_bar_
     lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_bg_color(status_bar_, lv_color_hex(0xFFFFFF), (lv_style_selector_t)(LV_PART_MAIN | LV_STATE_PRESSED));
-    lv_obj_set_style_bg_opa(status_bar_, LV_OPA_20, (lv_style_selector_t)(LV_PART_MAIN | LV_STATE_PRESSED));
+    lv_obj_set_style_bg_color(status_bar_, lv_color_hex(0xFFFFFF), (lv_style_selector_t)((int)LV_PART_MAIN | (int)LV_STATE_PRESSED));
+    lv_obj_set_style_bg_opa(status_bar_, LV_OPA_20, (lv_style_selector_t)((int)LV_PART_MAIN | (int)LV_STATE_PRESSED));
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_width(notification_label_, LV_HOR_RES * 0.8);
@@ -809,8 +809,8 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
     lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);  // Overlap with top_bar_
     lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_bg_color(status_bar_, lv_color_hex(0xFFFFFF), (lv_style_selector_t)(LV_PART_MAIN | LV_STATE_PRESSED));
-    lv_obj_set_style_bg_opa(status_bar_, LV_OPA_20, (lv_style_selector_t)(LV_PART_MAIN | LV_STATE_PRESSED));
+    lv_obj_set_style_bg_color(status_bar_, lv_color_hex(0xFFFFFF), (lv_style_selector_t)((int)LV_PART_MAIN | (int)LV_STATE_PRESSED));
+    lv_obj_set_style_bg_opa(status_bar_, LV_OPA_20, (lv_style_selector_t)((int)LV_PART_MAIN | (int)LV_STATE_PRESSED));
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_width(notification_label_, LV_HOR_RES * 0.75);

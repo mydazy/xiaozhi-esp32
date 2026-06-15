@@ -41,8 +41,8 @@ CustomWakeWord::~CustomWakeWord() {
         heap_caps_free(wake_word_encode_task_buffer_);
     }
 
-    if (models_ != nullptr) {
-        esp_srmodel_deinit(models_);
+    if (owns_models_ && models_ != nullptr) {
+        esp_srmodel_deinit(models_);   // 仅释放自己 init 的；共享 models_list_ 由 audio_service 持有，绝不在此 deinit（否则回落 AFE 时 UAF）
     }
 }
 
@@ -101,6 +101,7 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     if (models_list == nullptr) {
         language_ = "cn";
         models_ = esp_srmodel_init("model");
+        owns_models_ = true;
 #ifdef CONFIG_CUSTOM_WAKE_WORD
         threshold_ = CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
         commands_.push_back({CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY, "wake"});

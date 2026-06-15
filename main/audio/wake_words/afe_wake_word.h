@@ -41,6 +41,7 @@ public:
 
 private:
     srmodel_list_t *models_ = nullptr;
+    bool owns_models_ = false;   // true=自己 esp_srmodel_init 出来的，析构才 deinit；传入的共享列表不归我管
     const esp_afe_sr_iface_t* afe_iface_ = nullptr;
     esp_afe_sr_data_t* afe_data_ = nullptr;
     char* wakenet_model_ = NULL;

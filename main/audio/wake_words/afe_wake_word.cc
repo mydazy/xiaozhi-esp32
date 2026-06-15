@@ -42,8 +42,8 @@ AfeWakeWord::~AfeWakeWord() {
         heap_caps_free(wake_word_ring_);
     }
 
-    if (models_ != nullptr) {
-        esp_srmodel_deinit(models_);
+    if (owns_models_ && models_ != nullptr) {
+        esp_srmodel_deinit(models_);   // 仅释放自己 init 的；共享 models_list_ 由 audio_service 持有，绝不在此 deinit（否则回落 AFE 时 UAF）
     }
 
     if (detection_done_sem_ != nullptr) {
@@ -58,6 +58,7 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
 
     if (models_list == nullptr) {
         models_ = esp_srmodel_init("model");
+        owns_models_ = true;
     } else {
         models_ = models_list;
     }

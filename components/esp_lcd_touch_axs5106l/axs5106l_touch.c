@@ -178,7 +178,7 @@ struct axs5106l_touch_t {
 /*  Forward declarations                                               */
 /* ------------------------------------------------------------------ */
 
-static void IRAM_ATTR int_falling_edge_isr(void *arg);
+static void int_falling_edge_isr(void *arg);
 static void reset_chip(axs5106l_touch_handle_t self);
 static bool check_and_upgrade_firmware(axs5106l_touch_handle_t self);
 static bool write_register(axs5106l_touch_handle_t self, uint8_t reg, const uint8_t *data, size_t len);
