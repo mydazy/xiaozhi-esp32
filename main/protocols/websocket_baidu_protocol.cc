@@ -112,7 +112,7 @@ WebsocketBaiduProtocol::WebsocketBaiduProtocol() {
     server_frame_duration_ = 20;     // 百度固定 20ms 帧
     break_delay_ms_ = baidu_settings.GetInt("break_delay_ms", 500);
     idle_timeout_seconds_ = baidu_settings.GetInt("idle_timeout", 300);
-    license_key_ = baidu_settings.GetString("license_key", "759877c9b68b4aa082cc05390be0cea9");
+    license_key_ = baidu_settings.GetString("license_key", "25e5b99aac0f4e9084df236112f946c2");
 
     Settings aec_settings("aecMode", false);
     has_local_aec_ = (aec_settings.GetInt("deviceAec", 0) == 1);
