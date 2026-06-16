@@ -1189,8 +1189,6 @@ void Application::HandleStateChangedEvent() {
             display->ClearChatMessages();  // Clear messages first
 //            display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
-            audio_service_.EnableWakeWordDetection(true);
-            audio_service_.SetWakeWordThreshold(kWakeThresholdNormal);  // 回待机恢复常规档防误唤醒
             if (lcd) {
                 auto& pm = PomodoroManager::GetInstance();
                 if (pm.IsActive()) {
@@ -1200,6 +1198,8 @@ void Application::HandleStateChangedEvent() {
                     lcd->SwitchToClockMode();
                 }
             }
+            audio_service_.EnableWakeWordDetection(true);
+            audio_service_.SetWakeWordThreshold(kWakeThresholdNormal);
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
