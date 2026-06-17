@@ -16,8 +16,6 @@ public:
     esp_err_t CheckVersion();
     esp_err_t Activate();
 
-    static esp_err_t RequestSwitch(const std::string& type, cJSON* data);
-
     bool ReportStatus();
     bool HasActivationChallenge() { return has_activation_challenge_; }
     bool HasNewVersion() { return has_new_version_; }
@@ -60,8 +58,6 @@ private:
     bool IsNewVersionAvailable(const std::string& currentVersion, const std::string& newVersion);
     std::string GetActivationPayload();
     std::unique_ptr<Http> SetupHttp();
-
-    static esp_err_t PostToOta(const std::string& path, cJSON* payload);
 };
 
 #endif // _OTA_H
