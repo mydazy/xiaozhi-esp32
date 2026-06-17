@@ -840,8 +840,6 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_border_width(bottom_bar_, 0, 0);
     lv_obj_set_scrollbar_mode(bottom_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_align(bottom_bar_, LV_ALIGN_BOTTOM_MID, 0, 0);
-    // 纯展示字幕条：透明背景 + lv_obj 默认可点击 = 隐形点击吞噬者，
-    // 被提顶后会吃掉下方控件（如控制中心退出键）的触摸，必须放行点击
     lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_CLICKABLE);
 
     /* chat_message_label_ placed in bottom_bar_, multiline wrapped display */
@@ -866,7 +864,6 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_border_width(bottom_bar_, 0, 0);
     lv_obj_set_scrollbar_mode(bottom_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_align(bottom_bar_, LV_ALIGN_BOTTOM_MID, 0, 0);
-    // 纯展示字幕条：透明背景 + lv_obj 默认可点击 = 隐形点击吞噬者，必须放行点击
     lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_CLICKABLE);
 
     /* chat_message_label_ placed in bottom_bar_, single-line horizontal scroll */

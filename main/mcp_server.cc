@@ -26,55 +26,7 @@
 #define TAG "MCP"
 
 static std::atomic<int> g_preview_inflight_{0};
-
-#include "assets.h"
-#include <cJSON.h>
-
 static constexpr int kPreviewMaxInflight = 2;
-
-// 校验自定义唤醒词：text 须 2-4 个纯中文汉字，pinyin 须同样段数的小写拼音。
-// MultiNet 命令词模型仅支持单语言（本机为中文 CN_MULTINET7），中英混合/英文/标点/表情
-static std::string ValidateCustomWakeword(const std::string& text, const std::string& pinyin) {
-    int han = 0;
-    for (size_t i = 0; i < text.size(); ) {
-        unsigned char b = static_cast<unsigned char>(text[i]);
-        if ((b & 0x80) == 0) {
-            return "唤醒词名字只能用中文，不要带英文字母、数字或符号";
-        }
-        if ((b & 0xF0) != 0xE0 || i + 2 >= text.size()) {
-            return "唤醒词名字只能用 2-4 个中文汉字";
-        }
-        unsigned int cp = ((b & 0x0Fu) << 12) |
-                          ((static_cast<unsigned char>(text[i + 1]) & 0x3Fu) << 6) |
-                          (static_cast<unsigned char>(text[i + 2]) & 0x3Fu);
-        if (cp < 0x4E00 || cp > 0x9FFF) {
-            return "唤醒词名字只能用中文，不要带表情、标点或英文";
-        }
-        han++;
-        i += 3;
-    }
-    if (han < 2 || han > 4) {
-        return "唤醒词名字请用 2-4 个中文汉字";
-    }
-    if (pinyin.empty() || pinyin.front() == ' ' || pinyin.back() == ' ') {
-        return "请为每个字配上小写拼音，用空格分开";
-    }
-    int syllables = 1;
-    for (size_t i = 0; i < pinyin.size(); i++) {
-        char ch = pinyin[i];
-        if (ch == ' ') {
-            if (i == 0 || pinyin[i - 1] == ' ') return "拼音之间只用一个空格分隔";
-            syllables++;
-        } else if (ch < 'a' || ch > 'z') {
-            return "拼音只能用小写字母，每个字之间用空格分开";
-        }
-    }
-    if (syllables != han) {
-        return "拼音段数要和字数一致：" + std::to_string(han) + " 个字就配 " +
-               std::to_string(han) + " 段拼音";
-    }
-    return "";
-}
 
 McpServer::McpServer() {
 }
@@ -142,58 +94,6 @@ void McpServer::AddCommonTools() {
         [](const PropertyList& properties) -> ReturnValue {
             bool enabled = Application::GetInstance().IsSttPopupEnabled();
             return std::string("{\"enabled\":") + (enabled ? "true" : "false") + "}";
-        });
-
-    // 唤醒词配置 · mode=afe 回归默认 · mode=custom + text 启用自定义（须在 MultiNet 词表内 · 重启生效）
-    AddTool("self.audio.set_wakeword",
-        "起名/改唤醒词：text=新名字(2-4个纯中文汉字)+pinyin(每字一段小写拼音、空格分隔、段数=字数)；"
-        "text 传空=恢复默认『搭子精灵』。仅支持中文，调用前先提醒客户名字不能带英文、数字或符号。"
-        "若返回 success=false，把其中 error 原话转告客户、不要重启。成功后设备8秒自动重启，先用一句话告别。",
-        PropertyList({
-            Property("text", kPropertyTypeString, ""),
-            Property("pinyin", kPropertyTypeString, "")
-        }),
-        [](const PropertyList& properties) -> ReturnValue {
-            std::string text = properties["text"].value<std::string>();
-            std::string pinyin = properties["pinyin"].value<std::string>();
-            if (!text.empty()) {
-                if (!Application::GetInstance().GetAudioService().HasMultinetModel()) {
-                    return std::string("{\"success\":false,\"error\":\"本机未烧录命令词模型，无法自定义唤醒词，已保持当前设置\"}");
-                }
-                // 重启前先校验：纯中文 2-4 字 + 同段数拼音。不合法直接回拒、不写设置、不重启。
-                std::string err = ValidateCustomWakeword(text, pinyin);
-                if (!err.empty()) {
-                    return std::string("{\"success\":false,\"error\":\"") + err + "\"}";
-                }
-            }
-            Settings s("wakeword", true);
-            s.SetString("text", text);
-            s.SetString("pinyin", text.empty() ? "" : pinyin);
-            if (!text.empty()) {
-                Settings aec("aecMode", true);
-                aec.SetInt("deviceAec", 1);
-            }
-            Application::GetInstance().Schedule([]() {
-                Application::GetInstance().Alert("唤醒词已更新", "8秒后自动重启", "", Lang::Sounds::OGG_VIBRATION);
-            });
-            xTaskCreate([](void*) {
-                vTaskDelay(pdMS_TO_TICKS(8000));
-                Application::GetInstance().Reboot();
-                vTaskDelete(NULL);
-            }, "ww_reboot", 4096, nullptr, 3, nullptr);
-            return std::string("{\"success\":true,\"wakeword\":\"") + (text.empty() ? "搭子精灵" : text) +
-                   (text.empty() ? "\"" : "\",\"aec_auto_on\":true,\"tip\":\"我说话时打断请直接开口\"") +
-                   ",\"auto_reboot_in_sec\":8}";
-        });
-
-    AddTool("self.audio.get_wakeword",
-        "查当前唤醒词。用户问『你叫什么/你是谁/怎么唤醒你』时调用。",
-        PropertyList(),
-        [](const PropertyList&) -> ReturnValue {
-            Settings s("wakeword", false);
-            std::string text = s.GetString("text", "");
-            return std::string("{\"wakeword\":\"") + (text.empty() ? "搭子精灵" : text) +
-                   "\",\"is_custom\":" + (text.empty() ? "false" : "true") + "}";
         });
 
     AddTool("self.audio_speaker.set_volume",
@@ -599,12 +499,7 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
     } else {
         json += "],\"nextCursor\":\"" + next_cursor + "\"}";
     }
-
-    // 实测 payload 字节数 + 是否触发分页（便于量产前审计 · 对齐 mcp-flows § 8.2 N1）
-    ESP_LOGI(TAG, "tools/list: id=%d, payload=%u B, paged=%s, cursor=%s",
-             id, (unsigned)json.size(), next_cursor.empty() ? "no" : "YES",
-             cursor.empty() ? "(first)" : cursor.c_str());
-
+    
     ReplyResult(id, json);
 }
 

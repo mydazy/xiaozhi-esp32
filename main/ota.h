@@ -16,9 +16,6 @@ public:
     esp_err_t CheckVersion();
     esp_err_t Activate();
 
-    /// POST OTA_URL/switch — 切换智能体（NFC/iBeacon/自定义）
-    /// @param type 触发类型（"nfc", "ibeacon" 等）
-    /// @param data 附加数据（调用后自动释放）
     static esp_err_t RequestSwitch(const std::string& type, cJSON* data);
 
     bool ReportStatus();
@@ -32,9 +29,7 @@ public:
     static bool Upgrade(const std::string& firmware_url, std::function<void(int progress, size_t speed)> callback);
     void MarkCurrentVersionValid();
 
-    // 通用 HTTP GET 下载到 PSRAM 缓冲（动态图片 / 小资源等）。
-    static bool Download(const std::string& url, size_t max_size,
-                         uint8_t** buffer, size_t* size);
+    static bool Download(const std::string& url, size_t max_size, uint8_t** buffer, size_t* size);
 
     const std::string& GetFirmwareVersion() const { return firmware_version_; }
     const std::string& GetCurrentVersion() const { return current_version_; }
@@ -66,7 +61,6 @@ private:
     std::string GetActivationPayload();
     std::unique_ptr<Http> SetupHttp();
 
-    /// 通用: POST OTA_URL/<path>，payload 由调用方构建，调用后自动释放
     static esp_err_t PostToOta(const std::string& path, cJSON* payload);
 };
 

@@ -1,6 +1,5 @@
 # Define source files
 set(SOURCES "audio/audio_codec.cc"
-            "audio/srmodel_vfs.cc"
             "audio/audio_service.cc"
             "audio/music_player.cc"
             "audio/demuxer/ogg_demuxer.cc"

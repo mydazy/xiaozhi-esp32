@@ -412,14 +412,14 @@ void Application::Run() {
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
 
-            // 闹钟检查（每秒 · 仅校时后生效 · 内部有防重触发）
-            AlarmManager::GetInstance().CheckAndTrigger();
-
 #if CONFIG_ENABLE_RUNTIME_MONITOR
             if (clock_ticks_ % 10 == 0) {
                 SystemInfo::PrintHeapStats();
             }
 #endif
+
+            // 闹钟检查（每秒 · 仅校时后生效 · 内部有防重触发）
+            AlarmManager::GetInstance().CheckAndTrigger();
         }
     }
 }
@@ -470,7 +470,6 @@ void Application::HandleActivationDoneEvent() {
 
     has_server_time_ = ota_->HasServerTime();
     if (has_server_time_) {
-        // P0：闹钟时区基准 · 不 setenv("TZ") 会让 localtime_r 退化为 UTC（显示比真实少 8h）
         setenv("TZ", "CST-8", 1);
         tzset();
         AlarmManager::MarkTimeSynced();   // 校时成功 · 启用闹钟检查
@@ -490,7 +489,7 @@ void Application::HandleActivationDoneEvent() {
     Schedule([this]() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_CONNECT);
-        vTaskDelay(pdMS_TO_TICKS(1500));
+        vTaskDelay(pdMS_TO_TICKS(1000));
     });
 }
 
@@ -579,9 +578,6 @@ void Application::CheckNewVersion() {
     int retry_count = 0;
     int retry_delay = 10; // Initial retry delay in seconds
 
-    // 升级后首启必须先标记本固件有效（幂等，仅 PENDING_VERIFY 时生效）：
-    ota_->MarkCurrentVersionValid();
-
     auto& board = Board::GetInstance();
     while (true) {
         auto display = board.GetDisplay();
@@ -663,42 +659,41 @@ void Application::InitializeProtocol() {
     if (!remote_cmd_) remote_cmd_ = std::make_unique<RemoteCmd>(this);
     if (!flow_engine_) flow_engine_ = std::make_unique<FlowEngine>(this);
 
-    std::shared_ptr<Protocol> p;
     if (ota_->HasMqttConfig()) {
-        p = std::make_shared<MqttProtocol>();
+        protocol_ = std::make_unique<MqttProtocol>();
     } else if (ota_->HasWebsocketConfig()) {
         Settings ws_settings("websocket", false);
         std::string ws_url = ws_settings.GetString("url", "");
         if (ws_url.find("bcelive") != std::string::npos) {
             ESP_LOGI(TAG, "Using Baidu BRTC WebSocket protocol");
-            p = std::make_shared<WebsocketBaiduProtocol>();
+            protocol_ = std::make_unique<WebsocketBaiduProtocol>();
         } else if (ws_url.find("joyinside") != std::string::npos) {
             ESP_LOGI(TAG, "Using JoyAI WebSocket protocol");
-            p = std::make_shared<WebsocketJoeaiProtocol>();
+            protocol_ = std::make_unique<WebsocketJoeaiProtocol>();
         } else {
-            p = std::make_shared<WebsocketProtocol>();
+            protocol_ = std::make_unique<WebsocketProtocol>();
         }
     } else {
         ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
-        p = std::make_shared<MqttProtocol>();
+        protocol_ = std::make_unique<MqttProtocol>();
     }
 
-    p->OnConnected([this]() {
+    protocol_->OnConnected([this]() {
         DismissAlert();
     });
 
-    p->OnNetworkError([this](const std::string& message) {
+    protocol_->OnNetworkError([this](const std::string& message) {
         last_error_message_ = message;
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
     });
     
-    p->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        if (tts_streaming_.load()) {
+    protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
+        if (GetDeviceState() == kDeviceStateSpeaking) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
         }
     });
     
-    p->OnAudioChannelOpened([this, codec, &board]() {
+    protocol_->OnAudioChannelOpened([this, codec, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
         user_initiated_close_.store(false);  // 通道新开 → 清残留退出意图，防下次弱网掉线被误判
         server_initiated_close_.store(false);  // 同上，清服务器主动告别标志
@@ -708,7 +703,7 @@ void Application::InitializeProtocol() {
         }
     });
     
-    p->OnAudioChannelClosed([this, &board]() {
+    protocol_->OnAudioChannelClosed([this, &board]() {
         if (shutting_down_.load()) {
             return;
         }
@@ -775,7 +770,7 @@ void Application::InitializeProtocol() {
         });
     });
     
-    p->OnIncomingJson([this, display](const cJSON* root) {
+    protocol_->OnIncomingJson([this, display](const cJSON* root) {
         // Parse JSON data
         auto type = cJSON_GetObjectItem(root, "type");
         if (!cJSON_IsString(type)) {
@@ -878,11 +873,9 @@ void Application::InitializeProtocol() {
     });
 
     // 按 protocol 切 OPUS 帧长（百度 20 / 其它 60）
-    audio_service_.SetFrameDuration(p->client_frame_duration());
+    audio_service_.SetFrameDuration(protocol_->client_frame_duration());
 
-    // A-1: 回调全注册在 p 上后，原子发布——别的任务此刻起 atomic_load 到的是完整对象
-    std::atomic_store(&protocol_, p);
-    p->Start();
+    protocol_->Start();
 }
 
 void Application::ShowActivationCode(const std::string& code, const std::string& message) {
@@ -964,7 +957,7 @@ void Application::HandleToggleChatEvent() {
     MusicPlayer::GetInstance().Stop();
 
     auto state = GetDeviceState();
-    
+
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;
@@ -1128,7 +1121,6 @@ void Application::HandleWakeWordDetectedEvent() {
             // Re-enable wake word detection as it was stopped by the detection itself
             audio_service_.EnableWakeWordDetection(true);
         } else {
-            // 唤醒词打断 TTS：进听音后播 wakeup.ogg 作为打断反馈（时序机制与 popup 相同）
             pending_listening_sound_ = &Lang::Sounds::OGG_WAKEUP;
             SetListeningMode(GetDefaultListeningMode());
         }
@@ -1161,14 +1153,14 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     while (auto packet = audio_service_.PopWakeWordPacket()) {
         protocol_->SendAudio(std::move(packet));
     }
-#endif
-    // 通知协议层唤醒（baidu: 发固定问候触发 AI 回应; xiaozhi: detect 消息）· 不上送唤醒词音频
+    // Set the chat state to wake word detected
     protocol_->SendWakeWordDetected(wake_word);
-
-#if CONFIG_SEND_WAKE_WORD_DATA
-    pending_listening_sound_ = &Lang::Sounds::OGG_POPUP;
-#endif
     SetListeningMode(GetDefaultListeningMode());
+#else
+
+    pending_listening_sound_ = &Lang::Sounds::OGG_POPUP;
+    SetListeningMode(GetDefaultListeningMode());
+#endif
 }
 
 void Application::HandleStateChangedEvent() {
@@ -1199,7 +1191,6 @@ void Application::HandleStateChangedEvent() {
                 }
             }
             audio_service_.EnableWakeWordDetection(true);
-            audio_service_.SetWakeWordThreshold(kWakeThresholdNormal);
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -1227,7 +1218,6 @@ void Application::HandleStateChangedEvent() {
 #ifdef CONFIG_WAKE_WORD_DETECTION_IN_LISTENING
             // Enable wake word detection in listening mode (configured via Kconfig)
             audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
-            audio_service_.SetWakeWordThreshold(kWakeThresholdNormal);  // 听音期常规档，防灵敏档残留
 #else
             // Disable wake word detection in listening mode
             audio_service_.EnableWakeWordDetection(false);
@@ -1249,9 +1239,6 @@ void Application::HandleStateChangedEvent() {
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
-                audio_service_.SetWakeWordThreshold(kWakeThresholdInterrupt);
-            } else {
-                audio_service_.EnableWakeWordDetection(false);
             }
             audio_service_.ResetDecoder();
             break;
@@ -1279,7 +1266,7 @@ void Application::Schedule(std::function<void()>&& callback) {
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
-    tts_streaming_.store(false);  // B3: 打断 TTS → 在途音频帧丢弃，不"该停不停"
+    tts_streaming_.store(false);
     if (protocol_) {
         protocol_->SendAbortSpeaking(reason);
     }
@@ -1379,7 +1366,7 @@ void Application::Reboot() {
     if (protocol_ && protocol_->IsAudioChannelOpened()) {
         protocol_->CloseAudioChannel();
     }
-    std::atomic_store(&protocol_, std::shared_ptr<Protocol>{});  // A-1: Reboot 原子置空
+    protocol_.reset();
     audio_service_.Stop();
 
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -1451,13 +1438,10 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     }
 
     auto state = GetDeviceState();
-
+    
     if (state == kDeviceStateIdle) {
-#if CONFIG_SEND_WAKE_WORD_DATA
         audio_service_.EncodeWakeWord();
-#else
-        audio_service_.PlaySound(Lang::Sounds::OGG_WAKEUP);
-#endif
+
         skip_next_stt_popup_.store(true);
 
         if (!protocol_->IsAudioChannelOpened()) {
@@ -1577,7 +1561,7 @@ void Application::ResetProtocol() {
             protocol_->CloseAudioChannel();
         }
         // Reset protocol
-        std::atomic_store(&protocol_, std::shared_ptr<Protocol>{});  // A-1: 同 Reboot，原子置空
+        protocol_.reset();
     });
 }
 

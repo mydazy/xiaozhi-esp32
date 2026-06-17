@@ -173,7 +173,6 @@ private:
     int decoder_frame_size_ = 0;
     DebugStatistics debug_statistics_;
 
-    // AEC 后增益的噪声门门限（增益值在 codec_->aec_gain_linear() 读取，统一管理）
     static constexpr int32_t kNoiseGateRmsSq = 50 * 200;  // RMS 200 ≈ -44 dBFS，低于此值跳过增益
     srmodel_list_t* models_list_ = nullptr;
 
@@ -196,7 +195,7 @@ private:
     bool wake_word_initialized_ = false;
     bool audio_processor_initialized_ = false;
     bool voice_detected_ = false;
-    std::atomic<bool> service_stopped_{true};  // 跨任务读写(:262 裸读)，必须 atomic 防 data race(UB)
+    std::atomic<bool> service_stopped_{true};
     bool audio_input_need_warmup_ = false;
 
     esp_timer_handle_t audio_power_timer_ = nullptr;

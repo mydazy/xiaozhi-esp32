@@ -1,6 +1,5 @@
 #include "ml307_board.h"
 
-#include "application.h"
 #include "audio_codec.h"
 #include "display.h"
 
@@ -86,7 +85,6 @@ void Ml307Board::NetworkTask() {
     if (modem_ == nullptr) {
         ESP_LOGE(TAG, "Failed to detect modem after %d retries", MODEM_DETECT_MAX_RETRIES);
         OnNetworkEvent(NetworkEvent::ModemErrorInitFailed);
-        Application::GetInstance().SetDeviceState(kDeviceStateIdle);
         return;
     }
 
@@ -124,7 +122,6 @@ void Ml307Board::NetworkTask() {
 
     if (!modem_->network_ready()) {
         ESP_LOGE(TAG, "Failed to register network after %d retries", NETWORK_REG_MAX_RETRIES);
-        Application::GetInstance().SetDeviceState(kDeviceStateIdle);
         return;
     }
 

@@ -264,18 +264,6 @@ def process_emoji_collection(emoji_collection_dir, assets_dir):
 
 
 def process_extra_files(extra_files_arg, assets_dir):
-    """Process default_assets_extra_files parameter.
-
-    返回 (extra_files_list, extra_emoji_list):
-      - extra_files_list: 全部拷贝的文件名（写入 index.json/extra_files）
-      - extra_emoji_list: 来自 basename=="image" 的 .gif/.png 文件（追加到 emoji_collection）
-        约定: assets/image/ 下的图片自动注册为 emoji，可被 SetEmotion(name) 调用
-
-    Accepts:
-      - None / empty                                  -> no-op
-      - single string (single dir, or ';'-joined)     -> normalised to list
-      - list[str] from argparse nargs='+'             -> may contain ';'-joined elements
-    """
     if not extra_files_arg:
         return [], []
 
@@ -714,16 +702,7 @@ def get_multinet_model_paths(model_names, esp_sr_model_path):
             valid_paths.append(multinet_model_path)
         else:
             print(f"Warning: Multinet model directory not found: {multinet_model_path}")
-
-    # 选了 multinet 必须连带 fst 资源目录：esp_mn_commands_update 的拼音转音素
-    # 要读 fst/commands_cn.txt，缺失会在注册命令词时崩溃（库内 fopen 未判空）
-    if valid_paths:
-        fst_path = os.path.join(esp_sr_model_path, 'multinet_model', 'fst')
-        if os.path.exists(fst_path):
-            valid_paths.append(fst_path)
-        else:
-            print(f"Warning: fst resource directory not found: {fst_path}")
-
+    
     return valid_paths
 
 
@@ -919,14 +898,11 @@ def main():
     wakenet_model_paths = []
     multinet_model_paths = []
     
-    # 1. 选中的 wakenet 模型始终打包（含 CUSTOM 档）：
-    #    运行时默认引擎仍是 AFE（NVS wakeword/mode 默认 afe），custom 仅在用户
-    #    起名后切换，且 custom 初始化失败的回落保险也依赖 wakenet 模型在资产中。
-    if (wake_word_config['use_esp_wake_word'] or wake_word_config['use_afe_wake_word']
-            or wake_word_config['use_custom_wake_word']):
+    # 1. Only package wakenet models if USE_ESP_WAKE_WORD=y or USE_AFE_WAKE_WORD=y
+    if wake_word_config['use_esp_wake_word'] or wake_word_config['use_afe_wake_word']:
         wakenet_model_paths = get_wakenet_model_paths(wakenet_model_names, args.esp_sr_model_path)
     elif wakenet_model_names:
-        print(f"  Note: Found wakenet models {wakenet_model_names} but wake word type is not ESP/AFE/CUSTOM, skipping")
+        print(f"  Note: Found wakenet models {wakenet_model_names} but wake word type is not ESP/AFE, skipping")
     
     # 2. Error check: if USE_CUSTOM_WAKE_WORD=y but no multinet models selected, report error
     if wake_word_config['use_custom_wake_word'] and not multinet_model_names:

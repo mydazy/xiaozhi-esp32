@@ -501,8 +501,7 @@ private:
             }
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
-                bool pickup = Settings("status", false).GetInt("pickupWake", 0) == 1;
-                ShutdownOrSleep("休眠中", pickup ? "拿起唤醒" : "按键唤醒", "", 1500, true);
+                ShutdownOrSleep("休眠中", "拿起唤醒", "", 1500, true);
             }
         });
 
@@ -528,7 +527,7 @@ private:
     // 拿起唤醒
     void ArmGyroWakeup() {
         if (!sc7a20h_sensor_) return;
-        if (Settings("status", false).GetInt("pickupWake", 0) == 0) return;
+        if (Settings("status", false).GetInt("pickupWake", 1) == 0) return;
         esp_err_t r = sc7a20h_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
         if (r != ESP_OK) ESP_LOGW(TAG, "sc7a20h_wakeup failed: %s", esp_err_to_name(r));
     }
@@ -773,8 +772,6 @@ private:
             }
         });
 
-        // PressDown 而非 OnClick：单击事件有 ~300ms 双击判定窗，快按第二下会被
-        // 归类成"双击"（未注册）而吞掉。按下即响应：每按一下立即 ±10，零延迟。
         volume_up_button_.OnPressDown  ([this]() { ApplyVolume(+10); });
         volume_down_button_.OnPressDown([this]() { ApplyVolume(-10); });
     }

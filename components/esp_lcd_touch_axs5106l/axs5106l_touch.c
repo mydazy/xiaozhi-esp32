@@ -45,10 +45,7 @@ static const char *TAG = "axs5106l_touch";
 #define LONG_PRESS_TIME_US   500000   /* 500ms · 防儿童误触（300→500 与 Apple/iOS 对齐）*/
 #define DOUBLE_CLICK_TIME_US 500000   /* 500ms · 实测儿童双击间隔 320~480ms · 300→500 解决"快速双击全被切单击" */
 #define DOUBLE_CLICK_DIST    80       /* ~10.6mm · Apple 30pt 物理等效 */
-#define CLICK_MIN_FRAMES      1       /* F1修复 2→1：实现本注释原意"单帧即合法"。原值2致轻快点击(事件型芯片
-                                       * 33ms轮询常只采1帧)永远到不了2帧→LVGL收不到PRESSED→"不灵敏要重按"(WiFi/4G共有)。
-                                       * RF防护不丢:storm_detected(:553)拦RF storm、recognize_gesture rf_active时need_frames仍升2(:847)。
-                                       * [需真机验证轻触命中率;若仍偏钝可再松 CLICK_MIN_TIME_US 50ms] */
+#define CLICK_MIN_FRAMES      2       /* 事件型芯片 INT 只在边沿 latch · 单帧即合法（50ms 时长 + 抖动=0 兜底）*/
 #define SINGLE_FRAME_MAX_TIME_US 200000  /* f==1 时 dur 上限 200ms · 拦截 4G 伪 press（被 RF 拉长的单帧噪声）· f>=2 不受限 */
 #define RF_ACTIVE_EDGE_HINT      3       /*  本次 press 内 INT 边沿 ≥3 视为 RF 活跃 · 单帧 tap 升级要求 2 帧 */
 #define SWIPE_MIN_TIME_US    150000   /* 150ms 不变 */
@@ -671,9 +668,6 @@ static void lvgl_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 /* F1 缓解（非根治）：4G 射频耦合致小幅坐标乱跳，速度门(2000px/s)漏掉的离散单帧
  * 离群点用 3 点中值压掉。根因是硬件 RF（见 docs/audit/触摸乱跳现场复查），此为缓解；
  * 若手感变差或缓解微弱，改 AXS_MEDIAN_FILTER 0 一键回退当前行为。 */
-/* 回退为 0：三轮评审发现中值历史存的是"输出值"而非"原始采样"，与 last_x 耦合成反馈环，
- * 开启后按压期坐标冻结在首帧、滑动失效（比原问题更糟）。且现场主诉是"触屏不灵敏要重按"(钝)
- * 而非"乱跳"，中值(增延迟)方向存疑。最终方案待 F1 现场裁决，暂回退至旧行为。 */
 #define AXS_MEDIAN_FILTER 0
 
 #if AXS_MEDIAN_FILTER

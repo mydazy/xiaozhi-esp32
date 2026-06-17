@@ -2,6 +2,7 @@
 
 #include <esp_log.h>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 #define TAG "NoAudioCodec"

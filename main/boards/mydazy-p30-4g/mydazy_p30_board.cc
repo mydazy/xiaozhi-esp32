@@ -504,8 +504,7 @@ private:
             }
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
-                bool pickup = Settings("status", false).GetInt("pickupWake", 0) == 1;
-                ShutdownOrSleep("休眠中", pickup ? "拿起唤醒" : "按键唤醒", "", 1500, true);
+                ShutdownOrSleep("休眠中", "拿起唤醒", "", 1500, true);
             }
         });
 
@@ -891,7 +890,7 @@ private:
 
 public:
     MyDazyP30_4GBoard() :
-        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 0),  // 出厂默认 WiFi(0)；原默认 4G/ML307(1)。仅首次出厂(NVS无type)生效，已配网设备保留用户选择
+        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 0),
         boot_button_(BOOT_BUTTON_GPIO, false, 800, 400),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {

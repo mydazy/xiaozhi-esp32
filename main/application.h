@@ -113,7 +113,6 @@ public:
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
-
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void CloseAudioChannel();
@@ -132,8 +131,6 @@ public:
     void SetSttPopupEnabled(bool enabled);
     bool IsSttPopupEnabled() const { return stt_popup_enabled_; }
 
-    // 开机自动对话（A1 · 取代 board WelcomeTask 内 vTaskDelay+ToggleChat）
-    // board 在播欢迎音前调用 → state listener 在首次进 Idle 时自动 ToggleChat
     void RequestAutoChatOnIdle();
 
     void PlaySound(const std::string_view& sound);
@@ -156,7 +153,7 @@ private:
 
     std::mutex mutex_;
     std::deque<std::function<void()>> main_tasks_;
-    std::shared_ptr<Protocol> protocol_;  // A-1: shared_ptr + atomic_load/store 本地拷贝惯例，防 R2/R3 跨任务 UAF
+    std::unique_ptr<Protocol> protocol_;
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     DeviceStateMachine state_machine_;
@@ -173,7 +170,6 @@ private:
     bool has_server_time_ = false;
     bool aborted_ = false;
     bool assets_version_checked_ = false;
-    // 进入 listening 态后待播的提示音（nullptr=不播；正常唤醒=popup，唤醒打断 TTS=wakeup）
     const std::string_view* pending_listening_sound_ = nullptr;
 
     bool stt_popup_enabled_ = true;
@@ -188,7 +184,7 @@ private:
     std::atomic<bool> user_initiated_close_{false};
     std::atomic<bool> server_initiated_close_{false};
     std::atomic<bool> shutting_down_{false};
-    std::atomic<bool> tts_streaming_{false};  // B3: TTS 流期间(start→stop/abort)，覆盖 SetDeviceState(Speaking) 异步切换窗口，防首批音频帧被丢(有字幕无声)
+    std::atomic<bool> tts_streaming_{false};
     TaskHandle_t activation_task_handle_ = nullptr;
 
 
