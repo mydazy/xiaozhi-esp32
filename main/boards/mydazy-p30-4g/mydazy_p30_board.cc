@@ -310,16 +310,6 @@ private:
         });
     }
 
-    // 桌面双击 — 唤醒屏幕（与触摸唤醒同语义 · 不进 AI 对话）
-    static void OnStrike(void* ctx) {
-        auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
-        Application::GetInstance().Schedule([self] {
-            if (TryStopAlarmRinger("strike")) return;
-            ESP_LOGI(TAG, "strike → wakeup");
-            self->WakeUp();
-        });
-    }
-
     void PrepareTouchHardware() {
         axs5106l_touch_config_t cfg = {
             .worker          = i2c_worker_,
@@ -333,7 +323,7 @@ private:
             .on_wake         = &OnTouchWake,
             .on_click        = &OnTouchClick,
             .on_double_click = &OnTouchDoubleClick,
-            .on_swipe        = &OnTouchSwipe,        /* 下滑唤起控制中心 · 上滑收回 */
+            .on_swipe        = &OnTouchSwipe,        /* 上滑收回控制中心（呼出走单击状态栏顶部 y<36） */
         };
         if (axs5106l_touch_init(&cfg, &touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏硬件初始化失败");

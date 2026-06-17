@@ -73,33 +73,13 @@ typedef struct {
     axs5106l_long_press_cb_t   on_long_press;    /* 长按（is_release: false=按下 · true=松开）*/
 } axs5106l_touch_config_t;
 
-/**
- * Phase 1 — LCD 启动**前**调用：
- *   配 RST + I²C device + firmware 升级 + chip_id 校验 + 应用 rf_mode
- *
- * @return ESP_OK / ESP_ERR_INVALID_ARG / ESP_ERR_NO_MEM / ESP_ERR_NOT_FOUND
- */
 esp_err_t axs5106l_touch_init(const axs5106l_touch_config_t *cfg,
                               axs5106l_touch_handle_t *out);
-
-/**
- * Phase 2 — LVGL 启动**后**调用：
- *   配 INT GPIO + 安装 IRAM ISR（仅计数）+ lv_indev_create + 30ms polling
- *
- * @return ESP_OK / ESP_ERR_INVALID_ARG
- */
 esp_err_t axs5106l_touch_attach_lvgl(axs5106l_touch_handle_t h);
 
-
-/// 深睡前调：关 INT ISR + 写 sleep 寄存器（0x19=0x03）· 必须先于 AUDIO_PWR_EN=0
-/* 吞掉当前这次按压（直到抬手都不投递给 LVGL/手势）。
- * 用途：省电降亮时的"首触只点亮屏幕"——唤醒首帧坐标易被 RF 抖动污染，
- * 投递会误触按钮。须在 on_wake 回调内同步调用。*/
 void axs5106l_touch_swallow_current_press(axs5106l_touch_handle_t h);
-
 esp_err_t axs5106l_touch_sleep(axs5106l_touch_handle_t h);
 
-/// 浅睡唤醒后调：软复位 + 重开 ISR + 重置 storm 检测（当前三板未用）
 esp_err_t axs5106l_touch_resume(axs5106l_touch_handle_t h);
 
 #ifdef __cplusplus

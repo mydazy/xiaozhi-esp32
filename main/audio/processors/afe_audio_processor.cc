@@ -2,12 +2,14 @@
 #include <esp_log.h>
 
 #define PROCESSOR_RUNNING 0x01
+#define PROCESSOR_EXIT    0x02
 
 #define TAG "AfeAudioProcessor"
 
 AfeAudioProcessor::AfeAudioProcessor()
     : afe_data_(nullptr) {
     event_group_ = xEventGroupCreate();
+    task_done_sem_ = xSemaphoreCreateBinary();
 }
 
 void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srmodel_list_t* models_list) {
@@ -72,11 +74,21 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
         this_->AudioProcessorTask();
         vTaskDelete(NULL);
     }, "audio_communication", 4096, this, 7, NULL, 1);
+    task_created_ = true;
 }
 
 AfeAudioProcessor::~AfeAudioProcessor() {
+    if (task_created_) {
+        xEventGroupSetBits(event_group_, PROCESSOR_EXIT);
+        if (task_done_sem_) {
+            xSemaphoreTake(task_done_sem_, pdMS_TO_TICKS(2000));
+        }
+    }
     if (afe_data_ != nullptr) {
         afe_iface_->destroy(afe_data_);
+    }
+    if (task_done_sem_ != nullptr) {
+        vSemaphoreDelete(task_done_sem_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -190,6 +202,9 @@ void AfeAudioProcessor::AudioProcessorTask() {
                 }
             }
         }
+    }
+    if (task_done_sem_ != nullptr) {
+        xSemaphoreGive(task_done_sem_);
     }
 }
 

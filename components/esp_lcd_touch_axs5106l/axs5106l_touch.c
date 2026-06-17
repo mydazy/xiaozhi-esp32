@@ -88,13 +88,11 @@ typedef struct {
     uint8_t  release_count;
     int16_t  last_x;
     int16_t  last_y;
-    int16_t  med_x1;    // F1: 上上帧输出，3 点中值用
-    int16_t  med_y1;
     uint64_t last_time;
     uint64_t int_low_since;
 
     bool     press_pending;
-    bool     swallow;            /* 省电唤醒首触：本次按压不投递（直到抬手） */
+    bool     swallow;
     uint64_t last_release_time;  /* 0 = never released yet */
 } touch_state_t;
 
@@ -110,7 +108,7 @@ typedef struct {
     uint64_t press_time;
     uint64_t last_click_time;
     int16_t  last_click_x, last_click_y;
-    uint32_t press_edges_baseline;  /* 4G 干扰可观测 · press 起点的 INT 边沿快照 */
+    uint32_t press_edges_baseline;
 } gesture_state_t;
 
 #if AXS5106L_TOUCH_DEBUG_OVERLAY
@@ -641,7 +639,7 @@ static void lvgl_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
             data->point.y = self->touch.last_y;
             data->state   = LV_INDEV_STATE_RELEASED;
             if (self->touch.swallow) {
-                self->touch.swallow = false;   /* 吞噬结束：下次按压恢复正常投递 */
+                self->touch.swallow = false;
             } else {
                 recognize_gesture(self, 0, 0, false);
             }
@@ -664,19 +662,6 @@ static void lvgl_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 /* ------------------------------------------------------------------ */
 /*  Read one touch frame                                               */
 /* ------------------------------------------------------------------ */
-
-/* F1 缓解（非根治）：4G 射频耦合致小幅坐标乱跳，速度门(2000px/s)漏掉的离散单帧
- * 离群点用 3 点中值压掉。根因是硬件 RF（见 docs/audit/触摸乱跳现场复查），此为缓解；
- * 若手感变差或缓解微弱，改 AXS_MEDIAN_FILTER 0 一键回退当前行为。 */
-#define AXS_MEDIAN_FILTER 0
-
-#if AXS_MEDIAN_FILTER
-static inline uint16_t median3_u16(uint16_t a, uint16_t b, uint16_t c) {
-    uint16_t mx = a > b ? a : b; mx = mx > c ? mx : c;
-    uint16_t mn = a < b ? a : b; mn = mn < c ? mn : c;
-    return (uint16_t)(a + b + c - mx - mn);
-}
-#endif
 
 static bool read_touch(axs5106l_touch_handle_t self, uint16_t *out_x, uint16_t *out_y)
 {
@@ -741,21 +726,6 @@ static bool read_touch(axs5106l_touch_handle_t self, uint16_t *out_x, uint16_t *
             if ((uint64_t)dist * 1000000ULL > (uint64_t)self->rf_max_speed_px_s * dt_us) return false;
         }
     }
-
-#if AXS_MEDIAN_FILTER
-    /* 仅连续按压帧做 3 点中值（首帧 pressed=false 时初始化历史，不引入起始延迟/丢点）。
-     * 速度门已在前面挡掉大跳变，这里只压它漏网的小幅离散离群点。 */
-    if (self->touch.pressed) {
-        uint16_t mx = median3_u16(sx, (uint16_t)self->touch.last_x, (uint16_t)self->touch.med_x1);
-        uint16_t my = median3_u16(sy, (uint16_t)self->touch.last_y, (uint16_t)self->touch.med_y1);
-        self->touch.med_x1 = self->touch.last_x;
-        self->touch.med_y1 = self->touch.last_y;
-        sx = mx; sy = my;
-    } else {
-        self->touch.med_x1 = sx;
-        self->touch.med_y1 = sy;
-    }
-#endif
 
     self->touch.last_time = now;
     *out_x = sx;

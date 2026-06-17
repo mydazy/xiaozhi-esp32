@@ -381,54 +381,13 @@ void UiDisplay::SwitchToChatMode() {
 }
 
 // ============================================================
-// 开机 Logo（静态显示 · 无动画 · Idle 时由状态机触发渐出 → 切时钟）
+// 开机 Logo（静态显示 · 无动画 · 开机走 SwitchToClockMode 硬切）
 // ============================================================
-
-static void boot_opa_cb(void* obj, int32_t v) {
-    lv_obj_set_style_opa(static_cast<lv_obj_t*>(obj), v, 0);
-}
 
 void UiDisplay::StartBootAnimation() {
     if (!emoji_box_) return;
     lv_obj_set_style_opa(emoji_box_, LV_OPA_COVER, 0);
     if (status_bar_) lv_obj_set_style_opa(status_bar_, LV_OPA_COVER, 0);
-}
-
-void UiDisplay::FinishBootAndShowClock() {
-    DisplayLockGuard lock(this);
-    if (active_scene_ == SceneType::kClock) return;   // 幂等：已切时钟，重复 Idle 事件忽略
-    if (!setup_ui_called_) return;
-    if (active_scene_ == SceneType::kPlayer) return;
-
-    HideQrCode();
-
-    if (!emoji_box_) {
-        SwitchToClockMode();
-        return;
-    }
-
-    lv_anim_t fade_out;
-    lv_anim_init(&fade_out);
-    lv_anim_set_var(&fade_out, emoji_box_);
-    lv_anim_set_values(&fade_out, LV_OPA_COVER, LV_OPA_TRANSP);
-    lv_anim_set_time(&fade_out, 400);
-    lv_anim_set_exec_cb(&fade_out, boot_opa_cb);
-    lv_anim_set_user_data(&fade_out, this);
-    lv_anim_set_completed_cb(&fade_out, [](lv_anim_t* a) {
-        auto* d = static_cast<UiDisplay*>(lv_anim_get_user_data(a));
-        d->SwitchToClockMode();
-    });
-    lv_anim_start(&fade_out);
-
-    if (status_bar_) {
-        lv_anim_t status_out;
-        lv_anim_init(&status_out);
-        lv_anim_set_var(&status_out, status_bar_);
-        lv_anim_set_values(&status_out, LV_OPA_COVER, LV_OPA_TRANSP);
-        lv_anim_set_time(&status_out, 400);
-        lv_anim_set_exec_cb(&status_out, boot_opa_cb);
-        lv_anim_start(&status_out);
-    }
 }
 
 uint32_t UiDisplay::BeginFontPending() {
@@ -1087,7 +1046,7 @@ void UiDisplay::CreatePomodoroPage() {
     pomodoro_btn_ = lv_button_create(pomodoro_container_);
     lv_obj_set_size(pomodoro_btn_, BTN_SIZE, BTN_SIZE);
     lv_obj_set_pos(pomodoro_btn_, kScreenWidth / 2 - BTN_SIZE / 2, BTN_CENTER_Y - BTN_SIZE / 2);
-    // 番茄色（ui_config.h ACCENT_ORANGE=0xFB8C00）
+    // 番茄色（ACCENT_ORANGE=0xFB8C00）
     lv_obj_set_style_bg_color(pomodoro_btn_, lv_color_hex(0xFB8C00), 0);
     lv_obj_set_style_bg_opa(pomodoro_btn_, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(pomodoro_btn_, BTN_SIZE / 2, 0);

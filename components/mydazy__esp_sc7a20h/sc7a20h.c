@@ -62,27 +62,11 @@ typedef struct {
     void                   *ctx;
 } shake_state_t;
 
-typedef enum { STRIKE_IDLE, STRIKE_WAIT_GAP } strike_phase_t;
-
-typedef struct {
-    bool                    enabled;
-    int32_t                 peak_sq;     /* peak² (mg²) */
-    int64_t                 min_gap_us;
-    int64_t                 max_gap_us;
-    int64_t                 cooldown_us;
-    strike_phase_t          phase;
-    int64_t                 peak1_us;
-    int64_t                 last_us;
-    sc7a20h_strike_cb_t     cb;
-    void                   *ctx;
-} strike_state_t;
-
 struct sc7a20h_dev_t {
     i2c_worker_handle_t   worker;
     i2c_worker_dev_t     *dev;
     TaskHandle_t          motion_task;
     shake_state_t         shake;
-    strike_state_t        strike;
 };
 
 /* ============== 内部 I²C 助手（全部走 worker · 防 4G RF 共线污染）============== */
@@ -114,7 +98,7 @@ static esp_err_t read_xyz_mg(struct sc7a20h_dev_t *d, int16_t *x, int16_t *y, in
     return ESP_OK;
 }
 
-/* ============== motion_task — 共享数据流 · 双算法独立判定 ============== */
+/* ============== motion_task — 读 XYZ → 摇一摇判定 ============== */
 static void update_shake(shake_state_t *s, int32_t dev, int64_t now_us)
 {
     if (!s->enabled || !s->cb) return;
@@ -130,37 +114,6 @@ static void update_shake(shake_state_t *s, int32_t dev, int64_t now_us)
         s->last_us = now_us;
         ESP_LOGI(TAG, "摇一摇触发 (强动帧=%d/%d)", strong, s->window);
         s->cb(s->ctx);
-    }
-}
-
-static void update_strike(strike_state_t *t, int32_t dev, int64_t now_us)
-{
-    if (!t->enabled || !t->cb) return;
-    if ((now_us - t->last_us) < t->cooldown_us) return;
-
-    bool is_peak = (dev > t->peak_sq);
-
-    switch (t->phase) {
-        case STRIKE_IDLE:
-            if (is_peak) {
-                t->peak1_us = now_us;
-                t->phase = STRIKE_WAIT_GAP;
-            }
-            break;
-        case STRIKE_WAIT_GAP: {
-            int64_t gap = now_us - t->peak1_us;
-            if (gap > t->max_gap_us) {
-                /* 超时 · 若当前帧仍是峰值则视为新第一击，否则回 idle */
-                t->phase = is_peak ? STRIKE_WAIT_GAP : STRIKE_IDLE;
-                if (is_peak) t->peak1_us = now_us;
-            } else if (is_peak && gap >= t->min_gap_us) {
-                t->last_us = now_us;
-                t->phase = STRIKE_IDLE;
-                ESP_LOGI(TAG, "桌面双击触发 (间隔=%lldms)", gap / 1000);
-                t->cb(t->ctx);
-            }
-            break;
-        }
     }
 }
 
@@ -196,18 +149,17 @@ static void motion_task_entry(void *arg)
         if (same_streak >= 20) {
             if (!data_dead) {
                 data_dead = true;
-                ESP_LOGE(TAG, "传感器数据卡死(x=%d y=%d z=%d 持续不变)→ 暂停摇一摇/双击，数据恢复后自动解除", x, y, z);
+                ESP_LOGE(TAG, "传感器数据卡死(x=%d y=%d z=%d 持续不变)→ 暂停摇一摇，数据恢复后自动解除", x, y, z);
             }
             continue;  /* 数据无效 · 不喂判定 · 不触发 */
         }
         if (data_dead) {
             data_dead = false;
-            ESP_LOGW(TAG, "传感器数据已恢复变化 → 恢复摇一摇/双击");
+            ESP_LOGW(TAG, "传感器数据已恢复变化 → 恢复摇一摇");
         }
 
         int64_t now_us = esp_timer_get_time();
-        update_shake (&d->shake,  dev, now_us);
-        update_strike(&d->strike, dev, now_us);
+        update_shake(&d->shake, dev, now_us);
     }
 }
 
@@ -338,35 +290,5 @@ esp_err_t sc7a20h_shake(sc7a20h_handle_t h,
 
     ESP_LOGI(TAG, "摇一摇启用 (阈值=%umg 窗=%dms 目标帧=%d/%d 冷却=%ums)",
              deviation_mg, win * MOTION_PERIOD_MS, h->shake.target, win, cooldown_ms);
-    return ESP_OK;
-}
-
-esp_err_t sc7a20h_strike(sc7a20h_handle_t h,
-                         uint16_t peak_mg,
-                         uint16_t min_gap_ms,
-                         uint16_t max_gap_ms,
-                         uint16_t cooldown_ms,
-                         sc7a20h_strike_cb_t cb,
-                         void *ctx)
-{
-    if (!h || !cb) return ESP_ERR_INVALID_ARG;
-    if (h->strike.enabled) return ESP_ERR_INVALID_STATE;
-
-    h->strike.peak_sq     = (int32_t)peak_mg * peak_mg;
-    h->strike.min_gap_us  = (int64_t)min_gap_ms * 1000;
-    h->strike.max_gap_us  = (int64_t)max_gap_ms * 1000;
-    h->strike.cooldown_us = (int64_t)cooldown_ms * 1000;
-    h->strike.phase       = STRIKE_IDLE;
-    h->strike.peak1_us    = 0;
-    h->strike.last_us     = 0;
-    h->strike.cb          = cb;
-    h->strike.ctx         = ctx;
-    h->strike.enabled     = true;
-
-    esp_err_t r = ensure_motion_task(h);
-    if (r != ESP_OK) { h->strike.enabled = false; return r; }
-
-    ESP_LOGI(TAG, "桌面双击启用 (峰值=%umg 间隔=[%u,%u]ms 冷却=%ums)",
-             peak_mg, min_gap_ms, max_gap_ms, cooldown_ms);
     return ESP_OK;
 }
