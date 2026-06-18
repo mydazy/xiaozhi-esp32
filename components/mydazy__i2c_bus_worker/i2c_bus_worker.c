@@ -45,6 +45,15 @@ typedef enum {
     OP_QUIT,            /* 优雅停 worker */
 } op_type_t;
 
+
+typedef struct {
+    SemaphoreHandle_t   sem;        /* 堆上 binary semaphore（非栈 static）*/
+    esp_err_t           result;     /* worker 写回结果 */
+    _Atomic int         refcount;   /* 2 → 1 → 0(free) */
+    uint8_t            *wbuf;        /* write 数据堆拷贝（脱离 caller 栈）*/
+    uint8_t            *rbuf;        /* read 数据堆缓冲（worker 写，caller 成功后拷回）*/
+} op_ctx_t;
+
 typedef struct {
     op_type_t           type;
     i2c_worker_dev_t   *dev;
@@ -53,9 +62,22 @@ typedef struct {
     void               *read_data;
     size_t              read_len;
     uint32_t            timeout_ms;     /* 单次 i2c_master 超时（不含等队列） */
-    SemaphoreHandle_t   result_sem;     /* caller 等的 binary semaphore */
-    esp_err_t          *result_out;     /* worker 写回结果 */
+    SemaphoreHandle_t   result_sem;     /* = ctx->sem（worker give）*/
+    esp_err_t          *result_out;     /* = &ctx->result（worker 写）*/
+    op_ctx_t           *ctx;            /* 堆上下文；OP_QUIT 为 NULL */
 } op_t;
+
+/* 释放一份引用；减到 0 时真正销毁。worker 与 caller 各调一次。 */
+static void op_ctx_release(op_ctx_t *ctx)
+{
+    if (!ctx) return;
+    if (atomic_fetch_sub(&ctx->refcount, 1) == 1) {   /* 旧值为 1 → 我是最后一个 */
+        if (ctx->sem)  vSemaphoreDelete(ctx->sem);
+        if (ctx->wbuf) free(ctx->wbuf);
+        if (ctx->rbuf) free(ctx->rbuf);
+        free(ctx);
+    }
+}
 
 struct i2c_worker_dev_t {
     i2c_worker_handle_t       worker;
@@ -225,6 +247,7 @@ static void worker_task(void *arg)
 
         if (op.result_out) *op.result_out = ret;
         if (op.result_sem) xSemaphoreGive(op.result_sem);
+        if (op.ctx) op_ctx_release(op.ctx);   /* worker 释放自己那份引用（give 后 ctx 仍有效）*/
     }
 
     ESP_LOGI(TAG, "worker task exiting");
@@ -237,14 +260,38 @@ static void worker_task(void *arg)
 
 static esp_err_t submit_and_wait(i2c_worker_handle_t w, op_t *op, uint32_t total_timeout_ms)
 {
-    /* binary semaphore 在 caller 栈上动态创建（StaticSemaphore_t 也可，简化用动态） */
-    StaticSemaphore_t sem_buf;
-    SemaphoreHandle_t sem = xSemaphoreCreateBinaryStatic(&sem_buf);
-    if (!sem) return ESP_ERR_NO_MEM;
+    /* 共享上下文堆分配——caller 超时放弃后栈帧回退也不影响 worker（堆不随栈失效）。
+       refcount=2：caller 与 worker 各持一份，谁后释放谁 free。 */
+    op_ctx_t *ctx = (op_ctx_t *)heap_caps_calloc(
+        1, sizeof(op_ctx_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!ctx) return ESP_ERR_NO_MEM;
+    ctx->sem = xSemaphoreCreateBinary();
+    if (!ctx->sem) { free(ctx); return ESP_ERR_NO_MEM; }
+    ctx->result = ESP_FAIL;
+    atomic_init(&ctx->refcount, 2);
 
-    esp_err_t op_result = ESP_FAIL;
-    op->result_sem = sem;
-    op->result_out = &op_result;
+    /* write 数据拷进堆：worker 用 ctx->wbuf 而非 caller 栈缓冲，超时后仍安全 */
+    if (op->write_data && op->write_len) {
+        ctx->wbuf = (uint8_t *)heap_caps_malloc(op->write_len, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (!ctx->wbuf) { vSemaphoreDelete(ctx->sem); free(ctx); return ESP_ERR_NO_MEM; }
+        memcpy(ctx->wbuf, op->write_data, op->write_len);
+        op->write_data = ctx->wbuf;
+    }
+    /* read 走堆缓冲，成功后再拷回 caller（超时放弃则不拷，由 free 回收） */
+    void  *caller_read = op->read_data;
+    size_t caller_rlen = op->read_len;
+    if (op->read_data && op->read_len) {
+        ctx->rbuf = (uint8_t *)heap_caps_malloc(op->read_len, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (!ctx->rbuf) {
+            if (ctx->wbuf) free(ctx->wbuf);
+            vSemaphoreDelete(ctx->sem); free(ctx);
+            return ESP_ERR_NO_MEM;
+        }
+        op->read_data = ctx->rbuf;
+    }
+    op->result_sem = ctx->sem;
+    op->result_out = &ctx->result;
+    op->ctx        = ctx;
 
     TickType_t tick_total = pdMS_TO_TICKS(total_timeout_ms);
     TickType_t tick_send  = pdMS_TO_TICKS(10);
@@ -252,14 +299,14 @@ static esp_err_t submit_and_wait(i2c_worker_handle_t w, op_t *op, uint32_t total
     TickType_t tick_wait  = (tick_total > tick_send) ? (tick_total - tick_send) : 1;
 
     if (xQueueSend(w->queue, op, tick_send) != pdTRUE) {
-        vSemaphoreDelete(sem);
+        /* 没进队列，worker 永不持有这份 ctx：caller 独占，把 worker 那份引用收回再释放 */
+        atomic_store(&ctx->refcount, 1);
+        op_ctx_release(ctx);
         return ESP_ERR_TIMEOUT;
     }
 
-    if (xSemaphoreTake(sem, tick_wait) != pdTRUE) {
-        /* worker 还在执行此 op，不能立即 delete sem，否则 worker 给 sem 时 UAF。
-           带上诊断字段（队列深度 + 累计错误）方便量产现场追踪是 worker 被饿
-           还是 i2c_master_* 卡住硬件超时 */
+    if (xSemaphoreTake(ctx->sem, tick_wait) != pdTRUE) {
+        /* 诊断字段（队列深度 + 累计错误）方便量产现场追踪是 worker 被饿还是硬件卡住 */
         UBaseType_t qd = uxQueueMessagesWaiting(w->queue);
         ESP_LOGE(TAG, "submit timeout — worker may still be executing "
                       "(queue=%u, errs=%u, total_ops=%u)",
@@ -267,15 +314,21 @@ static esp_err_t submit_and_wait(i2c_worker_handle_t w, op_t *op, uint32_t total
                  atomic_load(&w->total_errors),
                  atomic_load(&w->total_ops));
         /* 兜底再等 200 ms（若 worker 已开始 i2c_master_*，会在硬件超时后退出） */
-        if (xSemaphoreTake(sem, pdMS_TO_TICKS(200)) != pdTRUE) {
-            ESP_LOGE(TAG, "worker stuck > 200ms after queue timeout");
-            /* 极端情况下 sem 不能释放（worker 仍持有） — 接受 leak 换 UAF 安全 */
+        if (xSemaphoreTake(ctx->sem, pdMS_TO_TICKS(200)) != pdTRUE) {
+            ESP_LOGE(TAG, "worker stuck > 200ms — caller abandons (worker owns ctx, no UAF)");
+            /* caller 放弃：只释放自己这份引用。worker 仍持一份，待其完成时释放，
+               最后释放者 free——ctx 在堆上不随本函数返回失效，杜绝 UAF。 */
+            op_ctx_release(ctx);
             return ESP_ERR_TIMEOUT;
         }
-        op_result = ESP_ERR_TIMEOUT;
     }
 
-    vSemaphoreDelete(sem);
+    /* 拿到 sem = worker 已 give 且不会再碰 ctx → 安全读 result / 拷回 read 数据 */
+    esp_err_t op_result = ctx->result;
+    if (caller_read && caller_rlen && op_result == ESP_OK) {
+        memcpy(caller_read, ctx->rbuf, caller_rlen);
+    }
+    op_ctx_release(ctx);
     return op_result;
 }
 
