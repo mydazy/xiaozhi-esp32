@@ -308,16 +308,6 @@ private:
         });
     }
 
-    // 桌面双击 — 唤醒屏幕（与触摸唤醒同语义 · 不进 AI 对话）
-    static void OnStrike(void* ctx) {
-        auto* self = static_cast<MyDazyP30_WifiBoard*>(ctx);
-        Application::GetInstance().Schedule([self] {
-            if (TryStopAlarmRinger("strike")) return;
-            ESP_LOGI(TAG, "strike → wakeup");
-            self->WakeUp();
-        });
-    }
-
     void PrepareTouchHardware() {
         axs5106l_touch_config_t cfg = {
             .worker          = i2c_worker_,
@@ -330,7 +320,7 @@ private:
             .on_wake         = &OnTouchWake,
             .on_click        = &OnTouchClick,
             .on_double_click = &OnTouchDoubleClick,
-            .on_swipe        = &OnTouchSwipe,        /* 下滑唤起控制中心 · 上滑收回 */
+            .on_swipe        = &OnTouchSwipe,        /* 上滑收回控制中心（呼出走单击状态栏顶部 y<36） */
         };
         if (axs5106l_touch_init(&cfg, &touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏硬件初始化失败");
@@ -501,8 +491,7 @@ private:
             }
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
-                bool pickup = Settings("status", false).GetInt("pickupWake", 0) == 1;
-                ShutdownOrSleep("休眠中", pickup ? "拿起唤醒" : "按键唤醒", "", 1500, true);
+                ShutdownOrSleep("休眠中", "拿起唤醒", "", 1500, true);
             }
         });
 
@@ -528,7 +517,7 @@ private:
     // 拿起唤醒
     void ArmGyroWakeup() {
         if (!sc7a20h_sensor_) return;
-        if (Settings("status", false).GetInt("pickupWake", 0) == 0) return;
+        if (Settings("status", false).GetInt("pickupWake", 1) == 0) return;
         esp_err_t r = sc7a20h_wakeup(sc7a20h_sensor_, SC7A20H_GPIO_INT1);
         if (r != ESP_OK) ESP_LOGW(TAG, "sc7a20h_wakeup failed: %s", esp_err_to_name(r));
     }
@@ -773,8 +762,6 @@ private:
             }
         });
 
-        // PressDown 而非 OnClick：单击事件有 ~300ms 双击判定窗，快按第二下会被
-        // 归类成"双击"（未注册）而吞掉。按下即响应：每按一下立即 ±10，零延迟。
         volume_up_button_.OnPressDown  ([this]() { ApplyVolume(+10); });
         volume_down_button_.OnPressDown([this]() { ApplyVolume(-10); });
     }

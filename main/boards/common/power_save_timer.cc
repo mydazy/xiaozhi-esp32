@@ -80,7 +80,7 @@ void PowerSaveTimer::PowerSaveCheck() {
                 auto& audio_service = app.GetAudioService();
                 is_wake_word_running_ = audio_service.IsWakeWordRunning();
                 if (is_wake_word_running_) {
-                    audio_service.ReleaseWakeWord();
+                    audio_service.EnableWakeWordDetection(false);
                     vTaskDelay(pdMS_TO_TICKS(100));
                 }
                 // Disable audio input

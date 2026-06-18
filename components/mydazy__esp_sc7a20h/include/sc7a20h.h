@@ -4,11 +4,10 @@
  *
  * SC7A20H 三轴加速度计驱动 — v5.0.0
  *
- * 四 API · 三场景（命名 / 寄存器 / 调试方法详见 docs/p30-sc7a20h-flows.html）：
+ * 三 API · 两场景（命名 / 寄存器 / 调试方法详见 docs/p30-sc7a20h-flows.html）：
  *   sc7a20h_init    — 基础初始化 + 拿起灵敏度
  *   sc7a20h_wakeup  — ① 深睡前 arm EXT1 唤醒
  *   sc7a20h_shake   — ② 摇一摇检测 + 回调
- *   sc7a20h_strike  — ③ 桌面双击检测 + 回调
  *
  * 所有灵敏度参数在调用时直接传入 · 不暴露 struct · 不支持运行时切换。
  */
@@ -28,7 +27,6 @@ typedef struct sc7a20h_dev_t *sc7a20h_handle_t;
 
 /* 回调签名（motion_task 上下文 · 非 ISR · 不可阻塞 · 必须 Schedule 切主线程） */
 typedef void (*sc7a20h_shake_cb_t)(void *ctx);
-typedef void (*sc7a20h_strike_cb_t)(void *ctx);
 
 /**
  * 基础初始化 + 配置拿起唤醒灵敏度
@@ -74,25 +72,6 @@ esp_err_t sc7a20h_shake(sc7a20h_handle_t h,
                         uint16_t cooldown_ms,
                         sc7a20h_shake_cb_t cb,
                         void *ctx);
-
-/**
- * ③ 桌面双击检测 · 与 shake 共享 motion_task
- *
- * 示例：sc7a20h_strike(handle, 1800, 80, 400, 800, &OnStrike, this);
- *
- * @param peak_mg       单次撞击瞬态峰值 mg · 默认 1800（P31 整机重 → 2200）
- * @param min_gap_ms    两击最小间隔 ms · 防抖下限 · 默认 80
- * @param max_gap_ms    两击最大间隔 ms · 双击窗口 · 默认 400
- * @param cooldown_ms   触发后冷却 ms · 默认 800
- * @param cb            触发回调（不可为 NULL）
- */
-esp_err_t sc7a20h_strike(sc7a20h_handle_t h,
-                         uint16_t peak_mg,
-                         uint16_t min_gap_ms,
-                         uint16_t max_gap_ms,
-                         uint16_t cooldown_ms,
-                         sc7a20h_strike_cb_t cb,
-                         void *ctx);
 
 #ifdef __cplusplus
 }

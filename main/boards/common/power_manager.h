@@ -24,23 +24,23 @@ private:
     inline static PowerManager* instance_ = nullptr; //hsf
     std::function<void(bool)> on_charging_status_changed_;
     std::function<void(bool)> on_low_battery_status_changed_;
-    std::function<void()> on_shutdown_request_;  // 运行期过放→请求关机（板级体内切主线程）
+    std::function<void()> on_shutdown_request_;
 
     gpio_num_t charging_pin_ = GPIO_NUM_NC;
     std::vector<uint16_t> adc_values_;
     uint32_t battery_level_ = 0;
-    std::atomic<bool> is_charging_{false};  // esp_timer 写/主线程读(关机前 IsCharging 二次确认)，atomic 防 data race
+    std::atomic<bool> is_charging_{false};
     bool is_low_battery_ = false;
     bool is_off_battery_ = false;
-    int off_battery_streak_ = 0;            // 连续过放确认计数（防 ADC 抖动误关）
-    bool shutdown_requested_ = false;       // 一次性哨兵（防多关机源二次触发）
-    std::atomic<bool> ready_{false};        // 发布栅栏：回调注入 + Start() 后才允许触发关机
+    int off_battery_streak_ = 0;
+    bool shutdown_requested_ = false;
+    std::atomic<bool> ready_{false};
     int ticks_ = 0;
     const int kBatteryAdcInterval = 60;
     const int kBatteryAdcDataCount = 3;
     const int kLowBatteryLevel = 5;
     const int kBatteryShutdownMv = 3400;
-    const int kBatteryRecoverMv = 3450;     // 迟滞：回升到此值才解除过放（防 3400 附近抖动反复触发）
+    const int kBatteryRecoverMv = 3450;
 
     adc_oneshot_unit_handle_t adc_handle_;
 
@@ -178,13 +178,6 @@ private:
             voltage = voltage * 2;  // 2个1M电阻分压
         }
         else {
-            // 08-P0-A：无 eFuse 校准的回退斜率。已校准机实测标定（2026-06-11，
-            // raw=2571 ↔ Cali 4200mV 整机 → 等效 Vref = 2100*4096/2571 ≈ 3346mV）：
-            //   原 3600 → 真实 ~3.16V 才触发 3400 关机阈值（过放，即本 P0）；
-            //   3300   → 真实 ~3.45V 触发（提前 ~50mV，轻微保守侧，采用）；
-            //   3100   → 真实 ~3.67V 就关机（半电关机，过度保守，弃用）。
-            // 单点标定取自满电段，3.4-3.7V 段非线性误差待补一个中低电数据点复核；
-            // 个体 Vref 差异 ±5%，故取 3300 留保守余量；已校准机不走此分支。
             voltage = 3300 * 1000 / 4096 * average_adc / 1000;
             voltage = voltage * 2;
         }
@@ -227,8 +220,6 @@ private:
             is_off_battery_ = false;
             off_battery_streak_ = 0;
         }
-        // 迟滞带 [3400,3450) 非充电：保持 is_off_battery_ / streak 不变
-        // 运行期过放闭环：连续确认 N 次 + 一次性哨兵 + 主线程回调关机（板级二次确认未充电）
         if (ready_.load() && off_battery_streak_ >= 3 && !shutdown_requested_ && on_shutdown_request_) {
             shutdown_requested_ = true;
             on_shutdown_request_();
@@ -279,8 +270,6 @@ public:
 
         do_calibration1_chan0_ = AdcCalibrationInit(ADC_UNIT_1, ADC_CHANNEL, ADC_ATTEN_DB_12, &adc1_cali_chan0_handle_);
         if (!do_calibration1_chan0_) {
-            // 08-P0-A 自检标记：无 eFuse ADC 校准 → 电压走保守 Vref 回退（电量偏低/提早关机=安全侧）。
-            // 正规渠道模组出厂应带校准；产线/产测抽查此日志，命中的机器登记批次并走校准流程。
             ESP_LOGE(POWER_MANAGER_TAG, "ADC 无 eFuse 校准(08-P0-A)！电压按保守值估算，产线需登记此机");
         }
 

@@ -164,9 +164,7 @@ int AtModem::GetCsq() {
     if (at_uart_->GetHttpBinaryMode()) {
         return csq_;
     }
-    if (at_uart_->SendCommand("AT+CSQ", 100)) {
-        int dbm = (csq_ >= 0 && csq_ <= 31) ? (-113 + csq_ * 2) : 0;
-    } else {
+    if (!at_uart_->SendCommand("AT+CSQ", 100)) {
         ESP_LOGW(TAG, "AT+CSQ failed (busy), use cached csq=%d", csq_);
     }
     return csq_;

@@ -687,24 +687,7 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         if (!wake_word_initialized_) {
             if (!wake_word_->Initialize(codec_, models_list_)) {
                 ESP_LOGE(TAG, "Failed to initialize wake word");
-                // custom 引擎初始化失败 → 回落 AFE 默认唤醒词，绝不让设备"变聋"
-                bool has_wn = models_list_ &&
-                              esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr;
-                if (!IsAfeWakeWord() && has_wn) {
-                    ESP_LOGE(TAG, "custom 唤醒初始化失败，回落 AFE 默认唤醒词");
-                    wake_word_ = std::make_unique<AfeWakeWord>();
-                    wake_word_->OnWakeWordDetected([this](const std::string& wake_word) {
-                        if (callbacks_.on_wake_word_detected) {
-                            callbacks_.on_wake_word_detected(wake_word);
-                        }
-                    });
-                    if (!wake_word_->Initialize(codec_, models_list_)) {
-                        ESP_LOGE(TAG, "AFE 回落初始化也失败");
-                        return;
-                    }
-                } else {
-                    return;
-                }
+                return;
             }
             wake_word_initialized_ = true;
         }
@@ -719,27 +702,8 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         wake_word_->Start();
         xEventGroupSetBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
     } else {
-        // 先清 RUNNING 位停掉 AudioInputTask 喂入，再 Stop
-        xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
         wake_word_->Stop();
-    }
-}
-
-void AudioService::SetWakeWordThreshold(float threshold) {
-    if (wake_word_) {
-        wake_word_->SetDetectThreshold(threshold);
-    }
-}
-
-void AudioService::ReleaseWakeWord() {
-    if (!wake_word_) {
-        return;
-    }
-    xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
-    wake_word_->Stop();
-    if (IsAfeWakeWord() && wake_word_initialized_) {
-        wake_word_->Release();
-        wake_word_initialized_ = false;
+        xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
     }
 }
 
@@ -825,7 +789,6 @@ void AudioService::PlaySound(const std::string_view& ogg) {
         ESP_LOGW(TAG, "PlaySound called before Initialize, ignored");
         return;
     }
-    ESP_LOGI(TAG, "PlaySound: %u bytes, output_enabled=%d", (unsigned)ogg.size(), (int)codec_->output_enabled());
     if (!codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
@@ -898,19 +861,18 @@ void AudioService::SetModelsList(srmodel_list_t* models_list) {
     models_list_ = models_list;
 
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
-    // 唯一判定：设置了自定义名(text 非空)且有命令词模型 → custom；否则默认 wn9
-    std::string custom_text = Settings("wakeword", false).GetString("text", "");
+    std::string mode = Settings("wakeword", false).GetString("mode", "afe");
     bool has_mn = esp_srmodel_filter(models_list_, ESP_MN_PREFIX, NULL) != nullptr;
     bool has_wn = esp_srmodel_filter(models_list_, ESP_WN_PREFIX, NULL) != nullptr;
-    if (!custom_text.empty() && has_mn) {
+    if (mode == "custom" && has_mn) {
         wake_word_ = std::make_unique<CustomWakeWord>();
     } else if (has_wn) {
         wake_word_ = std::make_unique<AfeWakeWord>();
     } else {
         wake_word_ = nullptr;
     }
-    ESP_LOGI(TAG, "wake_word: %s → %s", custom_text.empty() ? "(默认)" : custom_text.c_str(),
-             wake_word_ ? (!custom_text.empty() && has_mn ? "Custom" : "AFE") : "null");
+    ESP_LOGI(TAG, "wake_word: mode=%s → %s", mode.c_str(),
+             wake_word_ ? (mode == "custom" && has_mn ? "Custom" : "AFE") : "null");
 #else
     (void)models_list;
     wake_word_ = nullptr;
@@ -928,15 +890,6 @@ void AudioService::SetModelsList(srmodel_list_t* models_list) {
 bool AudioService::IsAfeWakeWord() {
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
     return wake_word_ != nullptr && dynamic_cast<AfeWakeWord*>(wake_word_.get()) != nullptr;
-#else
-    return false;
-#endif
-}
-
-bool AudioService::HasMultinetModel() {
-#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
-    return models_list_ != nullptr &&
-           esp_srmodel_filter(models_list_, ESP_MN_PREFIX, NULL) != nullptr;
 #else
     return false;
 #endif

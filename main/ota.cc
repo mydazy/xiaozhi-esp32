@@ -28,30 +28,6 @@
 
 #define TAG "Ota"
 
-namespace {
-bool ApplyServerUtcTime(cJSON* server_time_obj) {
-    if (!cJSON_IsObject(server_time_obj)) return false;
-    cJSON* timestamp = cJSON_GetObjectItem(server_time_obj, "timestamp");
-    if (!cJSON_IsNumber(timestamp)) return false;
-
-    struct timeval tv;
-    double ts = timestamp->valuedouble;                              // server UTC 毫秒
-    tv.tv_sec  = (time_t)(ts / 1000);
-    tv.tv_usec = (suseconds_t)((long long)ts % 1000) * 1000;
-    settimeofday(&tv, NULL);                                         // 接纯 UTC · TZ=CST-8 在 application.cc 设
-
-    time_t sec = tv.tv_sec;
-    struct tm utc_tm, local_tm;
-    gmtime_r(&sec, &utc_tm);
-    localtime_r(&sec, &local_tm);
-    ESP_LOGI(TAG, "[time] sync: ts=%.0fms UTC=%04d-%02d-%02d %02d:%02d:%02d Local=%02d:%02d:%02d",
-             ts, utc_tm.tm_year+1900, utc_tm.tm_mon+1, utc_tm.tm_mday,
-             utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec,
-             local_tm.tm_hour, local_tm.tm_min, local_tm.tm_sec);
-    return true;
-}
-}  // namespace
-
 
 Ota::Ota() {
 #ifdef ESP_EFUSE_BLOCK_USR_DATA
@@ -229,8 +205,28 @@ esp_err_t Ota::CheckVersion() {
         }
     }
 
-    has_server_time_ = ApplyServerUtcTime(cJSON_GetObjectItem(root, "server_time"));
-    if (!has_server_time_) {
+    has_server_time_ = false;
+    cJSON *server_time = cJSON_GetObjectItem(root, "server_time");
+    if (cJSON_IsObject(server_time)) {
+        cJSON *timestamp = cJSON_GetObjectItem(server_time, "timestamp");
+        cJSON *timezone_offset = cJSON_GetObjectItem(server_time, "timezone_offset");
+        
+        if (cJSON_IsNumber(timestamp)) {
+            // 设置系统时间
+            struct timeval tv;
+            double ts = timestamp->valuedouble;
+            
+            // 如果有时区偏移，计算本地时间
+            if (cJSON_IsNumber(timezone_offset)) {
+                ts += (timezone_offset->valueint * 60 * 1000); // 转换分钟为毫秒
+            }
+            
+            tv.tv_sec = (time_t)(ts / 1000);  // 转换毫秒为秒
+            tv.tv_usec = (suseconds_t)((long long)ts % 1000) * 1000;  // 剩余的毫秒转换为微秒
+            settimeofday(&tv, NULL);
+            has_server_time_ = true;
+        }
+    } else {
         ESP_LOGW(TAG, "No server_time section found!");
     }
 
@@ -266,72 +262,6 @@ esp_err_t Ota::CheckVersion() {
 
     cJSON_Delete(root);
     return ESP_OK;
-}
-
-// ============================================================
-// 通用 POST OTA_URL/<path>
-// ============================================================
-
-esp_err_t Ota::PostToOta(const std::string& path, cJSON* payload) {
-    // 设备未就绪（启动中/激活中）时跳过，避免网络未连接时阻塞
-    auto state = Application::GetInstance().GetDeviceState();
-    if (state < kDeviceStateIdle) {
-        cJSON_Delete(payload);
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    auto& board = Board::GetInstance();
-    auto network = board.GetNetwork();
-    if (!network) {
-        cJSON_Delete(payload);
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    Settings settings("wifi", false);
-    std::string url = settings.GetString("ota_url");
-    if (url.empty()) url = CONFIG_OTA_URL;
-    if (url.length() < 10) return ESP_ERR_INVALID_ARG;
-    // 去掉末尾 / 避免双斜杠
-    while (!url.empty() && url.back() == '/') url.pop_back();
-    url += path;
-
-    auto http = network->CreateHttp(0);
-    if (!http) {
-        cJSON_Delete(payload);
-        return ESP_ERR_NO_MEM;
-    }
-
-    http->SetTimeout(10000);  // 10 秒超时
-    http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
-    http->SetHeader("Client-Id", board.GetUuid());
-    http->SetHeader("Content-Type", "application/json");
-
-    char* json = cJSON_PrintUnformatted(payload);
-    http->SetContent(std::string(json));
-    cJSON_free(json);
-    cJSON_Delete(payload);
-
-    ESP_LOGI(TAG, "POST %s", url.c_str());
-    if (!http->Open("POST", url)) {
-        ESP_LOGW(TAG, "POST %s failed: %d", path.c_str(), http->GetLastError());
-        return ESP_FAIL;
-    }
-
-    int code = http->GetStatusCode();
-    std::string body = http->ReadAll();
-    http->Close();
-    ESP_LOGI(TAG, "%s response: %d %s", path.c_str(), code, body.c_str());
-
-    return (code >= 200 && code < 300) ? ESP_OK : ESP_FAIL;
-}
-
-// ============================================================
-// /switch — NFC 或 iBeacon 触发切换
-// ============================================================
-
-esp_err_t Ota::RequestSwitch(const std::string& type, cJSON* data) {
-    cJSON_AddStringToObject(data, "type", type.c_str());
-    return PostToOta("/switch", data);
 }
 
 // ============================================================
@@ -398,8 +328,6 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
         return false;
     }
 
-    // 暂停看门狗：4G 弱网下大文件下载可能数分钟，防 task WDT 触发
-    // RAII 退出（含 break/return）自动恢复
 #ifdef CONFIG_ESP_TASK_WDT_EN
     TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
     esp_task_wdt_delete(current_task);
@@ -407,7 +335,7 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
     struct WdtGuard { TaskHandle_t t; ~WdtGuard() { esp_task_wdt_add(t); } } _wdt_guard{current_task};
 #endif
 
-    size_t buffer_offset = 0;             // Current data size in buffer
+    size_t buffer_offset = 0;  // Current data size in buffer
     size_t total_read = 0, recent_read = 0;
     auto last_calc_time = esp_timer_get_time();
     int retry_count = 0;
@@ -416,7 +344,6 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
     while (true) {
         int ret = http ? http->Read(buffer + buffer_offset, PAGE_SIZE - buffer_offset) : -1;
 
-        // ──────── 网络中断检测：read 失败 / 服务端早断（content-length 未下完）─────────
         if (ret < 0 || (ret == 0 && total_read < content_length)) {
             if (http) { http->Close(); http.reset(); }
             if (retry_count >= kMaxRetries) {
@@ -429,8 +356,6 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
             ESP_LOGW(TAG, "Download interrupted at %u/%u bytes, retry %d/%d",
                      (unsigned)total_read, (unsigned)content_length, retry_count, kMaxRetries);
 
-            // ⚠ flush buffer 内已读未写的字节到 partition：保证 partition 写入字节 == total_read
-            // 否则下次 Range: bytes=total_read- 续传时 partition 会缺 buffer_offset 字节
             if (image_header_checked && buffer_offset > 0) {
                 if (esp_ota_write(update_handle, buffer, buffer_offset) != ESP_OK) {
                     esp_ota_abort(update_handle);
@@ -540,8 +465,6 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
         return false;
     }
 
-    // 每次 OTA 升级后清除 MIC 校准（NVS audio/mic_type=0）→ 新固件首次开机自动重新校准。
-    // 新固件可能调整音频增益/AEC 曲线，旧校准值未必匹配，强制重校保证识别质量。
     Settings("audio", true).SetInt("mic_type", 0);
     ESP_LOGI(TAG, "OTA 升级：已清除 MIC 校准，新固件开机将自动重校");
 

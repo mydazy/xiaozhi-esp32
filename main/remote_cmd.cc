@@ -93,7 +93,6 @@ bool RemoteCmd::Handle(const cJSON* payload) {
     else if (strcmp(type, "volume") == 0) OnVolume(msg);
     else if (strcmp(type, "gain") == 0) OnGain(msg);
     else if (strcmp(type, "mic_calibrate") == 0) OnMicCalibrate();
-    else if (strcmp(type, "download") == 0) OnDownload(msg);
     else if (strcmp(type, "flow") == 0) OnFlow(msg);
     else if (strcmp(type, "music_play") == 0) OnMusicPlay(msg);
     else if (strcmp(type, "music_stop") == 0) OnMusicStop();
@@ -249,25 +248,6 @@ void RemoteCmd::OnMicCalibrate() {
     });
 }
 
-void RemoteCmd::OnDownload(const cJSON* msg) {
-    auto files = cJSON_GetObjectItem(msg, "files");
-    auto emoji = cJSON_GetObjectItem(msg, "emoji");
-    if (!cJSON_IsArray(files)) return;
-
-    ESP_LOGI(TAG, "download");
-    cJSON* files_copy = cJSON_Duplicate(files, true);
-    std::string emotion = cJSON_IsString(emoji) ? emoji->valuestring : "";
-
-    app_->Schedule([this, files_copy, emotion]() {
-        app_->Alert("同步文件", "下载中...", "", "");
-        ESP_LOGW(TAG, "File sync not yet implemented in V2");
-        if (!emotion.empty()) {
-            Board::GetInstance().GetDisplay()->SetEmotion(emotion.c_str());
-        }
-        cJSON_Delete(files_copy);
-    });
-}
-
 void RemoteCmd::OnFlow(const cJSON* msg) {
     auto action_item = cJSON_GetObjectItem(msg, "action");
     const char* action = cJSON_IsString(action_item) ? action_item->valuestring : "";
@@ -341,9 +321,6 @@ void RemoteCmd::OnSleep(const cJSON* msg) {
         ScheduleDelayedAction(3000, [enable_gyro_wakeup]() {
             ESP_LOGI(TAG, "RemoteCmd 触发 EnterDeepSleep（gyro=%d）", enable_gyro_wakeup);
             Board::GetInstance().EnterDeepSleep(enable_gyro_wakeup);
-
-            ESP_LOGW(TAG, "EnterDeepSleep 未实现，降级 esp_restart");
-            esp_restart();
         });
     });
 }

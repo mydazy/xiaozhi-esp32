@@ -26,10 +26,6 @@
 #define TAG "MCP"
 
 static std::atomic<int> g_preview_inflight_{0};
-
-#include "assets.h"
-#include <cJSON.h>
-
 static constexpr int kPreviewMaxInflight = 2;
 
 McpServer::McpServer() {
@@ -44,11 +40,6 @@ McpServer::~McpServer() {
 }
 
 void McpServer::AddCommonTools() {
-    // *Important* To speed up the response time, we add the common tools to the beginning of
-    // the tools list to utilize the prompt cache.
-    // **重要** 为了提升响应速度，我们把常用的工具放在前面，利用 prompt cache 的特性。
-
-    // Backup the original tools list and restore it after adding the common tools.
     std::vector<McpTool*> original_tools;
     {
         std::lock_guard<std::mutex> lk(tools_mutex_);
@@ -56,8 +47,6 @@ void McpServer::AddCommonTools() {
     }
     auto& board = Board::GetInstance();
 
-    // Do not add custom tools here.
-    // Custom tools must be added in the board's InitializeTools function.
     // 获取MAC地址工具
     AddTool("self.get_mac_address",
         "获取设备 MAC 地址。",
@@ -105,63 +94,6 @@ void McpServer::AddCommonTools() {
         [](const PropertyList& properties) -> ReturnValue {
             bool enabled = Application::GetInstance().IsSttPopupEnabled();
             return std::string("{\"enabled\":") + (enabled ? "true" : "false") + "}";
-        });
-
-    // 唤醒词配置 · mode=afe 回归默认 · mode=custom + text 启用自定义（须在 MultiNet 词表内 · 重启生效）
-    AddTool("self.audio.set_wakeword",
-        "起名/改唤醒词：text=新名字(2-4字)+pinyin(小写空格分隔)；text 传空=恢复默认『搭子精灵』。"
-        "成功后设备8秒自动重启，先用一句话告别。",
-        PropertyList({
-            Property("text", kPropertyTypeString, ""),
-            Property("pinyin", kPropertyTypeString, "")
-        }),
-        [](const PropertyList& properties) -> ReturnValue {
-            std::string text = properties["text"].value<std::string>();
-            std::string pinyin = properties["pinyin"].value<std::string>();
-            if (!text.empty()) {
-                if (!Application::GetInstance().GetAudioService().HasMultinetModel()) {
-                    return std::string("{\"success\":false,\"error\":\"本机未烧录命令词模型，无法自定义唤醒词，已保持当前设置\"}");
-                }
-                // 任意名字统一规则：合法拼音（小写字母+单空格，2-4 音节）
-                bool pinyin_ok = pinyin.size() >= 2 && pinyin.size() <= 30 && pinyin.front() != ' ' && pinyin.back() != ' ';
-                int syllables = pinyin_ok ? 1 : 0;
-                for (size_t i = 0; pinyin_ok && i < pinyin.size(); i++) {
-                    char ch = pinyin[i];
-                    if (ch == ' ') syllables++;
-                    if (!((ch >= 'a' && ch <= 'z') || (ch == ' ' && pinyin[i-1] != ' '))) pinyin_ok = false;
-                }
-                if (!pinyin_ok || syllables < 2 || syllables > 4) {
-                    return std::string("{\"success\":false,\"error\":\"名字需 2-4 个字，并附小写空格分隔拼音\"}");
-                }
-            }
-            Settings s("wakeword", true);
-            s.SetString("text", text);
-            s.SetString("pinyin", text.empty() ? "" : pinyin);
-            if (!text.empty()) {
-                Settings aec("aecMode", true);
-                aec.SetInt("deviceAec", 1);
-            }
-            Application::GetInstance().Schedule([]() {
-                Application::GetInstance().Alert("唤醒词已更新", "8秒后自动重启", "", Lang::Sounds::OGG_VIBRATION);
-            });
-            xTaskCreate([](void*) {
-                vTaskDelay(pdMS_TO_TICKS(8000));
-                Application::GetInstance().Reboot();
-                vTaskDelete(NULL);
-            }, "ww_reboot", 4096, nullptr, 3, nullptr);
-            return std::string("{\"success\":true,\"wakeword\":\"") + (text.empty() ? "搭子精灵" : text) +
-                   (text.empty() ? "\"" : "\",\"aec_auto_on\":true,\"tip\":\"我说话时打断请直接开口\"") +
-                   ",\"auto_reboot_in_sec\":8}";
-        });
-
-    AddTool("self.audio.get_wakeword",
-        "查当前唤醒词。用户问『你叫什么/你是谁/怎么唤醒你』时调用。",
-        PropertyList(),
-        [](const PropertyList&) -> ReturnValue {
-            Settings s("wakeword", false);
-            std::string text = s.GetString("text", "");
-            return std::string("{\"wakeword\":\"") + (text.empty() ? "搭子精灵" : text) +
-                   "\",\"is_custom\":" + (text.empty() ? "false" : "true") + "}";
         });
 
     AddTool("self.audio_speaker.set_volume",
@@ -567,12 +499,7 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
     } else {
         json += "],\"nextCursor\":\"" + next_cursor + "\"}";
     }
-
-    // 实测 payload 字节数 + 是否触发分页（便于量产前审计 · 对齐 mcp-flows § 8.2 N1）
-    ESP_LOGI(TAG, "tools/list: id=%d, payload=%u B, paged=%s, cursor=%s",
-             id, (unsigned)json.size(), next_cursor.empty() ? "no" : "YES",
-             cursor.empty() ? "(first)" : cursor.c_str());
-
+    
     ReplyResult(id, json);
 }
 

@@ -71,8 +71,6 @@ public:
 
     SceneType GetCurrentScene() const { return active_scene_; }
 
-    void FinishBootAndShowClock();
-
     // 显示笔画 GIF 动画（写字识字）——把 PSRAM buffer 装入 emoji_collection "font" 槽位
     void FontGif(uint8_t* gif_buffer, size_t size, uint32_t request_id = 0);
 

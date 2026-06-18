@@ -310,16 +310,6 @@ private:
         });
     }
 
-    // 桌面双击 — 唤醒屏幕（与触摸唤醒同语义 · 不进 AI 对话）
-    static void OnStrike(void* ctx) {
-        auto* self = static_cast<MyDazyP30_4GBoard*>(ctx);
-        Application::GetInstance().Schedule([self] {
-            if (TryStopAlarmRinger("strike")) return;
-            ESP_LOGI(TAG, "strike → wakeup");
-            self->WakeUp();
-        });
-    }
-
     void PrepareTouchHardware() {
         axs5106l_touch_config_t cfg = {
             .worker          = i2c_worker_,
@@ -333,7 +323,7 @@ private:
             .on_wake         = &OnTouchWake,
             .on_click        = &OnTouchClick,
             .on_double_click = &OnTouchDoubleClick,
-            .on_swipe        = &OnTouchSwipe,        /* 下滑唤起控制中心 · 上滑收回 */
+            .on_swipe        = &OnTouchSwipe,        /* 上滑收回控制中心（呼出走单击状态栏顶部 y<36） */
         };
         if (axs5106l_touch_init(&cfg, &touch_driver_) != ESP_OK) {
             ESP_LOGE(TAG, "触摸屏硬件初始化失败");
@@ -504,8 +494,7 @@ private:
             }
             if (deep_sleep_enabled) {
                 ESP_LOGI(TAG, "5分钟无操作，进入深度睡眠");
-                bool pickup = Settings("status", false).GetInt("pickupWake", 0) == 1;
-                ShutdownOrSleep("休眠中", pickup ? "拿起唤醒" : "按键唤醒", "", 1500, true);
+                ShutdownOrSleep("休眠中", "拿起唤醒", "", 1500, true);
             }
         });
 
@@ -891,7 +880,7 @@ private:
 
 public:
     MyDazyP30_4GBoard() :
-        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 0),  // 出厂默认 WiFi(0)；原默认 4G/ML307(1)。仅首次出厂(NVS无type)生效，已配网设备保留用户选择
+        DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, MODEM_DTR_GPIO, 0),
         boot_button_(BOOT_BUTTON_GPIO, false, 800, 400),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {

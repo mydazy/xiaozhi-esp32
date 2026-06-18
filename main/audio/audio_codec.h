@@ -56,7 +56,7 @@ protected:
     int input_channels_ = 1;
     int output_channels_ = 1;
     int output_volume_ = 80;
-    bool suppress_persist_ = false;  // C2: SetOutputVolumeTransient 期间抑制写 NVS
+    bool suppress_persist_ = false;
     float input_gain_ = 15.0;
     float aec_gain_db_     = 9.0f;
     float aec_gain_linear_ = 2.0f;
