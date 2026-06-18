@@ -745,20 +745,14 @@ void Application::InitializeProtocol() {
                 return;
             }
 
+            // P1 修复：弱网重连改为 esp_timer 退避 + Schedule 回主循环单次尝试。
+            // 原实现在主循环闭包内 vTaskDelay 500+1000+1500=3s + 3 次同步 OpenAudioChannel，
+            // 整段独占主循环线程 → 断网期间按键/触屏/唤醒/音频上行全部排队冻结 ≥3s。
+            // 改后：退避延迟落在 esp_timer（不占主循环），连接尝试仍在主循环单次执行
+            // （protocol_ 串行访问，沿用 shutting_down_ 保护，无跨线程 UAF）。
             Schedule([this]() {
-                for (int attempt = 1; attempt <= 3; ++attempt) {
-                    vTaskDelay(pdMS_TO_TICKS(attempt * 500));
-                    if (!protocol_) {
-                        return;  // 延迟期间 protocol_ 已被销毁（关机/切网）：放弃重连
-                    }
-                    bool ok = protocol_->OpenAudioChannel();
-                    if (ok) {
-                        SetListeningMode(kListeningModeManualStop);
-                        return;
-                    }
-                }
-                Board::GetInstance().GetDisplay()->SetChatMessage("system", "");
-                SetDeviceState(kDeviceStateIdle);
+                reconnect_attempt_ = 1;
+                ScheduleReconnectAttempt();
             });
             return;
         }
@@ -1348,6 +1342,48 @@ void Application::ScheduleDelayedWake(const std::string& wake_text, uint64_t del
     }
     pending_wake_text_ = wake_text;
     esp_timer_start_once(delayed_wake_timer_, delay_us);
+}
+
+void Application::ScheduleReconnectAttempt() {
+    if (reconnect_timer_ == nullptr) {
+        esp_timer_create_args_t timer_args = {
+            .callback = [](void* arg) {
+                auto app = (Application*)arg;
+                app->Schedule([app]() { app->DoReconnectAttempt(); });
+            },
+            .arg = this,
+            .name = "reconnect",
+        };
+        esp_timer_create(&timer_args, &reconnect_timer_);
+    }
+    esp_timer_stop(reconnect_timer_);   // 防重复 arm（已在跑则先停）
+    uint64_t delay_us = (uint64_t)reconnect_attempt_ * 500 * 1000;  // 500/1000/1500ms 退避
+    esp_timer_start_once(reconnect_timer_, delay_us);
+}
+
+void Application::DoReconnectAttempt() {
+    // 主循环上下文执行：protocol_ 与状态机串行访问，无跨线程 UAF
+    if (shutting_down_.load() || !protocol_) {
+        reconnect_attempt_ = 0;
+        return;  // 关机/切网途中：放弃
+    }
+    auto state = GetDeviceState();
+    if (state != kDeviceStateListening && state != kDeviceStateSpeaking) {
+        reconnect_attempt_ = 0;
+        return;  // 用户已操作改变状态：放弃重连
+    }
+    if (protocol_->OpenAudioChannel()) {
+        reconnect_attempt_ = 0;
+        SetListeningMode(kListeningModeManualStop);
+        return;
+    }
+    if (++reconnect_attempt_ > 3) {
+        reconnect_attempt_ = 0;
+        Board::GetInstance().GetDisplay()->SetChatMessage("system", "");
+        SetDeviceState(kDeviceStateIdle);
+        return;
+    }
+    ScheduleReconnectAttempt();
 }
 
 void Application::SetListeningMode(ListeningMode mode) {

@@ -166,6 +166,8 @@ private:
     std::unique_ptr<FlowEngine> flow_engine_;
     esp_timer_handle_t delayed_wake_timer_ = nullptr;
     std::string pending_wake_text_;
+    esp_timer_handle_t reconnect_timer_ = nullptr;   // 弱网重连退避 timer（非阻塞，不占主循环）
+    int reconnect_attempt_ = 0;                       // 当前重连第几次（1..3）
 
     bool has_server_time_ = false;
     bool aborted_ = false;
@@ -210,6 +212,8 @@ private:
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
     ListeningMode GetDefaultListeningMode() const;
+    void ScheduleReconnectAttempt();   // arm esp_timer 退避后非阻塞重连
+    void DoReconnectAttempt();         // 主循环上下文执行单次重连尝试
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);

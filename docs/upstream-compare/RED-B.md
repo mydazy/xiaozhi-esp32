@@ -28,14 +28,16 @@
 - **后果**：worker 此刻仍卡在 `i2c_master_*`；一旦恢复执行到 `:226-227` 的 `*op.result_out=ret; xSemaphoreGive(op.result_sem)`，写的是已被其它栈帧复用的内存 = **栈 UAF / 随机内存踩踏**。
 - **注释自相矛盾**：`:272` 注释自称"接受 leak 换 UAF 安全"，但对**栈上** static 信号量根本换不到——不 delete 只避免提前释放堆，而它在栈上、随函数返回必失效。
 - **触发面真实存在**：codec 失电短路 SDA/SCL、4G RF 干扰下 I2C 卡死，驱动自己多处注释提到。
-- **断根方向（不在本轮改）**：result_sem/result_out 改堆分配 + worker 负责释放，或超时后置 op 失效标志让 worker 跳过回写（op 生命周期与 caller 解耦）。
-- 证据：`components/mydazy__i2c_bus_worker/i2c_bus_worker.c:241-280`、回写 `:226-227`。详见 B-09 深审 §P1。
+- **✅ 已修复（2026-06-18）**：`result_sem`/`result_out` 及 `write_data`/`read_data` 全部搬进堆分配的 `op_ctx_t`（引用计数=2，caller 与 worker 各 release 一次，最后释放者 free）。caller 超时放弃只释放自己那份，worker 完成时释放另一份 → ctx 在堆上不随 caller 栈失效，杜绝 UAF。独立并发测试 30 万轮（双线程竞争 release）无 double-free / 无 leak。**待真机测 I2C 超时/卡死场景**（codec 失电短路、4G 干扰下）。
+- 证据：`components/mydazy__i2c_bus_worker/i2c_bus_worker.c` op_ctx_t(:52) / op_ctx_release(:74) / submit_and_wait(:264) / worker 回写(:251-253)。
 
 ### P1-② 弱网三态重连在主循环线程同步阻塞【活体印证已知架构债】
 - **现象**：`OnAudioChannelClosed` 用 `Schedule` 投递一个闭包，闭包内 `for(1..3){ vTaskDelay(attempt*500); OpenAudioChannel(); }` —— 累计 `vTaskDelay` 500+1000+1500=**3 秒** + 3 次同步 `OpenAudioChannel()`（含 TLS 握手，弱网下更长）。
 - **后果**：`Schedule` 闭包由主循环线程串行执行（`application.cc:401-408`，prio 10）。阻塞期间 `MAIN_EVENT_SEND_AUDIO`（音频上行）/`TOGGLE_CHAT`（按键触屏）/`WAKE_WORD_DETECTED`（唤醒）/后续所有 Schedule 全部排队卡死 → 断网时整机冻结 ≥3s。
 - **判定**：🔴 **治标堆叠**（"异步壳 + 同步核"：投递是异步的，执行体把延时+同步连接放进了主循环）。正中项目记忆 `post-prod-stability-2026-06`「弱网主任务阻塞致卡死 P1×2，治标越修越糟、需架构断根」。**调退避参数无效，需把重连移到独立低优先级 task 或 esp_timer 非阻塞回调。**
-- 证据：`application.cc:748-762`（vTaskDelay+OpenAudioChannel 闭包）+ `:401-408`（Schedule 主循环串行）。官方对照 v2.2.4:512-518 仅回 Idle、不重连不阻塞。详见 B-07 深审 §1。
+- **✅ 已修复（2026-06-18）**：改用 esp_timer 退避 + Schedule 回主循环单次连接（仿现有 `ScheduleDelayedWake` 模式）。退避延迟（500/1000/1500ms）落在 esp_timer 不占主循环；连接尝试仍在主循环串行执行 → protocol_ 无跨线程访问（unique_ptr，沿用 `shutting_down_` 保护，避免独立 task 方案的 reset UAF）。主循环不再被 3s vTaskDelay 占用。**待真机测弱网断网恢复**（断网期间按键/触屏/唤醒应即时响应）。
+- 残留：单次 OpenAudioChannel 的 TLS 握手仍在主循环（瞬时阻塞），完全异步化需 protocol_ 改 shared_ptr，工作量大、风险高，留待后续单独排期。
+- 证据：`application.cc` ScheduleReconnectAttempt/DoReconnectAttempt（SetListeningMode 上方）+ OnAudioChannelClosed(:748)。官方对照 v2.2.4:512-518 仅回 Idle、不重连不阻塞。详见 B-07 深审 §1。
 
 ### P1-③ remote_cmd 零鉴权远程遥控通道【安全】
 - **现象**：复用对话通道（`type=custom`）下发 ~19 命令做远程运维，入口 `remote_cmd.cc:62` Handle **无任何 token/签名/设备身份校验**，信任边界=「已建立的对话连接」（`application.cc:865`）。
